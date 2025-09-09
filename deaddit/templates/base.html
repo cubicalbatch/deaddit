@@ -16,6 +16,12 @@
     </style>
 </head>
 <body>
+    <script>
+        // Apply dark mode immediately to prevent flash
+        if (localStorage.getItem('nightMode') === 'true') {
+            document.body.classList.add('night-mode');
+        }
+    </script>
     <header class="header">
         <div class="header-content">
             <div class="logo-container">
@@ -56,8 +62,10 @@
                     <a href="{{ url_for('list_subdeaddit',models=request.args.getlist('models')) }}">Communities</a>
                     <span class="separator">|</span>
                     <a href="{{ url_for('list_users',models=request.args.getlist('models')) }}">Users</a>
+                    {% if not PRODUCTION %}
                     <span class="separator">|</span>
                     <a href="{{ url_for('admin.dashboard') }}">Admin</a>
+                    {% endif %}
                 </nav>
             </div>
         </div>
@@ -208,9 +216,8 @@
                 }
             });
 
-            // Check local storage for night mode preference
+            // Check local storage for night mode preference and update toggle button
             if (localStorage.getItem('nightMode') === 'true') {
-                toggleNightMode();
                 $('#nightModeToggle i').removeClass('bi-moon-fill').addClass('bi-sun-fill');
                 $('#nightModeToggle').attr('title', 'Switch to light mode');
             }
