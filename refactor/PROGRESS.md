@@ -35,7 +35,6 @@ Run started: 2026-08-24 · Branch: `refactor` · Commits local only, NEVER push 
 | LLM-1 client consolidation | LeadLLM1 | **done** | deeb753 | 4/4 PASS (indep. tester; C2 full admin-job flow vs stub LLM on throwaway DB copy; C3 retry/typed-error after fix-loop) | `deaddit/llm/{client,transport,errors}.py` exist: ChatRequest/Sampling/ChatResult, complete(), STOP_VALUES, Transient/PermanentLLMError — LLM-2 EXTENDS this package. X-Request-Id: base id logged, wire header carries `<base>-<attempt>`. Mechanical ruff cleanup ridden along in loader.py/jobs.py (no behavior change). KNOWN BUG for A4: loader.get_api_base_url() reads Config key 'get_api_base_url()' instead of 'API_BASE_URL' (jobs.py correct). Legacy parsers frozen per Res. 11. |
 | A1 app factory & blueprints | LeadA1 | **done** | 8c12505 | 5/5 PASS (indep. tester; import-zero-IO sweep, gunicorn+dev boot, stub-LLM e2e job, route-map equality 60==60 vs baseline JSON, init-db 9 tables) | `from deaddit import create_app`; extensions at `deaddit.extensions` (db/cache/socketio init_app); blueprints `deaddit.routes.bp`('web') / `deaddit.api.bp`('api'); endpoints prefixed web.*, api./admin.* unchanged. create_app(config=None) takes dict/obj overrides → A2 conftest uses sqlite:// or tmp-path. wsgi.py moved into package (deaddit.wsgi:app), Dockerfile CMD matches. Scheduler still starts in web process by design until A5. Route-map baseline: tests/a1_route_map_baseline.json; render-smoke test pattern reusable. |
 | A3 migrations/WAL/indexes/feed-SQL | — | pending | — | — | Wave 2 GATE for all new schema + UX pagination; DB copy must exist before first migration |
-| LLM-2 capability probing + tool-arg validation | — | pending | — | — | Wave 2; EndpointCapability verdicts; tools probe PASS required before agent-phase live tests count |
 | UX-1 tokens + asset hygiene | — | pending | — | — | Wave 2; tokens.css, self-hosted assets, real dark palette, jQuery/Select2 removal |
 | A4 service layer; self-HTTP ingest deleted | — | pending | — | — | Wave 3; creates `deaddit/services/content.py` (Resolution 1); `/api/ingest` → wrapper |
 | AgenticCore P0+1 | — | pending | — | — | Wave 3; restore `deaddit/agents/` fresh; Agent/Run/Turn/ToolCall/Memory schema; `deaddit agent run-once`; feature-flagged off by default |
@@ -94,3 +93,9 @@ Run started: 2026-08-24 · Branch: `refactor` · Commits local only, NEVER push 
   admin.agents_dashboard/agent_detail in templates → AgenticCore P2. A1 fix-loop lesson for
   testers: route-map equality does NOT catch template-level url_for breakage — render-smoke
   every page class after blueprint/route moves.
+
+- 2026-08-24 — A2 closed (5854af0). Wave 1 complete. Downstream: fake-LLM seam is
+  deaddit/llm/provider.py (production falls back to transport.post_chat); every future
+  deterministic LLM test goes through tests.fakes.FakeProvider, never network.
+  `ruff format --check` NOT in CI (9 files unformatted) — first lead with appetite may run
+  a format pass as rider; A6 hygiene fallback.
