@@ -48,9 +48,9 @@
             <div class="col-md-3">
                 <label for="per_page" class="form-label">Per Page</label>
                 <select class="form-select" id="per_page" name="per_page">
-                    <option value="20">20</option>
-                    <option value="50">50</option>
-                    <option value="100">100</option>
+                    <option value="20" {% if current_per_page|string == '20' %}selected{% endif %}>20</option>
+                    <option value="50" {% if current_per_page|string == '50' %}selected{% endif %}>50</option>
+                    <option value="100" {% if current_per_page|string == '100' %}selected{% endif %}>100</option>
                 </select>
             </div>
             <div class="col-md-3">
@@ -193,7 +193,7 @@
             <ul class="pagination justify-content-center">
                 {% if pagination.has_prev %}
                 <li class="page-item">
-                    <a class="page-link" href="{{ url_for('admin.jobs', page=pagination.prev_num, status=current_status, type=current_type) }}">Previous</a>
+                    <a class="page-link" href="{{ url_for('admin.jobs', page=pagination.prev_num, status=current_status, type=current_type, per_page=current_per_page) }}">Previous</a>
                 </li>
                 {% endif %}
                 
@@ -201,7 +201,7 @@
                     {% if page_num %}
                         {% if page_num != pagination.page %}
                         <li class="page-item">
-                            <a class="page-link" href="{{ url_for('admin.jobs', page=page_num, status=current_status, type=current_type) }}">{{ page_num }}</a>
+                            <a class="page-link" href="{{ url_for('admin.jobs', page=page_num, status=current_status, type=current_type, per_page=current_per_page) }}">{{ page_num }}</a>
                         </li>
                         {% else %}
                         <li class="page-item active">
@@ -217,7 +217,7 @@
                 
                 {% if pagination.has_next %}
                 <li class="page-item">
-                    <a class="page-link" href="{{ url_for('admin.jobs', page=pagination.next_num, status=current_status, type=current_type) }}">Next</a>
+                    <a class="page-link" href="{{ url_for('admin.jobs', page=pagination.next_num, status=current_status, type=current_type, per_page=current_per_page) }}">Next</a>
                 </li>
                 {% endif %}
             </ul>

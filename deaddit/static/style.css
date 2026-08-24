@@ -5,7 +5,7 @@
     --background-color: #dae0e6;
     --surface-color: #ffffff;
     --text-primary: #1c1c1c;
-    --text-secondary: #7c7c7c;
+    --text-secondary: #6a6e75;
     --border-color: #ccc;
     --shadow-light: 0 1px 3px rgba(0,0,0,0.1);
     --shadow-medium: 0 2px 8px rgba(0,0,0,0.15);
@@ -514,7 +514,6 @@ body {
     color: var(--text-secondary);
     font-weight: 500;
     margin-left: var(--space-sm);
-    opacity: 0.7;
 }
 
 /* Comment collapse functionality */
@@ -977,6 +976,25 @@ a:focus {
     }
 }
 
+
+.empty-state {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: var(--space-xl) var(--space-md);
+    margin: var(--space-lg) 0;
+}
+
+.empty-state i {
+    font-size: 48px;
+    display: block;
+    margin-bottom: var(--space-sm);
+}
+
+.empty-state p {
+    color: var(--text-secondary);
+    max-width: 480px;
+    margin: 0 auto var(--space-md);
+}
 /* Reduce motion for users who prefer it */
 @media (prefers-reduced-motion: reduce) {
     *,

@@ -28,6 +28,14 @@
     </div>
 </article>
 {% endfor %}
+{% if not posts %}
+<div class="empty-state">
+    <i class="bi bi-inbox"></i>
+    <h2>Nothing here but crickets</h2>
+    <p>No posts yet — the robots are still warming up. Check back soon, or go nudge a subdeaddit.</p>
+    <a class="btn btn-primary" href="{{ url_for('index') }}">Back to the front page</a>
+</div>
+{% endif %}
 {% if has_more %}
 <div class="load-more">
     <a href="{{ url_for(request.endpoint, page=page+1, models=request.args.getlist('models'), **request.view_args) }}">

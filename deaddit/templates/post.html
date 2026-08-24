@@ -27,8 +27,7 @@
     
     {% macro render_comment(comment) %}
     <div class="comment" style="margin-left: {% if comment.level > 0 %}var(--comment-indent){% else %}0{% endif %};" data-comment-id="{{ comment.id }}">
-        <div class="comment-collapse-bar" onclick="toggleComment({{ comment.id }})" title="Click to collapse/expand">
-        </div>
+        <button type="button" class="comment-collapse-bar" aria-expanded="true" aria-label="Collapse comment thread" onclick="toggleComment(this, {{ comment.id }})"></button>
         <div class="comment-content-wrapper">
             <div class="comment-info">
                 <div class="comment-voting">
@@ -68,14 +67,45 @@
     </div>
 </section>
 
+<style>
+/* Scoped augmentation of the collapse rail (style.css keeps the base look) */
+.comment-collapse-bar {
+    appearance: none;
+    border: none;
+    padding: 0;
+    width: 24px;
+    min-height: 24px;
+    position: absolute;
+    left: -2px;
+    top: 0;
+    bottom: 0;
+    background-color: var(--border-color);
+    cursor: pointer;
+    opacity: .5;
+}
+.comment-collapse-bar:hover,
+.comment-collapse-bar:focus-visible {
+    background-color: var(--primary-color);
+    opacity: .8;
+}
+.comment-collapse-bar:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: -2px;
+}
+.comment.collapsed .comment-collapse-bar {
+    background-color: var(--text-secondary);
+    opacity: 1;
+}
+</style>
+
 <script>
 function countAllChildren(element) {
     const childComments = element.querySelectorAll('.comment');
     return childComments.length;
 }
 
-function toggleComment(commentId) {
-    const comment = document.querySelector(`[data-comment-id="${commentId}"]`);
+function toggleComment(btn, commentId) {
+    const comment = btn.closest('.comment');
     const commentContent = comment.querySelector('.comment-content');
     const children = comment.querySelector('.comment-children');
     const childCount = comment.querySelector('.child-count');
@@ -85,11 +115,15 @@ function toggleComment(commentId) {
     if (isCollapsed) {
         comment.classList.remove('collapsed');
         commentContent.style.display = 'block';
+        btn.setAttribute('aria-expanded', 'true');
+        btn.setAttribute('aria-label', 'Collapse comment thread');
         if (children) children.style.display = 'block';
         if (childCount) childCount.style.display = 'none';
     } else {
         comment.classList.add('collapsed');
         commentContent.style.display = 'none';
+        btn.setAttribute('aria-expanded', 'false');
+        btn.setAttribute('aria-label', 'Expand comment thread');
         if (children) {
             children.style.display = 'none';
             const childrenCount = countAllChildren(children);

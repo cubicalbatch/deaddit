@@ -510,6 +510,7 @@ def jobs():
         current_status=status_filter,
         current_type=type_filter,
         job_counts=job_counts,
+        current_per_page=per_page,
     )
 
 

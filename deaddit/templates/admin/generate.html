@@ -261,43 +261,6 @@
     </div>
 </div>
 
-{% if templates %}
-<div class="row mt-4">
-    <div class="col-md-12">
-        <h3>Generation Templates</h3>
-        <div class="card">
-            <div class="card-body">
-                <p class="text-muted">Pre-configured templates for common generation tasks. (Coming soon)</p>
-                <div class="table-responsive">
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Type</th>
-                                <th>Description</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for template in templates %}
-                            <tr>
-                                <td>{{ template.name }}</td>
-                                <td><span class="badge bg-secondary">{{ template.type.value }}</span></td>
-                                <td>{{ template.description or 'No description' }}</td>
-                                <td>
-                                    <button class="btn btn-sm btn-outline-primary" disabled>Use Template</button>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-{% endif %}
-
 <div class="row mt-4">
     <div class="col-md-12">
         <div class="alert alert-info">
