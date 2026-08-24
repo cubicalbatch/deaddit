@@ -18,7 +18,6 @@ Run started: 2026-08-24 · Branch: `refactor` · Commits local only, NEVER push 
   (~83 MB production data) taken BEFORE any migration runs. Status: NOT YET TAKEN.
 - pydantic v2 adopted (decision 18) · Python 3.13 only (decision 15) · gevent deleted in A0
   (Resolution 5) · Flask stays · SQLite stays · no new services/brokers.
-- Provenance marker: `model = "agent:<username>"` (Resolution 9).
 - Commit convention: `refactor(<phase-id>): <summary>` · app runnable at every commit.
 - **Repo state at run start**: branch `refactor`; five files carried pre-existing uncommitted
   owner modifications (+77/-1): `deaddit/__init__.py`, `deaddit/admin.py`, `deaddit/api.py`,
@@ -30,7 +29,7 @@ Run started: 2026-08-24 · Branch: `refactor` · Commits local only, NEVER push 
 
 | phase | lead | status | commit | verdicts | notes-for-downstream |
 |---|---|---|---|---|---|
-| A0 packaging truth & hygiene | — | pending | — | — | Wave 0; also compose env_file passthrough + replace debug-server CMD; deletes gevent |
+| A0 packaging truth & hygiene | LeadA0 | **done** | be4f9c3 baseline · 633c953 docs · bc2f4d4 main | 10/10 PASS (indep. tester; fresh-clone uv sync, gunicorn/wsgi tracked, gevent zero-ref, compose env passthrough live-verified in container, gunicorn serving w/o debug) | `deaddit/logging_config.py configure_logging()` is THE logging entrypoint (stdlib; DEADDIT_LOG_LEVEL/DEADDIT_LOG_FILE); loguru banned repo-wide. `wsgi.py`+`gunicorn.conf.py` tracked; compose service renamed `web`, builds locally, env_file .env + API_TOKEN/SECRET_KEY/OPENAI_KEY passthrough; `.env.example` canonical list. pyproject sole dep source, uv.lock frozen, py>=3.13. Owner PRODUCTION lockdown landed as be4f9c3. Known: gunicorn preload_app=True fork hazard until A5 moves scheduler; ~158 legacy ruff hits left for touching phases; host port 5000 was occupied during tests — testers bind ephemeral ports; year-old deaddit.db.backup must NOT be trusted — A3 takes a FRESH pre-migration copy. |
 | UX-0 quick wins | — | pending | — | — | Wave 0; contrast, collapse rail a11y, jobs pagination bug, empty states, dead buttons |
 | LLM-1 client consolidation | — | pending | — | — | Wave 0; merge two clients into `deaddit/llm/client.py`; no wiring change; first live probe |
 | A1 app factory & blueprints | — | pending | — | — | Wave 1; strictly before A2; kills import-time side effects; route-map equality test |
