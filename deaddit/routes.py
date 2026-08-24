@@ -1,8 +1,8 @@
-from flask import render_template, request
+from flask import Blueprint, render_template, request
 from sqlalchemy import func
 from sqlalchemy.orm import aliased, joinedload
 
-from deaddit import app, db
+from deaddit.extensions import db
 
 from .config import Config
 from .models import Comment, Post, Subdeaddit, User
@@ -12,8 +12,10 @@ from .utils import (
     process_post_title,
 )
 
+bp = Blueprint("web", __name__)
 
-@app.route("/")
+
+@bp.route("/")
 def index():
     # Check if the application needs initial setup
     needs_setup = False
@@ -96,7 +98,7 @@ def index():
     )
 
 
-@app.route("/d/<subdeaddit_name>")
+@bp.route("/d/<subdeaddit_name>")
 def subdeaddit(subdeaddit_name):
     page = request.args.get("page", default=1, type=int)
     posts_per_page = 10
@@ -155,7 +157,7 @@ def subdeaddit(subdeaddit_name):
     )
 
 
-@app.route("/d/<subdeaddit_name>/<int:post_id>")
+@bp.route("/d/<subdeaddit_name>/<int:post_id>")
 def post(subdeaddit_name, post_id):
     post = Post.query.get_or_404(post_id)
 
@@ -234,7 +236,7 @@ def post(subdeaddit_name, post_id):
     )
 
 
-@app.route("/list_subdeaddit")
+@bp.route("/list_subdeaddit")
 def list_subdeaddit():
     page = request.args.get("page", default=1, type=int)
     subdeaddits_per_page = 50
@@ -290,7 +292,7 @@ def list_subdeaddit():
     )
 
 
-@app.route("/user/<username>")
+@bp.route("/user/<username>")
 def user_profile(username):
     user = User.query.get_or_404(username)
 
@@ -331,7 +333,7 @@ def user_profile(username):
     )
 
 
-@app.route("/users")
+@bp.route("/users")
 def list_users():
     page = request.args.get("page", default=1, type=int)
     users_per_page = 50

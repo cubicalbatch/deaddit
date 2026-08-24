@@ -5,9 +5,9 @@
     <div class="post-content">
         <h1>{{ post.title }} <span class="upvote-indicator">{{ post.upvote_count or 0 }} ↑</span></h1>
         <div class="post-meta">
-            <span>Posted by <a href="{{ url_for('user_profile', username=post.user, models=request.args.getlist('models')) }}">{{ post.user }}</a></span>
+            <span>Posted by <a href="{{ url_for('web.user_profile', username=post.user, models=request.args.getlist('models')) }}">{{ post.user }}</a></span>
             <span class="separator">•</span>
-            <span>in <a href="{{ url_for('subdeaddit', subdeaddit_name=subdeaddit_name) }}">{{ subdeaddit_name }}</a></span>
+            <span>in <a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit_name) }}">{{ subdeaddit_name }}</a></span>
             <span class="separator">•</span>
             <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
             <span class="separator">•</span>
@@ -39,7 +39,7 @@
                         <i class="bi bi-arrow-down-short"></i>
                     </button>
                 </div>
-                <span>Posted by <a href="{{ url_for('user_profile', username=comment.user, models=request.args.getlist('models')) }}">{{ comment.user }}</a></span>
+                <span>Posted by <a href="{{ url_for('web.user_profile', username=comment.user, models=request.args.getlist('models')) }}">{{ comment.user }}</a></span>
                 <span class="separator">•</span>
                 <time datetime="{{ comment.created_at.isoformat() }}">{{ comment.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
                 <span class="separator">•</span>

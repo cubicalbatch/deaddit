@@ -15,7 +15,7 @@
                 </div>
                 <div class="user-info">
                     <h3 class="user-name">
-                        <a href="{{ url_for('user_profile', username=user.username, models=request.args.getlist('models')) }}">
+                        <a href="{{ url_for('web.user_profile', username=user.username, models=request.args.getlist('models')) }}">
                             u/{{ user.username }}
                         </a>
                     </h3>
@@ -30,7 +30,7 @@
                         {{ user.bio[:120] }}{% if user.bio|length > 120 %}...{% endif %}
                     </div>
                     <div class="user-footer">
-                        <a href="{{ url_for('user_profile', username=user.username, models=request.args.getlist('models')) }}" class="view-profile-btn">
+                        <a href="{{ url_for('web.user_profile', username=user.username, models=request.args.getlist('models')) }}" class="view-profile-btn">
                             View Profile →
                         </a>
                     </div>
@@ -44,7 +44,7 @@
             <ul class="pagination justify-content-center">
                 {% if users.has_prev %}
                     <li class="page-item">
-                        <a class="page-link" href="{{ url_for('list_users', page=users.prev_num, models=request.args.getlist('models')) }}">
+                        <a class="page-link" href="{{ url_for('web.list_users', page=users.prev_num, models=request.args.getlist('models')) }}">
                             ← Previous
                         </a>
                     </li>
@@ -58,7 +58,7 @@
                             </li>
                         {% else %}
                             <li class="page-item">
-                                <a class="page-link" href="{{ url_for('list_users', page=page_num, models=request.args.getlist('models')) }}">{{ page_num }}</a>
+                                <a class="page-link" href="{{ url_for('web.list_users', page=page_num, models=request.args.getlist('models')) }}">{{ page_num }}</a>
                             </li>
                         {% endif %}
                     {% else %}
@@ -70,7 +70,7 @@
 
                 {% if users.has_next %}
                     <li class="page-item">
-                        <a class="page-link" href="{{ url_for('list_users', page=users.next_num, models=request.args.getlist('models')) }}">
+                        <a class="page-link" href="{{ url_for('web.list_users', page=users.next_num, models=request.args.getlist('models')) }}">
                             Next →
                         </a>
                     </li>

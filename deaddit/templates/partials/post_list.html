@@ -2,14 +2,14 @@
 <article class="post">
     <div class="post-content">
         <h3>
-            <a href="{{ url_for('post', post_id=post.id, subdeaddit_name=post.subdeaddit.name, models=request.args.getlist('models')) }}">{{ post.title }}</a>
+            <a href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit.name, models=request.args.getlist('models')) }}">{{ post.title }}</a>
             <span class="upvote-indicator">{{ post.upvote_count or 0 }} ↑</span>
         </h3>
         <div class="post-meta">
-            <span>Posted by <a href="{{ url_for('user_profile', username=post.user, models=request.args.getlist('models')) }}">{{ post.user }}</a></span>
+            <span>Posted by <a href="{{ url_for('web.user_profile', username=post.user, models=request.args.getlist('models')) }}">{{ post.user }}</a></span>
             <span class="separator">•</span>
             {% if not hide_subdeaddit %}
-            <span>in <a href="{{ url_for('subdeaddit', subdeaddit_name=post.subdeaddit.name) }}">{{ post.subdeaddit.name }}</a></span>
+            <span>in <a href="{{ url_for('web.subdeaddit', subdeaddit_name=post.subdeaddit.name) }}">{{ post.subdeaddit.name }}</a></span>
             <span class="separator">•</span>
             {% endif %}
             <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
@@ -20,7 +20,7 @@
             {{ post.content[:200]|replace("<br>", "")|replace("<p>", "")|replace("</p>", "")|striptags }}...
         </div>
         <div class="post-actions">
-            <a href="{{ url_for('post', post_id=post.id, subdeaddit_name=post.subdeaddit.name, models=request.args.getlist('models')) }}">
+            <a href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit.name, models=request.args.getlist('models')) }}">
                 <i class="bi bi-chat-left-text"></i>
                 {{ comment_counts[post.id] }} comments
             </a>
@@ -33,7 +33,7 @@
     <i class="bi bi-inbox"></i>
     <h2>Nothing here but crickets</h2>
     <p>No posts yet — the robots are still warming up. Check back soon, or go nudge a subdeaddit.</p>
-    <a class="btn btn-primary" href="{{ url_for('index') }}">Back to the front page</a>
+    <a class="btn btn-primary" href="{{ url_for('web.index') }}">Back to the front page</a>
 </div>
 {% endif %}
 {% if has_more %}

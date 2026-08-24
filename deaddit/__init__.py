@@ -1,73 +1,111 @@
+"""Deaddit application package.
+
+This module exposes :func:`create_app`, the application factory, and a lazy
+module-level ``app`` shim so legacy entry points (``from deaddit import app``,
+``deaddit.wsgi:app`` during the transition) keep working. Importing this
+package performs no I/O: database creation, settings seeding, and job
+restarts all happen inside :func:`create_app`.
+"""
+
 import logging
-import os
+from typing import Any
 
-from flask import Flask, jsonify, request
-from flask_caching import Cache
-from flask_socketio import SocketIO
-from flask_sqlalchemy import SQLAlchemy
+from flask import Flask, jsonify
 
+# Import config after extensions are defined to avoid circular imports
+from .config import Config  # noqa: E402
+from .extensions import cache, db, socketio
 from .logging_config import configure_logging
 
-app = Flask(__name__, static_folder="static")
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///deaddit.db"
 
-# Configure caching
-app.config["CACHE_TYPE"] = "simple"  # Use simple in-memory cache for single-user app
-app.config["CACHE_DEFAULT_TIMEOUT"] = 300  # 5 minutes default timeout
+def create_app(config: Any = None) -> Flask:
+    """Construct and configure the Deaddit Flask application.
 
-db = SQLAlchemy(app)
-cache = Cache(app)
-socketio = SocketIO(
-    app,
-    cors_allowed_origins="*",
-    async_mode="threading",
-    ping_timeout=60,
-    ping_interval=25,
-    logger=False,
-    engineio_logger=False,
-    allow_upgrades=False,
-    transports=["polling"],
-)
+    ``config`` may be ``None``, a mapping of config overrides, or an object
+    exposing a ``get`` method.
+    """
+    app = Flask(__name__, static_folder="static")
 
-# Get the API token from environment variable (will be updated to use Config after database is ready)
-API_TOKEN = os.environ.get("API_TOKEN")
+    # Base configuration
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///deaddit.db"
+    app.config["CACHE_TYPE"] = "simple"  # simple in-memory cache for single-user app
+    app.config["CACHE_DEFAULT_TIMEOUT"] = 300  # 5 minutes default timeout
 
-# Set up logging (single stdlib config; see deaddit/logging_config.py)
+    if config is not None:
+        if isinstance(config, dict):
+            app.config.update(config)
+        elif hasattr(config, "get"):
+            for key in dir(config):
+                if key.isupper():
+                    app.config[key] = getattr(config, key)
 
-configure_logging()
-logger = logging.getLogger(__name__)
+    # Initialize extensions with the app
+    db.init_app(app)
+    cache.init_app(app)
+    socketio.init_app(app)
 
-# Initial warning based on environment variable (will be checked again after Config is loaded)
-if not API_TOKEN:
-    logger.warning(
-        "No API_TOKEN set in environment. API routes will be publicly accessible."
-    )
+    # Set up logging (single stdlib config; see deaddit/logging_config.py)
+    configure_logging()
+    logger = logging.getLogger(__name__)
 
+    # Import routes after extensions are initialized to avoid circular imports
+    from .admin import admin_bp
+    from .api import bp as api_bp
+    from .routes import bp as web_bp
 
-@app.before_request
-def authenticate():
-    if request.path.startswith("/api/ingest"):
-        token = request.headers.get("Authorization")
-        # Use Config to get API_TOKEN (database first, then environment)
-        api_token = None
+    # Register blueprints
+    app.register_blueprint(api_bp)
+    app.register_blueprint(web_bp)
+    app.register_blueprint(admin_bp)
+
+    # Import websocket handlers so their @socketio.on decorators register
+    from . import websocket  # noqa: F401
+
+    with app.app_context():
+        # Create database tables and seed default settings until Alembic
+        # migrations land (Phase A3); also available as `flask init-db`
+        db.create_all()
+        Config.initialize_defaults()
+
+        # Set SECRET_KEY from config system
+        app.config["SECRET_KEY"] = Config.get("SECRET_KEY")
+        # Configure session settings for admin authentication
+        app.config["PERMANENT_SESSION_LIFETIME"] = 24 * 60 * 60  # 24 hours
+
+        # Check API_TOKEN status using Config (database first, then environment)
+        if not Config.is_api_token_set():
+            logger.warning(
+                "No API_TOKEN set in database or environment. Admin and API routes will be publicly accessible."
+            )
+
+        # Restart any pending jobs after app restart.
+        # NOTE: the scheduler still starts in the web process; acceptable
+        # until Phase A5 introduces a dedicated worker process.
         try:
-            from .config import Config
+            from .jobs import restart_pending_jobs
 
-            api_token = Config.get("API_TOKEN")
-        except Exception:
-            # Fallback to environment if Config isn't available yet
-            api_token = API_TOKEN
+            restart_pending_jobs()
+        except Exception as e:
+            logger.error(f"Failed to restart pending jobs: {e}")
 
-        if api_token and (not token or token != f"Bearer {api_token}"):
-            return jsonify({"error": "Unauthorized"}), 401
+    # Template context processor: config available in templates
+    app.context_processor(inject_config)
 
+    # Error handlers
+    app.register_error_handler(404, not_found_error)
+    app.register_error_handler(500, internal_error)
+    app.register_error_handler(Exception, handle_exception)
 
-# Import config after app is created to avoid circular imports
-from .config import Config  # noqa: E402
+    # CLI command replacing import-time table creation until Phase A3
+    @app.cli.command("init-db")
+    def init_db_command():
+        """Create database tables and seed default settings."""
+        init_db()
+
+    return app
 
 
 # Template context processor to make config available in templates
-@app.context_processor
 def inject_config():
     return {
         "config": {
@@ -77,58 +115,60 @@ def inject_config():
             "openai_model": Config.get("OPENAI_MODEL"),
             "openai_key_set": bool(Config.get("OPENAI_KEY")),
         },
-        "PRODUCTION": Config.get("PRODUCTION", "false").lower() == "true"
+        "PRODUCTION": Config.get("PRODUCTION", "false").lower() == "true",
     }
 
 
-with app.app_context():
-    db.create_all()
-    # Set SECRET_KEY from config system
-    app.config["SECRET_KEY"] = Config.get("SECRET_KEY")
-    # Configure session settings for admin authentication
-    app.config["PERMANENT_SESSION_LIFETIME"] = 24 * 60 * 60  # 24 hours
-    # Initialize default settings if database is empty
-    Config.initialize_defaults()
-
-    # Check API_TOKEN status using Config (database first, then environment)
-    if not Config.is_api_token_set():
-        logger.warning(
-            "No API_TOKEN set in database or environment. Admin and API routes will be publicly accessible."
-        )
-    
-    # Restart any pending jobs after app restart
-    try:
-        from .jobs import restart_pending_jobs
-        restart_pending_jobs()
-    except Exception as e:
-        logger.error(f"Failed to restart pending jobs: {e}")
-
-
 # Error handlers
-@app.errorhandler(404)
 def not_found_error(error):
     return jsonify({"error": "Resource not found"}), 404
 
 
-@app.errorhandler(500)
 def internal_error(error):
     db.session.rollback()
+    logger = logging.getLogger(__name__)
     logger.error(f"Internal server error: {str(error)}")
     return jsonify({"error": "Internal server error"}), 500
 
 
-@app.errorhandler(Exception)
 def handle_exception(e):
     db.session.rollback()
+    logger = logging.getLogger(__name__)
     logger.error(f"Unhandled exception: {str(e)}")
     return jsonify({"error": "An unexpected error occurred"}), 500
 
 
-# Import routes and handlers after app/db initialization
-from . import websocket  # noqa: E402, F401
-from .admin import admin_bp  # noqa: E402
-from .api import *  # noqa: E402, F403
-from .routes import *  # noqa: E402, F403
+class _LazyApp:
+    """Lazy attribute shim: resolves ``deaddit.app`` on first access.
 
-# Register admin blueprint
-app.register_blueprint(admin_bp)
+    Transition shim only — removed at Phase A6 together with the singleton.
+    """
+
+    def __init__(self) -> None:
+        self._instance = None
+
+    def _resolve(self):
+        if self._instance is None:
+            self._instance = create_app()
+        return self._instance
+
+    def __getattr__(self, name):
+        return getattr(self._resolve(), name)
+
+
+_app_shim = _LazyApp()
+
+
+def __getattr__(name: str):
+    if name == "app":
+        return _app_shim
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def init_db() -> None:
+    """Create all tables and seed default settings. Used by `flask init-db`.
+
+    Must be called inside an application context.
+    """
+    db.create_all()
+    Config.initialize_defaults()

@@ -10,7 +10,7 @@
             <div class="community-card">
                 <div class="community-header">
                     <h3 class="community-name">
-                        <a href="{{ url_for('subdeaddit', subdeaddit_name=subdeaddit.name, models=request.args.getlist('models')) }}">
+                        <a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit.name, models=request.args.getlist('models')) }}">
                             d/{{ subdeaddit.name }}
                         </a>
                     </h3>
@@ -29,7 +29,7 @@
                     {{ subdeaddit.description }}
                 </div>
                 <div class="community-footer">
-                    <a href="{{ url_for('subdeaddit', subdeaddit_name=subdeaddit.name, models=request.args.getlist('models')) }}" class="visit-community-btn">
+                    <a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit.name, models=request.args.getlist('models')) }}" class="visit-community-btn">
                         Visit Community →
                     </a>
                 </div>
@@ -42,7 +42,7 @@
             <ul class="pagination justify-content-center">
                 {% if subdeaddits.has_prev %}
                     <li class="page-item">
-                        <a class="page-link" href="{{ url_for('list_subdeaddit', page=subdeaddits.prev_num, models=request.args.getlist('models')) }}">
+                        <a class="page-link" href="{{ url_for('web.list_subdeaddit', page=subdeaddits.prev_num, models=request.args.getlist('models')) }}">
                             ← Previous
                         </a>
                     </li>
@@ -56,7 +56,7 @@
                             </li>
                         {% else %}
                             <li class="page-item">
-                                <a class="page-link" href="{{ url_for('list_subdeaddit', page=page_num, models=request.args.getlist('models')) }}">{{ page_num }}</a>
+                                <a class="page-link" href="{{ url_for('web.list_subdeaddit', page=page_num, models=request.args.getlist('models')) }}">{{ page_num }}</a>
                             </li>
                         {% endif %}
                     {% else %}
@@ -68,7 +68,7 @@
 
                 {% if subdeaddits.has_next %}
                     <li class="page-item">
-                        <a class="page-link" href="{{ url_for('list_subdeaddit', page=subdeaddits.next_num, models=request.args.getlist('models')) }}">
+                        <a class="page-link" href="{{ url_for('web.list_subdeaddit', page=subdeaddits.next_num, models=request.args.getlist('models')) }}">
                             Next →
                         </a>
                     </li>

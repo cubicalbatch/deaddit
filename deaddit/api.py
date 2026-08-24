@@ -1,15 +1,39 @@
 import json
+import os
 from datetime import datetime, timedelta
 from functools import cache as functools_cache
 
-from flask import jsonify, request
+from flask import Blueprint, jsonify, request
 from sqlalchemy import func
 
-from deaddit import app, db
-from deaddit import cache as flask_cache
+from deaddit.extensions import cache as flask_cache
+from deaddit.extensions import db
 from deaddit.utils import production_disabled
 
 from .models import Comment, Post, Subdeaddit, User
+
+bp = Blueprint("api", __name__)
+
+
+def authenticate_ingest():
+    """Token-gate only the ingest endpoints, matching the legacy global guard."""
+    if request.path.startswith("/api/ingest"):
+        token = request.headers.get("Authorization")
+        # Use Config to get API_TOKEN (database first, then environment)
+        api_token = None
+        try:
+            from .config import Config
+
+            api_token = Config.get("API_TOKEN")
+        except Exception:
+            # Fallback to environment if Config isn't available yet
+            api_token = os.environ.get("API_TOKEN")
+
+        if api_token and (not token or token != f"Bearer {api_token}"):
+            return jsonify({"error": "Unauthorized"}), 401
+
+
+bp.before_request(authenticate_ingest)
 
 
 @functools_cache
@@ -24,7 +48,7 @@ def get_available_models():
     return list(all_models)
 
 
-@app.route("/api/ingest", methods=["POST"])
+@bp.route("/api/ingest", methods=["POST"])
 @production_disabled
 def ingest():
     data = request.get_json()
@@ -179,7 +203,7 @@ def ingest():
     return jsonify(response_data), 201
 
 
-@app.route("/api/subdeaddits", methods=["GET"])
+@bp.route("/api/subdeaddits", methods=["GET"])
 def api_subdeaddits():
     """
     Retrieves a list of subdeaddits.
@@ -201,7 +225,7 @@ def api_subdeaddits():
     return jsonify(response)
 
 
-@app.route("/api/posts", methods=["GET"])
+@bp.route("/api/posts", methods=["GET"])
 def api_posts():
     subdeaddit_name = request.args.get("subdeaddit")
     post_type = request.args.get("post_type")
@@ -266,7 +290,7 @@ def api_posts():
     return jsonify({"posts": post_data})
 
 
-@app.route("/api/post/<post_id>", methods=["GET"])
+@bp.route("/api/post/<post_id>", methods=["GET"])
 def api_post(post_id):
     if not post_id:
         return jsonify({"error": "Post ID is required"}), 400
@@ -323,7 +347,7 @@ def format_comment(comment, comment_map):
     return formatted_comment
 
 
-@app.route("/api/ingest/user", methods=["POST"])
+@bp.route("/api/ingest/user", methods=["POST"])
 @production_disabled
 def ingest_user():
     data = request.get_json()
@@ -373,7 +397,7 @@ def ingest_user():
     )
 
 
-@app.route("/api/users", methods=["GET"])
+@bp.route("/api/users", methods=["GET"])
 def get_users():
     users = User.query.all()
     user_list = [
@@ -398,7 +422,7 @@ def get_users():
     return jsonify({"users": user_list})
 
 
-@app.route("/api/available_models")
+@bp.route("/api/available_models")
 def available_models():
     models = get_available_models()
     return jsonify({"models": models})

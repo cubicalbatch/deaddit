@@ -3,14 +3,15 @@ WebSocket handlers for real-time admin interface updates.
 """
 
 import functools
+import logging
 from datetime import datetime
 
 from flask_socketio import disconnect, emit, join_room, leave_room
-import logging
+
+from deaddit.extensions import socketio
 
 logger = logging.getLogger(__name__)
 
-from deaddit import socketio
 
 
 def handle_socket_errors(f):

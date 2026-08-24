@@ -52,7 +52,7 @@
     <div class="comment-box">
         <p>{{ comment.content[:200] }}{% if comment.content|length > 200 %}...{% endif %}</p>
         <div class="comment-info">
-            <span>On post: <a href="{{ url_for('post', subdeaddit_name=comment.post.subdeaddit_name, post_id=comment.post_id) }}">{{ comment.post.title }}</a></span> |
+            <span>On post: <a href="{{ url_for('web.post', subdeaddit_name=comment.post.subdeaddit_name, post_id=comment.post_id) }}">{{ comment.post.title }}</a></span> |
             <span>{{ comment.created_at.strftime('%Y-%m-%d %H:%M') }}</span> |
             <span>Model: {{ comment.model }}</span> |
             <span>{{ comment.upvote_count }} upvotes</span>

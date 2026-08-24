@@ -16,8 +16,8 @@ from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from deaddit import db
 from deaddit.config import Config
+from deaddit.extensions import db
 from deaddit.llm.client import STOP_VALUES, ChatRequest, LLMClient, Sampling
 from deaddit.models import Job, JobStatus, JobType
 

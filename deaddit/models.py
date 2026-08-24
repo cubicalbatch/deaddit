@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from enum import Enum
 
-from deaddit import db
+from deaddit.extensions import db
 
 
 class Subdeaddit(db.Model):
