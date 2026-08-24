@@ -7,6 +7,7 @@ from sqlalchemy import func
 
 from deaddit import app, db
 from deaddit import cache as flask_cache
+from deaddit.utils import production_disabled
 
 from .models import Comment, Post, Subdeaddit, User
 
@@ -24,6 +25,7 @@ def get_available_models():
 
 
 @app.route("/api/ingest", methods=["POST"])
+@production_disabled
 def ingest():
     data = request.get_json()
 
@@ -322,6 +324,7 @@ def format_comment(comment, comment_map):
 
 
 @app.route("/api/ingest/user", methods=["POST"])
+@production_disabled
 def ingest_user():
     data = request.get_json()
 

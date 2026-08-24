@@ -23,6 +23,7 @@ from sqlalchemy import desc
 from deaddit import db
 from deaddit.config import Config
 from deaddit.jobs import cancel_job, create_job, get_job_status, get_queue_stats
+from deaddit.utils import production_disabled
 from deaddit.models import (
     ApiEndpointConfig,
     ApiModel,
@@ -225,6 +226,7 @@ def admin_required(f):
 
 
 @admin_bp.route("/login", methods=["GET", "POST"])
+@production_disabled
 def login():
     """Admin login page."""
     from deaddit.config import Config
@@ -250,6 +252,7 @@ def login():
 
 
 @admin_bp.route("/logout")
+@production_disabled
 def logout():
     """Admin logout."""
     session.pop("admin_authenticated", None)
@@ -259,6 +262,7 @@ def logout():
 
 @admin_bp.route("/")
 @admin_bp.route("/dashboard")
+@production_disabled
 @admin_required
 def dashboard():
     """Admin dashboard with overview statistics."""
@@ -323,6 +327,7 @@ def dashboard():
 
 
 @admin_bp.route("/generate")
+@production_disabled
 @admin_required
 def generate():
     """Content generation management page."""
@@ -341,6 +346,7 @@ def generate():
 
 
 @admin_bp.route("/generate/subdeaddit", methods=["POST"])
+@production_disabled
 @admin_required
 def generate_subdeaddit():
     """Create a job to generate subdeaddits."""
@@ -366,6 +372,7 @@ def generate_subdeaddit():
 
 
 @admin_bp.route("/generate/user", methods=["POST"])
+@production_disabled
 @admin_required
 def generate_user():
     """Create a job to generate users."""
@@ -391,6 +398,7 @@ def generate_user():
 
 
 @admin_bp.route("/generate/post", methods=["POST"])
+@production_disabled
 @admin_required
 def generate_post():
     """Create a job to generate posts."""
@@ -420,6 +428,7 @@ def generate_post():
 
 
 @admin_bp.route("/generate/comment", methods=["POST"])
+@production_disabled
 @admin_required
 def generate_comment():
     """Create a job to generate comments."""
@@ -451,6 +460,7 @@ def generate_comment():
 
 
 @admin_bp.route("/jobs")
+@production_disabled
 @admin_required
 def jobs():
     """Job management page."""
@@ -502,6 +512,7 @@ def jobs():
 
 
 @admin_bp.route("/jobs/<int:job_id>")
+@production_disabled
 @admin_required
 def job_detail(job_id):
     """Job detail page."""
@@ -533,6 +544,7 @@ def job_detail(job_id):
 
 
 @admin_bp.route("/jobs/<int:job_id>/cancel", methods=["POST"])
+@production_disabled
 @admin_required
 def cancel_job_route(job_id):
     """Cancel a job."""
@@ -545,6 +557,7 @@ def cancel_job_route(job_id):
 
 
 @admin_bp.route("/jobs/<int:job_id>/retry", methods=["POST"])
+@production_disabled
 @admin_required
 def retry_job_route(job_id):
     """Retry a failed job."""
@@ -567,6 +580,7 @@ def retry_job_route(job_id):
 
 
 @admin_bp.route("/api/jobs/<int:job_id>/status")
+@production_disabled
 @admin_required
 def job_status_api(job_id):
     """API endpoint to get job status (for real-time updates)."""
@@ -578,6 +592,7 @@ def job_status_api(job_id):
 
 
 @admin_bp.route("/api/jobs/stats")
+@production_disabled
 @admin_required
 def jobs_stats_api():
     """API endpoint to get job statistics."""
@@ -604,6 +619,7 @@ def jobs_stats_api():
 
 
 @admin_bp.route("/content")
+@production_disabled
 @admin_required
 def content():
     """Content management page."""
@@ -632,6 +648,7 @@ def content():
 
 
 @admin_bp.route("/api/users")
+@production_disabled
 @admin_required
 def api_users():
     """Get users with pagination and search."""
@@ -679,6 +696,7 @@ def api_users():
 
 
 @admin_bp.route("/api/users/<username>", methods=["PUT"])
+@production_disabled
 @admin_required
 def api_update_user(username):
     """Update a user."""
@@ -706,6 +724,7 @@ def api_update_user(username):
 
 
 @admin_bp.route("/api/users/<username>", methods=["DELETE"])
+@production_disabled
 @admin_required
 def api_delete_user(username):
     """Delete a user and all associated content."""
@@ -740,6 +759,7 @@ def api_delete_user(username):
 
 
 @admin_bp.route("/api/users/bulk-delete", methods=["POST"])
+@production_disabled
 @admin_required
 def api_bulk_delete_users():
     """Delete multiple users."""
@@ -785,6 +805,7 @@ def api_bulk_delete_users():
 
 
 @admin_bp.route("/api/subdeaddits")
+@production_disabled
 @admin_required
 def api_subdeaddits():
     """Get subdeaddits with pagination and search."""
@@ -823,6 +844,7 @@ def api_subdeaddits():
 
 
 @admin_bp.route("/api/subdeaddits/<name>", methods=["PUT"])
+@production_disabled
 @admin_required
 def api_update_subdeaddit(name):
     """Update a subdeaddit."""
@@ -856,6 +878,7 @@ def api_update_subdeaddit(name):
 
 
 @admin_bp.route("/api/subdeaddits/<name>", methods=["DELETE"])
+@production_disabled
 @admin_required
 def api_delete_subdeaddit(name):
     """Delete a subdeaddit and all associated posts."""
@@ -899,6 +922,7 @@ def api_delete_subdeaddit(name):
 
 
 @admin_bp.route("/api/subdeaddits/bulk-delete", methods=["POST"])
+@production_disabled
 @admin_required
 def api_bulk_delete_subdeaddits():
     """Delete multiple subdeaddits."""
@@ -957,6 +981,7 @@ def api_bulk_delete_subdeaddits():
 
 
 @admin_bp.route("/api/posts")
+@production_disabled
 @admin_required
 def api_posts():
     """Get posts with pagination, search, and filtering."""
@@ -1009,6 +1034,7 @@ def api_posts():
 
 
 @admin_bp.route("/api/posts/<int:post_id>", methods=["PUT"])
+@production_disabled
 @admin_required
 def api_update_post(post_id):
     """Update a post."""
@@ -1030,6 +1056,7 @@ def api_update_post(post_id):
 
 
 @admin_bp.route("/api/posts/<int:post_id>", methods=["DELETE"])
+@production_disabled
 @admin_required
 def api_delete_post(post_id):
     """Delete a post and all associated comments."""
@@ -1054,6 +1081,7 @@ def api_delete_post(post_id):
 
 
 @admin_bp.route("/api/posts/bulk-delete", methods=["POST"])
+@production_disabled
 @admin_required
 def api_bulk_delete_posts():
     """Delete multiple posts."""
@@ -1091,6 +1119,7 @@ def api_bulk_delete_posts():
 
 
 @admin_bp.route("/api/comments")
+@production_disabled
 @admin_required
 def api_comments():
     """Get comments with pagination and search."""
@@ -1137,6 +1166,7 @@ def api_comments():
 
 
 @admin_bp.route("/api/comments/<int:comment_id>", methods=["PUT"])
+@production_disabled
 @admin_required
 def api_update_comment(comment_id):
     """Update a comment."""
@@ -1156,6 +1186,7 @@ def api_update_comment(comment_id):
 
 
 @admin_bp.route("/api/comments/<int:comment_id>", methods=["DELETE"])
+@production_disabled
 @admin_required
 def api_delete_comment(comment_id):
     """Delete a comment and all child comments."""
@@ -1194,6 +1225,7 @@ def api_delete_comment(comment_id):
 
 
 @admin_bp.route("/api/comments/bulk-delete", methods=["POST"])
+@production_disabled
 @admin_required
 def api_bulk_delete_comments():
     """Delete multiple comments."""
@@ -1247,6 +1279,7 @@ def api_bulk_delete_comments():
 
 
 @admin_bp.route("/analytics")
+@production_disabled
 @admin_required
 def analytics():
     """Analytics and insights page."""
@@ -1292,6 +1325,7 @@ def analytics():
 
 
 @admin_bp.route("/settings")
+@production_disabled
 @admin_required
 def settings():
     """Settings and configuration page."""
@@ -1315,6 +1349,7 @@ def settings():
 
 
 @admin_bp.route("/api/system-info")
+@production_disabled
 @admin_required
 def system_info_api():
     """API endpoint to get system information."""
@@ -1335,6 +1370,7 @@ def system_info_api():
 
 
 @admin_bp.route("/api/save-config", methods=["POST"])
+@production_disabled
 @admin_required
 def save_config_api():
     """API endpoint to save configuration to database."""
@@ -1394,6 +1430,7 @@ def save_config_api():
 
 
 @admin_bp.route("/api/save-deaddit-config", methods=["POST"])
+@production_disabled
 @admin_required
 def save_deaddit_config_api():
     """API endpoint to save Deaddit configuration to database."""
@@ -1427,6 +1464,7 @@ def save_deaddit_config_api():
 
 
 @admin_bp.route("/api/test-connection", methods=["POST"])
+@production_disabled
 @admin_required
 def test_connection_api():
     """API endpoint to test AI service connection with custom parameters."""
@@ -1509,6 +1547,7 @@ def test_connection_api():
 
 
 @admin_bp.route("/api/load-models", methods=["POST"])
+@production_disabled
 @admin_required
 def load_models_api():
     """API endpoint to load available models from AI service with comprehensive pagination support."""
@@ -1615,6 +1654,7 @@ def load_models_api():
 
 
 @admin_bp.route("/api/models/<api_url_hash>", methods=["GET"])
+@production_disabled
 @admin_required
 def get_cached_models_api(api_url_hash):
     """API endpoint to get cached models for a specific API endpoint."""
@@ -1659,6 +1699,7 @@ def get_cached_models_api(api_url_hash):
 
 
 @admin_bp.route("/api/endpoint-config/<api_url_hash>", methods=["GET"])
+@production_disabled
 @admin_required
 def get_endpoint_config_api(api_url_hash):
     """Get configuration for a specific API endpoint including default model and cached models."""
@@ -1699,6 +1740,7 @@ def get_endpoint_config_api(api_url_hash):
 
 
 @admin_bp.route("/api/endpoint-config", methods=["POST"])
+@production_disabled
 @admin_required
 def save_endpoint_default_model_api():
     """Save the default model for a specific API endpoint."""
@@ -1736,6 +1778,7 @@ def save_endpoint_default_model_api():
 
 
 @admin_bp.route("/api/get-endpoint-key", methods=["POST"])
+@production_disabled
 @admin_required
 def get_endpoint_key_api():
     """API endpoint to get the API key for a specific endpoint."""
@@ -1764,6 +1807,7 @@ def get_endpoint_key_api():
 
 
 @admin_bp.route("/api/clear-jobs", methods=["POST"])
+@production_disabled
 @admin_required
 def clear_jobs_api():
     """API endpoint to clear all jobs history."""
@@ -1793,6 +1837,7 @@ def clear_jobs_api():
 
 
 @admin_bp.route("/api/load-default-data", methods=["POST"])
+@production_disabled
 @admin_required
 def load_default_data_api():
     """API endpoint to load default subdeaddits and users from JSON files."""
@@ -1886,6 +1931,7 @@ def load_default_data_api():
 
 
 @admin_bp.route("/api/hide-default-data", methods=["POST"])
+@production_disabled
 @admin_required
 def hide_default_data_api():
     """API endpoint to hide the default data section permanently."""

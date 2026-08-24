@@ -73,7 +73,8 @@ def inject_config():
             "openai_api_url": Config.get("OPENAI_API_URL"),
             "openai_model": Config.get("OPENAI_MODEL"),
             "openai_key_set": bool(Config.get("OPENAI_KEY")),
-        }
+        },
+        "PRODUCTION": Config.get("PRODUCTION", "false").lower() == "true"
     }
 
 

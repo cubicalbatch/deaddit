@@ -2,13 +2,37 @@
 Utility functions for the Deaddit application.
 """
 
+from functools import wraps
 from typing import Any
 
+from flask import abort
 from sqlalchemy import func
 
 from deaddit import cache, db
+from deaddit.config import Config
 
 from .models import Comment
+
+
+def production_disabled(f):
+    """Decorator that returns 404 for endpoints that should be disabled in production.
+    
+    This decorator checks the PRODUCTION configuration setting and returns a 404 error
+    if the application is running in production mode. This is used to disable admin
+    and ingestion endpoints in production deployments.
+    
+    Usage:
+        @production_disabled
+        def admin_endpoint():
+            # This endpoint will return 404 when PRODUCTION=true
+            pass
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if Config.get("PRODUCTION", "false").lower() == "true":
+            abort(404)
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 def get_comment_counts_bulk(post_ids: list[int]) -> dict[int, int]:
