@@ -15,8 +15,9 @@ Run started: 2026-08-24 · Branch: `refactor` · Commits local only, NEVER push 
 - **Tool-calls-only** everywhere (Resolution 11 / decision 17). No new code parses
   unstructured JSON from model output. `loader.py`/`jobs.py` legacy parsers frozen until
   Wave 6 deletions.
-- **Pre-A3 DB copy (mandatory, decision 14)**: timestamped copy of `instance/deaddit.db`
-  (~83 MB production data) taken BEFORE any migration runs. Status: NOT YET TAKEN.
+  (~83 MB production data) taken BEFORE any migration runs. Status: **TAKEN 2026-08-24
+  17:44** — `instance/deaddit.db.pre-a3-20260824T174408`, md5 cb4c9528…f27 identical to
+  live DB at copy time. Old `deaddit.db.backup` (2026-07) untrusted (A0 finding).
 - pydantic v2 adopted (decision 18) · Python 3.13 only (decision 15) · gevent deleted in A0
   (Resolution 5) · Flask stays · SQLite stays · no new services/brokers.
 - Commit convention: `refactor(<phase-id>): <summary>` · app runnable at every commit.
