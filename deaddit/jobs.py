@@ -3,24 +3,25 @@ Job management system for Deaddit admin UI.
 Handles background job processing using APScheduler (no Redis required).
 """
 
+import logging
 import os
 import threading
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import requests
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
-import logging
-
-logger = logging.getLogger(__name__)
 
 from deaddit import db
 from deaddit.config import Config
+from deaddit.llm.client import STOP_VALUES, ChatRequest, LLMClient, Sampling
 from deaddit.models import Job, JobStatus, JobType
+
+logger = logging.getLogger(__name__)
 
 # APScheduler configuration
 jobstores = {"default": MemoryJobStore()}
@@ -593,7 +594,6 @@ def _generate_user_data(model: str = None) -> dict[str, Any]:
             "model": used_model,
         }
         user_data["_api_response"] = api_response
-
     return user_data or {}
 
 
@@ -618,73 +618,16 @@ def _send_openai_request(
         f"Sending request to {OPENAI_API_URL} using model {selected_model}, temperature {temperature}"
     )
 
-    headers = {
-        "Authorization": f"Bearer {OPENAI_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    stop_values = [
-        "}\n```\n",
-        "assistant",
-        "}  #",
-        "} #",
-        "}\n\n",
-        "}\n}",
-        "##",
-        "```\n\n",
-    ]
-    if "api.groq.com" in OPENAI_API_URL:
-        stop_values = stop_values[:4]
-
-    payload = {
-        "model": selected_model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": temperature,
-        "max_tokens": 2048,
-        "stop": stop_values,
-    }
-
-    response = requests.post(
-        f"{OPENAI_API_URL}/chat/completions",
-        json=payload,
-        headers=headers,
-        timeout=120,
+    request = ChatRequest(
+        system_prompt=system_prompt,
+        user_prompt=prompt,
+        model=selected_model,
+        api_url=OPENAI_API_URL,
+        api_key=OPENAI_KEY,
+        sampling=Sampling(temperature=temperature, max_tokens=2048, stop=STOP_VALUES),
     )
-
-    if response.status_code == 200:
-        response_data = response.json()
-        logger.debug(f"API Response: {response_data}")
-
-        # Handle different response formats
-        if "choices" in response_data and len(response_data["choices"]) > 0:
-            choice = response_data["choices"][0]
-            message = choice.get("message", {})
-            content = message.get("content", "")
-
-            # Some models (like DeepSeek R1) put content in reasoning field
-            if not content and "reasoning" in message:
-                content = message["reasoning"]
-                logger.info("Using reasoning field as content (DeepSeek R1 model)")
-
-        elif "content" in response_data:
-            content = response_data["content"]
-        elif "response" in response_data:
-            content = response_data["response"]
-        else:
-            error_msg = f"Unexpected API response format: {response_data}"
-            logger.error(error_msg)
-            raise Exception(error_msg)
-
-        return content, selected_model
-    else:
-        error_msg = (
-            f"OpenAI API request failed: {response.status_code} - {response.text}"
-        )
-        logger.error(error_msg)
-        raise Exception(error_msg)
+    result = LLMClient().complete(request)
+    return result.content, result.model
 
 
 def _parse_json_response(response: str, content_type: str) -> dict[str, Any]:
@@ -853,7 +796,7 @@ def _generate_post_data(
     # "improved_random" - better randomness with history avoidance
     from .loader import select_user_smart
     selected_user_dict = select_user_smart(user_dicts, strategy="weighted")
-    
+
     if not selected_user_dict:
         # Fallback to random selection if weighted selection fails
         logger.warning("Weighted user selection failed, falling back to random selection")
@@ -958,7 +901,6 @@ def _generate_comment_data(
     """Generate comment data using OpenAI API."""
     import random
 
-
     from deaddit.models import Post, Subdeaddit, User
 
     # Get users for weighted selection
@@ -988,7 +930,7 @@ def _generate_comment_data(
     # "improved_random" - better randomness with history avoidance
     from .loader import select_user_smart
     selected_user_dict = select_user_smart(user_dicts, strategy="weighted")
-    
+
     if not selected_user_dict:
         # Fallback to random selection if weighted selection fails
         logger.warning("Weighted user selection failed, falling back to random selection")
@@ -1505,7 +1447,7 @@ def _execute_batch_operation(job: Job) -> dict[str, Any]:
     return {"batch_results": results, "count": len(results)}
 
 
-def get_job_status(job_id: int) -> Optional[dict[str, Any]]:
+def get_job_status(job_id: int) -> dict[str, Any] | None:
     """Get the current status of a job."""
     job = db.session.get(Job, job_id)
     if not job:
@@ -1621,19 +1563,19 @@ def _parse_cron_kwargs(cron_expression: str) -> dict[str, Any]:
 def restart_pending_jobs():
     """Restart any jobs that were pending when the app was shut down."""
     from deaddit.models import Job, JobStatus
-    
+
     # Find all pending jobs in the database
     pending_jobs = Job.query.filter_by(status=JobStatus.PENDING).all()
-    
+
     if not pending_jobs:
         logger.info("No pending jobs to restart")
         return
-    
+
     logger.info(f"Restarting {len(pending_jobs)} pending jobs")
-    
+
     # Start scheduler if not running
     start_scheduler()
-    
+
     for job in pending_jobs:
         try:
             # Select executor based on priority
@@ -1643,7 +1585,7 @@ def restart_pending_jobs():
                 executor = "low_priority"
             else:
                 executor = "default"
-            
+
             # Re-schedule the job to run immediately
             scheduler.add_job(
                 execute_job,
@@ -1654,9 +1596,9 @@ def restart_pending_jobs():
                 executor=executor,
                 replace_existing=True,
             )
-            
+
             logger.info(f"Restarted job {job.id} ({job.type.value})")
-            
+
         except Exception as e:
             logger.error(f"Failed to restart job {job.id}: {e}")
 
