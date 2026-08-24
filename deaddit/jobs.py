@@ -14,7 +14,9 @@ import requests
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 from deaddit import db
 from deaddit.config import Config
@@ -956,7 +958,6 @@ def _generate_comment_data(
     """Generate comment data using OpenAI API."""
     import random
 
-    from loguru import logger
 
     from deaddit.models import Post, Subdeaddit, User
 

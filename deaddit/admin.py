@@ -17,7 +17,9 @@ from flask import (
     session,
     url_for,
 )
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import desc
 
 from deaddit import db

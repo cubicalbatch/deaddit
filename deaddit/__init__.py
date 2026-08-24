@@ -6,6 +6,8 @@ from flask_caching import Cache
 from flask_socketio import SocketIO
 from flask_sqlalchemy import SQLAlchemy
 
+from .logging_config import configure_logging
+
 app = Flask(__name__, static_folder="static")
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///deaddit.db"
 
@@ -30,8 +32,9 @@ socketio = SocketIO(
 # Get the API token from environment variable (will be updated to use Config after database is ready)
 API_TOKEN = os.environ.get("API_TOKEN")
 
-# Set up logging
-logging.basicConfig(level=logging.WARNING)
+# Set up logging (single stdlib config; see deaddit/logging_config.py)
+
+configure_logging()
 logger = logging.getLogger(__name__)
 
 # Initial warning based on environment variable (will be checked again after Config is loaded)

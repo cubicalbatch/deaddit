@@ -6,7 +6,9 @@ import functools
 from datetime import datetime
 
 from flask_socketio import disconnect, emit, join_room, leave_room
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 from deaddit import socketio
 

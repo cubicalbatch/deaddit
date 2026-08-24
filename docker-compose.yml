@@ -1,8 +1,18 @@
 services:
-  deaddit:
-    image: cubicalbatch/deaddit
+  web:
+    build: .
     ports:
       - "5000:5000"
+    # Loads .env (see .env.example) into the container; explicit passthrough
+    # below forwards host-set variables too, so API_TOKEN actually reaches the app.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - API_TOKEN
+      - SECRET_KEY
+      - OPENAI_KEY
+      - DEADDIT_LOG_LEVEL
     volumes:
       - deaddit_data:/app/instance
     restart: unless-stopped

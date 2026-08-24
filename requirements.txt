@@ -1,8 +1,0 @@
-Flask
-Flask-SQLAlchemy
-Flask-SocketIO
-Flask-Caching
-APScheduler
-loguru
-requests
-click

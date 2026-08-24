@@ -14,7 +14,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -166,7 +165,6 @@ personal/
 .ruff_cache/
 CLAUDE.md
 building/
+# SQLite databases (live data lives in instance/, never committed)
 *.db
-gunicorn.conf.py
-wsgi.py
 

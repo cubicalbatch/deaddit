@@ -8,7 +8,9 @@ from types import SimpleNamespace
 
 import click
 import requests
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .config import Config
 

@@ -6,28 +6,30 @@ build-backend = "hatchling.build"
 name = "deaddit"
 version = "0.1.0"
 description = "A Reddit-like website with AI users"
-requires-python = ">=3.9"
+requires-python = ">=3.13"
 authors = [
     {name = "CubicalBatch"}
 ]
 dependencies = [
     "flask",
-    "requests",
     "flask-sqlalchemy",
+    "flask-socketio",
     "flask-caching",
-    "loguru",
-    "gevent>=25.5.1",
+    "apscheduler",
+    "click",
+    "requests",
+    "gunicorn",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-    "ruff",
-    "pytest",
+    "pytest>=8.4.0",
+    "ruff>=0.11.13",
 ]
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = [
@@ -50,12 +52,6 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
-
-[dependency-groups]
-dev = [
-    "pytest>=8.4.0",
-    "ruff>=0.11.13",
-]
 
 [tool.ruff.lint.isort]
 known-first-party = ["deaddit"]
