@@ -6,9 +6,10 @@ Run started: 2026-08-24 · Branch: `refactor` · Commits local only, NEVER push 
 
 ## Key facts for downstream leads
 
-- **Live endpoint**: `http://100.84.49.52:8080/v1`, expected model string `qwen3.8-27b` —
-  MUST be verified against the endpoint's `/models` list at first live use; verified string
-  recorded below once known (decision 20). Deterministic CI uses the fake provider only.
+- **Live endpoint**: `http://100.84.49.52:8080/v1`, model string **VERIFIED** `qwen3.8-27b`
+  (exact match vs GET /models, 2026-08-24, LLM-1 independent tester) · tools probe PASS same
+  day (finish_reason=tool_calls, schema-valid args) — Resolution 11 agent-phase gate GREEN;
+  re-probe at cohort creation per decision 2. Deterministic CI uses the fake provider only.
 - **Canonical content service**: `deaddit/services/content.py` — created in A4; later leads
   EXTEND it. A second persistence path is the failure to reject on sight (Resolution 1).
 - **Tool-calls-only** everywhere (Resolution 11 / decision 17). No new code parses
@@ -30,8 +31,8 @@ Run started: 2026-08-24 · Branch: `refactor` · Commits local only, NEVER push 
 | phase | lead | status | commit | verdicts | notes-for-downstream |
 |---|---|---|---|---|---|
 | A0 packaging truth & hygiene | LeadA0 | **done** | be4f9c3 baseline · 633c953 docs · bc2f4d4 main | 10/10 PASS (indep. tester; fresh-clone uv sync, gunicorn/wsgi tracked, gevent zero-ref, compose env passthrough live-verified in container, gunicorn serving w/o debug) | `deaddit/logging_config.py configure_logging()` is THE logging entrypoint (stdlib; DEADDIT_LOG_LEVEL/DEADDIT_LOG_FILE); loguru banned repo-wide. `wsgi.py`+`gunicorn.conf.py` tracked; compose service renamed `web`, builds locally, env_file .env + API_TOKEN/SECRET_KEY/OPENAI_KEY passthrough; `.env.example` canonical list. pyproject sole dep source, uv.lock frozen, py>=3.13. Owner PRODUCTION lockdown landed as be4f9c3. Known: gunicorn preload_app=True fork hazard until A5 moves scheduler; ~158 legacy ruff hits left for touching phases; host port 5000 was occupied during tests — testers bind ephemeral ports; year-old deaddit.db.backup must NOT be trusted — A3 takes a FRESH pre-migration copy. |
-| UX-0 quick wins | — | pending | — | — | Wave 0; contrast, collapse rail a11y, jobs pagination bug, empty states, dead buttons |
-| LLM-1 client consolidation | — | pending | — | — | Wave 0; merge two clients into `deaddit/llm/client.py`; no wiring change; first live probe |
+| UX-0 quick wins | LeadUX0 | **done** | 498255d | 4/4 PASS (indep. tester, axe 4.10.2 live :5097; collapse keyboard PASS after fix-loop on toggleComment) | Scoped `.comment-collapse-bar` <style> in post.html ~L70-99 → fold into tokens.css at UX-1. `.empty-state` component in partials/post_list.html → generalize at UX-2. Dead `GenerationTemplate.query.all()` in generate() route → drop at UX-5/P4. Pre-existing axe leftovers (contrast serious x21/x101, heading-order) = UX-1/UX-2 fodder. |
+| LLM-1 client consolidation | LeadLLM1 | **done** | deeb753 | 4/4 PASS (indep. tester; C2 full admin-job flow vs stub LLM on throwaway DB copy; C3 retry/typed-error after fix-loop) | `deaddit/llm/{client,transport,errors}.py` exist: ChatRequest/Sampling/ChatResult, complete(), STOP_VALUES, Transient/PermanentLLMError — LLM-2 EXTENDS this package. X-Request-Id: base id logged, wire header carries `<base>-<attempt>`. Mechanical ruff cleanup ridden along in loader.py/jobs.py (no behavior change). KNOWN BUG for A4: loader.get_api_base_url() reads Config key 'get_api_base_url()' instead of 'API_BASE_URL' (jobs.py correct). Legacy parsers frozen per Res. 11. |
 | A1 app factory & blueprints | — | pending | — | — | Wave 1; strictly before A2; kills import-time side effects; route-map equality test |
 | A2 tests + fake-LLM seam + CI | — | pending | — | — | Wave 1; pytest fixtures, smoke tests, GitHub Actions |
 | A3 migrations/WAL/indexes/feed-SQL | — | pending | — | — | Wave 2 GATE for all new schema + UX pagination; DB copy must exist before first migration |
@@ -76,3 +77,12 @@ Run started: 2026-08-24 · Branch: `refactor` · Commits local only, NEVER push 
   foreign hunks. Downstream: preserve `@production_disabled` decorators when relocating
   routes (A4 `/api/ingest` wrapper, A1 blueprint move); decorator reads DB-backed Config
   per request — acceptable until A6 settings-service TTL cache replaces the read path.
+
+- 2026-08-24 — Wave 0 closed. UX-0 (498255d) + LLM-1 (deeb753) PASS under independent
+  testers; both reports show genuine fix-loop traces; accepted. Rulings on escalations:
+  (1) DB `API_TOKEN=''` Setting row overriding env → assigned to A6 config/secrets split;
+  A1/A4 leads: when touching Config.get, do NOT silently change precedence — note it.
+  (2) SQLite path has no env override → architecture lead folds DEADDIT_DB_PATH-style env
+  into the A-phase config work (A6 settings service); interim: testers copy instance/.
+  (3) axe leftovers tracked as UX-1/UX-2 fodder. LLM-1's loader.get_api_base_url()
+  wrong-key bug → A4 must fix during ingest-wrapper work.
