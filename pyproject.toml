@@ -25,6 +25,7 @@ dependencies = [
 dev = [
     "pytest>=8.4.0",
     "ruff>=0.11.13",
+    "pytest-cov>=5",
 ]
 
 [tool.ruff]
@@ -55,3 +56,18 @@ line-ending = "auto"
 
 [tool.ruff.lint.isort]
 known-first-party = ["deaddit"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+markers = [
+    "llm_live: hits the real LLM endpoint; excluded from deterministic CI runs",
+]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["deaddit"]
+omit = ["deaddit/loader.py", "deaddit/jobs.py"] # frozen until Wave 6 deletions
+branch = true
+
+[tool.coverage.report]
+show_missing = true

@@ -8,7 +8,8 @@ import uuid
 from dataclasses import dataclass, field
 
 from deaddit.llm.errors import PermanentLLMError
-from deaddit.llm.transport import last_attempts, post_chat
+from deaddit.llm.provider import get_provider
+from deaddit.llm.transport import last_attempts
 
 logger = logging.getLogger(__name__)
 STOP_VALUES: list[str] = [
@@ -52,6 +53,7 @@ class ChatResult:
     latency_ms: float
     attempts: int
     request_id: str
+    tool_calls: list[dict] | None = None
 
 
 def _build_payload(req: ChatRequest) -> dict:
@@ -77,36 +79,39 @@ def _build_payload(req: ChatRequest) -> dict:
     return payload
 
 
-def _extract_content(response: dict) -> str:
-    """Normalize the assistant text out of a chat completion response.
+def _extract_response(response: dict) -> tuple[str, list[dict] | None]:
+    """Normalize assistant text and native tool_calls out of a response.
 
-    Verbatim semantics from the old jobs.py sniffing block. No other parsing:
-    no JSON salvage, no <think> stripping (Resolution 11).
+    Native message.tool_calls are surfaced verbatim on ChatResult.tool_calls
+    (with content possibly empty). No other parsing: no JSON salvage, no
+    <think> stripping (Resolution 11).
     """
     try:
         message = response["choices"][0]["message"]
         content = message.get("content") or ""
+        tool_calls = message.get("tool_calls") or None
+        if tool_calls is not None:
+            return content, tool_calls
         if not content and message.get("reasoning"):
             logger.info("Using reasoning field as content")
-            return message["reasoning"]
+            return message["reasoning"], None
         if content:
-            return content
+            return content, None
     except (KeyError, IndexError, TypeError, AttributeError):
         pass
 
     for key in ("content", "response"):
         value = response.get(key)
         if isinstance(value, str) and value:
-            return value
+            return value, None
 
     raise PermanentLLMError(f"Unexpected API response format: {str(response)[:200]}")
-
 
 class LLMClient:
     def complete(self, req: ChatRequest) -> ChatResult:
         payload = _build_payload(req)
         started = time.monotonic()
-        data = post_chat(
+        data = get_provider()(
             api_url=req.api_url,
             payload=payload,
             api_key=req.api_key,
@@ -114,8 +119,7 @@ class LLMClient:
             read_timeout=req.read_timeout,
         )
         latency_ms = (time.monotonic() - started) * 1000.0
-
-        content = _extract_content(data)
+        content, tool_calls = _extract_response(data)
         usage = data.get("usage") or {}
         attempts = last_attempts()
 
@@ -137,4 +141,5 @@ class LLMClient:
             latency_ms=latency_ms,
             attempts=attempts,
             request_id=req.request_id,
+            tool_calls=tool_calls,
         )

@@ -5,7 +5,6 @@ to environment variables. Only API_TOKEN remains as an environment variable.
 """
 
 import os
-from typing import Optional
 
 from deaddit.models import Setting
 
@@ -44,7 +43,7 @@ class Config:
     }
 
     @classmethod
-    def get(cls, key: str, default: Optional[str] = None) -> Optional[str]:
+    def get(cls, key: str, default: str | None = None) -> str | None:
         """Get a configuration value.
 
         Priority order:
@@ -180,7 +179,7 @@ class Config:
             return False
 
     @classmethod
-    def get_api_key_for_endpoint(cls, endpoint_url: str) -> Optional[str]:
+    def get_api_key_for_endpoint(cls, endpoint_url: str) -> str | None:
         """Get API key for a specific endpoint URL."""
         if not endpoint_url:
             return cls.get("OPENAI_KEY")

@@ -8,6 +8,7 @@ from deaddit.llm.client import (
     Sampling,
 )
 from deaddit.llm.errors import LLMError, PermanentLLMError, TransientLLMError
+from deaddit.llm.provider import get_provider, reset_provider, set_provider
 
 __all__ = [
     "STOP_VALUES",
@@ -18,4 +19,7 @@ __all__ = [
     "PermanentLLMError",
     "Sampling",
     "TransientLLMError",
+    "get_provider",
+    "reset_provider",
+    "set_provider",
 ]

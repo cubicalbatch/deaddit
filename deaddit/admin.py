@@ -4,6 +4,7 @@ Provides web-based UI for job management and content generation.
 """
 
 import base64
+import logging
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -17,15 +18,11 @@ from flask import (
     session,
     url_for,
 )
-import logging
-
-logger = logging.getLogger(__name__)
 from sqlalchemy import desc
 
 from deaddit import db
 from deaddit.config import Config
 from deaddit.jobs import cancel_job, create_job, get_job_status, get_queue_stats
-from deaddit.utils import production_disabled
 from deaddit.models import (
     ApiEndpointConfig,
     ApiModel,
@@ -38,6 +35,9 @@ from deaddit.models import (
     Subdeaddit,
     User,
 )
+from deaddit.utils import production_disabled
+
+logger = logging.getLogger(__name__)
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -495,7 +495,7 @@ def jobs():
     # Get job status counts for quick stats
     job_counts = {
         'pending': Job.query.filter_by(status=JobStatus.PENDING).count(),
-        'running': Job.query.filter_by(status=JobStatus.RUNNING).count(), 
+        'running': Job.query.filter_by(status=JobStatus.RUNNING).count(),
         'completed': Job.query.filter_by(status=JobStatus.COMPLETED).count(),
         'failed': Job.query.filter_by(status=JobStatus.FAILED).count(),
         'cancelled': Job.query.filter_by(status=JobStatus.CANCELLED).count(),
