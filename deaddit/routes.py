@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request
 from sqlalchemy import func
-from sqlalchemy.orm import aliased, joinedload
+from sqlalchemy.orm import joinedload
 
 from deaddit.extensions import db
 
@@ -53,12 +53,7 @@ def index():
     page = request.args.get("page", default=1, type=int)
     posts_per_page = 20
 
-    # Get selected models from query parameters
-    selected_models = request.args.getlist("models")
-
     query = Post.query
-    if selected_models:
-        query = query.filter(Post.model.in_(selected_models))
 
     total_posts = query.count()
     posts = (
@@ -83,7 +78,6 @@ def index():
         comment_counts=comment_counts,
         page=page,
         has_more=has_more,
-        selected_models=selected_models,
         title="Deaddit - The Reddit clone with AI users",
         description="Explore Deaddit, the AI-generated Reddit clone featuring diverse discussions and content created by artificial intelligence.",
     )
@@ -94,17 +88,10 @@ def subdeaddit(subdeaddit_name):
     page = request.args.get("page", default=1, type=int)
     posts_per_page = 10
 
-    # Get selected models from query parameters
-    selected_models = request.args.getlist("models")
-
     # Check if the subdeaddit exists
     Subdeaddit.query.filter_by(name=subdeaddit_name).first_or_404()
 
     query = Post.query.filter_by(subdeaddit_name=subdeaddit_name)
-
-    # Apply model filter if models are selected
-    if selected_models:
-        query = query.filter(Post.model.in_(selected_models))
 
     total_posts = query.count()
     paginated_posts = (
@@ -130,7 +117,6 @@ def subdeaddit(subdeaddit_name):
         subdeaddit_name=subdeaddit_name,
         page=page,
         has_more=has_more,
-        selected_models=selected_models,
         title=f"Deaddit - d/{subdeaddit_name}",
     )
 
@@ -139,17 +125,10 @@ def subdeaddit(subdeaddit_name):
 def post(subdeaddit_name, post_id):
     post = Post.query.get_or_404(post_id)
 
-    # Get selected models from query parameters
-    selected_models = request.args.getlist("models")
-
     # Query all comments for this post, ordered by upvote count
     query = Comment.query.filter_by(post_id=post_id).order_by(
         Comment.upvote_count.desc()
     )
-
-    # Apply model filter if models are selected
-    if selected_models:
-        query = query.filter(Comment.model.in_(selected_models))
 
     comments = query.all()
 
@@ -209,7 +188,6 @@ def post(subdeaddit_name, post_id):
         post=post,
         comment_tree=comment_tree,
         subdeaddit_name=subdeaddit_name,
-        selected_models=selected_models,
         title=f"Deaddit - {truncated_title}",
     )
 
@@ -219,42 +197,15 @@ def list_subdeaddit():
     page = request.args.get("page", default=1, type=int)
     subdeaddits_per_page = 50
 
-    # Get selected models from query parameters
-    selected_models = request.args.getlist("models")
-
-    # Query for total post count (all models)
     total_post_count = func.count(Post.id).label("total_post_count")
 
-    # Subquery for filtered post count
-    filtered_post_subquery = db.session.query(
-        Post.subdeaddit_name, func.count(Post.id).label("filtered_post_count")
-    )
-    if selected_models:
-        filtered_post_subquery = filtered_post_subquery.filter(
-            Post.model.in_(selected_models)
-        )
-    filtered_post_subquery = filtered_post_subquery.group_by(
-        Post.subdeaddit_name
-    ).subquery()
-
-    # Alias for the subquery
-    filtered_post_alias = aliased(filtered_post_subquery)
-
-    # Main query
     query = (
         db.session.query(
             Subdeaddit.name,
             Subdeaddit.description,
             total_post_count,
-            func.coalesce(filtered_post_alias.c.filtered_post_count, 0).label(
-                "filtered_post_count"
-            ),
         )
         .outerjoin(Post, Subdeaddit.name == Post.subdeaddit_name)
-        .outerjoin(
-            filtered_post_alias,
-            Subdeaddit.name == filtered_post_alias.c.subdeaddit_name,
-        )
         .group_by(Subdeaddit.name, Subdeaddit.description)
         .order_by(Subdeaddit.name)
     )
@@ -265,7 +216,6 @@ def list_subdeaddit():
     return render_template(
         "list_subdeaddit.html",
         subdeaddits=paginated_subdeaddits,
-        selected_models=selected_models,
         title="Deaddit - List of Subdeaddits",
     )
 

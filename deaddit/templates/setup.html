@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% block page_styles %}<link rel="stylesheet" href="{{ url_for('static', filename='bootstrap.min.css') }}">{% endblock %}
+
 {% block content %}
 <div class="container mt-5">
     <div class="row justify-content-center">

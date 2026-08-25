@@ -2,11 +2,11 @@
 <article class="post">
     <div class="post-content">
         <h3>
-            <a href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit.name, models=request.args.getlist('models')) }}">{{ post.title }}</a>
+            <a href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit.name) }}">{{ post.title }}</a>
             <span class="upvote-indicator">{{ post.upvote_count or 0 }} ↑</span>
         </h3>
         <div class="post-meta">
-            <span>Posted by <a href="{{ url_for('web.user_profile', username=post.user, models=request.args.getlist('models')) }}">{{ post.user }}</a></span>
+            <span>Posted by <a href="{{ url_for('web.user_profile', username=post.user) }}">{{ post.user }}</a></span>
             <span class="separator">•</span>
             {% if not hide_subdeaddit %}
             <span>in <a href="{{ url_for('web.subdeaddit', subdeaddit_name=post.subdeaddit.name) }}">{{ post.subdeaddit.name }}</a></span>
@@ -20,7 +20,7 @@
             {{ post.content[:200]|replace("<br>", "")|replace("<p>", "")|replace("</p>", "")|striptags }}...
         </div>
         <div class="post-actions">
-            <a href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit.name, models=request.args.getlist('models')) }}">
+            <a href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit.name) }}">
                 <i class="bi bi-chat-left-text"></i>
                 {{ comment_counts[post.id] }} comments
             </a>
@@ -38,7 +38,7 @@
 {% endif %}
 {% if has_more %}
 <div class="load-more">
-    <a href="{{ url_for(request.endpoint, page=page+1, models=request.args.getlist('models'), **request.view_args) }}">
+    <a href="{{ url_for(request.endpoint, page=page+1, **request.view_args) }}">
         <i class="bi bi-arrow-down"></i>
         Show More Posts
     </a>

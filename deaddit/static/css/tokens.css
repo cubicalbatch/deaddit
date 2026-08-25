@@ -1,0 +1,228 @@
+/* ============================================================
+   tokens.css - Deaddit two-layer design-token system
+   Layer 1: primitives (ramps). Layer 2: semantic roles.
+   Light theme lives under :root; dark under html[data-theme="dark"].
+   Both themes are first-class palettes - dark is designed, not
+   an inversion of light.
+
+   Contrast ratios below were computed per WCAG 2.x relative
+   luminance formula and must stay >= gate when edited:
+     text-1 / text-2 : >= 4.5:1 vs --bg-canvas AND --bg-surface (AA)
+     text-3          : >= 3:1   (large/UI)
+     accent/down/up  : >= 3:1   (large/UI)
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   Layer 1 - Primitives
+   ------------------------------------------------------------ */
+
+/* Neutral ramp (slightly blue-tinted; never pure #000/#fff) */
+:root {
+    --gray-50:  #f7f8f9;
+    --gray-100: #eef0f2;
+    --gray-200: #dfe2e6;
+    --gray-300: #c8ccd2;
+    --gray-400: #a9aeb7;
+    --gray-500: #878d97;
+    --gray-600: #6b7078;
+    --gray-700: #52565d;
+    --gray-800: #3a3d42;
+    --gray-900: #23262b;
+    --gray-950: #14161a;
+
+    /* Accent orange ramp (brand #ff4500 family) */
+    --accent-ramp-50:  #fff3ed;
+    --accent-ramp-100: #ffe3d5;
+    --accent-ramp-200: #ffc3ab;
+    --accent-ramp-300: #ff9d72;
+    --accent-ramp-400: #ff7038;
+    --accent-ramp-500: #ff4500;
+    --accent-ramp-600: #e63a00;
+    --accent-ramp-700: #bf3000;
+    --accent-ramp-800: #992600;
+    --accent-ramp-900: #731d00;
+    --accent-ramp-950: #401000;
+
+    /* Link-blue ramp */
+    --blue-50:  #eaf4fd;
+    --blue-100: #d3e8fa;
+    --blue-200: #a9d1f4;
+    --blue-300: #79b5ec;
+    --blue-400: #4796de;
+    --blue-500: #0070c8;
+    --blue-600: #005ba3;
+    --blue-700: #00487f;
+    --blue-800: #00355c;
+    --blue-900: #00243e;
+    --blue-950: #001424;
+
+    /* Status ramps - base + soft background each */
+    --green-500:      #0a7d33;
+    --green-soft-50:  #e2f4e7;
+    --yellow-600:     #9a6700;
+    --yellow-soft-50: #fdf3dd;
+    --red-600:        #c62828;
+    --red-soft-50:    #fde7e7;
+    --info-600:       #005ba3;
+    --info-soft-50:   #e3f1fb;
+
+    --green-400:      #46b45e;
+    --green-soft-900: #14251a;
+    --yellow-400:     #e3a008;
+    --yellow-soft-900: #291f08;
+    --red-400:        #ff7a76;
+    --red-soft-900:   #2b1515;
+    --info-400:       #79b5ec;
+    --info-soft-900:  #14232e;
+
+    --white: #ffffff;
+}
+
+/* ------------------------------------------------------------
+   Layer 2 - Semantic roles: LIGHT
+   ------------------------------------------------------------ */
+:root {
+    /* Backgrounds */
+    --bg-canvas: #f2f3f5;                    /* cooler than legacy #dae0e6 */
+    --bg-surface: #fbfbfc;
+    --bg-elevated: var(--white);
+
+    /* Text */
+    --text-1: #191b1e;   /* AA 15.54:1 on canvas, 16.69:1 on surface */
+    --text-2: #5c6066;   /* AA  5.70:1 on canvas,  6.12:1 on surface */
+    --text-3: #858a94;   /* UI  3.12:1 on canvas,  3.35:1 on surface */
+
+    /* Lines & chrome */
+    --border: var(--gray-300);               /* #c8ccd2 */
+
+    /* Brand & interaction */
+    --accent: var(--accent-ramp-500);        /* #ff4500 - UI 3.10:1 on canvas, 3.33:1 on surface */
+    --accent-soft: var(--accent-ramp-100);   /* #ffe3d5 tint fill */
+    --on-accent: var(--white);
+    --accent-hover: var(--accent-ramp-600);  /* #e63a00 - darker step for hovers */
+    --link: var(--blue-500);                 /* #0070c8 - AA 4.56:1 on canvas, 4.89:1 on surface */
+    --up: var(--green-500);                  /* #0a7d33 - UI 4.74:1 on canvas, 5.08:1 on surface */
+    --up-hover: #075c25;                     /* UI 7.37:1 on canvas, 7.91:1 on surface */
+    --down: var(--blue-500);                 /* #0070c8 - UI 4.56:1 on canvas, 4.89:1 on surface */
+    --down-hover: var(--blue-600);           /* #005ba3 - UI 6.25:1 on canvas, 6.71:1 on surface */
+
+    /* Status */
+    --status-success: var(--green-500);      /* #0a7d33 */
+    --status-success-soft: var(--green-soft-50);
+    --status-warning: var(--yellow-600);     /* #9a6700 */
+    --status-warning-soft: var(--yellow-soft-50);
+    --status-danger: var(--red-600);         /* #c62828 */
+    --status-danger-soft: var(--red-soft-50);
+    --status-info: var(--info-600);          /* #005ba3 */
+    --status-info-soft: var(--info-soft-50);
+
+    /* Focus */
+    --focus-ring: 0 0 0 3px rgba(255, 69, 0, 0.35);
+
+    /* Elevation (legacy values kept as semantic tokens) */
+    --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.1);
+    --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.15);
+    --shadow-3: 0 4px 16px rgba(0, 0, 0, 0.2);
+
+    /* Spacing system */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-xxl: 48px;
+
+    /* Border radius */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+
+    /* Typography scale */
+    --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    --font-size-xs: 12px;
+    --font-size-sm: 14px;
+    --font-size-base: 16px;
+    --font-size-lg: 18px;
+    --font-size-xl: 24px;
+    --font-size-xxl: 32px;
+    --line-height-tight: 1.25;
+    --line-height-normal: 1.5;
+    --line-height-relaxed: 1.75;
+
+    /* Motion */
+    --motion-fast: 150ms;
+    --motion-slow: 250ms;
+    --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+
+    /* Z-index ladder: dropdown < sticky < overlay < toast */
+    --z-dropdown: 10;
+    --z-sticky: 100;
+    --z-overlay: 1000;
+    --z-toast: 1100;
+}
+
+/* ------------------------------------------------------------
+   Layer 2 - Semantic roles: DARK (designed palette, not inverted)
+   ------------------------------------------------------------ */
+html[data-theme="dark"] {
+    /* Backgrounds */
+    --bg-canvas: #0f1012;
+    --bg-surface: #16181b;
+    --bg-elevated: #1d2024;
+
+    /* Text */
+    --text-1: #e4e6e9;   /* AA 15.22:1 on canvas, 14.23:1 on surface */
+    --text-2: #9aa0a8;   /* AA  7.22:1 on canvas,  6.75:1 on surface */
+    --text-3: #6b7078;   /* UI  3.82:1 on canvas,  3.57:1 on surface */
+
+    /* Lines & chrome */
+    --border: #2a2d31;
+
+    /* Brand & interaction (accent shifted lighter: saturated
+       mid-tones glow on dark surfaces) */
+    --accent: #ff5c1f;                       /* UI 6.17:1 on canvas, 5.76:1 on surface */
+    --accent-soft: #2b150a;                  /* dark-tinted orange wash */
+    --accent-hover: var(--accent-ramp-400);  /* #ff7038 - lighter step for hovers on dark */
+    --on-accent: var(--white);
+    --link: #6cb6f2;                         /* AA 8.71:1 on canvas, 8.14:1 on surface */
+    --up: var(--green-400);                  /* #46b45e - UI 7.21:1 on canvas, 6.73:1 on surface */
+    --up-hover: #5cc472;                     /* UI 8.70:1 on canvas, 8.13:1 on surface */
+    --down: #5aa2f0;                         /* UI 7.13:1 on canvas, 6.66:1 on surface */
+    --down-hover: #7193ff;                   /* UI 6.64:1 on canvas, 6.20:1 on surface */
+
+    /* Status (dark-tuned) */
+    --status-success: var(--green-400);      /* #46b45e */
+    --status-success-soft: var(--green-soft-900);
+    --status-warning: var(--yellow-400);
+    --status-warning-soft: var(--yellow-soft-900);
+    --status-danger: var(--red-400);
+    --status-danger-soft: var(--red-soft-900);
+    --status-info: var(--info-400);
+    --status-info-soft: var(--info-soft-900);
+
+    /* Focus */
+    --focus-ring: 0 0 0 3px rgba(255, 92, 31, 0.4);
+
+    /* Elevation: shadows soften into border+tint on dark */
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.45);
+    --shadow-3: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+/* ------------------------------------------------------------
+   Legacy aliases - consumed by style.css until UX-2 rename.
+   Referenced from semantic vars, so they re-resolve in dark
+   automatically. Do not use these names in new code.
+   ------------------------------------------------------------ */
+:root {
+    --primary-color: var(--accent);
+    --secondary-color: var(--link);
+    --background-color: var(--bg-canvas);
+    --surface-color: var(--bg-surface);
+    --text-primary: var(--text-1);
+    --text-secondary: var(--text-2);
+    --border-color: var(--border);
+    --shadow-light: var(--shadow-1);
+    --shadow-medium: var(--shadow-2);
+    --shadow-strong: var(--shadow-3);
+}

@@ -5,7 +5,7 @@
     <div class="post-content">
         <h1>{{ post.title }} <span class="upvote-indicator">{{ post.upvote_count or 0 }} ↑</span></h1>
         <div class="post-meta">
-            <span>Posted by <a href="{{ url_for('web.user_profile', username=post.user, models=request.args.getlist('models')) }}">{{ post.user }}</a></span>
+            <span>Posted by <a href="{{ url_for('web.user_profile', username=post.user) }}">{{ post.user }}</a></span>
             <span class="separator">•</span>
             <span>in <a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit_name) }}">{{ subdeaddit_name }}</a></span>
             <span class="separator">•</span>
@@ -39,7 +39,7 @@
                         <i class="bi bi-arrow-down-short"></i>
                     </button>
                 </div>
-                <span>Posted by <a href="{{ url_for('web.user_profile', username=comment.user, models=request.args.getlist('models')) }}">{{ comment.user }}</a></span>
+                <span>Posted by <a href="{{ url_for('web.user_profile', username=comment.user) }}">{{ comment.user }}</a></span>
                 <span class="separator">•</span>
                 <time datetime="{{ comment.created_at.isoformat() }}">{{ comment.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
                 <span class="separator">•</span>
@@ -66,37 +66,6 @@
         {% endfor %}
     </div>
 </section>
-
-<style>
-/* Scoped augmentation of the collapse rail (style.css keeps the base look) */
-.comment-collapse-bar {
-    appearance: none;
-    border: none;
-    padding: 0;
-    width: 24px;
-    min-height: 24px;
-    position: absolute;
-    left: -2px;
-    top: 0;
-    bottom: 0;
-    background-color: var(--border-color);
-    cursor: pointer;
-    opacity: .5;
-}
-.comment-collapse-bar:hover,
-.comment-collapse-bar:focus-visible {
-    background-color: var(--primary-color);
-    opacity: .8;
-}
-.comment-collapse-bar:focus-visible {
-    outline: 2px solid var(--primary-color);
-    outline-offset: -2px;
-}
-.comment.collapsed .comment-collapse-bar {
-    background-color: var(--text-secondary);
-    opacity: 1;
-}
-</style>
 
 <script>
 function countAllChildren(element) {

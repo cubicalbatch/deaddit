@@ -4,59 +4,59 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Admin{% endblock %} - Deaddit</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css" rel="stylesheet" />
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/select2-bootstrap-theme/0.1.0-beta.10/select2-bootstrap.min.css" rel="stylesheet" />
+    <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='vendor/icons/bootstrap-icons.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='vendor/select2/select2.min.css') }}" rel="stylesheet">
+    {# tokens.css AFTER bootstrap so tokens can override Bootstrap defaults #}
+    <link href="{{ url_for('static', filename='css/tokens.css') }}" rel="stylesheet">
     <style>
         .navbar-brand {
             padding-top: .75rem;
             padding-bottom: .75rem;
         }
-        
         .admin-nav {
-            background-color: #f8f9fa;
-            border-bottom: 1px solid #dee2e6;
+            background-color: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
             padding: 0.5rem 0;
             overflow-x: auto;
         }
-        
+
         .admin-nav .nav {
             flex-wrap: nowrap;
             min-width: max-content;
         }
-        
+
         .admin-nav .nav-link {
             font-weight: 500;
-            color: #495057;
+            color: var(--text-2);
             padding: 0.75rem 1rem;
             margin: 0 0.25rem;
             border-radius: 0.375rem;
             transition: all 0.15s ease-in-out;
             white-space: nowrap;
         }
-        
+
         .admin-nav .nav-link .bi {
             margin-right: 6px;
-            color: #6c757d;
+            color: var(--text-3);
         }
-        
+
         .admin-nav .nav-link.active {
-            color: #fff;
-            background-color: #007bff;
+            color: var(--on-accent);
+            background-color: var(--accent);
         }
-        
+
         .admin-nav .nav-link.active .bi {
-            color: #fff;
+            color: var(--on-accent);
         }
-        
+
         .admin-nav .nav-link:hover {
-            color: #007bff;
-            background-color: #e9ecef;
+            color: var(--link);
+            background-color: var(--bg-canvas);
         }
-        
+
         .admin-nav .nav-link:hover .bi {
-            color: #007bff;
+            color: var(--link);
         }
         
         @media (max-width: 768px) {
@@ -98,12 +98,11 @@
             height: 16px;
             vertical-align: text-bottom;
         }
-        
-        .job-status-pending { color: #6c757d; }
-        .job-status-running { color: #007bff; }
-        .job-status-completed { color: #28a745; }
-        .job-status-failed { color: #dc3545; }
-        .job-status-cancelled { color: #6c757d; }
+        .job-status-pending { color: var(--text-3); }
+        .job-status-running { color: var(--status-info); }
+        .job-status-completed { color: var(--status-success); }
+        .job-status-failed { color: var(--status-danger); }
+        .job-status-cancelled { color: var(--text-3); }
         
         .progress-bar-striped.active {
             animation: progress-bar-stripes 2s linear infinite;
@@ -204,10 +203,10 @@
         </main>
     </div>
 
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script>
-    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='vendor/jquery/jquery.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/select2/select2.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/socketio/socket.io.min.js') }}"></script>
     <script>
         // Initialize WebSocket connection for real-time updates
         const socket = io('/admin', {
@@ -319,7 +318,7 @@
             const container = document.createElement('div');
             container.id = 'toast-container';
             container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
-            container.style.zIndex = '9999';
+            container.style.setProperty('z-index', 'var(--z-toast)');
             document.body.appendChild(container);
             return container;
         }

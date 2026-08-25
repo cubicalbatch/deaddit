@@ -5,20 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="{{ description }}">
     <title>{{ title }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='bootstrap.min.css') }}">
+    <script>
+        // Apply theme before first paint to prevent flash
+        (function () {
+            var theme = localStorage.getItem('theme');
+            if (theme !== 'light' && theme !== 'dark') {
+                if (localStorage.getItem('nightMode') === 'true') {
+                    theme = 'dark';
+                } else {
+                    theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                }
+            }
+            document.documentElement.dataset.theme = theme;
+        })();
+    </script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/icons/bootstrap-icons.min.css') }}">
+    {% block page_styles %}{% endblock %}
     <link rel="icon" href="{{ url_for('static', filename='logo.ico') }}" type="image/x-icon">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css" rel="stylesheet" />
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/select2-bootstrap-theme/0.1.0-beta.10/select2-bootstrap.min.css" rel="stylesheet" />
 </head>
 <body>
-    <script>
-        // Apply dark mode immediately to prevent flash
-        if (localStorage.getItem('nightMode') === 'true') {
-            document.body.classList.add('night-mode');
-        }
-    </script>
     <header class="header">
         <div class="header-content">
             <div class="logo-container">
@@ -26,20 +33,9 @@
                     <div class="logo-and-title">
                         <img src="{{ url_for('static', filename='logo_small.png') }}" alt="Deaddit Logo" class="logo">
                         <h1 class="site-title">
-                            <a href="{{ url_for('web.index',models=request.args.getlist('models')) }}">Deaddit</a>
-                            {% if subdeaddit_name %}<span class="separator"> / </span><a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit_name,models=request.args.getlist('models')) }}">{{ subdeaddit_name }}</a>{% endif %}
+                            <a href="{{ url_for('web.index') }}">Deaddit</a>
+                            {% if subdeaddit_name %}<span class="separator"> / </span><a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit_name) }}">{{ subdeaddit_name }}</a>{% endif %}
                         </h1>
-                    </div>
-                    <div class="mobile-filter-wrapper">
-                        <button id="filterToggle" class="btn btn-secondary btn-sm mobile-filter-toggle">
-                            <i class="bi bi-funnel"></i> Filter
-                        </button>
-                        <div class="filter-content mobile-filter-dropdown">
-                            <select id="mobileModels" name="models" multiple class="form-control">
-                                <!-- Options will be populated dynamically -->
-                            </select>
-                            <button id="mobileResetFilter" class="btn btn-secondary btn-sm">Reset</button>
-                        </div>
                     </div>
                 </div>
                 <p class="ai-generated">
@@ -47,23 +43,18 @@
                 </p>
             </div>
             <div class="right-content">
-                <div class="model-selector">
-                    <div class="filter-content">
-                        <select id="models" name="models" multiple class="form-control">
-                            <!-- Options will be populated dynamically -->
-                        </select>
-                        <button id="resetFilter" class="btn btn-secondary btn-sm">Reset</button>
-                    </div>
-                </div>
                 <nav class="nav-links">
-                    <a href="{{ url_for('web.list_subdeaddit',models=request.args.getlist('models')) }}">Communities</a>
+                    <a href="{{ url_for('web.list_subdeaddit') }}">Communities</a>
                     <span class="separator">|</span>
-                    <a href="{{ url_for('web.list_users',models=request.args.getlist('models')) }}">Users</a>
+                    <a href="{{ url_for('web.list_users') }}">Users</a>
                     {% if not PRODUCTION %}
                     <span class="separator">|</span>
                     <a href="{{ url_for('admin.dashboard') }}">Admin</a>
                     {% endif %}
                 </nav>
+                <button type="button" id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode" aria-pressed="false">
+                    <i class="bi bi-moon-fill"></i>
+                </button>
             </div>
         </div>
     </header>
@@ -71,154 +62,7 @@
         {% block content %}{% endblock %}
     </main>
     <br>
-    
-    <!-- Add jQuery and Select2 JS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script>
-    <script>
-        $(document).ready(function() {
-            const desktopModelSelect = $('#models');
-            const mobileModelSelect = $('#mobileModels');
-            const desktopResetButton = $('#resetFilter');
-            const mobileResetButton = $('#mobileResetFilter');
 
-            // Initialize Select2 for both desktop and mobile
-            desktopModelSelect.select2({
-                theme: 'bootstrap',
-                placeholder: 'Filter by models',
-                allowClear: true,
-                closeOnSelect: false
-            });
-
-            mobileModelSelect.select2({
-                theme: 'bootstrap',
-                placeholder: 'Filter by models',
-                allowClear: true,
-                closeOnSelect: false
-            });
-
-            // Function to update URL and reload page
-            function updateModels(selectedModels) {
-                const currentUrl = new URL(window.location.href);
-                const currentModels = currentUrl.searchParams.getAll('models');
-                
-                // Check if there's an actual change in the selection
-                if (JSON.stringify(selectedModels.sort()) !== JSON.stringify(currentModels.sort())) {
-                    currentUrl.searchParams.delete('models');
-                    selectedModels.forEach(model => currentUrl.searchParams.append('models', model));
-                    window.location.href = currentUrl.toString();
-                }
-            }
-
-            // Track if we're syncing to prevent infinite loops
-            let isSyncing = false;
-
-            // Sync selections between desktop and mobile
-            function syncSelections(sourceSelect, targetSelect) {
-                if (isSyncing) return;
-                isSyncing = true;
-                
-                const selectedModels = sourceSelect.val() || [];
-                targetSelect.val(selectedModels).trigger('change.select2');
-                updateModels(selectedModels);
-                
-                isSyncing = false;
-            }
-
-            // Fetch available models and populate both dropdowns
-            fetch('/api/available_models')
-                .then(response => response.json())
-                .then(data => {
-                    data.models.forEach(model => {
-                        const desktopOption = new Option(model, model);
-                        const mobileOption = new Option(model, model);
-                        desktopModelSelect.append(desktopOption);
-                        mobileModelSelect.append(mobileOption);
-                    });
-
-                    // Set selected models based on URL parameters
-                    const urlParams = new URLSearchParams(window.location.search);
-                    const selectedModels = urlParams.getAll('models');
-                    isSyncing = true;
-                    desktopModelSelect.val(selectedModels).trigger('change.select2');
-                    mobileModelSelect.val(selectedModels).trigger('change.select2');
-                    isSyncing = false;
-                });
-
-            // Apply filter when selection changes
-            desktopModelSelect.on('change', function() {
-                if (!isSyncing) {
-                    syncSelections($(this), mobileModelSelect);
-                }
-            });
-
-            mobileModelSelect.on('change', function() {
-                if (!isSyncing) {
-                    syncSelections($(this), desktopModelSelect);
-                }
-            });
-
-            // Reset filter buttons
-            desktopResetButton.on('click', function() {
-                desktopModelSelect.val(null).trigger('change');
-            });
-
-            mobileResetButton.on('click', function() {
-                mobileModelSelect.val(null).trigger('change');
-            });
-
-            // Mobile filter toggle
-            $('#filterToggle').on('click', function(e) {
-                e.stopPropagation();
-                $('.mobile-filter-dropdown').toggleClass('show');
-                $(this).toggleClass('active');
-            });
-
-            // Close mobile filter when clicking outside
-            $(document).on('click', function(e) {
-                if (!$(e.target).closest('.mobile-filter-wrapper').length) {
-                    $('.mobile-filter-dropdown').removeClass('show');
-                    $('#filterToggle').removeClass('active');
-                }
-            });
-
-            // Prevent dropdown from closing when clicking inside it
-            $('.mobile-filter-dropdown').on('click', function(e) {
-                e.stopPropagation();
-            });
-
-            // Night mode toggle
-            function toggleNightMode() {
-                $('body').toggleClass('night-mode');
-            }
-
-            // Add night mode toggle button next to Github link
-            $('.ai-generated').append(' <span class="separator">|</span> <a id="nightModeToggle" href="#" title="Toggle dark mode"><i class="bi bi-moon-fill"></i></a>');
-
-            // Handle night mode toggle
-            $('#nightModeToggle').on('click', function(e) {
-                e.preventDefault();
-                toggleNightMode();
-                const isNightMode = $('body').hasClass('night-mode');
-                localStorage.setItem('nightMode', isNightMode);
-                
-                // Update icon
-                const icon = $(this).find('i');
-                if (isNightMode) {
-                    icon.removeClass('bi-moon-fill').addClass('bi-sun-fill');
-                    $(this).attr('title', 'Switch to light mode');
-                } else {
-                    icon.removeClass('bi-sun-fill').addClass('bi-moon-fill');
-                    $(this).attr('title', 'Switch to dark mode');
-                }
-            });
-
-            // Check local storage for night mode preference and update toggle button
-            if (localStorage.getItem('nightMode') === 'true') {
-                $('#nightModeToggle i').removeClass('bi-moon-fill').addClass('bi-sun-fill');
-                $('#nightModeToggle').attr('title', 'Switch to light mode');
-            }
-        });
-    </script>
+    <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>
