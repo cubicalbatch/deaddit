@@ -26,10 +26,10 @@ _thread_local = threading.local()
 
 
 def _default_app():
-    """Lazily resolve the Flask app; callers may pass their own instead."""
-    from deaddit import app as _lazy
+    """Resolve the Flask app; callers may pass their own instead."""
+    from deaddit import create_app
 
-    return _lazy
+    return create_app()
 
 
 def create_job(

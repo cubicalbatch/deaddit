@@ -974,7 +974,7 @@ def _post_payload(post):
         or "",
         "username": post.user,
         "subdeaddit_name": post.subdeaddit_name,
-        "upvote_count": post.upvote_count or 0,
+        "score": post.score or 0,
         "post_type": post.post_type or "",
         "comments_count": Comment.query.filter_by(post_id=post.id).count(),
         "created_at": post.created_at.isoformat() if post.created_at else "",
@@ -1025,7 +1025,7 @@ def api_update_post(post_id):
     try:
         post.title = data.get("title", post.title)
         post.content = data.get("content", post.content)
-        post.upvote_count = data.get("upvote_count", post.upvote_count)
+        post.score = data.get("score", post.score)
         post.post_type = data.get("post_type", post.post_type)
 
         db.session.commit()
@@ -1122,7 +1122,7 @@ def _comment_payload(comment):
         "post_id": comment.post_id,
         "post_title": comment.post.title if comment.post else "Unknown",
         "parent_id": comment.parent_id,
-        "upvote_count": comment.upvote_count or 0,
+        "score": comment.score or 0,
         "created_at": comment.created_at.isoformat() if comment.created_at else "",
         "model": comment.model or "",
     }
@@ -1165,7 +1165,7 @@ def api_update_comment(comment_id):
 
     try:
         comment.content = data.get("content", comment.content)
-        comment.upvote_count = data.get("upvote_count", comment.upvote_count)
+        comment.score = data.get("score", comment.score)
 
         db.session.commit()
         return jsonify({"success": True})

@@ -379,7 +379,7 @@
                                     </td>
                                     <td>/d/{{ post.subdeaddit.name }}</td>
                                     <td>{{ post.author.username }}</td>
-                                    <td>{{ post.upvote_count }}</td>
+                                    <td>{{ post.score }}</td>
                                 </tr>
                                 {% endif %}
                                 {% endfor %}
@@ -473,7 +473,7 @@
                                         </a>
                                     </td>
                                     <td>{{ comment.author.username }}</td>
-                                    <td>{{ comment.upvote_count }}</td>
+                                    <td>{{ comment.score }}</td>
                                 </tr>
                                 {% endif %}
                                 {% endfor %}

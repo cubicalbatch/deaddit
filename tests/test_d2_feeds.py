@@ -129,7 +129,6 @@ def comment_thread(app):
                 model="m",
                 score=score,
                 vote_count=votes,
-                upvote_count=max(score, 0),
                 created_at=BASE + timedelta(hours=i),
             )
         )

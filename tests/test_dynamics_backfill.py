@@ -26,7 +26,7 @@ def _build_fixture():
     posts = {
         "infeasible": Post(
             title="p1",
-            upvote_count=5,  # |5| > capacity 3 => infeasible
+            score=5,  # |5| > capacity 3 => infeasible
             content="c",
             subdeaddit_name="testsub",
             user="u0",
@@ -34,7 +34,7 @@ def _build_fixture():
         ),
         "maxed": Post(
             title="p2",
-            upvote_count=3,  # exactly at capacity
+            score=3,  # exactly at capacity
             content="c",
             subdeaddit_name="testsub",
             user="u0",
@@ -42,7 +42,7 @@ def _build_fixture():
         ),
         "negative": Post(
             title="p3",
-            upvote_count=-2,
+            score=-2,
             content="c",
             subdeaddit_name="testsub",
             user="u1",
@@ -56,21 +56,21 @@ def _build_fixture():
         "plain": Comment(
             post_id=posts["maxed"].id,
             content="c1",
-            upvote_count=1,
+            score=1,
             user="u2",
             created_at=BASE_TIME,
         ),
         "zeroscore": Comment(
             post_id=posts["maxed"].id,
             content="c0",
-            upvote_count=0,  # must still receive >= 1 vote row (n >= 2)
+            score=0,  # must still receive >= 1 vote row (n >= 2)
             user="u3",
             created_at=BASE_TIME,
         ),
         "prevoted": Comment(
             post_id=posts["maxed"].id,
             content="c2",
-            upvote_count=2,
+            score=2,
             user="u2",
             created_at=BASE_TIME,
         ),
@@ -149,7 +149,6 @@ def test_backfill_exact_sum_and_report(scenario):
         item = _item_for(scenario, key)
         assert _vote_sum(item) == original  # exact-sum invariant
         assert item.score == original
-        assert item.upvote_count == original
         n = item.vote_count
         assert abs(original) <= n <= 3  # >= |S|, never above capacity
         if original == 0:
@@ -167,9 +166,8 @@ def test_backfill_exact_sum_and_report(scenario):
     # Infeasible item untouched: no rows, no attribute drift.
     infeasible = scenario["posts"]["infeasible"]
     assert _item_votes(infeasible) == []
-    assert infeasible.score == 0
+    assert infeasible.score == 5
     assert infeasible.vote_count == 0
-    assert infeasible.upvote_count == 5
 
 
 def test_backfill_idempotent(scenario):
@@ -203,8 +201,8 @@ def test_backfill_deterministic(scenario):
 
 def test_backfill_dry_run_writes_nothing(scenario):
     items = list(scenario["posts"].values()) + list(scenario["comments"].values())
-    upvote_counts_before = {
-        (type(item).__name__, item.id): item.upvote_count for item in items
+    scores_before = {
+        (type(item).__name__, item.id): item.score for item in items
     }
     rows_before = _rows()
 
@@ -216,9 +214,8 @@ def test_backfill_dry_run_writes_nothing(scenario):
     assert report["unbackfilled_infeasible"] != []
     assert _rows() == rows_before
     for item in items:
-        assert item.score == 0
+        assert item.score == scores_before[(type(item).__name__, item.id)]
         assert item.vote_count == 0
-        assert item.upvote_count == upvote_counts_before[(type(item).__name__, item.id)]
 
 
 def test_backfill_batching_matches_unbatched(scenario):
@@ -266,7 +263,7 @@ def test_production_guard_refuses_and_opt_in(scenario, tmp_path, monkeypatch):
         db.session.add(
             Post(
                 title="t",
-                upvote_count=2,
+                score=2,
                 content="c",
                 subdeaddit_name="s",
                 user="u0",

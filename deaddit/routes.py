@@ -41,11 +41,8 @@ def index():
     openai_key = Config.get("OPENAI_KEY")
     openai_url = Config.get("OPENAI_API_URL")
 
-    is_configured = (
-        openai_key
-        and openai_key != "your_openrouter_api_key"
-        and openai_url
-        and openai_url != "http://localhost/v1"
+    is_configured = bool(
+        openai_key and openai_url and openai_url != "http://localhost/v1"
     )
 
     # Show setup message only if database is empty AND configuration is not set
@@ -232,7 +229,6 @@ def post(subdeaddit_name, post_id):
                 "content_html": (
                     "" if comment.removed else format_content_html(comment.content)
                 ),
-                "upvote_count": 0 if comment.removed else comment.upvote_count,
                 "score": 0 if comment.removed else comment.score,
                 "vote_count": 0 if comment.removed else comment.vote_count,
                 "user": None if comment.removed else comment.user,
@@ -385,12 +381,12 @@ def user_profile(username):
     ).count()
 
     post_upvotes = (
-        db.session.query(func.coalesce(func.sum(Post.upvote_count), 0))
+        db.session.query(func.coalesce(func.sum(Post.score), 0))
         .filter(Post.user == username)
         .scalar()
     )
     comment_upvotes = (
-        db.session.query(func.coalesce(func.sum(Comment.upvote_count), 0))
+        db.session.query(func.coalesce(func.sum(Comment.score), 0))
         .filter(Comment.user == username)
         .scalar()
     )

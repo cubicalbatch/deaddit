@@ -64,7 +64,7 @@ def _mk_post(i, user, sub, title=None, content="body"):
         user=user,
         subdeaddit_name=sub,
         model="model-x",
-        upvote_count=i % 5,
+        score=i % 5,
         created_at=BASE + timedelta(minutes=i),
     )
 
@@ -140,7 +140,7 @@ class TestProfileTraits:
                     content="c",
                     user="quirky",
                     model="m",
-                    upvote_count=5,
+                    score=5,
                     created_at=BASE + timedelta(hours=1),
                 )
             ]
@@ -163,19 +163,19 @@ class TestProfileTraits:
             [_mk_sub("s"), _mk_user("counter", bio=None), _mk_user("other")]
         )
         db_session.flush()
-        p1 = _mk_post(0, "counter", "s")  # upvote_count = 0
-        p2 = _mk_post(1, "counter", "s")  # upvote_count = 1
+        p1 = _mk_post(0, "counter", "s")  # score = 0
+        p2 = _mk_post(1, "counter", "s")  # score = 1
         db_session.add_all([p1, p2])
         db_session.flush()
         db_session.add_all(
             [
-                # upvotes: posts 0 + 1, comment 5 -> total_upvotes == 6
+                # scores: posts 0 + 1, comment 5 -> total_upvotes == 6
                 Comment(
                     post_id=p1.id,
                     content="c",
                     user="counter",
                     model="m",
-                    upvote_count=5,
+                    score=5,
                     created_at=BASE + timedelta(hours=1),
                 )
             ]

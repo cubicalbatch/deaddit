@@ -3,13 +3,14 @@
 Nightly recompute per the frozen D1 contract:
 
 - Items WITH at least one Vote row are vote-authoritative: ``score`` and
-  ``vote_count`` are repaired from the Vote rows (drift is logged),
-  ``upvote_count`` is synced to ``score``.
-- Items WITHOUT any Vote row are legacy: untouched — the fabricated
-  ``upvote_count`` stays display truth until Wave 6 removes fabrication.
+  ``vote_count`` are repaired from the Vote rows (drift is logged).
+- Items WITHOUT any Vote row are legacy: untouched. Since Resolution 4
+  collapsed the old display alias into a single column, a vote-less item's
+  fabricated ``score`` simply stays display truth until Wave 6 removes
+  fabrication.
 - Karma = sum of effective scores over a user's posts/comments, where
-  effective_score = score if vote_count > 0 else COALESCE(upvote_count, 0).
-  Only users who own at least one post or comment are updated.
+  effective_score = item.score. Only users who own at least one post or
+  comment are updated.
 """
 
 from __future__ import annotations
@@ -57,9 +58,10 @@ def recompute_scores_and_karma() -> dict[str, int]:
         for item in db.session.query(model).all():
             agg = aggregates.get(item.id)
             if agg is None:
-                # Legacy item with zero votes: fabricated display numbers win.
+                # Legacy item with zero votes: untouched; its fabricated
+                # score is the displayed value by construction.
                 legacy_items += 1
-                effective[(name, item.id)] = item.upvote_count or 0
+                effective[(name, item.id)] = item.score
                 continue
 
             total, count = agg
@@ -71,9 +73,6 @@ def recompute_scores_and_karma() -> dict[str, int]:
             if item.vote_count != count:
                 drift_votes += 1
                 item.vote_count = count
-                changed = True
-            if item.upvote_count != total:
-                item.upvote_count = total
                 changed = True
             if changed:
                 logger.info(

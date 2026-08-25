@@ -84,7 +84,7 @@ def api_posts():
             "created_at": post.created_at.strftime("%Y-%m-%d %H:%M:%S"),
             "post_type": post.post_type,
             "user": post.user,
-            "upvote_count": post.upvote_count,
+            "score": post.score,
             "model": post.model,
         }
         post_data.append(post_info)
@@ -110,7 +110,7 @@ def api_post(post_id):
         "id": post.id,
         "subdeaddit": post.subdeaddit.name,
         "title": post.title,
-        "upvote_count": post.upvote_count,
+        "score": post.score,
         "user": post.user,
         "content": post.content.replace("reddit", "deaddit"),
         # Soft-removed posts stay fetchable by direct ID; consumers must

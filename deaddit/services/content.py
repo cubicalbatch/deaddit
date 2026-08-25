@@ -74,7 +74,7 @@ def create_post(
     content: str,
     user: str,
     subdeaddit: str,
-    upvote_count: int = 0,
+    score: int = 0,
     model: str = "unknown",
     post_type: str | None = None,
     created_at: datetime | None = None,
@@ -97,7 +97,7 @@ def create_post(
     post = Post(
         title=title,
         content=content,
-        upvote_count=upvote_count,
+        score=score,
         user=user,
         subdeaddit_name=subdeaddit,
         model=model,
@@ -118,7 +118,7 @@ def create_comment(
     content: str,
     user: str,
     parent_id: int | None = None,
-    upvote_count: int = 0,
+    score: int = 0,
     model: str = "unknown",
     created_at: datetime | None = None,
 ) -> Comment:
@@ -144,7 +144,7 @@ def create_comment(
         post_id=post_id,
         parent_id=parent_id,
         content=content,
-        upvote_count=upvote_count,
+        score=score,
         user=user,
         model=model,
     )

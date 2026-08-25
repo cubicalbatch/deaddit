@@ -57,7 +57,7 @@ def _post_summary(post: Post, comment_count: int) -> dict:
         "title": post.title,
         "subdeaddit": post.subdeaddit_name,
         "author": post.user,
-        "score": post.upvote_count or 0,
+        "score": post.score,
         "age_hours": round(_age_hours(post.created_at), 2),
         "comment_count": comment_count,
         "excerpt": _excerpt(post.content, 200),
@@ -90,8 +90,8 @@ def _browse_feed(ctx: ToolContext, params: BrowseFeedArgs) -> dict:
         age = max(_age_hours(post.created_at), 1.0)
         return {
             "new": post.created_at or datetime.min,
-            "top": -(post.upvote_count or 0),
-            "hot": -((post.upvote_count or 0) + 1) / age,
+            "top": -post.score,
+            "hot": -(post.score + 1) / age,
         }[params.sort]
 
     posts = sorted(pool.values(), key=_sort_key, reverse=params.sort == "new")[
@@ -118,7 +118,7 @@ class ReadPostArgs(BaseModel):
 def _comment_order(sort: str):
     if sort == "new":
         return (Comment.created_at.desc(), Comment.id.desc())
-    return (Comment.upvote_count.desc(), Comment.created_at.asc())
+    return (Comment.score.desc(), Comment.created_at.asc())
 
 
 def _comment_node(comment: Comment) -> dict:
@@ -127,7 +127,7 @@ def _comment_node(comment: Comment) -> dict:
         "parent_id": comment.parent_id,
         "author": comment.user,
         "content": (comment.content or "")[:500],
-        "score": comment.upvote_count or 0,
+        "score": comment.score,
         "created_at": _iso(comment.created_at),
         "replies": [],
     }
@@ -178,7 +178,7 @@ def _read_post(ctx: ToolContext, params: ReadPostArgs) -> dict:
             "subdeaddit": post.subdeaddit_name,
             "author": post.user,
             "content": (post.content or "")[:2000],
-            "score": post.upvote_count or 0,
+            "score": post.score,
             "created_at": _iso(post.created_at),
             "comments": _build_comment_tree(post.id, params),
         },
@@ -208,7 +208,7 @@ def _search(ctx: ToolContext, params: SearchArgs) -> dict:
                 "title": p.title,
                 "subdeaddit": p.subdeaddit_name,
                 "excerpt": _excerpt(p.content, 200),
-                "score": p.upvote_count or 0,
+                "score": p.score,
             }
             for p in rows
         ]

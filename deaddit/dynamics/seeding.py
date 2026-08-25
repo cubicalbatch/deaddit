@@ -82,7 +82,7 @@ def _backfill_item(
     max_votes: int | None = None,
 ) -> int:
     """Create synthetic votes for one item; returns number of rows created."""
-    score = int(item.upvote_count or 0)
+    score = int(item.score)
 
     # Long-tail extra votes: geometric-ish draw bounded by remaining capacity.
     k_max = (capacity - abs(score)) // 2
@@ -132,7 +132,6 @@ def _backfill_item(
     if not dry_run:
         item.score = score
         item.vote_count = n
-        item.upvote_count = score
     return n
 
 
@@ -161,7 +160,7 @@ def backfill_history(
     """Backfill deterministic synthetic vote history for legacy content.
 
     Items with any existing Vote rows are skipped entirely (idempotency).
-    Items whose |upvote_count| exceeds the voter capacity are reported under
+    Items whose |score| exceeds the voter capacity are reported under
     "unbackfilled_infeasible" and left untouched.
 
     Refuses to run against the production database (<instance>/deaddit.db)
@@ -212,7 +211,7 @@ def backfill_history(
                 report["skipped_already_voted"] += 1
                 continue
 
-            score = int(item.upvote_count or 0)
+            score = int(item.score)
             if abs(score) > capacity:
                 report["unbackfilled_infeasible"].append(
                     {"kind": kind, "id": item.id, "score": score}
@@ -543,7 +542,7 @@ def _vote_pass(
             target = int(bound * votes_rng.random() ** 3)
             if votes_rng.random() < 0.08:
                 target = -(1 + int(4 * votes_rng.random()))
-            item.upvote_count = target
+            item.score = target
             votes_created += _backfill_item(
                 votes_rng,
                 item,

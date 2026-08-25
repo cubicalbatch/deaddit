@@ -48,7 +48,7 @@ def deep_thread(app, db_session):
     post = Post(
         title="Deep thread",
         content="post body",
-        upvote_count=1,
+        score=1,
         subdeaddit_name="deep",
         user="threader",
         model="m",
@@ -65,7 +65,7 @@ def deep_thread(app, db_session):
             post_id=post.id,
             parent_id=parent_id,
             content=f"level {i}",
-            upvote_count=20 - i,
+            score=20 - i,
             user="threader",
             model="m",
         )
@@ -78,7 +78,7 @@ def deep_thread(app, db_session):
     root = Comment(
         post_id=post.id,
         content="root",
-        upvote_count=5,
+        score=5,
         user="threader",
         model="m",
     )
@@ -88,7 +88,7 @@ def deep_thread(app, db_session):
         post_id=post.id,
         parent_id=root.id,
         content="kid",
-        upvote_count=4,
+        score=4,
         user="threader",
         model="m",
     )
@@ -98,7 +98,7 @@ def deep_thread(app, db_session):
         post_id=post.id,
         parent_id=kid.id,
         content="gk1",
-        upvote_count=3,
+        score=3,
         user="threader",
         model="m",
     )
@@ -106,7 +106,7 @@ def deep_thread(app, db_session):
         post_id=post.id,
         parent_id=kid.id,
         content="gk2",
-        upvote_count=2,
+        score=2,
         user="threader",
         model="m",
     )
@@ -116,7 +116,6 @@ def deep_thread(app, db_session):
     old_top = Comment(
         post_id=post.id,
         content="old but heavily upvoted",
-        upvote_count=100,
         score=100,
         user="threader",
         model="m",
@@ -124,7 +123,7 @@ def deep_thread(app, db_session):
     fresh_low = Comment(
         post_id=post.id,
         content="fresh and ignored",
-        upvote_count=0,
+        score=0,
         user="threader",
         model="m",
     )
@@ -378,7 +377,7 @@ class TestRenderContract:
         post = Post(
             title="evil body",
             content="<script>alert(1)</script>",
-            upvote_count=0,
+            score=0,
             subdeaddit_name="xss",
             user="sneaky",
             model="m",

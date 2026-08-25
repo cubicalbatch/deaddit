@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from click.testing import CliRunner
-from sqlalchemy import case, func
+from sqlalchemy import func
 
 from deaddit import cli as cli_module
 from deaddit import create_app
@@ -96,7 +96,6 @@ def test_exact_sum_invariants(app, pinned_now, db_session):
             votes = _db.session.query(Vote).filter(fk == item.id).all()
             assert len(votes) == item.vote_count
             assert sum(v.value for v in votes) == item.score
-            assert item.score == item.upvote_count
             checked += 1
     assert checked > 0
 
@@ -118,7 +117,7 @@ def test_vote_attention_shape_and_hot_feed(app, pinned_now):
     # (d) no fabricated display score without vote rows.
     for model in (Post, Comment):
         fabricated = model.query.filter(
-            model.vote_count == 0, model.upvote_count != 0
+            model.vote_count == 0, model.score != 0
         ).count()
         assert fabricated == 0
 
@@ -133,9 +132,7 @@ def test_karma_matches_effective_scores(app, pinned_now, db_session):
         rows = (
             db_session.query(
                 owner_col,
-                func.sum(
-                    case((model.vote_count > 0, model.score), else_=model.upvote_count)
-                ),
+                func.sum(model.score),
             )
             .group_by(owner_col)
             .all()

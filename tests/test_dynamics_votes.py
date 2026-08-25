@@ -107,7 +107,7 @@ def test_downvote_allowed_by_default(seeded_db):
     assert _downvotes_allowed() is True
 
 
-# --- Score / vote_count / upvote_count sync and karma accrual ---
+# --- Score / vote_count sync and karma accrual ---
 
 
 def test_new_upvote_updates_all_counters_and_post_karma(seeded_db, db_session):
@@ -117,7 +117,6 @@ def test_new_upvote_updates_all_counters_and_post_karma(seeded_db, db_session):
     post = _refresh(db_session, Post, post.id)
     assert post.score == 1
     assert post.vote_count == 1
-    assert post.upvote_count == 1
 
     bob = db_session.get(User, "bob")
     assert bob.post_karma == 1
@@ -130,7 +129,6 @@ def test_new_comment_upvote_accrues_comment_karma(seeded_db, db_session):
     comment = _refresh(db_session, type(comment), comment.id)
     assert comment.score == 1
     assert comment.vote_count == 1
-    assert comment.upvote_count == 1
 
     alice = db_session.get(User, "alice")
     assert alice.comment_karma == 1
@@ -145,8 +143,6 @@ def test_new_downvote_negative_score_and_karma(seeded_db, db_session):
     post = _refresh(db_session, Post, post.id)
     assert post.score == -1
     assert post.vote_count == 1
-    # Res 4 alias keeps upvote_count in lockstep with score.
-    assert post.upvote_count == -1
     assert db_session.get(User, "bob").post_karma == -1
 
 
@@ -161,7 +157,7 @@ def test_same_value_revote_is_idempotent_noop(seeded_db, db_session):
     rows = db_session.query(Vote).filter_by(voter="alice", post_id=post.id).all()
     assert len(rows) == 1
     post = db_session.get(Post, post.id)
-    assert (post.score, post.vote_count, post.upvote_count) == (1, 1, 1)
+    assert (post.score, post.vote_count) == (1, 1)
     assert db_session.get(User, "bob").post_karma == 1
 
 
@@ -174,7 +170,6 @@ def test_switch_up_to_down_delta_is_two(seeded_db, db_session):
     post = _refresh(db_session, Post, post.id)
     assert post.score == -1
     assert post.vote_count == 1  # switch never changes vote_count
-    assert post.upvote_count == -1
     assert db_session.get(User, "bob").post_karma == -1
 
 
@@ -212,7 +207,7 @@ def test_switch_on_comment_keeps_vote_count(seeded_db, db_session):
     }
 
     comment = _refresh(db_session, type(comment), comment.id)
-    assert (comment.score, comment.vote_count, comment.upvote_count) == (-1, 1, -1)
+    assert (comment.score, comment.vote_count) == (-1, 1)
     assert db_session.get(User, "bob").comment_karma == -1
 
 
@@ -260,5 +255,5 @@ def test_concurrent_duplicate_insert_rolls_back_and_resolves(
     db_session.expire_all()
     assert db_session.query(Vote).filter_by(voter="alice", post_id=post.id).count() == 1
     post = db_session.get(Post, post.id)
-    assert (post.score, post.vote_count, post.upvote_count) == (1, 1, 1)
+    assert (post.score, post.vote_count) == (1, 1)
     assert db_session.get(User, "bob").post_karma == 1

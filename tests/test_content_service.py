@@ -39,7 +39,7 @@ def test_create_post_persists(seeded_db, db_session, cache_spy):
         content="Fresh content",
         user="alice",
         subdeaddit="testsub",
-        upvote_count=5,
+        score=5,
         model="gpt-x",
         post_type="text",
     )
@@ -49,7 +49,7 @@ def test_create_post_persists(seeded_db, db_session, cache_spy):
     assert fetched.content == "Fresh content"
     assert fetched.user == "alice"
     assert fetched.subdeaddit_name == "testsub"
-    assert fetched.upvote_count == 5
+    assert fetched.score == 5
     assert fetched.model == "gpt-x"
     assert fetched.post_type == "text"
     assert cache_spy == ["clear"]
@@ -103,13 +103,13 @@ def test_create_comment_persists_with_parent(seeded_db, db_session, cache_spy):
         content="A reply",
         user="alice",
         parent_id=parent.id,
-        upvote_count=2,
+        score=2,
         model="m1",
     )
     fetched = Comment.query.filter_by(id=comment.id).one()
     assert fetched.content == "A reply"
     assert fetched.parent_id == parent.id
-    assert fetched.upvote_count == 2
+    assert fetched.score == 2
     assert fetched.model == "m1"
     assert cache_spy == ["clear"]
 

@@ -1,7 +1,7 @@
 """Vote casting service (Phase D1, Wave B slice S2).
 
 Implements the frozen D1 contract: transactional vote upsert with score /
-vote_count / upvote_count bookkeeping and author karma adjustments.
+vote_count bookkeeping and author karma adjustments.
 Rejection reasons are BYTE-FROZEN — agents match on them verbatim.
 """
 
@@ -46,7 +46,7 @@ def cast_vote(
     """Cast (or recast) ``voter``'s vote of ``value`` on a post or comment.
 
     One transaction: upsert the :class:`Vote` row, adjust the target's
-    ``score``/``vote_count``/``upvote_count``, and adjust the author's
+    ``score``/``vote_count``, and adjust the author's
     ``post_karma``/``comment_karma``.
 
     Returns ``{"status": "ok", "score": <int>}`` on success (including an
@@ -106,7 +106,6 @@ def cast_vote(
 
         if delta:
             item.score += delta
-            item.upvote_count = item.score
             author = db.session.get(User, item.user)
             if is_post:
                 author.post_karma += delta

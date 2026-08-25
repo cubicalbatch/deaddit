@@ -424,7 +424,7 @@ class ContentManager {
                 <td>${this.truncate(post.title, 50)}</td>
                 <td class="d-none d-sm-table-cell">${post.username}</td>
                 <td class="d-none d-md-table-cell">${post.subdeaddit_name}</td>
-                <td class="d-none d-sm-table-cell">${post.upvote_count}</td>
+                <td class="d-none d-sm-table-cell">\${post.score}</td>
                 <td class="d-none d-lg-table-cell">${post.comments_count}</td>
                 <td class="d-none d-lg-table-cell">${createdDate}</td>
                 <td>${this.actionButtons(
@@ -450,7 +450,7 @@ class ContentManager {
             document.getElementById('editPostId').value = id;
             document.getElementById('editPostTitle').value = post.title;
             document.getElementById('editPostContent').value = post.content;
-            document.getElementById('editPostUpvotes').value = post.upvote_count;
+            document.getElementById('editPostUpvotes').value = post.score;
             document.getElementById('editPostType').value = post.post_type || '';
 
             // Show modal
@@ -466,7 +466,7 @@ class ContentManager {
         const data = {
             title: document.getElementById('editPostTitle').value,
             content: document.getElementById('editPostContent').value,
-            upvote_count: parseInt(document.getElementById('editPostUpvotes').value) || 0,
+            score: parseInt(document.getElementById('editPostUpvotes').value) || 0,
             post_type: document.getElementById('editPostType').value
         };
 
@@ -509,7 +509,7 @@ class ContentManager {
                 <td class="d-none d-sm-table-cell">${comment.username}</td>
                 <td class="d-none d-md-table-cell">${this.truncate(comment.post_title, 30)}</td>
                 <td class="d-none d-lg-table-cell">${comment.parent_id ? 'Reply' : 'Root'}</td>
-                <td class="d-none d-sm-table-cell">${comment.upvote_count}</td>
+                <td class="d-none d-sm-table-cell">\${comment.score}</td>
                 <td class="d-none d-lg-table-cell">${createdDate}</td>
                 <td>${this.actionButtons(
                     `contentManager.editComment(${comment.id})`,
@@ -533,7 +533,7 @@ class ContentManager {
             // Populate form
             document.getElementById('editCommentId').value = id;
             document.getElementById('editCommentContent').value = comment.content;
-            document.getElementById('editCommentUpvotes').value = comment.upvote_count;
+            document.getElementById('editCommentUpvotes').value = comment.score;
 
             // Show modal
             new bootstrap.Modal(document.getElementById('editCommentModal')).show();
@@ -547,7 +547,7 @@ class ContentManager {
         const id = document.getElementById('editCommentId').value;
         const data = {
             content: document.getElementById('editCommentContent').value,
-            upvote_count: parseInt(document.getElementById('editCommentUpvotes').value) || 0
+            score: parseInt(document.getElementById('editCommentUpvotes').value) || 0
         };
 
         try {

@@ -1,9 +1,7 @@
 """Deaddit application package.
 
-This module exposes :func:`create_app`, the application factory, and a lazy
-module-level ``app`` shim so legacy entry points (``from deaddit import app``,
-``deaddit.wsgi:app`` during the transition) keep working. Importing this
-package performs no I/O: database creation, settings seeding, and job
+This module exposes :func:`create_app`, the application factory. Importing
+this package performs no I/O: database creation, settings seeding, and job
 restarts all happen inside :func:`create_app`.
 """
 
@@ -65,8 +63,8 @@ def create_app(config: Any = None) -> Flask:
     # Import routes after extensions are initialized to avoid circular imports
     from .admin import admin_bp
     from .api import bp as api_bp
-    from .llm.stream_admin import stream_admin_bp
     from .live import bp as live_bp
+    from .llm.stream_admin import stream_admin_bp
     from .routes import bp as web_bp
 
     # Register blueprints
@@ -150,31 +148,6 @@ def handle_exception(e):
     return jsonify({"error": "An unexpected error occurred"}), 500
 
 
-class _LazyApp:
-    """Lazy attribute shim: resolves ``deaddit.app`` on first access.
-
-    Transition shim only — removed at Phase A6 together with the singleton.
-    """
-
-    def __init__(self) -> None:
-        self._instance = None
-
-    def _resolve(self):
-        if self._instance is None:
-            self._instance = create_app()
-        return self._instance
-
-    def __getattr__(self, name):
-        return getattr(self._resolve(), name)
-
-
-_app_shim = _LazyApp()
-
-
-def __getattr__(name: str):
-    if name == "app":
-        return _app_shim
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def init_db() -> None:

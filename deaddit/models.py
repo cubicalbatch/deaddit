@@ -21,7 +21,6 @@ class Subdeaddit(db.Model):
 class Post(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(100), nullable=False)
-    upvote_count = db.Column(db.Integer, default=0)
     score = db.Column(db.Integer, nullable=False, server_default="0")
     vote_count = db.Column(db.Integer, nullable=False, server_default="0")
     content = db.Column(db.Text)
@@ -61,8 +60,7 @@ class Comment(db.Model):
         db.Integer, db.ForeignKey("comment.id"), nullable=True, index=True
     )
     content = db.Column(db.Text)
-    upvote_count = db.Column(db.Integer, default=0, index=True)
-    score = db.Column(db.Integer, nullable=False, server_default="0")
+    score = db.Column(db.Integer, nullable=False, server_default="0", index=True)
     vote_count = db.Column(db.Integer, nullable=False, server_default="0")
     user = db.Column(
         db.String(50), db.ForeignKey("user.username"), nullable=False, index=True

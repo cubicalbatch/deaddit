@@ -34,9 +34,10 @@ def ctx(app):
 def feed_db(app):
     """Deterministic feed: 2 subs, 3 users, TOTAL_POSTS posts.
 
-    Post i (i = 0..N-1): created_at ascending with i, upvote_count = i % 7,
-    so default (newest first) order is reversed id order while 'top' sorts by
-    upvote count -- visibly different orders.
+    Post i (i = 0..N-1): created_at ascending with i, score = i % 7.
+    Since Resolution 4 the fabricated display number lives in ``score``, so
+    default (hot) order groups by score bucket (newest first within a
+    bucket) while 'new' is plain recency -- visibly different orders.
     """
     from datetime import datetime, timedelta
 
@@ -59,7 +60,7 @@ def feed_db(app):
                 user=f"u{i % 3}",
                 subdeaddit_name=sub_name,
                 model=f"model-{i % 2}",
-                upvote_count=i % 7,
+                score=i % 7,
                 created_at=base + timedelta(minutes=i),
             )
         )
@@ -110,17 +111,34 @@ class TestIndexPaging:
 
 
 class TestIndexSort:
+    @staticmethod
+    def _hot_bucket_ids(posts):
+        """Pure-python mirror of the SQL hot order for this fixture.
+
+        Post i carries score i % 7 (ids are offset by the autoincrement
+        start). The hot term is log10(max(|score|, 1)) * sign(score),
+        which lumps scores 0 and 1 together at 0; that combined bucket
+        dominates the fixture's entire recency spread, and ties resolve
+        newest (largest id) first.
+        """
+        order = sorted(
+            posts,
+            key=lambda p: (
+                -(math.log10(p.score) if p.score > 0 else 0.0),
+                -p.id,
+            ),
+        )
+        return [p.id for p in order]
+
     def test_default_order_is_hot(self, app, ctx, feed_db):
         client = app.test_client()
         client.get("/")
         context = _index_ctx(ctx)
-        # All seeded posts share score=0, so hot reduces to recency
-        # (created_at asc with id) => reversed id order on the page.
         assert context["sort"] == "hot"
         ids = [p.id for p in context["posts"]]
-        assert ids == sorted(ids, reverse=True)
+        assert ids == self._hot_bucket_ids(feed_db["posts"])[: len(ids)]
 
-    def test_sort_new_explicitly_same_as_default(self, app, ctx, feed_db):
+    def test_sort_new_is_plain_recency(self, app, ctx, feed_db):
         client = app.test_client()
         client.get("/?sort=new")
         context = _index_ctx(ctx)
@@ -132,8 +150,8 @@ class TestIndexSort:
         from deaddit import db as _db
 
         client = app.test_client()
-        # Seeded posts share score=0; give them distinct scores so 'top'
-        # (score DESC) is visibly different from the recency default.
+        # Give the posts distinct scores so 'top' (score DESC) differs
+        # from the hot default.
         for i, post in enumerate(feed_db["posts"]):
             post.score = (i * 13) % 50
         _db.session.commit()
@@ -155,7 +173,7 @@ class TestIndexSort:
         context = _index_ctx(ctx)
         assert context["sort"] == "hot"
         ids = [p.id for p in context["posts"]]
-        assert ids == sorted(ids, reverse=True)
+        assert ids == self._hot_bucket_ids(feed_db["posts"])[: len(ids)]
 
 
 class TestRails:
@@ -168,7 +186,7 @@ class TestRails:
                 user="u0",
                 subdeaddit_name="beta",
                 model="m",
-                upvote_count=0,
+                score=0,
             )
             for i in range(45)
         ]
@@ -210,7 +228,7 @@ class TestRails:
                 user="u2",
                 subdeaddit_name="alpha",
                 model="m",
-                upvote_count=0,
+                score=0,
             )
             for i in range(30)
         ]
