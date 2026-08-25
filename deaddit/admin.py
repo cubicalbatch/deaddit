@@ -51,6 +51,7 @@ from deaddit.services.content import (
     create_subdeaddit,
     create_user,
 )
+from deaddit.settings import SecretNotPersistable
 from deaddit.utils import production_disabled
 
 logger = logging.getLogger(__name__)
@@ -1439,9 +1440,7 @@ def settings():
         "api_base_url": all_settings["API_BASE_URL"]["value"],
         "models": all_settings["MODELS"]["value"],
         "api_token_set": all_settings["API_TOKEN"]["value"] == "***set***",
-        "openai_key_set": all_settings["OPENAI_KEY"]["value"]
-        != "your_openrouter_api_key"
-        and bool(all_settings["OPENAI_KEY"]["value"]),
+        "openai_key_set": all_settings["OPENAI_KEY"]["value"] != "***not set***",
         "all_settings": all_settings,
     }
 
@@ -1545,18 +1544,24 @@ def save_config_api():
             Config.set("OPENAI_API_URL", endpoint_url)
 
         # Empty-means-unchanged: an absent or blank secret never overwrites the
-        # stored value. Only a non-empty key is written.
+        # stored value. Only a non-empty key is written. Since A6 secrets are
+        # environment-only: a non-empty key is refused, other settings in the
+        # same request still commit.
         openai_key = (data.get("openai_key") or "").strip()
+        openai_key_refused = False
         if openai_key:
-            if endpoint_url:
-                Config.set_api_key_for_endpoint(endpoint_url, openai_key)
-            else:
-                # If no endpoint URL, use current endpoint
-                current_endpoint = Config.get("OPENAI_API_URL")
-                if current_endpoint:
-                    Config.set_api_key_for_endpoint(current_endpoint, openai_key)
+            try:
+                if endpoint_url:
+                    Config.set_api_key_for_endpoint(endpoint_url, openai_key)
                 else:
-                    Config.set("OPENAI_KEY", openai_key)
+                    # If no endpoint URL, use current endpoint
+                    current_endpoint = Config.get("OPENAI_API_URL")
+                    if current_endpoint:
+                        Config.set_api_key_for_endpoint(current_endpoint, openai_key)
+                    else:
+                        Config.set("OPENAI_KEY", openai_key)
+            except SecretNotPersistable:
+                openai_key_refused = True
 
         if data.get("openai_model"):
             Config.set("OPENAI_MODEL", data["openai_model"])
@@ -1569,12 +1574,17 @@ def save_config_api():
         current_endpoint = Config.get("OPENAI_API_URL")
         config = {
             "openai_api_url": current_endpoint or "Not set",
-            "openai_model": Config.get("OPENAI_MODEL", "Not set"),
-            "api_base_url": Config.get("API_BASE_URL", "Not set"),
-            "openai_key_set": bool(Config.get_api_key_for_endpoint(current_endpoint))
-            and Config.get_api_key_for_endpoint(current_endpoint)
-            != "your_openrouter_api_key",
+            "openai_key_set": bool(Config.get_api_key_for_endpoint(current_endpoint)),
         }
+
+        if openai_key_refused:
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "OPENAI_KEY is environment-only since refactor A6 — set it in your environment/.env (other settings were saved).",
+                    "config": config,
+                }
+            )
 
         return jsonify(
             {
@@ -1603,8 +1613,10 @@ def save_deaddit_config_api():
             Config.set("API_BASE_URL", data["api_base_url"].rstrip("/"))
 
         # Empty-means-unchanged: an absent or blank token never overwrites the
-        # stored value. Only a non-empty token is validated and written.
+        # stored value. Only a non-empty token is validated and written. Since
+        # A6 the token is environment-only: a non-empty token is refused.
         token = (data.get("api_token") or "").strip()
+        api_token_refused = False
         if token:
             if len(token) < 3:
                 return jsonify(
@@ -1613,7 +1625,18 @@ def save_deaddit_config_api():
                         "message": "API Token must be at least 3 characters long",
                     }
                 )
-            Config.set("API_TOKEN", token)
+            try:
+                Config.set("API_TOKEN", token)
+            except SecretNotPersistable:
+                api_token_refused = True
+
+        if api_token_refused:
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "API_TOKEN is environment-only since refactor A6 — set it in your environment/.env.",
+                }
+            )
 
         return jsonify(
             {"success": True, "message": "Deaddit configuration saved successfully"}

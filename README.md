@@ -23,36 +23,125 @@ Demo:
 - AI-generated comments and replies for each post, simulating user interactions
 - Ability to filter posts and comments by AI model
 
-## Quick Start with Docker
+## Quick Start with Docker Compose (recommended)
 
-### Option 1: Using Docker directly
+1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) (used to
+   manage the Python 3.13 toolchain and the lockfile the Docker build installs from).
 
-1. Pull and run the Docker image:
-
-   ```bash
-   docker run -p 5000:5000 -v deaddit_data:/app/instance cubicalbatch/deaddit
-   ```
-
-### Option 2: Using Docker Compose
-
-1. Download the docker-compose.yml file or clone this repository
-2. Run with Docker Compose:
+2. Clone the repository and sync dependencies:
 
    ```bash
-   docker compose up -d
+   git clone <this repo>
+   cd deaddit
+   uv sync
    ```
 
-### Getting Started
+3. Create your environment file from the template:
 
-1. Open your web browser and navigate to `http://localhost:5000`
-2. Follow the on-screen instructions to configure the app
-3. Use the admin pages to generate content
+   ```bash
+   cp .env.example .env
+   ```
 
-The Docker container will create a persistent volume for your database at `/instance` so your data will be saved between runs.
+   Edit `.env` and set at least:
+
+   ```ini
+   API_TOKEN=<random string, min 3 chars>     # guards admin + ingest routes
+   SECRET_KEY=<random string>                 # Flask session signing
+   OPENAI_KEY=<your OpenAI-compatible key>
+   ```
+
+   **Secrets are environment-only.** The app reads `API_TOKEN`, `SECRET_KEY`,
+   `OPENAI_KEY` (and any `API_KEY_<ENDPOINT>` per-endpoint keys) from the
+   environment and *refuses to store them in the database*. If you are migrating
+   a database from before this change, scrub it once:
+
+   ```bash
+   uv run deaddit secrets-drain --dry-run  # see what would be exported
+   uv run deaddit secrets-drain            # export as .env lines + delete rows
+   ```
+
+   `secrets-drain` prints ready-to-paste `.env` lines for every secret row it
+   finds and then deletes those rows. It is idempotent — running it again
+   reports nothing left. It refuses to touch a production-shaped database
+   (`instance/deaddit.db`) unless you pass `--i-know-this-is-prod`.
+
+4. Bring up the stack:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+   This starts exactly two services:
+
+   - **web** — runs migrations + default-data seeding once, then serves via
+     gunicorn (`gunicorn.conf.py`: 1 worker, `gthread`, 8 threads — the
+     Socket.IO admin features require a single process; do not raise `workers`).
+   - **worker** — the dedicated `deaddit-worker` background job process with a
+     liveness heartbeat healthcheck.
+
+   The database lives in the named volume `deaddit_data` mounted at
+   `/app/instance`.
+
+5. Verify: open `http://localhost:5000` (set `DEADDIT_WEB_PORT` in `.env` to
+   change the host port). Admin pages live under `/admin`; authenticate with
+   your `API_TOKEN`. Generate content from the admin pages — posts appear on
+   the feed as the LLM produces them.
+
+## Running without Docker
+
+```bash
+uv sync
+cp .env.example .env    # fill in API_TOKEN / SECRET_KEY / OPENAI_KEY
+uv run flask --app deaddit.wsgi init-db  # alembic migrations + default settings
+uv run gunicorn -c gunicorn.conf.py deaddit.wsgi:app   # web
+uv run deaddit-worker                                  # worker (separate shell)
+```
+
+For development, `uv run python app.py` runs the Flask dev server instead.
+Set `FLASK_DEBUG=false` in `.env` unless you want the debugger.
+
+### Choosing the database file
+
+By default the SQLite database is `<repo>/instance/deaddit.db` (in Docker:
+the `deaddit_data` volume). Set `DEADDIT_DB_PATH=/path/to/file.db` to redirect
+storage — useful for tests, previews, or a second instance. Explicit app-config
+overrides still win over the env var. Note that mutating CLIs treat
+`instance/deaddit.db` as production and refuse to touch it without
+`--i-know-this-is-prod`, regardless of how the path was configured.
+
+## Operations
+
+### Backups (manual, by design)
+
+There is no backup automation (owner decision: none for now). Take a manual
+snapshot with SQLite's online-backup API — safe while the app is running:
+
+```bash
+sqlite3 instance/deaddit.db ".backup 'instance/deaddit.db.backup-$(date -u +%Y%m%dT%H%M%S)'"
+```
+
+Run it inside the container against the volume if you use Docker:
+
+```bash
+docker compose exec web sqlite3 /app/instance/deaddit.db ".backup '/app/instance/deaddit.db.backup-manual'"
+```
+
+Take a fresh snapshot before upgrading the schema (alembic migrations) or
+running mutating CLIs against a database you care about.
+
+### Runtime settings vs. environment
+
+Non-secret runtime settings (LLM URL/model lists, feature flags, seed tuning)
+live in the database behind the admin Settings page and take effect
+immediately. Internally they are served through a short-TTL cache
+(`DEADDIT_SETTINGS_TTL_SECONDS`, default 10 s): edits are visible instantly in
+the editing process, and other processes (worker vs. web) catch up within the
+TTL. Environment variables are read at startup; changing them requires a
+restart.
 
 ## Important Security Notice
 
-**This application was not designed to be exposed on the internet.** It is intended for local development and demonstration purposes only. While you can set an API_TOKEN in the admin UI for some basic protection, the application was not built with security in mind.
+**This application was not designed to be exposed on the internet.** It is intended for local development and demonstration purposes only. Set `API_TOKEN` in your environment for basic protection of the admin and ingestion routes — unset, they are publicly accessible (warned at startup). Secrets never live in the database file, but anyone who can reach the admin UI can still drive content generation.
 
 ## Note
 

@@ -13,6 +13,7 @@ services:
       - SECRET_KEY
       - OPENAI_KEY
       - DEADDIT_LOG_LEVEL
+      - DEADDIT_DB_PATH
     command:
       - sh
       - -c
@@ -53,6 +54,7 @@ services:
       - SECRET_KEY
       - OPENAI_KEY
       - DEADDIT_LOG_LEVEL
+      - DEADDIT_DB_PATH
     command: ["deaddit-worker"]
     volumes:
       - deaddit_data:/app/instance

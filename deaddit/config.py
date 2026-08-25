@@ -1,21 +1,47 @@
 """Configuration management for Deaddit.
 
-This module handles loading configuration from the database with fallback
-to environment variables. Only API_TOKEN remains as an environment variable.
+Non-secret settings resolve database first, then environment variables, then
+built-in defaults (DB > env > defaults), served through the process-local TTL
+cache in :mod:`deaddit.settings.service`.
+
+Since refactor A6, secret keys (``API_TOKEN``, ``SECRET_KEY``, ``OPENAI_KEY``
+and every ``API_KEY_*`` endpoint key) are environment-only: :meth:`Config.set`
+refuses to persist them, the environment wins over any stale database row left
+by an earlier deployment (served with a once-per-process warning so pre-A6
+installations keep working), and ``deaddit secrets-drain`` exports and scrubs
+those legacy rows.
 """
 
+import logging
 import os
 
 from deaddit.models import Setting
+from deaddit.settings.service import SecretNotPersistable, cached, invalidate
+
+logger = logging.getLogger(__name__)
+
+SECRET_KEYS = frozenset({"API_TOKEN", "SECRET_KEY", "OPENAI_KEY"})
+
+# Secrets read from a stale DB row warn exactly once per process per key.
+_warned_stale_secrets: set[str] = set()
+
+# Sentinel: no DB/env/DEFAULTS layer answered for a non-secret key.
+_UNSET = object()
+
+
+def is_secret_key(key: str) -> bool:
+    """True when the setting holds a credential and must never be persisted."""
+    return key in SECRET_KEYS or key.startswith("API_KEY_")
 
 
 class Config:
     """Configuration manager that loads from database with environment fallbacks."""
 
-    # Default values for configuration
+    # Default values for configuration. Secret keys stay None: credentials are
+    # never defaulted into the database and only ever come from the environment.
     DEFAULTS = {
         "OPENAI_API_URL": "http://localhost/v1",
-        "OPENAI_KEY": "your_openrouter_api_key",
+        "OPENAI_KEY": None,
         "OPENAI_MODEL": "llama3",
         "MODELS": "llama3,gpt-3.5-turbo,gpt-4,claude-3-haiku,mistral-7b",
         "API_BASE_URL": "http://localhost:5000",
@@ -36,7 +62,7 @@ class Config:
     # Descriptions for each setting
     DESCRIPTIONS = {
         "OPENAI_API_URL": "Base URL for AI API service",
-        "OPENAI_KEY": "API authentication key for AI service",
+        "OPENAI_KEY": "API authentication key for AI service (environment-only)",
         "OPENAI_MODEL": "Default AI model to use for content generation",
         "MODELS": "Comma-separated list of available AI models",
         "API_BASE_URL": "Base URL for the application API",
@@ -45,7 +71,7 @@ class Config:
         "FLASK_DEBUG": "Enable Flask debug mode (True/False)",
         "DEFAULT_DATA_LOADED": "Whether default subdeaddits and users have been loaded",
         "PRODUCTION": "Production mode - disables admin interface and ingestion endpoints (true/false)",
-        "API_TOKEN": "Security token for admin access (minimum 3 characters)",
+        "API_TOKEN": "Security token for admin access (minimum 3 characters; environment-only)",
         "SEED_VOTE_MAX": "Max synthetic votes (total attention) per item during history seeding",
         "SEED_VOTE_PROBABILITY": "Base probability an item receives synthetic attention during history seeding (0-1)",
         "SEED_DECAY_DAYS": "Days over which seed vote probability decays linearly to zero from the anchor",
@@ -58,90 +84,110 @@ class Config:
     def get(cls, key: str, default: str | None = None) -> str | None:
         """Get a configuration value.
 
-        Priority order:
+        Non-secrets — priority order, served through the process-local TTL
+        cache (the final resolved value per key is cached, so environment
+        changes need a restart to show up):
         1. Database setting (if available)
         2. Environment variable (as fallback)
         3. Default value from DEFAULTS
         4. Provided default parameter
-        """
-        # Special case: API_TOKEN checks database first, then environment
-        if key == "API_TOKEN":
-            try:
-                # Try to get from database first
-                db_value = Setting.get_value(key)
-                if db_value is not None:
-                    return db_value
-            except Exception:
-                # Database might not be initialized yet, fall back to env
-                pass
-            # Fall back to environment variable
-            return os.environ.get(key)
 
-        try:
-            # Try to get from database first
-            db_value = Setting.get_value(key)
+        Secrets — the environment is authoritative; a stale database row is
+        served as a grace path with a once-per-process warning.
+        """
+        if is_secret_key(key):
+            return cls._get_secret(key, default)
+
+        def _resolve() -> object:
+            try:
+                db_value = Setting.get_value(key)
+            except Exception:
+                db_value = None
             if db_value is not None:
                 return db_value
-        except Exception:
-            # Database might not be initialized yet, fall back to env
-            pass
+            env_value = os.environ.get(key)
+            if env_value is not None:
+                return env_value
+            default_value = cls.DEFAULTS.get(key)
+            if default_value is not None:
+                return default_value
+            return _UNSET
 
-        # Fall back to environment variable
+        value = cached(key, _resolve)
+        return default if value is _UNSET else value
+
+    @classmethod
+    def _get_secret(cls, key: str, default: str | None = None) -> str | None:
+        """Resolve a secret: environment first, stale DB row as grace fallback."""
         env_value = os.environ.get(key)
         if env_value is not None:
             return env_value
-
-        # Fall back to default value
+        try:
+            db_value = Setting.get_value(key)
+        except Exception:
+            db_value = None
+        if db_value is not None:
+            if key not in _warned_stale_secrets:
+                _warned_stale_secrets.add(key)
+                logger.warning(
+                    "Secret %s still stored in database; run `deaddit secrets-drain`"
+                    " to scrub it",
+                    key,
+                )
+            return db_value
         default_value = cls.DEFAULTS.get(key)
         if default_value is not None:
             return default_value
-
         return default
 
     @classmethod
     def set(cls, key: str, value: str) -> None:
-        """Set a configuration value in the database."""
+        """Set a configuration value in the database (secrets are refused)."""
+        if is_secret_key(key):
+            raise SecretNotPersistable(
+                f"Refusing to store secret '{key}' in the database (env-only since A6). "
+                "Set it via the environment or .env."
+            )
         description = cls.DESCRIPTIONS.get(key)
         Setting.set_value(key, value, description)
+        invalidate(key)
+
+    @staticmethod
+    def _has_value(value: str | None) -> bool:
+        return value is not None and str(value).strip() != ""
 
     @classmethod
     def get_all_settings(cls) -> dict:
-        """Get all configuration settings with their current values."""
+        """Get all configuration settings; every secret key is masked."""
         settings = {}
 
-        # Get all defined keys
         for key in cls.DEFAULTS.keys():
+            source = cls._get_source(key)
+            if is_secret_key(key):
+                value = (
+                    "***set***" if cls._has_value(cls._get_secret(key)) else "***not set***"
+                )
+            else:
+                value = cls.get(key)
             settings[key] = {
-                "value": cls.get(key),
+                "value": value,
                 "description": cls.DESCRIPTIONS.get(key, ""),
-                "source": cls._get_source(key),
+                "source": source,
             }
-
-        # Handle API_TOKEN specially - don't expose the actual value
-        api_token = cls.get("API_TOKEN")
-        settings["API_TOKEN"] = {
-            "value": "***set***" if api_token else "***not set***",
-            "description": cls.DESCRIPTIONS.get("API_TOKEN", ""),
-            "source": cls._get_source("API_TOKEN"),
-        }
 
         return settings
 
     @classmethod
     def _get_source(cls, key: str) -> str:
         """Determine the source of a configuration value."""
-        if key == "API_TOKEN":
+        if is_secret_key(key):
+            if os.environ.get(key) is not None:
+                return "environment"
             try:
-                # Check database first
-                db_value = Setting.get_value(key)
-                if db_value is not None:
-                    return "database"
+                if Setting.get_value(key) is not None:
+                    return "database (stale)"
             except Exception:
                 pass
-            # Then check environment
-            env_value = os.environ.get(key)
-            if env_value is not None:
-                return "environment"
             return "none"
 
         try:
@@ -168,9 +214,14 @@ class Config:
 
     @classmethod
     def initialize_defaults(cls) -> None:
-        """Initialize database with default values if not already set."""
+        """Initialize database with default values if not already set.
+
+        Secret keys are skipped entirely: they are never written as rows.
+        """
         try:
             for key, default_value in cls.DEFAULTS.items():
+                if is_secret_key(key):
+                    continue
                 # Only set if not already in database
                 if Setting.get_value(key) is None:
                     description = cls.DESCRIPTIONS.get(key)
@@ -209,7 +260,10 @@ class Config:
 
     @classmethod
     def set_api_key_for_endpoint(cls, endpoint_url: str, api_key: str) -> None:
-        """Set API key for a specific endpoint URL."""
+        """Set API key for a specific endpoint URL.
+
+        Raises SecretNotPersistable: endpoint keys are environment-only since A6.
+        """
         if not endpoint_url:
             cls.set("OPENAI_KEY", api_key)
             return
@@ -248,7 +302,7 @@ class Config:
 
     @classmethod
     def get_all_endpoint_keys(cls) -> dict:
-        """Get all endpoint-specific API keys."""
+        """Get all endpoint-specific API keys, masked (never plaintext)."""
         endpoint_keys = {}
 
         # Common endpoints
@@ -259,12 +313,12 @@ class Config:
         }
 
         for endpoint_url, name in endpoints.items():
-            key = cls.get_api_key_for_endpoint(endpoint_url)
-            if key:
-                endpoint_keys[endpoint_url] = {
-                    "name": name,
-                    "key": key,
-                    "masked": "••••••••••••••••" if key else None,
-                }
+            api_key = cls.get_api_key_for_endpoint(endpoint_url)
+            has_key = bool(api_key)
+            endpoint_keys[endpoint_url] = {
+                "name": name,
+                "masked": "••••••••••••••••" if has_key else None,
+                "has_key": has_key,
+            }
 
         return endpoint_keys

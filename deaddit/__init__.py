@@ -8,6 +8,7 @@ restarts all happen inside :func:`create_app`.
 """
 
 import logging
+import os
 from typing import Any
 
 from flask import Flask, jsonify
@@ -17,6 +18,7 @@ from flask_migrate import upgrade as db_upgrade
 from .config import Config  # noqa: E402
 from .extensions import cache, db, migrate, socketio
 from .logging_config import configure_logging
+from .settings.service import clear as clear_settings_cache  # noqa: E402
 
 
 def create_app(config: Any = None) -> Flask:
@@ -29,8 +31,18 @@ def create_app(config: Any = None) -> Flask:
 
     # Base configuration
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///deaddit.db"
-    app.config["CACHE_TYPE"] = "simple"  # simple in-memory cache for single-user app
-    app.config["CACHE_DEFAULT_TIMEOUT"] = 300  # 5 minutes default timeout
+
+    # Wave-0 ruling: DEADDIT_DB_PATH overrides the base sqlite location;
+    # explicit create_app(config=...) overrides below still win.
+    db_path_override = os.environ.get("DEADDIT_DB_PATH")
+    if db_path_override:
+        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.abspath(
+            db_path_override
+        )
+
+    # The per-process settings cache must never leak values across instances
+    # (tests create many apps against different databases).
+    clear_settings_cache()
 
     if config is not None:
         if isinstance(config, dict):
@@ -61,6 +73,11 @@ def create_app(config: Any = None) -> Flask:
     app.register_blueprint(web_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(stream_admin_bp)
+    # Register the drain command on the Flask CLI too (lazy import:
+    # deaddit.cli imports create_app from this module at its own import time).
+    from .cli import secrets_drain_command  # noqa: E402
+
+    app.cli.add_command(secrets_drain_command)
 
     # Import websocket handlers so their @socketio.on decorators register
     from . import websocket  # noqa: F401
