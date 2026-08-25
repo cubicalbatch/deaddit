@@ -30,6 +30,7 @@ from deaddit.models import (
     ApiEndpointConfig,
     ApiModel,
     Comment,
+    DegeneracyFlag,
     EndpointCapability,
     Job,
     JobLog,
@@ -1274,52 +1275,57 @@ def api_bulk_delete_comments():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error bulk deleting comments: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+def _sparkline(values: list[float | None], width: int = 120, height: int = 28) -> str:
+    """SVG polyline points for a series; None values are skipped, not faked."""
+    present = [v for v in values if v is not None]
+    if not present:
+        return ""
+    lo, hi = min(present), max(present)
+    span = (hi - lo) or 1.0
+    step = width / max(len(values) - 1, 1)
+    points = []
+    for i, value in enumerate(values):
+        if value is None:
+            continue
+        x = round(i * step, 2)
+        y = round(height - ((value - lo) / span) * (height - 4) - 2, 2)
+        points.append(f"{x},{y}")
+    return " ".join(points)
 
 
 @admin_bp.route("/analytics")
 @production_disabled
 @admin_required
 def analytics():
-    """Analytics and insights page."""
+    """Platform-dynamics analytics tab (Phase D6): daily rollups + watchlist.
 
-    # Get generation metrics over time
-    # This is a placeholder - in a real implementation, you'd want more sophisticated analytics
+    The previous placeholder body rendered a template that no longer existed
+    (TemplateNotFound since the UX-5 rebuild); this revives the page on
+    PlatformDaily rollups written by the nightly metrics job.
+    """
+    from deaddit.dynamics.degeneracy import flagged_hot_authors
+    from deaddit.dynamics.metrics import daily_series
 
-    # Model usage statistics
-    model_stats = {}
-    for model in db.session.query(Post.model).distinct():
-        if model[0]:
-            count = Post.query.filter_by(model=model[0]).count()
-            model_stats[model[0]] = count
+    series = daily_series(30)
+    watchlist = (
+        DegeneracyFlag.query.order_by(DegeneracyFlag.created_at.desc())
+        .limit(50)
+        .all()
+    )
 
-    # Daily generation counts (last 30 days)
-    daily_stats = []
-    for i in range(30):
-        date = datetime.utcnow() - timedelta(days=i)
-        date_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
-        date_end = date_start + timedelta(days=1)
+    def _column(name: str) -> list[float | None]:
+        return [getattr(row, name) for row in series]
 
-        posts_count = Post.query.filter(
-            Post.created_at >= date_start, Post.created_at < date_end
-        ).count()
-
-        comments_count = Comment.query.filter(
-            Comment.created_at >= date_start, Comment.created_at < date_end
-        ).count()
-
-        daily_stats.append(
-            {
-                "date": date_start.strftime("%Y-%m-%d"),
-                "posts": posts_count,
-                "comments": comments_count,
-            }
-        )
-
-    daily_stats.reverse()  # Show oldest to newest
-
+    latest = series[-1] if series else None
     return render_template(
-        "admin/analytics.html", model_stats=model_stats, daily_stats=daily_stats
+        "admin/analytics.html",
+        series=series,
+        latest=latest,
+        watchlist=watchlist,
+        demoted_authors=flagged_hot_authors(),
+        spark_cost=_sparkline(_column("llm_cost_usd")),
+        spark_cpe=_sparkline(_column("cost_per_engagement")),
+        spark_actions=_sparkline(_column("actions_per_active")),
     )
 
 

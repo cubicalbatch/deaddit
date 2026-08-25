@@ -5,6 +5,7 @@ from flask import Blueprint, render_template, request
 from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import joinedload
 
+from deaddit.dynamics import degeneracy
 from deaddit.dynamics.ranking import (
     controversy,
     normalize_comment_sort,
@@ -73,7 +74,7 @@ def index():
     total_posts = query.count()
 
     posts = (
-        query.order_by(*post_order_by(sort))
+        query.order_by(*degeneracy.with_repetition_demotion(post_order_by(sort)))
         .offset((page - 1) * posts_per_page)
         .limit(posts_per_page)
         .all()
@@ -153,7 +154,7 @@ def subdeaddit(subdeaddit_name):
     total_posts = query.count()
 
     paginated_posts = (
-        query.order_by(*post_order_by(sort))
+        query.order_by(*degeneracy.with_repetition_demotion(post_order_by(sort)))
         .offset((page - 1) * posts_per_page)
         .limit(posts_per_page)
         .all()

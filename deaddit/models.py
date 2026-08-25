@@ -720,3 +720,74 @@ class PromptRenderAudit(db.Model):
     subject_key = db.Column(db.String(120))
     rendered_sha256 = db.Column(db.String(64), nullable=False)
     variables_json = db.Column(db.Text)
+
+
+# --- Platform dynamics: anti-degeneracy & metrics (Phase D6) ---
+class ActivityEvent(db.Model):
+    """One platform action, the raw truth for the daily rollup (plan §8).
+
+    Emitted by deaddit.dynamics.activity from the content service, vote
+    service, and report service strictly AFTER their transactions commit;
+    emission is failure-isolated and never blocks the action itself.
+    Retention: raw rows are kept (plan §Risks — ~1 MB/month at this scale).
+    """
+
+    id = db.Column(db.Integer, primary_key=True)
+    occurred_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    event_type = db.Column(
+        db.String(20), nullable=False, index=True
+    )  # 'post' | 'comment' | 'vote' | 'report' | 'login_session'
+    username = db.Column(db.String(50), index=True)
+    post_id = db.Column(db.Integer)
+    comment_id = db.Column(db.Integer)
+    meta = db.Column(db.Text)  # JSON we build ourselves (never model output)
+
+
+class PlatformDaily(db.Model):
+    """Per-UTC-day rollup of engagement, spend, and health metrics (§8).
+
+    Written by the nightly rollup job (deaddit.dynamics.metrics), idempotent
+    per day. ``llm_*`` columns join LLMUsage on day=date(created_at) per the
+    LLM-3 conventions: token sums are COALESCEd to 0, but ``llm_cost_usd`` is
+    NULL when no priced attempt exists that day (never fake $0), and
+    ``cost_per_engagement`` is NULL when cost or engagement is absent.
+    ``provenance_json`` keeps Resolution-9 provenance splits intact: post and
+    comment counts bucketed by model marker ('agent:*' vs 'seed' vs other).
+    """
+
+    day = db.Column(db.Date, primary_key=True)
+    posts = db.Column(db.Integer, nullable=False, server_default="0")
+    comments = db.Column(db.Integer, nullable=False, server_default="0")
+    votes = db.Column(db.Integer, nullable=False, server_default="0")
+    reports = db.Column(db.Integer, nullable=False, server_default="0")
+    active_agents = db.Column(
+        db.Integer, nullable=False, server_default="0"
+    )  # distinct users with >=1 event
+    actions_per_active = db.Column(db.Float)  # events / active_agents
+    llm_tokens_in = db.Column(db.Integer)
+    llm_tokens_out = db.Column(db.Integer)
+    llm_cost_usd = db.Column(db.Float)
+    cost_per_engagement = db.Column(db.Float)  # llm_cost_usd / (posts+comments)
+    median_thread_depth = db.Column(db.Float)
+    dissent_share_avg = db.Column(db.Float)
+    gini_participation_avg = db.Column(db.Float)
+    provenance_json = db.Column(db.Text)
+
+
+class DegeneracyFlag(db.Model):
+    """One detector finding feeding the admin degeneracy watchlist (§7).
+
+    ``kind``: 'repetition' (trigram-Jaccard echo, per write), 'echo_chamber'
+    or 'brigading' (nightly scans). Hot-feed demotion derives from recent
+    repetition flags by author — derived at query time, so it is idempotent.
+    """
+
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(20), nullable=False, index=True)
+    username = db.Column(db.String(50), index=True)
+    subdeaddit_name = db.Column(db.String(50))
+    post_id = db.Column(db.Integer)
+    comment_id = db.Column(db.Integer)
+    metric = db.Column(db.Float)  # max Jaccard / Gini / voter-overlap
+    detail = db.Column(db.Text)  # JSON context we assemble ourselves
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)

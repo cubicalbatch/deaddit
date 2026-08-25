@@ -220,6 +220,11 @@ def test_downgrade_restores_display_truth_not_provenance(tmp_path):
 
 
 def test_single_linear_head_includes_rename():
+    """Single head, and the Res-4 rename sits in its linear ancestry.
+
+    Originally pinned to the rename revision itself; D6's additive revision
+    legitimately stacks past it, so the invariant is now ancestry, not pin.
+    """
     cfg = Config()
     cfg.set_main_option(
         "script_location",
@@ -227,4 +232,13 @@ def test_single_linear_head_includes_rename():
     )
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    assert heads == [_RENAME_REVISION], heads
+    assert len(heads) == 1, heads
+    rev = script.get_revision(heads[0])
+    ancestry = set()
+    while rev is not None:
+        ancestry.add(rev.revision)
+        down = rev.down_revision
+        if down is None:
+            break
+        rev = script.get_revision(down)
+    assert _RENAME_REVISION in ancestry

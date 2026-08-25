@@ -103,6 +103,13 @@
                         <span class="nav-text">Settings</span>
                     </a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'admin.analytics' %}active{% endif %}"
+                       href="{{ url_for('admin.analytics') }}">
+                        <i class="bi bi-graph-up"></i>
+                        <span class="nav-text">Analytics</span>
+                    </a>
+                </li>
             </ul>
         </div>
     </nav>

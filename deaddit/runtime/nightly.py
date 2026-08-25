@@ -15,8 +15,10 @@ from typing import Any
 from apscheduler.schedulers.base import BaseScheduler
 from flask import current_app
 
+from deaddit.dynamics.degeneracy import run_nightly_scans
 from deaddit.dynamics.inbox import purge_read_notifications
 from deaddit.dynamics.karma import recompute_scores_and_karma
+from deaddit.dynamics.metrics import run_nightly_rollup
 from deaddit.dynamics.moderation import expire_bans
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,24 @@ NIGHTLY_JOBS: tuple[NightlyJob, ...] = (
         cron_expression="15 3 * * *",
         func=expire_bans,
         description="Auto-lift expired bans",
+    ),
+    NightlyJob(
+        id="dynamics-platform-rollup",
+        cron_expression="55 3 * * *",
+        func=run_nightly_rollup,
+        description=(
+            "Fold yesterday's ActivityEvents, LLM spend, and health trio "
+            "into the PlatformDaily rollup row"
+        ),
+    ),
+    NightlyJob(
+        id="dynamics-degeneracy-scan",
+        cron_expression="05 4 * * *",
+        func=run_nightly_scans,
+        description=(
+            "Nightly echo-chamber (participation Gini) and brigading "
+            "(voter-overlap) detection into the degeneracy watchlist"
+        ),
     ),
 )
 

@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 
+from deaddit.dynamics import activity
 from deaddit.dynamics.moderation import active_ban_for
 from deaddit.extensions import db
 from deaddit.models import Comment, Post, Setting, User, Vote
@@ -120,4 +121,10 @@ def cast_vote(
         # re-read resolves it deterministically (no-op or switch).
         return cast_vote(voter, target, target_id, value, _retried=True)
 
+    activity.record_event(
+        event_type="vote",
+        username=voter,
+        post_id=target_id if is_post else None,
+        comment_id=None if is_post else target_id,
+    )
     return {"status": "ok", "score": int(item.score)}

@@ -14,15 +14,15 @@ creates one.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import cache
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from deaddit.dynamics import moderation, notifications
+from deaddit.dynamics import activity, degeneracy, moderation, notifications
 from deaddit.extensions import cache as flask_cache
 from deaddit.extensions import db
-from deaddit.models import Comment, Post, Subdeaddit, User
+from deaddit.models import Comment, Post, Setting, Subdeaddit, User
 
 __all__ = ["ContentValidationError", "get_available_models"]
 
@@ -43,8 +43,35 @@ def get_available_models() -> list[str]:
 
     # Combine and deduplicate the models
     all_models = {model[0] for model in post_models + comment_models if model[0]}
-
     return list(all_models)
+
+
+# Per-user hourly creation caps (plan §7): 5 posts, 30 comments per hour by
+# default; each cap is Setting-tunable and a negative value disables it.
+_RATE_LIMITS: dict[str, tuple[str, int]] = {
+    "post": ("rate_limit_posts_per_hour", 5),
+    "comment": ("rate_limit_comments_per_hour", 30),
+}
+
+
+def _check_rate_limit(user: str, kind: str) -> None:
+    """Reject creation overflow with the machine-readable reason rate_limited."""
+    key, default = _RATE_LIMITS[kind]
+    raw = Setting.get_value(key, str(default))
+    try:
+        limit = int(str(raw))
+    except (TypeError, ValueError):
+        limit = default
+    if limit < 0:
+        return
+    model = Post if kind == "post" else Comment
+    cutoff = datetime.utcnow() - timedelta(hours=1)
+    recent = model.query.filter(
+        model.user == user, model.created_at >= cutoff
+    ).count()
+    if recent >= limit:
+        raise ContentValidationError("rate_limited")
+
 
 
 def _clear_read_caches() -> None:
@@ -93,6 +120,7 @@ def create_post(
         raise ContentValidationError(f"Subdeaddit '{subdeaddit}' does not exist")
     if moderation.active_ban_for(user, subdeaddit) is not None:
         raise ContentValidationError(f"User '{user}' is banned")
+    _check_rate_limit(user, "post")
 
     post = Post(
         title=title,
@@ -109,6 +137,8 @@ def create_post(
     _commit()
     _clear_read_caches()
     notifications.notify_post_created(post)
+    activity.record_event(event_type="post", username=user, post_id=post.id)
+    degeneracy.detect_repetition_for_post(post)
     return post
 
 
@@ -139,6 +169,7 @@ def create_comment(
         raise ContentValidationError(f"Post '{post_id}' has been removed")
     if moderation.active_ban_for(user, post.subdeaddit_name) is not None:
         raise ContentValidationError(f"User '{user}' is banned")
+    _check_rate_limit(user, "comment")
 
     comment = Comment(
         post_id=post_id,
@@ -154,6 +185,8 @@ def create_comment(
     _commit()
     _clear_read_caches()
     notifications.notify_comment_created(comment)
+    activity.record_event(event_type="comment", username=user, post_id=post_id, comment_id=comment.id)
+    degeneracy.detect_repetition_for_comment(comment)
     return comment
 
 
