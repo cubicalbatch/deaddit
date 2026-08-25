@@ -508,12 +508,11 @@ class TestNewUserFlow:
         with client.session_transaction() as sess:
             sess["admin_authenticated"] = True
 
+        # A6: secrets are environment-only, so the setup flow posts just the
+        # endpoint URL; a non-empty openai_key payload is refused outright.
         resp = client.post(
             "/admin/api/save-config",
-            json={
-                "openai_api_url": "http://localhost:9999/v1",
-                "openai_key": "sk-test",
-            },
+            json={"openai_api_url": "http://localhost:9999/v1"},
         )
         assert resp.status_code == 200
         assert resp.get_json()["success"] is True
