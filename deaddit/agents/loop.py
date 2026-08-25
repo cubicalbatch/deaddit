@@ -42,6 +42,8 @@ NUDGE_MESSAGE = "Use a tool to act, or call finish."
 
 CONSECUTIVE_FAILURE_DISABLE_THRESHOLD = 5
 
+FAILURE_BACKOFF_SECONDS = 300
+
 
 def is_runtime_enabled() -> bool:
     """Read the AGENT_RUNTIME_ENABLED feature flag (Setting row, default false).
@@ -109,6 +111,11 @@ def _fail(
     run.error_message = message[:2000]
     agent.status = "error"
     agent.last_run_at = now
+    if agent.is_enabled:
+        # A failed run must never leave next_run_at in the past, or the
+        # scheduler re-fires immediately against a possibly-dead endpoint.
+        # (The strike-disable path below overrides this with NULL.)
+        agent.next_run_at = now + timedelta(seconds=FAILURE_BACKOFF_SECONDS)
     if strike:
         agent.consecutive_failures = (agent.consecutive_failures or 0) + 1
         if agent.consecutive_failures >= CONSECUTIVE_FAILURE_DISABLE_THRESHOLD:
