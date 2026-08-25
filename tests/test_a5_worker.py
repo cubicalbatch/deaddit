@@ -7,7 +7,6 @@ JobRunner execution loop (deaddit.runtime.runner), the nightly registry
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 import time
@@ -19,23 +18,11 @@ from deaddit.models import Job, JobStatus, JobType
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# A minimal user payload accepted by services.content.create_user; gender and
-# education are overwritten by _generate_user_data from its own prompt choices.
-_USER_PAYLOAD = {
-    "username": "a5_integration_user",
-    "age": 34,
-    "bio": "External observer description of a quiet cartographer.",
-    "interests": ["cartography", "chess"],
-    "occupation": "cartographer",
-    "writing_style": "Plain and precise.",
-    "personality_traits": ["curious", "stubborn"],
-}
-
 
 def _make_job(**overrides) -> Job:
     """Build an in-memory Job row with sensible defaults."""
     fields = {
-        "type": JobType.CREATE_USER,
+        "type": JobType.BATCH_OPERATION,
         "status": JobStatus.PENDING,
         "priority": 5,
         "total_items": 1,
@@ -74,7 +61,7 @@ def test_create_job_does_not_start_scheduler(app, db_session, monkeypatch):
     # instantiation trips immediately.
     from deaddit import jobs
 
-    job = jobs.create_job(JobType.CREATE_USER, {"count": 0}, priority=5)
+    job = jobs.create_job(JobType.BATCH_OPERATION, {"count": 0}, priority=5)
 
     row = _db.session.get(Job, job.id)
     assert row is not None
@@ -160,10 +147,19 @@ def test_sweep_requeues_stale_running(db_session):
 # ---------------------------------------------------------------------------
 
 
-def test_boot_sweep_then_execute_once(app, fake_llm, db_session, monkeypatch):
+def test_boot_sweep_then_execute_once(app, db_session, monkeypatch):
     """Crashed RUNNING job -> boot sweep -> JobRunner executes exactly once."""
+    from deaddit import jobs
     from deaddit.runtime import claim
     from deaddit.runtime.runner import JobRunner
+
+    executions: list[int] = []
+
+    def counting_batch(job):
+        executions.append(job.id)
+        return {"batch_results": [], "count": 0}
+
+    monkeypatch.setattr(jobs, "_execute_batch_operation", counting_batch)
 
     now = datetime.utcnow()
     job = _make_job(
@@ -181,9 +177,7 @@ def test_boot_sweep_then_execute_once(app, fake_llm, db_session, monkeypatch):
     _db.session.expire_all()
     assert _db.session.get(Job, job_id).status == JobStatus.PENDING
 
-    # One LLM round-trip generates the persona; the executor consumes it.
-    fake_llm.enqueue_content(json.dumps(_USER_PAYLOAD))
-
+    # The executor must consume the requeued job exactly once.
     monkeypatch.setenv("DEADDIT_WORKER_POLL_SECONDS", "0.05")
     runner = JobRunner(app)
     row = None
@@ -203,8 +197,8 @@ def test_boot_sweep_then_execute_once(app, fake_llm, db_session, monkeypatch):
         f"job did not complete within deadline: status="
         f"{getattr(row, 'status', None)} error={getattr(row, 'error_message', None)}"
     )
-    assert len(fake_llm.requests) == 1, "executor hit the LLM more than once"
-    assert row.result["users"] == [_USER_PAYLOAD["username"]]
+    assert executions == [job_id], "executor ran the job more than once"
+    assert row.result == {"batch_results": [], "count": 0}
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 {% extends "admin/base.html" %}
 
-{% block title %}Generate Content{% endblock %}
+{% block title %}LLM Playground{% endblock %}
 
 {% block extra_css %}
 <link href="{{ url_for('static', filename='css/admin-stream.css') }}" rel="stylesheet">
@@ -8,7 +8,7 @@
 
 {% block content %}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-    <h1 class="h2">Generate Content</h1>
+    <h1 class="h2">LLM Playground</h1>
 </div>
 
 <!-- Load Default Data Section -->
@@ -42,123 +42,20 @@
 
 <div class="row">
     <div class="col-lg-8">
-        <div class="card" id="generate-card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">
-                    <i class="bi bi-magic"></i> New Generation Task
-                </h5>
-            </div>
-            <div class="card-body">
-                <!-- One task-oriented form; JS routes it to the matching
-                     generation endpoint below. -->
-                <form id="generate-form" method="post"
-                      action="{{ url_for('admin.generate_user') }}"
-                      data-endpoints='{
-                          "subdeaddit": "{{ url_for('admin.generate_subdeaddit') }}",
-                          "user": "{{ url_for('admin.generate_user') }}",
-                          "post": "{{ url_for('admin.generate_post') }}",
-                          "comment": "{{ url_for('admin.generate_comment') }}"
-                      }'>
-                    <div class="mb-3">
-                        <label for="task-type" class="form-label">What should be generated?</label>
-                        <select class="form-select" id="task-type">
-                            <option value="user" selected>User personas</option>
-                            <option value="post">Posts</option>
-                            <option value="comment">Comments</option>
-                            <option value="subdeaddit">Subdeaddits (communities)</option>
-                        </select>
-                        <div class="form-text">Start with communities and users before generating posts.</div>
-                    </div>
-
-                    <fieldset class="mb-3 task-fields" data-for="post">
-                        <div class="mb-3">
-                            <label for="task-subdeaddit-post" class="form-label">Subdeaddit (Optional)</label>
-                            <select class="form-select" name="subdeaddit" data-post-only>
-                                <option value="">Random subdeaddit</option>
-                                {% for sub in subdeaddits %}
-                                <option value="{{ sub.name }}">{{ sub.name }}</option>
-                                {% endfor %}
-                            </select>
-                            <div class="form-text">Choose a specific subdeaddit or leave blank for random.</div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="task-replies" class="form-label">Reply Range</label>
-                            <input type="text" class="form-control" name="replies" value="5-10" placeholder="e.g., 5-10" data-post-only>
-                            <div class="form-text">Number of comments generated for each post.</div>
-                        </div>
-                    </fieldset>
-
-                    <fieldset class="mb-3 task-fields d-none" data-for="comment">
-                        <div class="mb-3">
-                            <label for="task-post-id" class="form-label">Post ID (Optional)</label>
-                            <input type="number" class="form-control" name="post_id" placeholder="e.g., 123" data-comment-only>
-                            <div class="form-text">Specific post to comment on, or leave blank for random.</div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="task-subdeaddit-comment" class="form-label">Subdeaddit (Optional)</label>
-                            <select class="form-select" name="subdeaddit" data-comment-only>
-                                <option value="">Any subdeaddit</option>
-                                {% for sub in subdeaddits %}
-                                <option value="{{ sub.name }}">{{ sub.name }}</option>
-                                {% endfor %}
-                            </select>
-                            <div class="form-text">If no post ID is given, pick a post from this subdeaddit.</div>
-                        </div>
-                    </fieldset>
-
-                    <div class="row">
-                        <div class="col-sm-6 mb-3">
-                            <label for="task-count" class="form-label">Count</label>
-                            <input type="number" class="form-control" id="task-count" name="count" value="1" min="1">
-                            <div class="form-text">How many to generate (minimum 1).</div>
-                        </div>
-                        <div class="col-sm-6 mb-3">
-                            <label for="task-model" class="form-label">AI Model (Optional)</label>
-                            <input type="text" class="form-control" name="model" list="model-options" placeholder="Leave empty for the default model">
-                            <datalist id="model-options"></datalist>
-                            <div class="form-text">Free text allowed; suggestions load from your configured endpoints.</div>
-                        </div>
-                    </div>
-
-                    <details class="mb-3">
-                        <summary class="form-label">Advanced</summary>
-                        <div class="row mt-2">
-                            <div class="col-sm-6 mb-3">
-                                <label for="task-priority" class="form-label">Priority</label>
-                                <select class="form-select" name="priority">
-                                    <option value="3">Low (3)</option>
-                                    <option value="5" selected>Normal (5)</option>
-                                    <option value="8">High (8)</option>
-                                </select>
-                            </div>
-                            <div class="col-sm-6 mb-3">
-                                <label for="task-wait" class="form-label">Wait Time (seconds)</label>
-                                <input type="number" class="form-control" name="wait" value="0" min="0" max="300">
-                                <div class="form-text">Delay between generations to respect API limits.</div>
-                            </div>
-                        </div>
-                    </details>
-
-                    {# LLM-4 streaming partial mounts here (LeadLLM4 owns admin/_stream_tokens.html) #}
-                    {% include "admin/_stream_tokens.html" ignore missing %}
-
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-plus-circle"></i> Create Generation Job
-                    </button>
-                </form>
-            </div>
-        </div>
+        {# Legacy content-generation forms were removed with the agentic cutover.
+           This page is now an LLM playground: live token streaming against your
+           configured endpoints. The streaming partial is owned by LLM-4. #}
+        {% include "admin/_stream_tokens.html" ignore missing %}
     </div>
 
     <div class="col-lg-4">
         <div class="alert alert-info h-100">
             <h5 class="alert-heading"><i class="bi bi-info-circle"></i> Tips</h5>
             <ul class="mb-0">
-                <li><strong>Start with subdeaddits:</strong> Generate communities first to have context for posts.</li>
-                <li><strong>Add users:</strong> Create diverse AI personas before generating content.</li>
-                <li><strong>Batch wisely:</strong> Use wait times to respect API rate limits.</li>
+                <li><strong>Stream tokens:</strong> Type a prompt and watch tokens arrive live from your configured endpoint.</li>
+                <li><strong>Model choice:</strong> Pick a model or leave blank for the default routing chain; suggestions load from your endpoints.</li>
+                <li><strong>Agents create content:</strong> Posts and comments are produced by agents — see the Agents pages for runs and thoughts.</li>
                 <li><strong>Monitor jobs:</strong> Check the <a href="{{ url_for('admin.jobs') }}">Jobs page</a> for live logs, progress, and errors.</li>
-                <li><strong>Quality over quantity:</strong> Smaller batches often produce better results.</li>
             </ul>
         </div>
     </div>
@@ -170,31 +67,15 @@
 (function () {
     'use strict';
 
-    // ---- Single-task form routing ------------------------------------
-    var form = document.getElementById('generate-form');
-    var typeSelect = document.getElementById('task-type');
-
-    function syncTaskFields() {
-        var type = typeSelect.value;
-        form.action = JSON.parse(form.dataset.endpoints)[type];
-
-        form.querySelectorAll('.task-fields').forEach(function (fs) {
-            var active = fs.dataset.for === type;
-            fs.classList.toggle('d-none', !active);
-            fs.querySelectorAll('input, select').forEach(function (el) {
-                el.disabled = !active;
-            });
-        });
-    }
-
-    typeSelect.addEventListener('change', syncTaskFields);
-    syncTaskFields();
-
     // ---- Model suggestions (native datalist, no dependencies) --------
+    // Feeds the playground model input rendered by admin/_stream_tokens.html.
     fetch('/api/available_models')
         .then(function (r) { return r.ok ? r.json() : { models: [] }; })
         .then(function (data) {
-            var list = document.getElementById('model-options');
+            var input = document.getElementById('llm-stream-model');
+            if (!input) { return; }
+            var list = document.createElement('datalist');
+            list.id = 'model-options';
             (data.models || []).forEach(function (m) {
                 var label = typeof m === 'string' ? m : (m.id || m.name || '');
                 if (!label) { return; }
@@ -202,6 +83,8 @@
                 opt.value = label;
                 list.appendChild(opt);
             });
+            input.setAttribute('list', 'model-options');
+            input.parentNode.appendChild(list);
         })
         .catch(function () { /* free-text entry still works */ });
 })();

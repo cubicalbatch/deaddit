@@ -413,34 +413,6 @@
     ]
   },
   {
-    "rule": "/admin/generate/comment",
-    "endpoint": "generate_comment",
-    "methods": [
-      "POST"
-    ]
-  },
-  {
-    "rule": "/admin/generate/post",
-    "endpoint": "generate_post",
-    "methods": [
-      "POST"
-    ]
-  },
-  {
-    "rule": "/admin/generate/subdeaddit",
-    "endpoint": "generate_subdeaddit",
-    "methods": [
-      "POST"
-    ]
-  },
-  {
-    "rule": "/admin/generate/user",
-    "endpoint": "generate_user",
-    "methods": [
-      "POST"
-    ]
-  },
-  {
     "rule": "/admin/jobs",
     "endpoint": "jobs",
     "methods": [
@@ -530,20 +502,6 @@
     "endpoint": "available_models",
     "methods": [
       "GET"
-    ]
-  },
-  {
-    "rule": "/api/ingest",
-    "endpoint": "ingest",
-    "methods": [
-      "POST"
-    ]
-  },
-  {
-    "rule": "/api/ingest/user",
-    "endpoint": "ingest_user",
-    "methods": [
-      "POST"
     ]
   },
   {

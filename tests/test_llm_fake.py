@@ -76,28 +76,22 @@ class TestClientWithFakeProvider:
 class TestGenerationPaths:
     """Legacy callers construct LLMClient() internally; the seam serves them."""
 
-    def test_jobs_send_openai_request(self, fake_llm):
-        import deaddit.jobs as jobs
+    def test_enqueued_content_returned_verbatim(self, fake_llm):
+        fake_llm.enqueue_content("canned generation content")
 
-        fake_llm.enqueue_content("canned jobs content")
-        content, model = jobs._send_openai_request("sys", "user prompt", "m1")
+        result = LLMClient().complete(_request())
 
-        assert content == "canned jobs content"
-        assert model == "m1"
+        assert result.content == "canned generation content"
+        assert isinstance(result.model, str) and result.model
         assert len(fake_llm.requests) == 1
-        assert fake_llm.requests[0]["payload"]["model"] == "m1"
 
-    def test_loader_send_request(self, app, fake_llm):
-        import deaddit.loader as loader
+    def test_explicit_model_flows_into_request_payload(self, fake_llm):
+        fake_llm.enqueue_content("ok")
 
-        fake_llm.enqueue_content("canned loader content")
-        result = loader.send_request("sys", "user prompt")
+        LLMClient().complete(_request(model="override-model"))
 
-        assert result is not None
-        response, model = result
-        assert response.choices[0].message.content == "canned loader content"
-        assert isinstance(model, str) and model
         assert len(fake_llm.requests) == 1
+        assert fake_llm.requests[0]["payload"]["model"] == "override-model"
 
 
 class TestFixtureDrivenResponses:

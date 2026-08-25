@@ -23,18 +23,6 @@ from deaddit.runtime.tailer import get_tailer, reset_tailer
 _UX5_REVISION = "a9c1e5f7b3d2"
 _PRE_UX5_HEAD = "b8e2f4a6c9d1"
 
-_USER_PAYLOAD = {
-    "username": "ux5_log_user",
-    "age": 41,
-    "gender": "non-binary",
-    "education": "master",
-    "occupation": "plumber",
-    "interests": ["logs"],
-    "bio": "A quiet observer of streaming pipelines.",
-    "writing_style": "Terse.",
-    "personality_traits": ["patient"],
-}
-
 
 @pytest.fixture(autouse=True)
 def _fresh_tailer():
@@ -48,8 +36,8 @@ def _make_job():
     from deaddit.jobs import create_job
 
     return create_job(
-        job_type=JobType.CREATE_USER,
-        parameters={"count": 1},
+        job_type=JobType.BATCH_OPERATION,
+        parameters={"operations": []},
         priority=5,
         total_items=1,
     )
@@ -64,17 +52,15 @@ def test_execute_job_captures_log_lines(app, monkeypatch):
     """Lines logged via the 'deaddit' hierarchy become JobLog rows."""
     from deaddit import jobs
 
-    calls = {"n": 0}
-
-    def fake_generate(model=None):
+    def fake_batch(job):
         log = logging.getLogger("deaddit.jobs")
         for i in range(12):
             log.info("synthetic line %d", i)
             log.warning("synthetic warning %d", i)
-        calls["n"] += 1
-        return dict(_USER_PAYLOAD)
 
-    monkeypatch.setattr(jobs, "_generate_user_data", fake_generate)
+        return {}
+
+    monkeypatch.setattr(jobs, "_execute_batch_operation", fake_batch)
 
     with app.app_context():
         job = _make_job()
@@ -83,7 +69,6 @@ def test_execute_job_captures_log_lines(app, monkeypatch):
         # scoped session; refresh our outer-context objects from the DB.
         _db.session.expire_all()
 
-        assert calls["n"] == 1
         assert job.status == JobStatus.COMPLETED
         rows = (
             JobLog.query.filter_by(job_id=job.id).order_by(JobLog.seq).all()
@@ -100,14 +85,14 @@ def test_job_log_capped_at_500_per_job(app, monkeypatch):
     from deaddit import jobs
     from deaddit.runtime.joblog import MAX_JOB_LOG_LINES
 
-    def flooding_generate(model=None):
+    def flooding_batch(job):
         log = logging.getLogger("deaddit.jobs")
         for i in range(600):
             log.info("flood %04d", i)
 
-        return dict(_USER_PAYLOAD)
+        return {}
 
-    monkeypatch.setattr(jobs, "_generate_user_data", flooding_generate)
+    monkeypatch.setattr(jobs, "_execute_batch_operation", flooding_batch)
 
     with app.app_context():
         job = _make_job()
@@ -125,11 +110,12 @@ def test_log_write_failure_never_breaks_job(app, monkeypatch):
 
     from deaddit import jobs
 
-    def working_generate(model=None):
+    def working_batch(job):
         logging.getLogger("deaddit.jobs").info("before broken flush")
-        return dict(_USER_PAYLOAD)
 
-    monkeypatch.setattr(jobs, "_generate_user_data", working_generate)
+        return {}
+
+    monkeypatch.setattr(jobs, "_execute_batch_operation", working_batch)
 
     def boom_write(self, batch):
         raise RuntimeError("disk full")
@@ -334,23 +320,19 @@ def test_migration_upgrade_downgrade_round_trip(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# (e) Generate page: single task-oriented form; four POST endpoints intact
+# (e) Generate page: LLM playground (legacy generation forms removed AC-P4)
 # ---------------------------------------------------------------------------
 
 
-def test_generate_page_renders_single_form(client):
+def test_generate_page_is_llm_playground(client):
     resp = client.get("/admin/generate")
     assert resp.status_code == 200
     html = resp.data.decode()
-    assert html.count("<form") == 1
-    assert 'id="task-type"' in html
-    # LLM-4 mount point renders even before their partial lands in-tree.
-    assert "/admin/generate/user" in html
+    # No legacy content-generation form remains.
+    assert "<form" not in html
+    assert 'id="task-type"' not in html
+    # LLM-4 streaming mount point and model datalist feed survive.
+    assert "llm-stream-card" in html
+    assert "/api/available_models" in html
 
 
-def test_generation_post_routes_still_exist(app):
-    rules = {r.rule: r for r in app.url_map.iter_rules()}
-    for suffix in ("subdeaddit", "user", "post", "comment"):
-        rule = f"/admin/generate/{suffix}"
-        assert rule in rules, f"missing generation endpoint {rule}"
-        assert "POST" in rules[rule].methods

@@ -1,12 +1,12 @@
 """Route-map equality acceptance for Phase A1.
 
 Compares the url_map produced by create_app() against the pre-refactor
-baseline captured in tests/a1_route_map_baseline.json (60 routes).
+baseline captured in tests/a1_route_map_baseline.json (90 routes).
 
 Endpoint-name normalization: the baseline uses pre-blueprint names
 ("index", "subdeaddit", "available_models", "admin.dashboard"). After A1
 the same view functions live on blueprints, so their endpoint names gain a
-blueprint prefix ("web.index", "api.ingest", "admin.dashboard"). The
+blueprint prefix ("web.index", "api.available_models", "admin.dashboard"). The
 comparison strips a single leading known-blueprint prefix ("api.", "web.",
 "admin.") from the actual endpoint name before comparing to the baseline.
 

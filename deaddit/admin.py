@@ -349,131 +349,14 @@ def dashboard():
 @production_disabled
 @admin_required
 def generate():
-    """Content generation management page."""
-    subdeaddits = Subdeaddit.query.all()
-
+    """LLM playground page."""
     # Check if default data has been loaded
     default_data_loaded = Config.get("DEFAULT_DATA_LOADED", "false") == "true"
 
     return render_template(
         "admin/generate.html",
-        subdeaddits=subdeaddits,
         default_data_loaded=default_data_loaded,
     )
-
-
-@admin_bp.route("/generate/subdeaddit", methods=["POST"])
-@production_disabled
-@admin_required
-def generate_subdeaddit():
-    """Create a job to generate subdeaddits."""
-
-    count = int(request.form.get("count", 1))
-    model = request.form.get("model")
-    wait = int(request.form.get("wait", 0))
-    priority = int(request.form.get("priority", 5))
-
-    parameters = {"count": count, "wait": wait}
-    if model:
-        parameters["model"] = model
-
-    job = create_job(
-        job_type=JobType.CREATE_SUBDEADDIT,
-        parameters=parameters,
-        priority=priority,
-        total_items=count,
-    )
-
-    flash(f"Subdeaddit generation job created (ID: {job.id})", "success")
-    return redirect(url_for("admin.jobs"))
-
-
-@admin_bp.route("/generate/user", methods=["POST"])
-@production_disabled
-@admin_required
-def generate_user():
-    """Create a job to generate users."""
-
-    count = int(request.form.get("count", 1))
-    model = request.form.get("model")
-    wait = int(request.form.get("wait", 0))
-    priority = int(request.form.get("priority", 5))
-
-    parameters = {"count": count, "wait": wait}
-    if model:
-        parameters["model"] = model
-
-    job = create_job(
-        job_type=JobType.CREATE_USER,
-        parameters=parameters,
-        priority=priority,
-        total_items=count,
-    )
-
-    flash(f"User generation job created (ID: {job.id})", "success")
-    return redirect(url_for("admin.jobs"))
-
-
-@admin_bp.route("/generate/post", methods=["POST"])
-@production_disabled
-@admin_required
-def generate_post():
-    """Create a job to generate posts."""
-
-    count = int(request.form.get("count", 1))
-    subdeaddit = request.form.get("subdeaddit")
-    replies = request.form.get("replies", "5-10")
-    model = request.form.get("model")
-    wait = int(request.form.get("wait", 0))
-    priority = int(request.form.get("priority", 5))
-
-    parameters = {"count": count, "wait": wait, "replies": replies}
-    if subdeaddit:
-        parameters["subdeaddit"] = subdeaddit
-    if model:
-        parameters["model"] = model
-
-    job = create_job(
-        job_type=JobType.CREATE_POST,
-        parameters=parameters,
-        priority=priority,
-        total_items=count,
-    )
-
-    flash(f"Post generation job created (ID: {job.id})", "success")
-    return redirect(url_for("admin.jobs"))
-
-
-@admin_bp.route("/generate/comment", methods=["POST"])
-@production_disabled
-@admin_required
-def generate_comment():
-    """Create a job to generate comments."""
-
-    count = int(request.form.get("count", 1))
-    post_id = request.form.get("post_id")
-    subdeaddit = request.form.get("subdeaddit")
-    model = request.form.get("model")
-    wait = int(request.form.get("wait", 0))
-    priority = int(request.form.get("priority", 5))
-
-    parameters = {"count": count, "wait": wait}
-    if post_id:
-        parameters["post_id"] = int(post_id)
-    if subdeaddit:
-        parameters["subdeaddit"] = subdeaddit
-    if model:
-        parameters["model"] = model
-
-    job = create_job(
-        job_type=JobType.CREATE_COMMENT,
-        parameters=parameters,
-        priority=priority,
-        total_items=count,
-    )
-
-    flash(f"Comment generation job created (ID: {job.id})", "success")
-    return redirect(url_for("admin.jobs"))
 
 
 @admin_bp.route("/jobs")
@@ -623,6 +506,21 @@ def retry_job_route(job_id):
 
     if original_job.status not in [JobStatus.FAILED, JobStatus.CANCELLED]:
         flash("Only failed or cancelled jobs can be retried", "error")
+        return redirect(url_for("admin.job_detail", job_id=job_id))
+
+    # Legacy generation executors are gone; only queue-internal job types
+    # may be retried.
+    retryable_types = {
+        JobType.BATCH_OPERATION,
+        JobType.SCHEDULED_TASK,
+        JobType.CONTENT_CLEANUP,
+    }
+    if original_job.type not in retryable_types:
+        flash(
+            f"Jobs of type '{original_job.type.value}' can no longer be retried: "
+            "legacy content generation has been removed",
+            "error",
+        )
         return redirect(url_for("admin.job_detail", job_id=job_id))
 
     # Create a new job with the same parameters

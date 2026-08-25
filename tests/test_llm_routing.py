@@ -11,9 +11,7 @@ from __future__ import annotations
 import pytest
 
 from deaddit.config import Config
-from deaddit.jobs import _send_openai_request
 from deaddit.llm import routing
-from deaddit.loader import send_request
 from deaddit.models import ApiEndpointConfig, ModelRoute
 
 DEFAULT_URL = "http://localhost/v1"
@@ -170,49 +168,11 @@ def test_endpoint_config_falls_back_to_openai_model(app, db_session):
 # live reroute: no restart, no caching
 
 
-def test_route_change_applies_on_next_generation(app, db_session, fake_llm):
+def test_route_change_applies_on_next_resolution(app, db_session):
+    """Route changes take effect on the very next resolve() — no restart."""
     routing.set_route("creative", "model-a")
-
-    fake_llm.enqueue_content('{"ok": true}')
-    send_request("sys", "prompt", ["creative"], content_type="post")
-    assert fake_llm.requests[0]["payload"]["model"] == "model-a"
+    assert routing.resolve("creative")[1] == "model-a"
 
     routing.set_route("creative", "model-b")
 
-    fake_llm.enqueue_content('{"ok": true}')
-    send_request("sys", "prompt", ["creative"], content_type="post")
-    assert fake_llm.requests[1]["payload"]["model"] == "model-b"
-
-
-def test_send_request_uses_routed_api_url_and_action(app, db_session, fake_llm):
-    routing.set_models_override(["cli-model"])
-
-    fake_llm.enqueue_content('{"ok": true}')
-    send_request("sys", "prompt", ["calm"], content_type="comment")
-
-    sent = fake_llm.requests[0]
-    assert sent["payload"]["model"] == "cli-model"
-    assert sent["api_url"] == DEFAULT_URL
-
-
-# ---------------------------------------------------------------------------
-# jobs lane
-
-
-def test_jobs_explicit_model_wins_pass_through(app, db_session, fake_llm):
-    routing.set_route("default", "routed-model")
-
-    fake_llm.enqueue_content("{}")
-    content, model = _send_openai_request("sys", "prompt", model="explicit-model")
-
-    assert model == "explicit-model"
-    assert fake_llm.requests[0]["payload"]["model"] == "explicit-model"
-    assert fake_llm.requests[0]["api_url"] == DEFAULT_URL
-
-
-def test_jobs_else_branch_resolves_via_routing(app, db_session, fake_llm):
-    routing.set_route("default", "jobs-routed-model")
-    fake_llm.enqueue_content("{}")
-    _, model = _send_openai_request("sys", "prompt")
-
-    assert model == "jobs-routed-model"
+    assert routing.resolve("creative")[1] == "model-b"

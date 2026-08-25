@@ -1,12 +1,18 @@
-"""UX-5 settings slice: empty-means-unchanged secret semantics.
+"""Settings secrets contract (UX-5 slice, updated by A6).
 
-Covers the settings IA contract for /admin/settings and its save APIs:
+Since refactor A6, secrets are ENVIRONMENT-ONLY: the app resolves
+API_TOKEN / SECRET_KEY / OPENAI_KEY / API_KEY_* from the environment and
+refuses to persist them (``SecretNotPersistable``). These tests pin the
+post-A6 behaviour of /admin/settings and its save APIs:
 
-* blank/absent secret fields (OPENAI key, API_TOKEN, per-endpoint keys)
-  never overwrite stored values (byte-identical Setting rows),
-* non-empty secrets are written,
+* blank/absent secret fields never touch anything (and legacy DB rows,
+  i.e. rows written before A6, are left byte-identical),
+* non-empty secrets are REFUSED with an explicit environment-only
+  message while the non-secret rest of the request still commits,
+* short tokens keep their dedicated validation error,
 * no bullet-mask placeholder and no secret value ever reaches the
-  rendered HTML or the JSON API responses.
+  rendered HTML or the JSON API responses,
+* the endpoint-key status endpoint reports has_key/last4 only.
 """
 
 from __future__ import annotations
@@ -19,6 +25,8 @@ OPENAI_KEY = "sk-test-openai-key-abcdef123456"
 API_TOKEN = "unit-test-token-987654"
 ENDPOINT = "https://api.groq.com/openai/v1"
 ENDPOINT_KEY = "gsk-test-groq-key-abcdef123456"
+
+SECRET_KEYS = ("OPENAI_KEY", "API_TOKEN", "API_KEY_GROQ")
 
 
 def _setting_value(db_session, key: str) -> str | None:
@@ -35,36 +43,27 @@ def admin_client(client):
 
 
 @pytest.fixture()
-def stored_secrets(admin_client, db_session):
-    """Seed one of each secret flavor via the public save APIs."""
-    resp = admin_client.post(
-        "/admin/api/save-config",
-        json={
-            "openai_api_url": ENDPOINT,
-            "openai_key": OPENAI_KEY,
-        },
-    )
-    assert resp.status_code == 200
-    assert resp.get_json()["success"] is True
+def legacy_secret_rows(admin_client, db_session):
+    """Seed one of each secret flavor as a pre-A6 database would have them.
 
-    resp = admin_client.post(
-        "/admin/api/save-deaddit-config",
-        json={"api_token": API_TOKEN},
-    )
-    assert resp.status_code == 200
-    assert resp.get_json()["success"] is True
-
-    # The endpoint key lands under API_KEY_GROQ (set_api_key_for_endpoint).
-    return {
-        "OPENAI_KEY": _setting_value(db_session, "OPENAI_KEY"),
-        "API_TOKEN": _setting_value(db_session, "API_TOKEN"),
-        "API_KEY_GROQ": _setting_value(db_session, "API_KEY_GROQ"),
-    }
+    The save APIs refuse to write secrets since A6, so legacy rows can only
+    exist in databases predating the change (or be recreated by hand).
+    """
+    for key, value in (
+        ("OPENAI_KEY", OPENAI_KEY),
+        ("API_TOKEN", API_TOKEN),
+        ("API_KEY_GROQ", ENDPOINT_KEY),
+    ):
+        db_session.add(Setting(key=key, value=value))
+    db_session.commit()
+    return {k: _setting_value(db_session, k) for k in SECRET_KEYS}
 
 
-def test_blank_secrets_are_unchanged_on_resave(stored_secrets, admin_client, db_session):
-    before = {k: _setting_value(db_session, k) for k in ("OPENAI_KEY", "API_TOKEN", "API_KEY_GROQ")}
-    assert before == stored_secrets
+def test_blank_secrets_are_unchanged_on_resave(
+    legacy_secret_rows, admin_client, db_session
+):
+    before = {k: _setting_value(db_session, k) for k in SECRET_KEYS}
+    assert before == legacy_secret_rows
 
     # First re-save with every secret field blank.
     resp = admin_client.post(
@@ -87,17 +86,17 @@ def test_blank_secrets_are_unchanged_on_resave(stored_secrets, admin_client, db_
     resp = admin_client.post("/admin/api/save-deaddit-config", json={})
     assert resp.get_json()["success"] is True
 
-    after = {k: _setting_value(db_session, k) for k in ("OPENAI_KEY", "API_TOKEN", "API_KEY_GROQ")}
+    after = {k: _setting_value(db_session, k) for k in SECRET_KEYS}
     assert after == before
 
 
-def test_whitespace_only_secret_is_unchanged(stored_secrets, admin_client, db_session):
+def test_whitespace_only_secret_is_unchanged(
+    legacy_secret_rows, admin_client, db_session
+):
     """Whitespace-only payloads count as blank and must not clobber secrets."""
     before = {k: _setting_value(db_session, k) for k in ("OPENAI_KEY", "API_TOKEN")}
 
-    resp = admin_client.post(
-        "/admin/api/save-config", json={"openai_key": "   \t "}
-    )
+    resp = admin_client.post("/admin/api/save-config", json={"openai_key": "   \t "})
     assert resp.get_json()["success"] is True
     resp = admin_client.post("/admin/api/save-deaddit-config", json={"api_token": "  "})
     assert resp.get_json()["success"] is True
@@ -107,35 +106,46 @@ def test_whitespace_only_secret_is_unchanged(stored_secrets, admin_client, db_se
 
 
 # ---------------------------------------------------------------------------
-# (b) non-empty secrets update stored values
+# (b) non-empty secrets are refused: the database is no longer their home
 
 
-def test_new_nonempty_secrets_update_rows(admin_client, db_session):
+def test_nonempty_secrets_are_refused_env_only(admin_client, db_session):
+    """A6: save APIs reject secret values and write NO secret rows.
+
+    Regression guard for the UX-5 double-write defect too: even when the
+    posted endpoint equals the current OPENAI_API_URL, neither OPENAI_KEY
+    nor the mirrored API_KEY_* row may appear.
+    """
     resp = admin_client.post(
         "/admin/api/save-config",
         json={"openai_api_url": ENDPOINT, "openai_key": OPENAI_KEY},
     )
-    assert resp.get_json()["success"] is True
-    assert _setting_value(db_session, "OPENAI_KEY") == OPENAI_KEY
-    # Endpoint-specific storage mirrors the default while it is the current endpoint.
-    assert _setting_value(db_session, "API_KEY_GROQ") == OPENAI_KEY
+    body = resp.get_json()
+    assert body["success"] is False
+    assert "environment-only" in body["message"]
 
     resp = admin_client.post("/admin/api/save-deaddit-config", json={"api_token": API_TOKEN})
-    assert resp.get_json()["success"] is True
-    assert _setting_value(db_session, "API_TOKEN") == API_TOKEN
+    body = resp.get_json()
+    assert body["success"] is False
+    assert "environment-only" in body["message"]
 
-    # Rotating to a new value overwrites; blank afterwards keeps the rotation.
-    new_key = "sk-rotated-key-000000"
+    for key in SECRET_KEYS:
+        assert _setting_value(db_session, key) is None
+
+
+def test_refused_secret_still_commits_other_fields(admin_client, db_session):
+    """The non-secret rest of a request survives the secret refusal."""
     resp = admin_client.post(
         "/admin/api/save-config",
-        json={"openai_api_url": ENDPOINT, "openai_key": new_key},
+        json={
+            "openai_api_url": ENDPOINT,
+            "openai_key": OPENAI_KEY,
+            "openai_model": "llama3",
+        },
     )
-    assert resp.get_json()["success"] is True
-    assert _setting_value(db_session, "OPENAI_KEY") == new_key
-
-    resp = admin_client.post("/admin/api/save-config", json={"openai_key": ""})
-    assert resp.get_json()["success"] is True
-    assert _setting_value(db_session, "OPENAI_KEY") == new_key
+    assert resp.get_json()["success"] is False
+    assert _setting_value(db_session, "OPENAI_MODEL") == "llama3"
+    assert _setting_value(db_session, "OPENAI_API_URL") == ENDPOINT
 
 
 def test_short_token_is_rejected_without_write(admin_client, db_session):
@@ -149,7 +159,7 @@ def test_short_token_is_rejected_without_write(admin_client, db_session):
 # (c) rendered page leaks neither bullet masks nor secret values
 
 
-def test_render_hides_all_secrets(admin_client, db_session, stored_secrets):
+def test_render_hides_all_secrets(admin_client, db_session, legacy_secret_rows):
     resp = admin_client.get("/admin/settings")
     assert resp.status_code == 200
     html = resp.get_data(as_text=True)
@@ -175,9 +185,9 @@ def test_save_config_response_has_no_secret_echo(admin_client, db_session):
     text = resp.get_data(as_text=True)
     assert OPENAI_KEY not in text
     body = resp.get_json()
-    assert body["success"] is True
+    # Refused under A6 (env-only), and the refusal never echoes the value.
+    assert body["success"] is False
     assert "openai_key" not in body["config"]
-    assert body["config"]["openai_key_set"] is True
 
 
 def test_save_deaddit_config_response_has_no_secret_echo(admin_client, db_session):
@@ -187,14 +197,14 @@ def test_save_deaddit_config_response_has_no_secret_echo(admin_client, db_sessio
     assert resp.status_code == 200
     text = resp.get_data(as_text=True)
     assert API_TOKEN not in text
-    assert resp.get_json()["success"] is True
 
 
-def test_get_endpoint_key_never_returns_full_key(admin_client, db_session):
-    admin_client.post(
-        "/admin/api/save-config",
-        json={"openai_api_url": ENDPOINT, "openai_key": ENDPOINT_KEY},
-    )
+def test_get_endpoint_key_never_returns_full_key(
+    admin_client, db_session, monkeypatch
+):
+    """Env-provided keys surface only as has_key/last4, never plaintext."""
+    monkeypatch.setenv("OPENAI_KEY", ENDPOINT_KEY)
+
     resp = admin_client.post(
         "/admin/api/get-endpoint-key", json={"endpoint_url": ENDPOINT}
     )
@@ -212,12 +222,7 @@ def test_get_endpoint_key_never_returns_full_key(admin_client, db_session):
 
 
 def test_get_endpoint_key_reports_unset(admin_client, db_session):
-    # get_api_key_for_endpoint falls back to OPENAI_KEY (whose DEFAULTS sentinel is
-    # "your_openrouter_api_key"), so an endpoint only reports has_key=False when no
-    # fallback value exists at all. Precedence quirk noted for A6.
-    db_session.add(Setting(key="OPENAI_KEY", value=""))
-    db_session.commit()
-
+    """Virgin deployments report has_key=False (no sentinel fallback — A6 fix)."""
     resp = admin_client.post(
         "/admin/api/get-endpoint-key", json={"endpoint_url": "http://localhost:11434/v1"}
     )
@@ -225,5 +230,3 @@ def test_get_endpoint_key_reports_unset(admin_client, db_session):
     assert body["success"] is True
     assert body["has_key"] is False
     assert body["last4"] is None
-
-
