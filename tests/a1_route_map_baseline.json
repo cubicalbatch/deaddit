@@ -146,6 +146,13 @@
    "POST"
   ]
  },
+{
+ "rule": "/admin/api/routes",
+ "endpoint": "admin.routes_api",
+ "methods": [
+  "GET"
+ ]
+},
  {
   "rule": "/admin/api/save-config",
   "endpoint": "admin.save_config_api",
@@ -202,8 +209,15 @@
    "POST"
   ]
  },
- {
-  "rule": "/admin/api/users",
+{
+ "rule": "/admin/api/usage/summary",
+ "endpoint": "admin.usage_summary_api",
+ "methods": [
+  "GET"
+ ]
+},
+{
+ "rule": "/admin/api/users",
   "endpoint": "admin.api_users",
   "methods": [
    "GET"

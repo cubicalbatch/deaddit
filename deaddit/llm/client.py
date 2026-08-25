@@ -8,6 +8,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+from deaddit.llm import accounting
 from deaddit.llm.errors import CapabilityError, PermanentLLMError
 from deaddit.llm.provider import get_provider
 from deaddit.llm.tools import ToolSpec
@@ -46,6 +47,8 @@ class ChatRequest:
     read_timeout: float = 120.0
     tools: list[ToolSpec] | None = None
     request_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    action: str | None = None
+    agent: str | None = None
 
 
 @dataclass
@@ -122,15 +125,21 @@ class LLMClient:
             ensure_tools_allowed(req.api_url, req.model, request_id=req.request_id)
         payload = _build_payload(req)
         started = time.monotonic()
+        rec = accounting.AttemptRecorder(req)
+        data: dict | None = None
+        failure: BaseException | None = None
         try:
+            rec.mark_invoked()
             data = get_provider()(
                 api_url=req.api_url,
                 payload=payload,
                 api_key=req.api_key,
                 request_id=req.request_id,
                 read_timeout=req.read_timeout,
+                on_attempt=rec.on_attempt,
             )
         except PermanentLLMError as exc:
+            failure = exc
             message = str(exc)
             if (
                 req.tools
@@ -140,13 +149,22 @@ class LLMClient:
                 from deaddit.llm.capabilities import mark_stale
 
                 mark_stale(req.api_url, req.model)
-                raise CapabilityError(
+                failure = CapabilityError(
                     message,
                     api_url=req.api_url,
                     model=req.model,
                     request_id=req.request_id,
-                ) from exc
+                )
+                raise failure from exc
             raise
+        except Exception as exc:
+            failure = exc
+            raise
+        finally:
+            rec.finalize(
+                exc=failure,
+                data=data if failure is None else None,
+            )
         latency_ms = (time.monotonic() - started) * 1000.0
         content, tool_calls = _extract_response(data)
         usage = data.get("usage") or {}

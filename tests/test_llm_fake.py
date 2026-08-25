@@ -87,7 +87,7 @@ class TestGenerationPaths:
         assert len(fake_llm.requests) == 1
         assert fake_llm.requests[0]["payload"]["model"] == "m1"
 
-    def test_loader_send_request(self, fake_llm):
+    def test_loader_send_request(self, app, fake_llm):
         import deaddit.loader as loader
 
         fake_llm.enqueue_content("canned loader content")

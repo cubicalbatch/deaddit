@@ -12,6 +12,7 @@ from sqlalchemy import func
 from .api import build_comment_tree
 from .config import Config
 from .extensions import db
+from .llm import routing
 from .llm.client import STOP_VALUES, ChatRequest, LLMClient, Sampling
 from .llm.errors import LLMError
 from .models import Comment, Post, Subdeaddit, User
@@ -20,10 +21,6 @@ from .services.content import ContentValidationError
 
 logger = logging.getLogger(__name__)
 
-# Get models from config or use defaults
-MODELS = Config.get("MODELS", "").split(",") if Config.get("MODELS") else [""]
-# Remove empty strings and strip whitespace
-MODELS = [model.strip() for model in MODELS if model.strip()]
 
 # Global cache for post counts per subdeaddit to improve distribution
 _subdeaddit_post_counts = defaultdict(int)
@@ -629,50 +626,6 @@ def test_user_distribution(num_tests=100, strategy="weighted"):
         return None
 
 
-def select_model(user_persona=None):
-    """
-    Select a model from the global MODELS list, optionally based on user persona.
-
-    Args:
-        user_persona (str, optional): User personality type to influence model selection
-
-    Returns:
-        str: The selected model name.
-    """
-    if not MODELS:
-        logger.warning("No models configured, falling back to default model")
-        return Config.get("OPENAI_MODEL", "llama3")
-
-    # If user persona is provided, try to match model to personality
-    if user_persona and len(MODELS) > 1:
-        creative_personas = ["creative", "artistic", "imaginative", "expressive"]
-        analytical_personas = ["analytical", "logical", "methodical", "systematic"]
-
-        persona_lower = user_persona.lower()
-
-        # Prefer creative models for creative personas
-        if any(trait in persona_lower for trait in creative_personas):
-            creative_models = [
-                m
-                for m in MODELS
-                if any(word in m.lower() for word in ["claude", "gpt-4", "creative"])
-            ]
-            if creative_models:
-                return random.choice(creative_models)
-
-        # Prefer analytical models for analytical personas
-        elif any(trait in persona_lower for trait in analytical_personas):
-            analytical_models = [
-                m
-                for m in MODELS
-                if any(word in m.lower() for word in ["gpt", "mistral", "llama"])
-            ]
-            if analytical_models:
-                return random.choice(analytical_models)
-
-    return random.choice(MODELS)
-
-
 def get_dynamic_temperature(user_personality_traits, content_type="post"):
     """
     Calculate dynamic temperature based on user personality and content type.
@@ -753,7 +706,7 @@ def send_request(
     if user_personality_traits:
         user_persona = " ".join(user_personality_traits)
 
-    selected_model = select_model(user_persona)
+    selected_api_url, selected_model = routing.resolve(user_persona)
 
     # Add /nothink prefix for specific models
     if any(keyword in selected_model.lower() for keyword in ["qwen", "qwq", "deepseek"]):
@@ -765,7 +718,7 @@ def send_request(
     else:
         temperature = round(random.uniform(0.7, 1.1), 2)
     logger.info(
-        f"Sending prompt to the server {OPENAI_API_URL} using model {selected_model}. Temperature chosen: {temperature}. Prompt length: {len(prompt)} characters."
+        f"Sending prompt to the server {selected_api_url} using model {selected_model}. Temperature chosen: {temperature}. Prompt length: {len(prompt)} characters."
     )
     # Dynamic max_tokens based on personality and content type
     max_tokens = 1300  # default
@@ -799,10 +752,11 @@ def send_request(
         system_prompt=system_prompt,
         user_prompt=prompt,
         model=selected_model,
-        api_url=OPENAI_API_URL,
+        api_url=selected_api_url,
         api_key=OPENAI_KEY,
         sampling=Sampling(temperature=temperature, max_tokens=max_tokens, stop=STOP_VALUES),
     )
+    request.action = content_type
     if "openrouter" in OPENAI_API_URL:
         request.extra_payload = {"provider": {"allow_fallbacks": False}}
 
@@ -2893,17 +2847,15 @@ def ingest_user(user_data: dict):
     help="Model(s) to use for requests. Can be specified multiple times.",
 )
 def cli(ctx, model):
-    global MODELS
-    MODELS = list(model) if model else [Config.get("OPENAI_MODEL", "llama3")]
-    logger.info(f"Using model(s): {', '.join(MODELS)}")
+    routing.set_models_override(list(model) if model else None)
     ctx.ensure_object(dict)
-    ctx.obj["models"] = MODELS
 
     # Standalone loader runs need an app context for the content service and
     # direct DB queries; nested contexts from job execution are harmless.
     from deaddit import create_app
 
     create_app().app_context().push()
+    logger.info(f"Using model(s): {routing.resolve()[1]}")
 
 
 @cli.command()
@@ -2915,10 +2867,10 @@ def cli(ctx, model):
 @click.pass_context
 def subdeaddit(ctx, count, wait, model):
     """Create new subdeaddit(s)"""
-    models = [model] if model else ctx.obj["models"]
+    if model:
+        routing.set_models_override([model])
     for i in range(count):
         logger.info(f"Creating subdeaddit {i + 1}/{count}")
-        MODELS[:] = models  # Temporarily set the model for this creation
         create_subdeaddit()
         if i < count - 1 and wait > 0:
             logger.info(
@@ -2936,10 +2888,10 @@ def subdeaddit(ctx, count, wait, model):
 @click.pass_context
 def user(ctx, count, wait, model):
     """Create new user(s)"""
-    models = [model] if model else ctx.obj["models"]
+    if model:
+        routing.set_models_override([model])
     for i in range(count):
         logger.info(f"Creating user {i + 1}/{count}")
-        MODELS[:] = models  # Temporarily set the model for this creation
         generate_user()
         if i < count - 1 and wait > 0:
             logger.info(f"Waiting for {wait} seconds before creating the next user...")

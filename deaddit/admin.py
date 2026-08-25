@@ -18,12 +18,13 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.exc import SQLAlchemyError
 
 from deaddit import db
 from deaddit.config import Config
 from deaddit.jobs import cancel_job, create_job, get_job_status, get_queue_stats
+from deaddit.llm import routing
 from deaddit.llm.capabilities import probe_endpoint, set_manual_override
 from deaddit.models import (
     ApiEndpointConfig,
@@ -34,6 +35,8 @@ from deaddit.models import (
     Job,
     JobStatus,
     JobType,
+    LLMUsage,
+    ModelRoute,
     Post,
     Subdeaddit,
     User,
@@ -2030,3 +2033,107 @@ def hide_default_data_api():
                 "message": f"Failed to hide default data section: {str(e)}",
             }
         )
+
+
+# --- LLM usage accounting & routing JSON API (Phase LLM-3) ---
+
+
+@admin_bp.route("/api/usage/summary")
+@production_disabled
+@admin_required
+def usage_summary_api():
+    """Aggregate LLM usage accounting (totals, by day, by action)."""
+    totals_row = db.session.query(
+        func.count(LLMUsage.id),
+        func.coalesce(func.sum(LLMUsage.prompt_tokens), 0),
+        func.coalesce(func.sum(LLMUsage.completion_tokens), 0),
+        func.coalesce(func.sum(LLMUsage.total_tokens), 0),
+        # NULL-safe: rows with unknown price contribute nothing, and an
+        # all-unpriced ledger stays NULL instead of faking $0.
+        func.sum(LLMUsage.estimated_cost),
+    ).one()
+
+    day_expr = func.date(LLMUsage.created_at)
+    action_expr = LLMUsage.action
+    cost_sum = func.sum(LLMUsage.estimated_cost)
+    tokens_sum = func.coalesce(func.sum(LLMUsage.total_tokens), 0)
+
+    by_day = (
+        db.session.query(
+            day_expr.label("day"), tokens_sum.label("tokens"), cost_sum.label("cost")
+        )
+        .group_by(day_expr)
+        .order_by(day_expr)
+        .all()
+    )
+    by_action = (
+        db.session.query(
+            action_expr.label("action"),
+            func.count(LLMUsage.id).label("rows"),
+            tokens_sum.label("tokens"),
+            cost_sum.label("cost"),
+        )
+        .group_by(action_expr)
+        .order_by(action_expr)
+        .all()
+    )
+
+    return jsonify(
+        {
+            "totals": {
+                "rows": totals_row[0],
+                "prompt_tokens": totals_row[1],
+                "completion_tokens": totals_row[2],
+                "total_tokens": totals_row[3],
+                "estimated_cost_sum": totals_row[4],
+            },
+            "by_day": [
+                {"day": row.day, "tokens": row.tokens, "cost": row.cost}
+                for row in by_day
+            ],
+            "by_action": [
+                {
+                    "action": row.action,
+                    "rows": row.rows,
+                    "tokens": row.tokens,
+                    "cost": row.cost,
+                }
+                for row in by_action
+            ],
+        }
+    )
+
+
+@admin_bp.route("/api/routes")
+@production_disabled
+@admin_required
+def routes_api():
+    """List model routing rows plus the currently resolved default."""
+    routes = ModelRoute.query.order_by(
+        ModelRoute.tier.asc(), ModelRoute.priority.desc(), ModelRoute.id.desc()
+    ).all()
+
+    resolved_api_url, resolved_model = routing.resolve()
+
+    return jsonify(
+        {
+            "routes": [
+                {
+                    "id": route.id,
+                    "tier": route.tier,
+                    "api_url": route.api_url,
+                    "model_name": route.model_name,
+                    "priority": route.priority,
+                    "is_active": route.is_active,
+                    "updated_at": (
+                        route.updated_at.isoformat() if route.updated_at else None
+                    ),
+                }
+                for route in routes
+            ],
+            "resolved_default": {
+                "api_url": resolved_api_url,
+                "model_name": resolved_model,
+            },
+        }
+    )

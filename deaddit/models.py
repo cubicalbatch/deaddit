@@ -316,3 +316,157 @@ class Setting(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+# --- LLM accounting & routing ---
+class LLMUsage(db.Model):
+    """One row per LLM provider attempt, including failed attempts."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    request_id = db.Column(db.String(32))
+    attempt = db.Column(db.Integer)
+    api_url = db.Column(db.String(255))
+    model = db.Column(db.String(120))
+    action = db.Column(db.String(40), nullable=True)
+    agent = db.Column(db.String(120), nullable=True)
+    status = db.Column(db.String(10))  # 'ok' | 'failed'
+    error_type = db.Column(db.String(80), nullable=True)  # exception class name
+    prompt_tokens = db.Column(db.Integer, nullable=True)
+    completion_tokens = db.Column(db.Integer, nullable=True)
+    total_tokens = db.Column(db.Integer, nullable=True)
+    estimated_cost = db.Column(
+        db.Float, nullable=True
+    )  # USD; NULL = unknown price (never fake $0); 0.0 exactly = local/free endpoint
+    latency_ms = db.Column(db.Float, nullable=True)
+
+
+class ModelPrice(db.Model):
+    """Dated price rows, glob pattern matched against model name."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    pattern = db.Column(db.String(200), unique=True)
+    prompt_price_per_1k = db.Column(db.Float)
+    completion_price_per_1k = db.Column(db.Float)
+    currency = db.Column(db.String(8), default="USD")
+    note = db.Column(db.String(255), nullable=True)
+    effective_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class ModelRoute(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    tier = db.Column(
+        db.String(40), index=True, nullable=False
+    )  # 'default', 'creative', 'analytical'
+    api_url = db.Column(
+        db.String(255), nullable=True
+    )  # NULL -> Config OPENAI_API_URL
+    model_name = db.Column(db.String(120), nullable=False)
+    priority = db.Column(db.Integer, default=0)
+    is_active = db.Column(db.Boolean, default=True)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+# --- AgenticCore agent runtime ---
+class Agent(db.Model):
+    """An autonomous agent bound to exactly one user account.
+
+    ``config`` holds static settings (schedule, model prefs, tool allowlist);
+    ``state`` is scratch space the runtime mutates across runs (cursors,
+    backoff bookkeeping). Rows are created disabled by default so a user must
+    explicitly enable an agent before the scheduler picks it up.
+    """
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_username = db.Column(
+        db.String(50), db.ForeignKey("user.username"), unique=True, nullable=False
+    )
+    autonomy_tier = db.Column(
+        db.String(20), nullable=False, default="regular"
+    )  # 'lurker' | 'regular' | 'power_user'
+    is_enabled = db.Column(db.Boolean, nullable=False, default=False)
+    status = db.Column(db.String(20), nullable=False, default="idle")
+    config = db.Column(db.JSON, nullable=False, default=dict)
+    state = db.Column(db.JSON, nullable=False, default=dict)
+    last_run_at = db.Column(db.DateTime)
+    next_run_at = db.Column(db.DateTime)
+    consecutive_failures = db.Column(db.Integer, nullable=False, default=0)
+
+    runs = db.relationship("AgentRun", backref="agent", lazy="dynamic")
+
+
+class AgentRun(db.Model):
+    """One execution of an agent, from trigger to terminal status."""
+
+    __tablename__ = "agent_run"
+
+    id = db.Column(db.Integer, primary_key=True)
+    agent_id = db.Column(
+        db.Integer, db.ForeignKey("agent.id"), nullable=False, index=True
+    )
+    trigger = db.Column(
+        db.String(20), nullable=False, default="manual"
+    )  # 'manual' | 'schedule' | 'event'
+    status = db.Column(
+        db.String(20), nullable=False, default="running"
+    )  # 'running' | 'completed' | 'failed'
+    started_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    finished_at = db.Column(db.DateTime)
+    turn_count = db.Column(db.Integer, nullable=False, default=0)
+    action_count = db.Column(db.Integer, nullable=False, default=0)
+    token_usage = db.Column(db.JSON)  # {'prompt': n, 'completion': n, 'total': n}
+    error_message = db.Column(db.Text)
+
+    turns = db.relationship("AgentTurn", backref="run", lazy="dynamic")
+    tool_calls = db.relationship("ToolCall", backref="run", lazy="dynamic")
+
+
+class AgentTurn(db.Model):
+    """A single LLM request/response exchange within a run."""
+
+    __tablename__ = "agent_turn"
+
+    id = db.Column(db.Integer, primary_key=True)
+    run_id = db.Column(
+        db.Integer, db.ForeignKey("agent_run.id"), nullable=False, index=True
+    )
+    seq = db.Column(db.Integer, nullable=False)  # 0-based order within the run
+    request_messages = db.Column(db.JSON, nullable=False)
+    response_message = db.Column(db.JSON, nullable=False)
+    model = db.Column(db.String(100))
+    latency_ms = db.Column(db.Integer)
+
+
+class ToolCall(db.Model):
+    """One tool invocation made during a run, kept for audit and replay."""
+
+    __tablename__ = "tool_call"
+
+    id = db.Column(db.Integer, primary_key=True)
+    turn_id = db.Column(db.Integer, db.ForeignKey("agent_turn.id"), nullable=True)
+    run_id = db.Column(
+        db.Integer, db.ForeignKey("agent_run.id"), nullable=False, index=True
+    )
+    name = db.Column(db.String(100), nullable=False)
+    arguments = db.Column(db.JSON)
+    result = db.Column(db.JSON)
+    ok = db.Column(db.Boolean, nullable=False, default=True)
+    error = db.Column(db.Text)
+    duration_ms = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+class AgentMemory(db.Model):
+    """Long-lived note attached to an agent (episodes, facts, summaries)."""
+
+    __tablename__ = "agent_memory"
+
+    id = db.Column(db.Integer, primary_key=True)
+    agent_id = db.Column(
+        db.Integer, db.ForeignKey("agent.id"), nullable=False, index=True
+    )
+    kind = db.Column(db.String(20), nullable=False, default="episode")
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

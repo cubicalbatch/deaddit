@@ -16,6 +16,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from deaddit.config import Config
 from deaddit.extensions import db
+from deaddit.llm import routing
 from deaddit.llm.client import STOP_VALUES, ChatRequest, LLMClient, Sampling
 from deaddit.models import Job, JobStatus, JobType
 from deaddit.services import content
@@ -557,7 +558,7 @@ def _generate_user_data(model: str = None) -> dict[str, Any]:
 
 
 def _send_openai_request(
-    system_prompt: str, prompt: str, model: str = None
+    system_prompt: str, prompt: str, model: str = None, action: str | None = "job"
 ) -> tuple[str, str]:
     """Send request to OpenAI API."""
     import random
@@ -565,26 +566,26 @@ def _send_openai_request(
     OPENAI_API_URL = Config.get("OPENAI_API_URL", "http://localhost/v1")
     OPENAI_KEY = Config.get("OPENAI_KEY", "your_openrouter_api_key")
 
-    # Use provided model or default model
+    # Explicit model wins; otherwise resolve through the routing chain.
     if model:
-        selected_model = model
+        selected_api_url, selected_model = OPENAI_API_URL, model
     else:
-        # Use the default model instead of randomly selecting
-        selected_model = Config.get("OPENAI_MODEL", "llama3")
+        selected_api_url, selected_model = routing.resolve()
 
     temperature = round(random.uniform(0.9, 1), 2)
     logger.info(
-        f"Sending request to {OPENAI_API_URL} using model {selected_model}, temperature {temperature}"
+        f"Sending request to {selected_api_url} using model {selected_model}, temperature {temperature}"
     )
 
     request = ChatRequest(
         system_prompt=system_prompt,
         user_prompt=prompt,
         model=selected_model,
-        api_url=OPENAI_API_URL,
+        api_url=selected_api_url,
         api_key=OPENAI_KEY,
         sampling=Sampling(temperature=temperature, max_tokens=2048, stop=STOP_VALUES),
     )
+    request.action = action
     result = LLMClient().complete(request)
     return result.content, result.model
 
