@@ -19,6 +19,7 @@ dependencies = [
     "click",
     "requests",
     "gunicorn",
+    "flask-migrate>=4.1.0",
 ]
 
 [dependency-groups]

@@ -8,7 +8,6 @@ from .config import Config
 from .models import Comment, Post, Subdeaddit, User
 from .utils import (
     get_comment_counts_bulk,
-    paginate_posts_with_model_cycling,
     process_post_title,
 )
 
@@ -57,38 +56,30 @@ def index():
     # Get selected models from query parameters
     selected_models = request.args.getlist("models")
 
-    # Get all posts and randomize the order
-    query = Post.query.order_by(func.random())
-
-    # Apply model filter if models are selected
+    query = Post.query
     if selected_models:
         query = query.filter(Post.model.in_(selected_models))
 
-    all_posts = query.all()
-
-    # Get all unique models (either selected or all)
-    if selected_models:
-        all_models = selected_models
-    else:
-        all_models = db.session.query(Post.model).distinct().all()
-        all_models = [model[0] for model in all_models]
+    total_posts = query.count()
+    posts = (
+        query.order_by(Post.created_at.desc(), Post.id.desc())
+        .offset((page - 1) * posts_per_page)
+        .limit(posts_per_page)
+        .all()
+    )
+    has_more = total_posts > page * posts_per_page
 
     # Process post titles
-    for post in all_posts:
+    for post in posts:
         post.title = process_post_title(post.title)
 
-    # Paginate posts with model cycling
-    paginated_posts, total_posts, has_more = paginate_posts_with_model_cycling(
-        all_posts, all_models, page, posts_per_page
-    )
-
     # Get comment counts efficiently
-    post_ids = [post.id for post in paginated_posts]
+    post_ids = [post.id for post in posts]
     comment_counts = get_comment_counts_bulk(post_ids)
 
     return render_template(
         "index.html",
-        posts=paginated_posts,
+        posts=posts,
         comment_counts=comment_counts,
         page=page,
         has_more=has_more,
@@ -109,37 +100,24 @@ def subdeaddit(subdeaddit_name):
     # Check if the subdeaddit exists
     Subdeaddit.query.filter_by(name=subdeaddit_name).first_or_404()
 
-    # Get all posts for this subdeaddit and randomize the order
-    query = Post.query.filter_by(subdeaddit_name=subdeaddit_name).order_by(
-        func.random()
-    )
+    query = Post.query.filter_by(subdeaddit_name=subdeaddit_name)
 
     # Apply model filter if models are selected
     if selected_models:
         query = query.filter(Post.model.in_(selected_models))
 
-    all_posts = query.all()
-
-    # Get all unique models used in this subdeaddit
-    if selected_models:
-        all_models = selected_models
-    else:
-        all_models = (
-            db.session.query(Post.model)
-            .filter(Post.subdeaddit_name == subdeaddit_name)
-            .distinct()
-            .all()
-        )
-        all_models = [model[0] for model in all_models]
+    total_posts = query.count()
+    paginated_posts = (
+        query.order_by(Post.created_at.desc(), Post.id.desc())
+        .offset((page - 1) * posts_per_page)
+        .limit(posts_per_page)
+        .all()
+    )
+    has_more = total_posts > page * posts_per_page
 
     # Process post titles
-    for post in all_posts:
+    for post in paginated_posts:
         post.title = process_post_title(post.title)
-
-    # Paginate posts with model cycling
-    paginated_posts, total_posts, has_more = paginate_posts_with_model_cycling(
-        all_posts, all_models, page, posts_per_page
-    )
 
     # Get comment counts efficiently
     post_ids = [post.id for post in paginated_posts]

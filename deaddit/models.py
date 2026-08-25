@@ -35,6 +35,13 @@ class Post(db.Model):
     subdeaddit = db.relationship("Subdeaddit", backref=db.backref("posts", lazy=True))
     comments = db.relationship("Comment", back_populates="post", lazy="dynamic")
 
+    __table_args__ = (
+        db.Index(
+            "ix_post_subdeaddit_name_created_at", "subdeaddit_name", "created_at"
+        ),
+        db.Index("ix_post_model_created_at", "model", "created_at"),
+    )
+
 
 class Comment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -53,6 +60,10 @@ class Comment(db.Model):
     model = db.Column(db.String(100), index=True)
 
     post = db.relationship("Post", back_populates="comments")
+
+    __table_args__ = (
+        db.Index("ix_comment_post_id_created_at", "post_id", "created_at"),
+    )
 
 
 class User(db.Model):
@@ -110,6 +121,10 @@ class Job(db.Model):
     completed_at = db.Column(db.DateTime)
     estimated_completion = db.Column(db.DateTime)
     rq_job_id = db.Column(db.String(36), unique=True, index=True)
+
+    __table_args__ = (
+        db.Index("ix_job_status_priority", "status", "priority"),
+    )
 
     def to_dict(self):
         return {

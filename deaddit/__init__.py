@@ -11,10 +11,11 @@ import logging
 from typing import Any
 
 from flask import Flask, jsonify
+from flask_migrate import upgrade as db_upgrade
 
 # Import config after extensions are defined to avoid circular imports
 from .config import Config  # noqa: E402
-from .extensions import cache, db, socketio
+from .extensions import cache, db, migrate, socketio
 from .logging_config import configure_logging
 
 
@@ -41,6 +42,7 @@ def create_app(config: Any = None) -> Flask:
 
     # Initialize extensions with the app
     db.init_app(app)
+    migrate.init_app(app, db)
     cache.init_app(app)
     socketio.init_app(app)
 
@@ -62,9 +64,8 @@ def create_app(config: Any = None) -> Flask:
     from . import websocket  # noqa: F401
 
     with app.app_context():
-        # Create database tables and seed default settings until Alembic
-        # migrations land (Phase A3); also available as `flask init-db`
-        db.create_all()
+        # Seed default settings; schema is owned by Alembic migrations
+        # (see migrations/). Also available as `flask init-db`.
         Config.initialize_defaults()
 
         # Set SECRET_KEY from config system
@@ -96,10 +97,10 @@ def create_app(config: Any = None) -> Flask:
     app.register_error_handler(500, internal_error)
     app.register_error_handler(Exception, handle_exception)
 
-    # CLI command replacing import-time table creation until Phase A3
+    # CLI command: applies Alembic migrations and seeds default settings.
     @app.cli.command("init-db")
     def init_db_command():
-        """Create database tables and seed default settings."""
+        """Run database migrations and seed default settings."""
         init_db()
 
     return app
@@ -166,9 +167,9 @@ def __getattr__(name: str):
 
 
 def init_db() -> None:
-    """Create all tables and seed default settings. Used by `flask init-db`.
+    """Run database migrations and seed default settings. Used by `flask init-db`.
 
     Must be called inside an application context.
     """
-    db.create_all()
+    db_upgrade()
     Config.initialize_defaults()

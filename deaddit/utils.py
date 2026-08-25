@@ -3,7 +3,6 @@ Utility functions for the Deaddit application.
 """
 
 from functools import wraps
-from typing import Any
 
 from flask import abort
 from sqlalchemy import func
@@ -93,53 +92,6 @@ def get_single_comment_count(post_id: int) -> int:
         Comment count for the post
     """
     return Comment.query.filter_by(post_id=post_id).count()
-
-
-def paginate_posts_with_model_cycling(
-    all_posts: list[Any], all_models: list[str], page: int, posts_per_page: int
-) -> tuple[list[Any], int, bool]:
-    """
-    Paginate posts while cycling through models for balanced representation.
-
-    Args:
-        all_posts: List of all posts to paginate
-        all_models: List of model names to cycle through
-        page: Current page number (1-indexed)
-        posts_per_page: Number of posts per page
-
-    Returns:
-        Tuple of (paginated_posts, total_posts, has_more)
-    """
-    import random
-    from itertools import cycle
-
-    # Randomize the order of models
-    models_copy = all_models.copy()
-    random.shuffle(models_copy)
-    model_cycle = cycle(models_copy)
-
-    # Create a dictionary to store posts by model
-    posts_by_model = {model: [] for model in models_copy}
-
-    # Populate the posts_by_model dictionary
-    for post in all_posts:
-        if post.model in posts_by_model:
-            posts_by_model[post.model].append(post)
-
-    # Create the final ordered list of posts
-    ordered_posts = []
-    while len(ordered_posts) < len(all_posts):
-        current_model = next(model_cycle)
-        if posts_by_model[current_model]:
-            ordered_posts.append(posts_by_model[current_model].pop(0))
-
-    # Apply pagination
-    offset = (page - 1) * posts_per_page
-    paginated_posts = ordered_posts[offset : offset + posts_per_page]
-    total_posts = len(all_posts)
-    has_more = total_posts > page * posts_per_page
-
-    return paginated_posts, total_posts, has_more
 
 
 def process_post_title(title: str) -> str:
