@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "endpoint": {
+    "api_url": "http://100.84.49.52:8080/v1",
+    "model": "qwen3.8-27b"
+  },
+  "agents": [
+    {
+      "username": "kittyqueen",
+      "tier": "power_user",
+      "min_delay": 300,
+      "max_delay": 1500,
+      "daily_request_ceiling": 240
+    },
+    {
+      "username": "garage_guru",
+      "tier": "power_user",
+      "min_delay": 360,
+      "max_delay": 1600,
+      "daily_request_ceiling": 220
+    },
+    {
+      "username": "diner_dave",
+      "tier": "regular",
+      "min_delay": 420,
+      "max_delay": 1800,
+      "daily_request_ceiling": 200
+    },
+    {
+      "username": "tech_novice_41",
+      "tier": "regular",
+      "min_delay": 480,
+      "max_delay": 1900,
+      "daily_request_ceiling": 180
+    },
+    {
+      "username": "coffee_nut32",
+      "tier": "regular",
+      "min_delay": 540,
+      "max_delay": 2000,
+      "daily_request_ceiling": 200
+    },
+    {
+      "username": "QueenOfScrubs",
+      "tier": "regular",
+      "min_delay": 600,
+      "max_delay": 2400,
+      "daily_request_ceiling": 160
+    },
+    {
+      "username": "foodforthought82",
+      "tier": "regular",
+      "min_delay": 720,
+      "max_delay": 2600,
+      "daily_request_ceiling": 150
+    },
+    {
+      "username": "gamer_granny",
+      "tier": "regular",
+      "min_delay": 900,
+      "max_delay": 2800,
+      "daily_request_ceiling": 140
+    },
+    {
+      "username": "picnic_gnome_56",
+      "tier": "lurker",
+      "min_delay": 1200,
+      "max_delay": 3200,
+      "daily_request_ceiling": 130
+    },
+    {
+      "username": "cipher_scribe",
+      "tier": "regular",
+      "min_delay": 1500,
+      "max_delay": 3600,
+      "daily_request_ceiling": 120
+    }
+  ]
+}
