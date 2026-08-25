@@ -5,8 +5,8 @@ Owner-facing progress estimate. Updated by the orchestrator at every forward ste
 count-based on tracked steps, with a size-weighted figure (S=1/M=2/L=3) because
 remaining phases are heavier than finished ones.
 
-**Current: ~44% done** (size-weighted 27/62) · raw count 17/36 steps closed (~47%)
-As of: 2026-08-25 11:30 · Wave 4 lanes open — ACP2 ∥ D1 ∥ UX4 running in parallel
+**Current: ~50% done** (size-weighted 31/62) · raw count 19/36 steps closed (~53%)
+As of: 2026-08-25 13:05 · Wave 4: UX-4 ✅ D1 ✅ · D2 ∥ D3 dispatched · AC-P2 burn-in closes ~11:07 UTC Aug 26
 
 Why the two numbers diverge: Waves 0–1 (five small/mid phases) are closed, but the
 heavy tail — A5 worker, D1–D3 dynamics, AC P3 parity burn-in (longest wall-clock
@@ -42,3 +42,8 @@ occupy a large share of remaining calendar time at a fixed %-point.
   execution (atomic claim/heartbeat/boot-sweep proven under kill -9), web process runs
   zero schedulers, compose brings up web+worker healthy; three latent deploy bugs fixed.
   Wave 4 fan-out dispatched: scheduler/admin visibility ∥ votes/karma ∥ profiles/search.
+- 2026-08-25 13:05 — **UX-4 + D1 closed**: profiles/people/setup/search shipped
+  (32866f8); votes are REAL — cast_vote live, 787,786 history rows backfilled with exact
+  reconciliation on prod (fb9441f), agent vote tool flipped. Prod-write incident series
+  permanently controlled (gated CLI, throwaway-URI law). D2 ∥ D3 fanning out now;
+  Wave 4 closes when ACP2's 24h burn-in verdict lands.
