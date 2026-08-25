@@ -334,6 +334,31 @@ def test_since_returns_only_strictly_newer_items(app, client):
         assert len(keys) <= live_mod.NEWER_LIMIT
 
 
+def test_older_fragment_is_bare_items_with_oob_control(app, client):
+    """htmx append paging: an older-page fragment is bare <li> nodes (no
+    <ol> wrapper) plus an out-of-band #live-older replacement while more
+    pages exist, and an oob delete of the control at end of history."""
+    with app.app_context():
+        _posts, _comments, expected = _seed_activity_events(_db.session)
+
+    first = client.get("/live?fragment=1").get_data(as_text=True)
+    keys = _fragment_keys(first)
+    assert "<ol" in first  # cursor-less fragment keeps the wrapped layout
+    resp = client.get(
+        "/live?fragment=1&before="
+        + live_mod.encode_cursor(*keys[-1])
+    )
+    html = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert "<ol" not in html and "</ol" not in html
+    page_keys = _fragment_keys(html)
+    assert all(k < keys[-1] for k in page_keys)
+    if len(page_keys) == live_mod.PAGE_SIZE:
+        assert 'hx-swap-oob="outerHTML"' in html
+    else:
+        assert 'hx-swap-oob="delete"' in html
+
+
 def test_both_cursors_rejected_with_400(app, client):
     cursor = live_mod.encode_cursor(_BASE, "post", 1)
 
@@ -480,6 +505,27 @@ def test_join_emits_joined_and_starts_pump_thread(app):
         try:
             _join(client)
             assert get_live_pump().running is True
+        finally:
+            client.disconnect(namespace="/live")
+
+
+def test_join_without_payload_is_accepted(app):
+    """Real browsers emit join_activity/leave_activity with NO payload; the
+    handlers must default the argument instead of raising TypeError (UX-6
+    fix-loop: a payload-less join killed every live badge)."""
+    from deaddit.extensions import socketio
+
+    _register_live_handlers()
+    with app.app_context():
+        client = socketio.test_client(app, namespace="/live")
+        try:
+            client.emit("join_activity", namespace="/live")
+            joined = [m for m in client.get_received(namespace="/live") if m["name"] == "joined"]
+            assert joined and joined[0]["args"][0]["room"] == "activity"
+            assert get_live_pump().running is True
+            client.emit("leave_activity", namespace="/live")
+            left = [m for m in client.get_received(namespace="/live") if m["name"] == "left"]
+            assert left
         finally:
             client.disconnect(namespace="/live")
 

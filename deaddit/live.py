@@ -383,9 +383,20 @@ def recent():
     else:
         items = _collect_events(newer=False, cursor=None)
 
+    # Fragment + cursor = htmx paging mode: the response is bare <li> nodes
+    # (appended/prepended into #live-list) plus an out-of-band older-control
+    # update. Full-page and cursor-less renders keep the wrapped structure.
+    ctx = {
+        "items": items,
+        "title": "Live",
+        "paging": is_fragment and (before is not None or since is not None),
+        "older_mode": before is not None,
+        "has_more": len(items) == PAGE_SIZE and since is None,
+        "next_cursor": items[-1]["cursor"] if items else None,
+    }
     if is_fragment:
-        return render_template("partials/_live_items.html", items=items)
-    return render_template("live.html", items=items)
+        return render_template("partials/_live_items.html", **ctx)
+    return render_template("live.html", **ctx)
 
 
 # ---------------------------------------------------------------------------

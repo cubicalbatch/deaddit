@@ -14,10 +14,9 @@
     {# Newer pill: plain link without JS (full navigation); htmx upgrades it to
        a prepend swap. Kept hidden until the socket reports pending events. #}
     <a id="live-newer" class="live-pill"
-       href="/live?since={{ latest_cursor }}&fragment=1"
+       href="/live?since={{ latest_cursor }}"
        hx-get="/live?since={{ latest_cursor }}&fragment=1"
        hx-target="#live-list"
-       hx-select="li[data-cursor]"
        hx-swap="afterbegin"
        hidden>New activity</a>
     <button type="button" id="live-pause" class="live-pause" aria-pressed="false" hidden>Pause</button>

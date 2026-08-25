@@ -10,6 +10,8 @@ const errorEl = document.getElementById('live-error');
 let paused = false;
 let pendingCount = 0;
 let socket = null;
+let lastLoadAt = 0; // an in-flight live_count emitted just before our ack can
+                    // arrive right after a load; ignore those stragglers.
 
 function newestBy(attr) {
     const first = document.querySelector('#live-list li[data-cursor]');
@@ -19,9 +21,10 @@ function newestBy(attr) {
 function syncPillUrl() {
     const cursor = newestBy('cursor');
     if (!cursor || !pill) return;
-    const url = '/live?since=' + encodeURIComponent(cursor) + '&fragment=1';
-    pill.setAttribute('href', url);
-    pill.setAttribute('hx-get', url);
+    // No-JS fallback navigates to a full page of what's new; htmx takes the
+    // fragment (bare <li> nodes) for the prepend swap.
+    pill.setAttribute('href', '/live?since=' + encodeURIComponent(cursor));
+    pill.setAttribute('hx-get', '/live?since=' + encodeURIComponent(cursor) + '&fragment=1');
 }
 
 function showError() {
@@ -46,6 +49,8 @@ if (list && pill) {
             if (pauseBtn) pauseBtn.hidden = false;
         });
         socket.on('live_count', (data) => {
+            // Straggler guard: counts emitted before our just-sent ack.
+            if (Date.now() - lastLoadAt < 1500) return;
             pendingCount = Number(data && data.count) || 0;
             if (!pill) return;
             if (!paused && pendingCount > 0) {
@@ -81,23 +86,12 @@ if (pauseBtn && pill) {
 
 // htmx swaps drive both controls so app.js relative-time upgrade keeps
 // working via htmx:afterSwap.
-document.body.addEventListener('htmx:beforeSwap', (e) => {
-    const elt = e.detail && e.detail.elt;
-    // Older request came back with no list (end of history): suppress the
-    // swap so the current list is never wiped, and retire the button.
-    if (elt && elt.id === 'live-older' && e.detail.xhr &&
-        e.detail.xhr.responseText && !e.detail.xhr.responseText.includes('live-list')) {
-        e.detail.shouldSwap = false;
-        elt.removeAttribute('href');
-        elt.setAttribute('aria-disabled', 'true');
-        elt.textContent = 'No older activity';
-    }
-});
 
 document.body.addEventListener('htmx:afterSwap', (e) => {
     const elt = e.detail && e.detail.elt;
     if (errorEl) errorEl.hidden = true;
     if (elt && elt.id === 'live-newer') {
+        lastLoadAt = Date.now();
         pendingCount = 0;
         pill.hidden = true;
         syncPillUrl();

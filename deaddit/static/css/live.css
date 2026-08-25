@@ -32,13 +32,21 @@
 }
 
 .live-pill {
-    background-color: var(--accent);
+    /* accent-strong keeps the white label >=4.5:1 at small-text size in both
+       themes (plain --accent only clears the 3:1 large/UI gate). */
+    background-color: var(--accent-strong);
     border: none;
     color: var(--on-accent);
 }
 
+/* display:inline-flex would beat the UA [hidden] rule and leave a visually
+   rendered control reachable by keyboard; honour hidden explicitly. */
+.live-pill[hidden] {
+    display: none;
+}
+
 .live-pill:hover {
-    background-color: var(--accent-hover);
+    background-color: var(--accent-strong-hover);
     color: var(--on-accent);
 }
 
@@ -140,7 +148,9 @@
 }
 
 .live-item time {
-    color: var(--text-3);
+    /* text-3 is a 3:1 UI role; timestamps render at 12px body size and need
+       the 4.5:1 text-2 role to pass AA in both themes. */
+    color: var(--text-2);
 }
 
 .live-item__kind {

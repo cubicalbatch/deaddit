@@ -170,7 +170,7 @@ def admin_error_handler(e):
 
 @socketio.on("join_activity", namespace="/live")
 @handle_socket_errors
-def join_activity(data):
+def join_activity(data=None):
     """Join the public activity room and start the live-count pump."""
     from deaddit.runtime.live_pump import ROOM as ACTIVITY_ROOM
     from deaddit.runtime.live_pump import get_live_pump
@@ -185,7 +185,7 @@ def join_activity(data):
 
 @socketio.on("leave_activity", namespace="/live")
 @handle_socket_errors
-def leave_activity(data):
+def leave_activity(data=None):
     """Leave the public activity room."""
     from deaddit.runtime.live_pump import ROOM as ACTIVITY_ROOM
     from deaddit.runtime.live_pump import get_live_pump

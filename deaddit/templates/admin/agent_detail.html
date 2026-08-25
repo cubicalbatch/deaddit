@@ -35,9 +35,9 @@
             <div class="card-header"><strong>Config &amp; State</strong></div>
             <div class="card-body">
                 <h6>config</h6>
-                <pre id="config-pre" class="bg-light p-2 rounded small mb-3">loading…</pre>
+                <pre id="config-pre" class="thought-pre p-2 rounded small mb-3">loading…</pre>
                 <h6>state</h6>
-                <pre id="state-pre" class="bg-light p-2 rounded small mb-0">loading…</pre>
+                <pre id="state-pre" class="thought-pre p-2 rounded small mb-0">loading…</pre>
             </div>
         </div>
     </div>
@@ -292,7 +292,7 @@
         const role = (message && message.role) || "?";
         wrap.appendChild(el("div", "badge bg-info mb-1", role));
         const content = message && message.content !== undefined ? message.content : message;
-        const pre = el("pre", "bg-light p-2 rounded small mb-0");
+        const pre = el("pre", "thought-pre p-2 rounded small mb-0");
         pre.style.whiteSpace = "pre-wrap";
         pre.textContent = typeof content === "string" ? content : JSON.stringify(content, null, 2);
         wrap.appendChild(pre);
@@ -331,11 +331,11 @@
         if (call.content) {
             wrap.appendChild(contentCard(call.content));
         }
-        const args = el("pre", "bg-light p-2 rounded small mb-1");
+        const args = el("pre", "thought-pre p-2 rounded small mb-1");
         args.textContent = JSON.stringify(call.arguments, null, 2);
         wrap.appendChild(el("div", "small text-muted", "arguments:"));
         wrap.appendChild(args);
-        const result = el("pre", "bg-light p-2 rounded small mb-0");
+        const result = el("pre", "thought-pre p-2 rounded small mb-0");
         result.textContent = call.ok
             ? JSON.stringify(call.result, null, 2)
             : String(call.error || "");
@@ -383,7 +383,7 @@
         const detail = document.getElementById("turn-detail");
 
         // Null-safe turn metadata: em dash when the field never landed.
-        const meta = el("dl", "row row-cols-sm-3 small text-muted border rounded p-2 mb-2 bg-light");
+        const meta = el("dl", "row row-cols-sm-3 small text-muted border rounded p-2 mb-2 thought-pre");
         [
             ["Model", turn.model || "—"],
             ["Latency", turn.latency_ms != null ? turn.latency_ms + " ms" : "—"],

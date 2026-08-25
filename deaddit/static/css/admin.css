@@ -280,3 +280,12 @@ main {
 .nav-tabs .nav-link:focus {
     color: var(--link);
 }
+
+/* ThoughtLog code blocks (agent config/state, turn payloads, tool args).
+   Bootstrap's .bg-light is a hardcoded light surface that breaks AA in dark
+   theme (1.18:1); these blocks use token roles instead. */
+.thought-pre {
+    background-color: var(--bg-canvas);
+    color: var(--text-1);
+    border: 1px solid var(--border);
+}
