@@ -327,6 +327,15 @@ body {
     margin-bottom: var(--space-md);
 }
 
+/* Autolinked URLs inside formatter output otherwise render UA-default
+   #0000ee, which fails dark AA at 2.02:1 (axe serious, UX-POST fix loop).
+   --link passes AA in both themes: 4.56:1 light / 8.71:1 dark on canvas,
+   4.89:1 / 8.14:1 on surface. */
+.post-body a,
+.comment-body a {
+    color: var(--link);
+}
+
 /* Comments section */
 .comments-section {
     margin-top: var(--space-xxl);
