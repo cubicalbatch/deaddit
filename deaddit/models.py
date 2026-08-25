@@ -36,9 +36,7 @@ class Post(db.Model):
     comments = db.relationship("Comment", back_populates="post", lazy="dynamic")
 
     __table_args__ = (
-        db.Index(
-            "ix_post_subdeaddit_name_created_at", "subdeaddit_name", "created_at"
-        ),
+        db.Index("ix_post_subdeaddit_name_created_at", "subdeaddit_name", "created_at"),
         db.Index("ix_post_model_created_at", "model", "created_at"),
     )
 
@@ -122,9 +120,7 @@ class Job(db.Model):
     estimated_completion = db.Column(db.DateTime)
     rq_job_id = db.Column(db.String(36), unique=True, index=True)
 
-    __table_args__ = (
-        db.Index("ix_job_status_priority", "status", "priority"),
-    )
+    __table_args__ = (db.Index("ix_job_status_priority", "status", "priority"),)
 
     def to_dict(self):
         return {
@@ -263,6 +259,23 @@ class ApiEndpointConfig(db.Model):
             if self.last_updated
             else None,
         }
+
+
+class EndpointCapability(db.Model):
+    """Cached per-endpoint/per-model capability verdicts (Phase LLM-2).
+
+    Rows are written by deaddit.llm.capabilities.probe_endpoint or by a
+    human override (probe_method='manual', which always wins over probes).
+    ``supports_streaming`` stays NULL until streaming lands in Phase 4.
+    """
+
+    api_url = db.Column(db.String(255), primary_key=True)
+    model_name = db.Column(db.String(100), primary_key=True)
+    supports_tools = db.Column(db.Boolean, nullable=False)
+    supports_streaming = db.Column(db.Boolean, nullable=True)
+    context_tokens = db.Column(db.Integer, nullable=True)
+    probed_at = db.Column(db.DateTime)
+    probe_method = db.Column(db.String(20))  # 'probe' | 'declared' | 'manual'
 
 
 class Setting(db.Model):

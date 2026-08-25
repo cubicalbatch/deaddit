@@ -18,6 +18,7 @@ dependencies = [
     "apscheduler",
     "click",
     "requests",
+    "pydantic>=2",
     "gunicorn",
     "flask-migrate>=4.1.0",
 ]

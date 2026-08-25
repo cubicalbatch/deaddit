@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
 
-from deaddit.llm.errors import PermanentLLMError
+from deaddit.llm.errors import CapabilityError, PermanentLLMError
 from deaddit.llm.provider import get_provider
+from deaddit.llm.tools import ToolSpec
 from deaddit.llm.transport import last_attempts
 
 logger = logging.getLogger(__name__)
@@ -42,6 +44,7 @@ class ChatRequest:
     sampling: Sampling | None = None
     extra_payload: dict | None = None
     read_timeout: float = 120.0
+    tools: list[ToolSpec] | None = None
     request_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
 
 
@@ -74,6 +77,8 @@ def _build_payload(req: ChatRequest) -> dict:
                 # Groq only supports 4 stop values.
                 stop = stop[:4]
             payload["stop"] = stop
+    if req.tools:
+        payload["tools"] = [t.to_openai_tool() for t in req.tools]
     if req.extra_payload:
         payload.update(req.extra_payload)
     return payload
@@ -107,17 +112,41 @@ def _extract_response(response: dict) -> tuple[str, list[dict] | None]:
 
     raise PermanentLLMError(f"Unexpected API response format: {str(response)[:200]}")
 
+
 class LLMClient:
     def complete(self, req: ChatRequest) -> ChatResult:
+        if req.tools:
+            from deaddit.llm.capabilities import ensure_tools_allowed
+
+            # Raises CapabilityError on an explicit supports_tools=False verdict.
+            ensure_tools_allowed(req.api_url, req.model, request_id=req.request_id)
         payload = _build_payload(req)
         started = time.monotonic()
-        data = get_provider()(
-            api_url=req.api_url,
-            payload=payload,
-            api_key=req.api_key,
-            request_id=req.request_id,
-            read_timeout=req.read_timeout,
-        )
+        try:
+            data = get_provider()(
+                api_url=req.api_url,
+                payload=payload,
+                api_key=req.api_key,
+                request_id=req.request_id,
+                read_timeout=req.read_timeout,
+            )
+        except PermanentLLMError as exc:
+            message = str(exc)
+            if (
+                req.tools
+                and re.search(r"HTTP 400", message)
+                and re.search(r"\b(tools?|function)\b", message, re.IGNORECASE)
+            ):
+                from deaddit.llm.capabilities import mark_stale
+
+                mark_stale(req.api_url, req.model)
+                raise CapabilityError(
+                    message,
+                    api_url=req.api_url,
+                    model=req.model,
+                    request_id=req.request_id,
+                ) from exc
+            raise
         latency_ms = (time.monotonic() - started) * 1000.0
         content, tool_calls = _extract_response(data)
         usage = data.get("usage") or {}

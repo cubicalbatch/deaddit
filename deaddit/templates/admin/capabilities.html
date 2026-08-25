@@ -1,0 +1,171 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Capabilities{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Endpoint Capabilities</h1>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-shield-check"></i> Tool-Calling Verdicts
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if capabilities %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>API URL</th>
+                                <th>Model</th>
+                                <th>Tool Calling</th>
+                                <th>Streaming</th>
+                                <th>Probed At</th>
+                                <th>Method</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for cap in capabilities %}
+                            <tr>
+                                <td><code>{{ cap.api_url }}</code></td>
+                                <td>{{ cap.model_name }}</td>
+                                <td>
+                                    {% if cap.supports_tools %}
+                                        <span class="badge bg-success">Supported</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">Not supported</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if cap.supports_streaming is none %}
+                                        <span class="badge bg-secondary">Unknown</span>
+                                    {% elif cap.supports_streaming %}
+                                        <span class="badge bg-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">No</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ cap.probed_at.strftime('%Y-%m-%d %H:%M') if cap.probed_at else '-' }}</td>
+                                <td><span class="badge bg-info">{{ cap.probe_method }}</span></td>
+                                <td>
+                                    <form method="post" action="{{ url_for('admin.capabilities_override') }}" class="d-inline"
+                                          onsubmit="return confirm('Mark {{ cap.model_name }} as tool-capable?');">
+                                        <input type="hidden" name="api_url" value="{{ cap.api_url }}">
+                                        <input type="hidden" name="model_name" value="{{ cap.model_name }}">
+                                        <input type="hidden" name="supports_tools" value="true">
+                                        <button type="submit" class="btn btn-outline-success btn-sm">Allow tools</button>
+                                    </form>
+                                    <form method="post" action="{{ url_for('admin.capabilities_override') }}" class="d-inline">
+                                        <input type="hidden" name="api_url" value="{{ cap.api_url }}">
+                                        <input type="hidden" name="model_name" value="{{ cap.model_name }}">
+                                        <input type="hidden" name="supports_tools" value="false">
+                                        <button type="submit" class="btn btn-outline-danger btn-sm">Disable tools</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted">No capability verdicts recorded yet. Run a probe below.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-broadcast"></i> Run Probe
+                </h5>
+            </div>
+            <div class="card-body">
+                <form method="post" action="{{ url_for('admin.capabilities_probe') }}">
+                    <div class="mb-3">
+                        <label for="probe_api_url" class="form-label">API Endpoint URL</label>
+                        <input type="url" class="form-control" id="probe_api_url" name="api_url" required
+                               placeholder="http://localhost:11434/v1">
+                    </div>
+                    <div class="mb-3">
+                        <label for="probe_model_name" class="form-label">Model Name</label>
+                        <input type="text" class="form-control" id="probe_model_name" name="model_name" required
+                               placeholder="llama3.1">
+                    </div>
+                    <div class="mb-3">
+                        <label for="probe_api_key" class="form-label">API Key (optional)</label>
+                        <input type="password" class="form-control" id="probe_api_key" name="api_key"
+                               placeholder="Leave empty for local endpoints">
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-play-fill"></i> Probe
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-toggle-on"></i> Manual Override
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">A manual override always wins over probes.</p>
+                <form method="post" action="{{ url_for('admin.capabilities_override') }}">
+                    <div class="mb-3">
+                        <label for="override_api_url" class="form-label">API Endpoint URL</label>
+                        <input type="url" class="form-control" id="override_api_url" name="api_url" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="override_model_name" class="form-label">Model Name</label>
+                        <input type="text" class="form-control" id="override_model_name" name="model_name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="override_supports_tools" class="form-label">Verdict</label>
+                        <select class="form-select" id="override_supports_tools" name="supports_tools">
+                            <option value="true">Supports tool calling</option>
+                            <option value="false">Does not support tool calling</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg"></i> Save Override
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if endpoints %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="bi bi-hdd-network"></i> Configured Endpoints</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled mb-0">
+                    {% for endpoint in endpoints %}
+                    <li><code>{{ endpoint.api_url }}</code>
+                        {% if endpoint.default_model %}&mdash; default model: {{ endpoint.default_model }}{% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

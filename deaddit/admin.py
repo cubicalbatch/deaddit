@@ -23,10 +23,12 @@ from sqlalchemy import desc
 from deaddit import db
 from deaddit.config import Config
 from deaddit.jobs import cancel_job, create_job, get_job_status, get_queue_stats
+from deaddit.llm.capabilities import probe_endpoint, set_manual_override
 from deaddit.models import (
     ApiEndpointConfig,
     ApiModel,
     Comment,
+    EndpointCapability,
     GenerationTemplate,
     Job,
     JobStatus,
@@ -494,11 +496,11 @@ def jobs():
 
     # Get job status counts for quick stats
     job_counts = {
-        'pending': Job.query.filter_by(status=JobStatus.PENDING).count(),
-        'running': Job.query.filter_by(status=JobStatus.RUNNING).count(),
-        'completed': Job.query.filter_by(status=JobStatus.COMPLETED).count(),
-        'failed': Job.query.filter_by(status=JobStatus.FAILED).count(),
-        'cancelled': Job.query.filter_by(status=JobStatus.CANCELLED).count(),
+        "pending": Job.query.filter_by(status=JobStatus.PENDING).count(),
+        "running": Job.query.filter_by(status=JobStatus.RUNNING).count(),
+        "completed": Job.query.filter_by(status=JobStatus.COMPLETED).count(),
+        "failed": Job.query.filter_by(status=JobStatus.FAILED).count(),
+        "cancelled": Job.query.filter_by(status=JobStatus.CANCELLED).count(),
     }
 
     return render_template(
@@ -1349,6 +1351,67 @@ def settings():
     }
 
     return render_template("admin/settings.html", config=config)
+
+
+@admin_bp.route("/capabilities")
+@production_disabled
+@admin_required
+def capabilities():
+    """Capability verdicts per endpoint/model, with probe/override forms."""
+    caps = EndpointCapability.query.order_by(
+        EndpointCapability.api_url, EndpointCapability.model_name
+    ).all()
+    endpoints = ApiEndpointConfig.query.order_by(ApiEndpointConfig.api_url).all()
+    return render_template(
+        "admin/capabilities.html",
+        capabilities=caps,
+        endpoints=endpoints,
+    )
+
+
+@admin_bp.route("/capabilities/probe", methods=["POST"])
+@production_disabled
+@admin_required
+def capabilities_probe():
+    """Run a tools probe for one endpoint/model and flash the verdict."""
+    api_url = request.form.get("api_url", "").strip()
+    model_name = request.form.get("model_name", "").strip()
+    api_key = request.form.get("api_key", "").strip() or None
+    if not api_url or not model_name:
+        flash("Both API URL and model name are required.", "error")
+        return redirect(url_for("admin.capabilities"))
+    try:
+        cap = probe_endpoint(api_url, model_name, api_key=api_key)
+    except Exception as exc:
+        flash(f"Probe could not determine a verdict: {exc}", "error")
+        return redirect(url_for("admin.capabilities"))
+    verdict = "supported" if cap.supports_tools else "NOT supported"
+    flash(
+        f"Probe verdict for {model_name}: tool calling {verdict} "
+        f"(probe_method={cap.probe_method}).",
+        "success" if cap.supports_tools else "warning",
+    )
+    return redirect(url_for("admin.capabilities"))
+
+
+@admin_bp.route("/capabilities/override", methods=["POST"])
+@production_disabled
+@admin_required
+def capabilities_override():
+    """Record a manual capability override for one endpoint/model."""
+    api_url = request.form.get("api_url", "").strip()
+    model_name = request.form.get("model_name", "").strip()
+    supports_tools = request.form.get("supports_tools") == "true"
+    if not api_url or not model_name:
+        flash("Both API URL and model name are required.", "error")
+        return redirect(url_for("admin.capabilities"))
+    set_manual_override(api_url, model_name, supports_tools)
+    flash(
+        f"Manual override saved: {model_name} tool calling "
+        f"{'supported' if supports_tools else 'disabled'}.",
+        "success",
+    )
+    return redirect(url_for("admin.capabilities"))
 
 
 @admin_bp.route("/api/system-info")
