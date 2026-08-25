@@ -19,7 +19,7 @@ from functools import cache
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from deaddit.dynamics import notifications
+from deaddit.dynamics import moderation, notifications
 from deaddit.extensions import cache as flask_cache
 from deaddit.extensions import db
 from deaddit.models import Comment, Post, Subdeaddit, User
@@ -91,6 +91,8 @@ def create_post(
         raise ContentValidationError(f"User '{user}' does not exist")
     if not Subdeaddit.query.filter_by(name=subdeaddit).first():
         raise ContentValidationError(f"Subdeaddit '{subdeaddit}' does not exist")
+    if moderation.active_ban_for(user, subdeaddit) is not None:
+        raise ContentValidationError(f"User '{user}' is banned")
 
     post = Post(
         title=title,
@@ -130,8 +132,13 @@ def create_comment(
         raise ContentValidationError("Comment missing required fields: content")
     if not User.query.filter_by(username=user).first():
         raise ContentValidationError(f"User '{user}' does not exist")
-    if db.session.get(Post, post_id) is None:
+    post = db.session.get(Post, post_id)
+    if post is None:
         raise ContentValidationError(f"Post '{post_id}' does not exist")
+    if post.removed:
+        raise ContentValidationError(f"Post '{post_id}' has been removed")
+    if moderation.active_ban_for(user, post.subdeaddit_name) is not None:
+        raise ContentValidationError(f"User '{user}' is banned")
 
     comment = Comment(
         post_id=post_id,
@@ -175,7 +182,7 @@ def create_user(
 
     Note:
         ``created_at`` is accepted for signature uniformity but only applied
-        if the model has a ``created_at`` column (currently it does not).
+        if the model has a ``created_at`` column (Phase D5: it does).
 
     Raises:
         IntegrityError: on duplicate username, after rollback.
@@ -220,7 +227,7 @@ def create_subdeaddit(
 
     Note:
         ``created_at`` is accepted for signature uniformity but only applied
-        if the model has a ``created_at`` column (currently it does not).
+        if the model has a ``created_at`` column (Phase D5: it does).
 
     Raises:
         ContentValidationError: missing name/description, or existing name

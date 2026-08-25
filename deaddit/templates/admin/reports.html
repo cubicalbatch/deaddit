@@ -1,0 +1,118 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Reports{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Moderation Reports</h1>
+</div>
+
+<!-- Status filter -->
+<ul class="nav nav-pills mb-3">
+    {% for status in statuses %}
+    <li class="nav-item">
+        <a class="nav-link {% if current_status == status %}active{% endif %}"
+           href="{{ url_for('admin.reports', status=status) }}">{{ status|capitalize }}</a>
+    </li>
+    {% endfor %}
+</ul>
+
+<div class="card">
+    <div class="card-body">
+        {% if rows %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Target</th>
+                        <th>Preview</th>
+                        <th>Reason</th>
+                        <th>Reporter</th>
+                        <th>Created</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td>{{ row.report.id }}</td>
+                        <td>
+                            {% if row.url %}
+                            <a href="{{ row.url }}" target="_blank" rel="noopener">
+                                {{ row.kind }} #{{ row.report.post_id or row.report.comment_id }}
+                            </a>
+                            {% else %}
+                            {{ row.kind or 'unknown' }}
+                            {% endif %}
+                            {% if row.author %}<div class="text-muted small">by u/{{ row.author }}</div>{% endif %}
+                        </td>
+                        <td>{{ row.snippet }}</td>
+                        <td>{{ row.report.reason }}</td>
+                        <td>{{ row.report.reporter }}</td>
+                        <td>{{ row.report.created_at.strftime('%Y-%m-%d %H:%M') if row.report.created_at }}</td>
+                        <td><span class="badge bg-secondary">{{ row.report.status }}</span></td>
+                        <td>
+                            {% if row.report.status == 'open' %}
+                            <form method="post" action="{{ url_for('admin.report_remove', report_id=row.report.id) }}" class="mb-1">
+                                <input type="text" class="form-control form-control-sm mb-1" name="removal_reason" placeholder="Removal reason">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                            </form>
+                            <form method="post" action="{{ url_for('admin.report_dismiss', report_id=row.report.id) }}" class="mb-1">
+                                <input type="text" class="form-control form-control-sm mb-1" name="note" placeholder="Dismissal note (optional)">
+                                <button type="submit" class="btn btn-sm btn-outline-secondary">Dismiss</button>
+                            </form>
+                            <form method="post" action="{{ url_for('admin.report_ban', report_id=row.report.id) }}">
+                                <select name="scope" class="form-select form-select-sm mb-1" aria-label="Ban scope">
+                                    <option value="site">Site-wide</option>
+                                    {% if row.subdeaddit_name %}
+                                    <option value="subdeaddit">d/{{ row.subdeaddit_name }}</option>
+                                    {% endif %}
+                                </select>
+                                <input type="number" min="1" class="form-control form-control-sm mb-1" name="duration_days" placeholder="Days (blank = permanent)">
+                                <input type="text" class="form-control form-control-sm mb-1" name="reason" placeholder="Ban reason">
+                                <button type="submit" class="btn btn-sm btn-outline-warning">Ban author</button>
+                            </form>
+                            {% else %}
+                            {% if row.report.resolution_note %}<div class="small">{{ row.report.resolution_note }}</div>{% endif %}
+                            <div class="text-muted small">resolved by {{ row.report.resolved_by or '—' }}</div>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">No reports with this status.</p>
+        {% endif %}
+    </div>
+</div>
+
+{% if pagination.pages > 1 %}
+<nav aria-label="Report pagination">
+    <ul class="pagination justify-content-center">
+        {% if pagination.has_prev %}
+        <li class="page-item">
+            <a class="page-link" href="{{ url_for('admin.reports', page=pagination.prev_num, status=current_status) }}">Previous</a>
+        </li>
+        {% endif %}
+        {% for page_num in pagination.iter_pages() %}
+            {% if page_num %}
+            <li class="page-item {% if page_num == pagination.page %}active{% endif %}">
+                <a class="page-link" href="{{ url_for('admin.reports', page=page_num, status=current_status) }}">{{ page_num }}</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+        {% endfor %}
+        {% if pagination.has_next %}
+        <li class="page-item">
+            <a class="page-link" href="{{ url_for('admin.reports', page=pagination.next_num, status=current_status) }}">Next</a>
+        </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}

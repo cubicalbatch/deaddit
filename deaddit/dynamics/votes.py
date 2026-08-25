@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 
+from deaddit.dynamics.moderation import active_ban_for
 from deaddit.extensions import db
 from deaddit.models import Comment, Post, Setting, User, Vote
 
@@ -65,6 +66,18 @@ def cast_vote(
 
     if db.session.get(User, voter) is None:
         return _reject(f"user '{voter}' does not exist", score)
+
+    # Phase D4: banned voters and removed content are rejected. The frozen
+    # D1 vocabulary above is untouched; these are additive reasons.
+    ban_sub = (
+        item.subdeaddit_name
+        if target == "post"
+        else item.post.subdeaddit_name
+    )
+    if active_ban_for(voter, ban_sub) is not None:
+        return _reject(f"user '{voter}' is banned", score)
+    if getattr(item, "removed", False):
+        return _reject(f"{target} {target_id} was removed", score)
 
     if item.user == voter:
         return _reject(f"you cannot vote on your own {target}", score)

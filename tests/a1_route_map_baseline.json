@@ -553,4 +553,33 @@
    "GET"
   ]
  }
+ ,
+ {
+  "rule": "/admin/reports",
+  "endpoint": "admin.reports",
+  "methods": [
+   "GET"
+  ]
+ },
+ {
+  "rule": "/admin/reports/<int:report_id>/ban",
+  "endpoint": "admin.report_ban",
+  "methods": [
+   "POST"
+  ]
+ },
+ {
+  "rule": "/admin/reports/<int:report_id>/dismiss",
+  "endpoint": "admin.report_dismiss",
+  "methods": [
+   "POST"
+  ]
+ },
+ {
+  "rule": "/admin/reports/<int:report_id>/remove",
+  "endpoint": "admin.report_remove",
+  "methods": [
+   "POST"
+  ]
+ }
 ]

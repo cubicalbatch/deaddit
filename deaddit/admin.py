@@ -29,6 +29,7 @@ from deaddit.llm.capabilities import probe_endpoint, set_manual_override
 from deaddit.models import (
     ApiEndpointConfig,
     ApiModel,
+    Ban,
     Comment,
     EndpointCapability,
     GenerationTemplate,
@@ -38,6 +39,7 @@ from deaddit.models import (
     LLMUsage,
     ModelRoute,
     Post,
+    Report,
     Subdeaddit,
     User,
 )
@@ -2557,3 +2559,192 @@ def agents_dashboard():
 def agent_detail(username):
     """Single-agent detail page with run timeline and thought drill-down."""
     return render_template("admin/agent_detail.html", username=username)
+
+
+# --- Moderation: reports queue (Phase D4) ---
+
+_REPORT_STATUSES = ("open", "actioned", "dismissed", "all")
+
+
+def _report_target(report):
+    """Resolve a report's target to (kind, item_or_None).
+
+    kind is "post" or "comment"; item is None when the row was hard-deleted
+    by bulk cleanup (the queue still lists the report).
+    """
+    if report.post_id:
+        return "post", Post.query.get(report.post_id)
+    if report.comment_id:
+        return "comment", Comment.query.get(report.comment_id)
+    return None, None
+
+
+def _report_row(report):
+    """View model for one queue row: links, preview snippet, author."""
+    kind, item = _report_target(report)
+    url = None
+    snippet = "(content no longer exists)"
+    author = None
+    subdeaddit_name = None
+    if kind == "post" and item is not None:
+        url = url_for(
+            "web.post",
+            subdeaddit_name=item.subdeaddit_name,
+            post_id=item.id,
+        )
+        snippet = (item.title or item.content or "")[:120]
+        author = item.user
+        subdeaddit_name = item.subdeaddit_name
+    elif kind == "comment" and item is not None:
+        url = url_for(
+            "web.post",
+            subdeaddit_name=item.post.subdeaddit_name,
+            post_id=item.post_id,
+            _anchor=f"comment-{item.id}",
+        )
+        snippet = (item.content or "")[:120]
+        author = item.user
+        subdeaddit_name = item.post.subdeaddit_name
+    return {
+        "report": report,
+        "kind": kind,
+        "url": url,
+        "snippet": snippet,
+        "author": author,
+        "subdeaddit_name": subdeaddit_name,
+    }
+
+
+def _report_subdeaddit_name(report):
+    """Subdeaddit scope for a ban: the reported item's community."""
+    _, item = _report_target(report)
+    if item is None:
+        return None
+    return (
+        item.subdeaddit_name
+        if hasattr(item, "subdeaddit_name")
+        else item.post.subdeaddit_name
+    )
+
+
+@admin_bp.route("/reports")
+@production_disabled
+@admin_required
+def reports():
+    """Moderation report queue (Phase D4)."""
+    status = request.args.get("status", "open")
+    if status not in _REPORT_STATUSES:
+        status = "open"
+
+    from deaddit.dynamics import moderation
+
+    if status == "all":
+        query = Report.query.order_by(desc(Report.created_at), desc(Report.id))
+    else:
+        query = moderation.list_reports(status=status)
+
+    page = int(request.args.get("page", 1))
+    pagination = query.paginate(page=page, per_page=20, error_out=False)
+
+    return render_template(
+        "admin/reports.html",
+        rows=[_report_row(report) for report in pagination.items],
+        pagination=pagination,
+        statuses=_REPORT_STATUSES,
+        current_status=status,
+    )
+
+
+@admin_bp.route("/reports/<int:report_id>/remove", methods=["POST"])
+@production_disabled
+@admin_required
+def report_remove(report_id):
+    """Action a report: soft-remove the reported content (Phase D4)."""
+    removal_reason = (request.form.get("removal_reason") or "").strip() or None
+
+    from deaddit.dynamics import moderation
+
+    try:
+        report = moderation.remove_report(
+            report_id, moderator="admin", removal_reason=removal_reason
+        )
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("admin.reports"))
+
+    flash(f"Report #{report.id} actioned: content removed.", "success")
+    return redirect(url_for("admin.reports"))
+
+
+@admin_bp.route("/reports/<int:report_id>/dismiss", methods=["POST"])
+@production_disabled
+@admin_required
+def report_dismiss(report_id):
+    """Dismiss a report without acting on the content (Phase D4)."""
+    note = (request.form.get("note") or "").strip() or None
+
+    from deaddit.dynamics import moderation
+
+    try:
+        report = moderation.dismiss_report(report_id, moderator="admin", note=note)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("admin.reports"))
+
+    flash(f"Report #{report.id} dismissed.", "success")
+    return redirect(url_for("admin.reports"))
+
+
+@admin_bp.route("/reports/<int:report_id>/ban", methods=["POST"])
+@production_disabled
+@admin_required
+def report_ban(report_id):
+    """Ban the author of the reported content (Phase D4)."""
+    report = Report.query.get_or_404(report_id)
+    _, item = _report_target(report)
+    if item is None:
+        flash("Reported content no longer exists; cannot ban its author.", "error")
+        return redirect(url_for("admin.reports", status=request.args.get("status")))
+
+    username = item.user
+    scope = request.form.get("scope", "site")
+    reason = (request.form.get("reason") or "").strip()
+    duration_raw = (request.form.get("duration_days") or "").strip()
+
+    if not reason:
+        flash("A ban reason is required.", "error")
+        return redirect(url_for("admin.reports"))
+
+    expires_at = None
+    if duration_raw:
+        try:
+            days = int(duration_raw)
+            if days <= 0:
+                raise ValueError("duration must be positive")
+        except ValueError as exc:
+            flash(f"Invalid ban duration: {exc}", "error")
+            return redirect(url_for("admin.reports"))
+        expires_at = datetime.utcnow() + timedelta(days=days)
+
+    subdeaddit_name = (
+        _report_subdeaddit_name(report) if scope == "subdeaddit" else None
+    )
+
+    from deaddit.dynamics import moderation
+
+    try:
+        ban = moderation.ban_user(
+            username,
+            reason,
+            subdeaddit_name=subdeaddit_name,
+            expires_at=expires_at,
+            banned_by="admin",
+        )
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("admin.reports"))
+
+    scope_label = ban.subdeaddit_name or "site-wide"
+    duration_label = f" until {ban.expires_at:%Y-%m-%d}" if ban.expires_at else ""
+    flash(f"Banned u/{username} ({scope_label}){duration_label}.", "success")
+    return redirect(url_for("admin.reports"))

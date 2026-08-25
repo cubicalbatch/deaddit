@@ -4,6 +4,14 @@
 {% block content %}
 <article class="post post-detail">
     <div class="post-content">
+        {% if post.removed %}
+        {# Tombstone: direct links stay reachable, title/body suppressed. #}
+        {{ m.empty_state(
+            'bi-slash-circle',
+            'Post removed',
+            removal_reason or 'This post was removed by a moderator.',
+        ) }}
+        {% else %}
         <div class="post-header">
             {{ m.vote_widget(post.upvote_count) }}
             <h1>{{ post.title }}</h1>
@@ -20,6 +28,7 @@
         <div class="post-body">
             {{ post_body_html|safe }}
         </div>
+        {% endif %}
     </div>
 </article>
 
@@ -56,6 +65,14 @@
              data-comment-id="{{ node.id }}"
              data-depth="{{ node.level }}"
              data-descendants="{{ node.descendant_count }}">
+        {% if node.removed %}
+        {# Tombstone node: content/author/score suppressed, children kept. #}
+        <div class="comment-main">
+            <div class="comment-body">
+                <em>[removed{% if node.removal_reason %} — {{ node.removal_reason }}{% endif %}]</em>
+            </div>
+        </div>
+        {% else %}
         <button type="button"
                 class="comment-collapse"
                 aria-expanded="{{ 'false' if auto_collapse else 'true' }}"
@@ -81,6 +98,7 @@
                 {{ node.content_html|safe }}
             </div>
         </div>
+        {% endif %}
         {% if node.tail %}
         <a class="continue-thread" href="#comment-{{ node.tail[0].id }}">Continue this thread ({{ node.tail | length }})</a>
         {% for t in node.tail %}

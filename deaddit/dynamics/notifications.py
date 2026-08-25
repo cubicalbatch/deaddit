@@ -147,3 +147,37 @@ def notify_post_created(post: Post) -> None:
         logger.warning(
             "notification emission failed for post %s", post_id, exc_info=True
         )
+
+
+def notify_mod_action(
+    *,
+    recipient: str | None,
+    actor: str | None,
+    post_id: int | None = None,
+    comment_id: int | None = None,
+    snippet: str | None = None,
+) -> None:
+    """Emit a ``mod_action`` notification (the emitter owed from D3).
+
+    Called by :mod:`deaddit.dynamics.moderation` strictly AFTER the
+    moderation transaction has committed. Same isolation contract as every
+    other public entry point: whole body guarded, rollback before any ORM
+    access on a failed flush, log warning, never raise.
+    """
+    try:
+        _emit(
+            recipient=recipient,
+            kind="mod_action",
+            actor=actor,
+            post_id=post_id,
+            comment_id=comment_id,
+            snippet=snippet,
+        )
+    except Exception:
+        # Roll back BEFORE any attribute access; log plain snapshotted values.
+        db.session.rollback()
+        logger.warning(
+            "notification emission failed for mod action to %s",
+            recipient,
+            exc_info=True,
+        )

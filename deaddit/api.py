@@ -228,7 +228,7 @@ def api_posts():
     limit = request.args.get("limit", default=50, type=int)
     title = request.args.get("title")  # New parameter for title filtering
 
-    query = Post.query
+    query = Post.query.filter(Post.removed.is_(False))
 
     # Filter by Subdeaddit if provided
     if subdeaddit_name:
@@ -305,6 +305,9 @@ def api_post(post_id):
         "upvote_count": post.upvote_count,
         "user": post.user,
         "content": post.content.replace("reddit", "deaddit"),
+        # Soft-removed posts stay fetchable by direct ID; consumers must
+        # honor the flag (the web surface renders a tombstone instead).
+        "removed": bool(post.removed),
         "comment_count": comment_count,
         "comments": comment_tree,
     }
@@ -326,8 +329,14 @@ def build_comment_tree(comments):
 def format_comment(comment, comment_map):
     formatted_comment = {
         "id": comment.id,
-        "user": comment.user,
-        "content": comment.content.replace("reddit", "deaddit"),
+        # Removed comments keep their tree position (replies stay attached)
+        # but their content/author are suppressed behind a tombstone marker.
+        "removed": bool(comment.removed),
+        "user": None if comment.removed else comment.user,
+        "content": (
+            "[removed]" if comment.removed
+            else comment.content.replace("reddit", "deaddit")
+        ),
         "parent_id": comment.parent_id,
         "replies": [],
     }
