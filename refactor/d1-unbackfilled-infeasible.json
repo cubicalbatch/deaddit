@@ -1,0 +1,248 @@
+{
+  "generated_at": "2026-08-25T11:45Z",
+  "rule": "abs(upvote_count) > user_count-1 under unique(voter,item); no vote rows written; legacy display path retained",
+  "user_capacity": 98,
+  "total": 48,
+  "items": [
+    {
+      "kind": "post",
+      "id": 363,
+      "score": 123
+    },
+    {
+      "kind": "post",
+      "id": 388,
+      "score": 124
+    },
+    {
+      "kind": "post",
+      "id": 515,
+      "score": 120
+    },
+    {
+      "kind": "post",
+      "id": 940,
+      "score": 127
+    },
+    {
+      "kind": "post",
+      "id": 1125,
+      "score": 123
+    },
+    {
+      "kind": "post",
+      "id": 1143,
+      "score": 112
+    },
+    {
+      "kind": "post",
+      "id": 1177,
+      "score": 125
+    },
+    {
+      "kind": "post",
+      "id": 1214,
+      "score": 112
+    },
+    {
+      "kind": "post",
+      "id": 1227,
+      "score": 128
+    },
+    {
+      "kind": "post",
+      "id": 1587,
+      "score": 200
+    },
+    {
+      "kind": "post",
+      "id": 1589,
+      "score": 132
+    },
+    {
+      "kind": "post",
+      "id": 1610,
+      "score": 123
+    },
+    {
+      "kind": "post",
+      "id": 1634,
+      "score": 100
+    },
+    {
+      "kind": "post",
+      "id": 1638,
+      "score": 123
+    },
+    {
+      "kind": "post",
+      "id": 1653,
+      "score": 100
+    },
+    {
+      "kind": "post",
+      "id": 1655,
+      "score": 150
+    },
+    {
+      "kind": "post",
+      "id": 1663,
+      "score": 154
+    },
+    {
+      "kind": "post",
+      "id": 1664,
+      "score": 120
+    },
+    {
+      "kind": "post",
+      "id": 1666,
+      "score": 125
+    },
+    {
+      "kind": "post",
+      "id": 1676,
+      "score": 150
+    },
+    {
+      "kind": "post",
+      "id": 1698,
+      "score": 100
+    },
+    {
+      "kind": "post",
+      "id": 1704,
+      "score": 120
+    },
+    {
+      "kind": "post",
+      "id": 1717,
+      "score": 120
+    },
+    {
+      "kind": "post",
+      "id": 1728,
+      "score": 125
+    },
+    {
+      "kind": "post",
+      "id": 1731,
+      "score": 100
+    },
+    {
+      "kind": "post",
+      "id": 1739,
+      "score": 104
+    },
+    {
+      "kind": "post",
+      "id": 1745,
+      "score": 123
+    },
+    {
+      "kind": "post",
+      "id": 1768,
+      "score": 112
+    },
+    {
+      "kind": "post",
+      "id": 1796,
+      "score": 123
+    },
+    {
+      "kind": "post",
+      "id": 1806,
+      "score": 134
+    },
+    {
+      "kind": "post",
+      "id": 1818,
+      "score": 105
+    },
+    {
+      "kind": "post",
+      "id": 1820,
+      "score": 123
+    },
+    {
+      "kind": "post",
+      "id": 1825,
+      "score": 126
+    },
+    {
+      "kind": "post",
+      "id": 1829,
+      "score": 103
+    },
+    {
+      "kind": "post",
+      "id": 1838,
+      "score": 114
+    },
+    {
+      "kind": "post",
+      "id": 1858,
+      "score": 125
+    },
+    {
+      "kind": "post",
+      "id": 1872,
+      "score": 112
+    },
+    {
+      "kind": "post",
+      "id": 1876,
+      "score": 112
+    },
+    {
+      "kind": "post",
+      "id": 1907,
+      "score": 106
+    },
+    {
+      "kind": "post",
+      "id": 2083,
+      "score": 127
+    },
+    {
+      "kind": "post",
+      "id": 2092,
+      "score": 127
+    },
+    {
+      "kind": "comment",
+      "id": 24551,
+      "score": 1234
+    },
+    {
+      "kind": "comment",
+      "id": 25214,
+      "score": 200
+    },
+    {
+      "kind": "comment",
+      "id": 25297,
+      "score": 981
+    },
+    {
+      "kind": "comment",
+      "id": 25564,
+      "score": 200
+    },
+    {
+      "kind": "comment",
+      "id": 25661,
+      "score": 234
+    },
+    {
+      "kind": "comment",
+      "id": 26508,
+      "score": 984
+    },
+    {
+      "kind": "comment",
+      "id": 27630,
+      "score": 253
+    }
+  ]
+}
