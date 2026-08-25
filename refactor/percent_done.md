@@ -5,8 +5,8 @@ Owner-facing progress estimate. Updated by the orchestrator at every forward ste
 count-based on tracked steps, with a size-weighted figure (S=1/M=2/L=3) because
 remaining phases are heavier than finished ones.
 
-**Current: ~39% done** (size-weighted 24/62) · raw count 16/36 steps closed (~44%)
-As of: 2026-08-25 01:10 · Wave 3 closed; Wave 4 opening with LeadA5 (worker gate)
+**Current: ~44% done** (size-weighted 27/62) · raw count 17/36 steps closed (~47%)
+As of: 2026-08-25 11:30 · Wave 4 lanes open — ACP2 ∥ D1 ∥ UX4 running in parallel
 
 Why the two numbers diverge: Waves 0–1 (five small/mid phases) are closed, but the
 heavy tail — A5 worker, D1–D3 dynamics, AC P3 parity burn-in (longest wall-clock
@@ -38,3 +38,7 @@ occupy a large share of remaining calendar time at a fixed %-point.
   green), feeds/comments rebuilt on design tokens with zero axe violations, spend ledger
   + model routing landed. First agent-authored content is live in prod (comment 36102).
   Next gate: A5 dedicated worker before scheduler/dynamics fan-out.
+- 2026-08-25 11:30 — **A5 closed** (a3f3a96, 8/8 PASS): dedicated worker owns job
+  execution (atomic claim/heartbeat/boot-sweep proven under kill -9), web process runs
+  zero schedulers, compose brings up web+worker healthy; three latent deploy bugs fixed.
+  Wave 4 fan-out dispatched: scheduler/admin visibility ∥ votes/karma ∥ profiles/search.
