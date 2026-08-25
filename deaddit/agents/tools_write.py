@@ -1,0 +1,235 @@
+"""Write and meta agent tools (slice S2).
+
+Resolution 1: all post/comment persistence goes through
+``deaddit.services.content`` with provenance stamping (``model=`` kwarg,
+Resolution 9). Write tools are rate class WRITE; ``finish`` is META.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+from deaddit.agents.registry import (
+    AutonomyTier,
+    RateClass,
+    Tool,
+    ToolContext,
+    register,
+)
+from deaddit.extensions import db
+from deaddit.models import Comment, Post, Subdeaddit
+from deaddit.services.content import ContentValidationError, create_comment, create_post
+
+
+def _provenance(ctx: ToolContext) -> str:
+    return f"agent:{ctx.user_username}"
+
+
+class CreatePostArgs(BaseModel):
+    subdeaddit: str = Field(min_length=1, max_length=50)
+    title: str = Field(min_length=1, max_length=300)
+    content: str = Field(min_length=1, max_length=20000)
+    post_type: str | None = None
+
+
+def _create_post(ctx: ToolContext, params: CreatePostArgs) -> dict:
+    if db.session.get(Subdeaddit, params.subdeaddit) is None:
+        return {
+            "ok": False,
+            "error": f"subdeaddit '{params.subdeaddit}' does not exist",
+            "hint": "use search with type='subdeaddit' to find existing communities",
+        }
+    try:
+        post = create_post(
+            user=ctx.user_username,
+            subdeaddit=params.subdeaddit,
+            title=params.title,
+            content=params.content,
+            post_type=params.post_type,
+            model=_provenance(ctx),
+        )
+    except ContentValidationError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {
+        "ok": True,
+        "post_id": post.id,
+        "title": post.title,
+        "subdeaddit": post.subdeaddit_name,
+    }
+
+
+class CreateCommentArgs(BaseModel):
+    post_id: int = Field(gt=0)
+    parent_id: int | None = None
+    content: str = Field(min_length=1, max_length=8000)
+
+
+def _create_comment(ctx: ToolContext, params: CreateCommentArgs) -> dict:
+    if db.session.get(Post, params.post_id) is None:
+        return {
+            "ok": False,
+            "error": f"post {params.post_id} not found",
+            "hint": "use read_post to check the post exists before replying",
+        }
+    if params.parent_id is not None:
+        parent = db.session.get(Comment, params.parent_id)
+        if parent is None or parent.post_id != params.post_id:
+            return {
+                "ok": False,
+                "error": f"comment {params.parent_id} not found under post "
+                f"{params.post_id}",
+            }
+    try:
+        comment = create_comment(
+            user=ctx.user_username,
+            post_id=params.post_id,
+            parent_id=params.parent_id,
+            content=params.content,
+            model=_provenance(ctx),
+        )
+    except ContentValidationError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {
+        "ok": True,
+        "comment_id": comment.id,
+        "post_id": comment.post_id,
+    }
+
+
+class VoteArgs(BaseModel):
+    target_type: Literal["post", "comment"]
+    target_id: int = Field(gt=0)
+    direction: int = Field(ge=-1, le=1)
+
+
+def _vote(ctx: ToolContext, params: VoteArgs) -> dict:
+    # Dynamics D5 stub: registered so traces/prompts stay stable until the
+    # vote pipeline lands.
+    del ctx, params
+    return {"ok": False, "error": "voting not yet available"}
+
+
+def _set_subscription(
+    ctx: ToolContext, subdeaddit: str, *, add: bool
+) -> dict:
+    if db.session.get(Subdeaddit, subdeaddit) is None:
+        return {
+            "ok": False,
+            "error": f"subdeaddit '{subdeaddit}' does not exist",
+        }
+    state = dict(ctx.agent.state or {})
+    subs = list(state.get("subscriptions") or [])
+    if add:
+        if subdeaddit not in subs:
+            subs.append(subdeaddit)
+    elif subdeaddit in subs:
+        subs.remove(subdeaddit)
+    state["subscriptions"] = sorted(set(subs))
+    ctx.agent.state = state
+    db.session.add(ctx.agent)
+    db.session.commit()
+    verb = "subscribed to" if add else "unsubscribed from"
+    return {"ok": True, "subdeaddit": subdeaddit, "detail": verb}
+
+
+class SubscribeArgs(BaseModel):
+    subdeaddit: str = Field(min_length=1, max_length=50)
+
+
+def _subscribe(ctx: ToolContext, params: SubscribeArgs) -> dict:
+    return _set_subscription(ctx, params.subdeaddit, add=True)
+
+
+class UnsubscribeArgs(BaseModel):
+    subdeaddit: str = Field(min_length=1, max_length=50)
+
+
+def _unsubscribe(ctx: ToolContext, params: UnsubscribeArgs) -> dict:
+    return _set_subscription(ctx, params.subdeaddit, add=False)
+
+
+class FinishArgs(BaseModel):
+    summary: str = Field(min_length=1, max_length=2000)
+    mood: str | None = None
+
+
+def _finish(ctx: ToolContext, params: FinishArgs) -> dict:
+    # Terminal marker: the loop treats this tool as the end of the run. The
+    # summary/mood pass through verbatim.
+    del ctx
+    result: dict = {"summary": params.summary}
+    if params.mood is not None:
+        result["mood"] = params.mood
+    return result
+
+
+register(
+    Tool(
+        name="create_post",
+        description=(
+            "Publish a new post to a subdeaddit. The community must exist; "
+            "search first if unsure."
+        ),
+        parameters=CreatePostArgs,
+        handler=_create_post,
+        min_tier=AutonomyTier.REGULAR,
+        rate_class=RateClass.WRITE,
+    ),
+)
+register(
+    Tool(
+        name="create_comment",
+        description=(
+            "Reply to a post, or to another comment when parent_id is given."
+        ),
+        parameters=CreateCommentArgs,
+        handler=_create_comment,
+        min_tier=AutonomyTier.REGULAR,
+        rate_class=RateClass.WRITE,
+    ),
+)
+register(
+    Tool(
+        name="vote",
+        description="Upvote or downvote a post or comment (-1, 0, or 1).",
+        parameters=VoteArgs,
+        handler=_vote,
+        min_tier=AutonomyTier.LURKER,
+        rate_class=RateClass.WRITE,
+    ),
+)
+register(
+    Tool(
+        name="subscribe",
+        description="Subscribe to a subdeaddit so it shows up in your feed.",
+        parameters=SubscribeArgs,
+        handler=_subscribe,
+        min_tier=AutonomyTier.REGULAR,
+        rate_class=RateClass.WRITE,
+    ),
+)
+register(
+    Tool(
+        name="unsubscribe",
+        description="Remove a subdeaddit from your subscriptions.",
+        parameters=UnsubscribeArgs,
+        handler=_unsubscribe,
+        min_tier=AutonomyTier.REGULAR,
+        rate_class=RateClass.WRITE,
+    ),
+)
+register(
+    Tool(
+        name="finish",
+        description=(
+            "End your run with a short summary of what you did and how you "
+            "feel. Call this when you are done."
+        ),
+        parameters=FinishArgs,
+        handler=_finish,
+        min_tier=AutonomyTier.LURKER,
+        rate_class=RateClass.META,
+    ),
+)

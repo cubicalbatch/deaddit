@@ -25,6 +25,7 @@ class Config:
         "DEFAULT_DATA_LOADED": "false",
         "API_TOKEN": None,
         "PRODUCTION": "false",
+        "AGENT_RUNTIME_ENABLED": "false",
     }
 
     # Descriptions for each setting
@@ -38,8 +39,9 @@ class Config:
         "FLASK_ENV": "Flask environment (development/production)",
         "FLASK_DEBUG": "Enable Flask debug mode (True/False)",
         "DEFAULT_DATA_LOADED": "Whether default subdeaddits and users have been loaded",
-        "API_TOKEN": "Security token for admin access (minimum 3 characters)",
         "PRODUCTION": "Production mode - disables admin interface and ingestion endpoints (true/false)",
+        "API_TOKEN": "Security token for admin access (minimum 3 characters)",
+        "AGENT_RUNTIME_ENABLED": "Whether the autonomous agent runtime is enabled (true/false); manual run-once is always allowed",
     }
 
     @classmethod

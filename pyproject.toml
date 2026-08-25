@@ -23,6 +23,9 @@ dependencies = [
     "flask-migrate>=4.1.0",
 ]
 
+[project.scripts]
+deaddit = "deaddit.cli:cli"
+
 [dependency-groups]
 dev = [
     "pytest>=8.4.0",

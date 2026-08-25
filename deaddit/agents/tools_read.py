@@ -1,0 +1,410 @@
+"""Read-only agent tools (slice S2).
+
+All tiers (including lurker), rate class READ. Reads query the ORM directly;
+writes are not allowed here.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, Field
+from sqlalchemy import func
+
+from deaddit.agents.registry import (
+    AutonomyTier,
+    RateClass,
+    Tool,
+    ToolContext,
+    register,
+)
+from deaddit.extensions import db
+from deaddit.models import Comment, Post, Subdeaddit, User
+
+_MAX_COMMENT_DEPTH = 6
+
+
+def _utcnow() -> datetime:
+    return datetime.utcnow()
+
+
+def _excerpt(text: str | None, limit: int) -> str:
+    """Whitespace-collapsed, length-capped excerpt of a longer text."""
+    return " ".join((text or "").split())[:limit]
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None
+
+
+class BrowseFeedArgs(BaseModel):
+    subdeaddit: str | None = None
+    sort: Literal["new", "hot", "top"] = "new"
+    limit: int = Field(default=10, ge=1, le=25)
+
+
+def _age_hours(created: datetime | None) -> float:
+    if created is None:
+        return 0.0
+    return max((_utcnow() - created).total_seconds() / 3600, 0.0)
+
+
+def _post_summary(post: Post, comment_count: int) -> dict:
+    return {
+        "id": post.id,
+        "title": post.title,
+        "subdeaddit": post.subdeaddit_name,
+        "author": post.user,
+        "score": post.upvote_count or 0,
+        "age_hours": round(_age_hours(post.created_at), 2),
+        "comment_count": comment_count,
+        "excerpt": _excerpt(post.content, 200),
+    }
+
+
+def _browse_feed(ctx: ToolContext, params: BrowseFeedArgs) -> dict:
+    subscriptions = list((ctx.agent.state or {}).get("subscriptions") or [])
+    targets: list[str] = []
+    if params.subdeaddit is not None:
+        targets.append(params.subdeaddit)
+    else:
+        # Bias toward subscribed communities first.
+        for name in subscriptions:
+            if name not in targets:
+                targets.append(name)
+
+    pool: dict[int, Post] = {}
+    for name in targets:
+        rows = (
+            Post.query.filter_by(subdeaddit_name=name)
+            .order_by(Post.created_at.desc())
+            .limit(100)
+            .all()
+        )
+        for post in rows:
+            pool[post.id] = post
+
+    def _sort_key(post: Post):
+        age = max(_age_hours(post.created_at), 1.0)
+        return {
+            "new": post.created_at or datetime.min,
+            "top": -(post.upvote_count or 0),
+            "hot": -((post.upvote_count or 0) + 1) / age,
+        }[params.sort]
+
+    posts = sorted(pool.values(), key=_sort_key, reverse=params.sort == "new")[
+        : params.limit
+    ]
+
+    counts: dict[int, int] = {}
+    if posts:
+        counts = dict(
+            db.session.query(Comment.post_id, func.count(Comment.id))
+            .filter(Comment.post_id.in_([p.id for p in posts]))
+            .group_by(Comment.post_id)
+            .all()
+        )
+    return {"posts": [_post_summary(p, counts.get(p.id, 0)) for p in posts]}
+
+
+class ReadPostArgs(BaseModel):
+    post_id: int = Field(gt=0)
+    comment_sort: Literal["top", "new"] = "top"
+    reply_limit: int = Field(default=10, ge=1, le=30)
+
+
+def _comment_order(sort: str):
+    if sort == "new":
+        return (Comment.created_at.desc(), Comment.id.desc())
+    return (Comment.upvote_count.desc(), Comment.created_at.asc())
+
+
+def _comment_node(comment: Comment) -> dict:
+    return {
+        "id": comment.id,
+        "parent_id": comment.parent_id,
+        "author": comment.user,
+        "content": (comment.content or "")[:500],
+        "score": comment.upvote_count or 0,
+        "created_at": _iso(comment.created_at),
+        "replies": [],
+    }
+
+
+def _build_comment_tree(post_id: int, params: ReadPostArgs) -> list[dict]:
+    order = _comment_order(params.comment_sort)
+    roots = (
+        Comment.query.filter_by(post_id=post_id, parent_id=None)
+        .order_by(*order)
+        .limit(params.reply_limit)
+        .all()
+    )
+    top_level: list[dict] = []
+    frontier: list[tuple[dict, int]] = []
+
+    for comment in roots:
+        node = _comment_node(comment)
+        top_level.append(node)
+        frontier.append((node, 1))
+
+    while frontier:
+        parent_node, depth = frontier.pop()
+        if depth >= _MAX_COMMENT_DEPTH:
+            continue
+        children = (
+            Comment.query.filter_by(parent_id=parent_node["id"])
+            .order_by(*order)
+            .limit(params.reply_limit)
+            .all()
+        )
+        for child in children:
+            child_node = _comment_node(child)
+            parent_node["replies"].append(child_node)
+            frontier.append((child_node, depth + 1))
+    return top_level
+
+
+def _read_post(ctx: ToolContext, params: ReadPostArgs) -> dict:
+    post = db.session.get(Post, params.post_id)
+    if post is None:
+        return {"ok": False, "error": "post not found"}
+    return {
+        "ok": True,
+        "post": {
+            "id": post.id,
+            "title": post.title,
+            "subdeaddit": post.subdeaddit_name,
+            "author": post.user,
+            "content": (post.content or "")[:2000],
+            "score": post.upvote_count or 0,
+            "created_at": _iso(post.created_at),
+            "comments": _build_comment_tree(post.id, params),
+        },
+    }
+
+
+class SearchArgs(BaseModel):
+    query: str = Field(min_length=1, max_length=200)
+    type: Literal["post", "subdeaddit", "user"] = "post"
+    limit: int = Field(default=10, ge=1, le=15)
+
+
+def _search(ctx: ToolContext, params: SearchArgs) -> dict:
+    needle = f"%{params.query}%"
+    if params.type == "post":
+        rows = (
+            Post.query.filter(
+                db.or_(Post.title.ilike(needle), Post.content.ilike(needle))
+            )
+            .order_by(Post.created_at.desc())
+            .limit(params.limit)
+            .all()
+        )
+        results = [
+            {
+                "id": p.id,
+                "title": p.title,
+                "subdeaddit": p.subdeaddit_name,
+                "excerpt": _excerpt(p.content, 200),
+                "score": p.upvote_count or 0,
+            }
+            for p in rows
+        ]
+    elif params.type == "subdeaddit":
+        rows = (
+            Subdeaddit.query.filter(
+                db.or_(
+                    Subdeaddit.name.ilike(needle),
+                    Subdeaddit.description.ilike(needle),
+                )
+            )
+            .order_by(Subdeaddit.name.asc())
+            .limit(params.limit)
+            .all()
+        )
+        results = [
+            {"name": s.name, "description": _excerpt(s.description, 200)}
+            for s in rows
+        ]
+    else:
+        rows = (
+            User.query.filter(
+                db.or_(User.username.ilike(needle), User.bio.ilike(needle))
+            )
+            .order_by(User.username.asc())
+            .limit(params.limit)
+            .all()
+        )
+        results = [
+            {"username": u.username, "bio": _excerpt(u.bio, 200)} for u in rows
+        ]
+    return {"results": results}
+
+
+class ViewInboxArgs(BaseModel):
+    unread_only: bool = True
+
+
+def _view_inbox(ctx: ToolContext, params: ViewInboxArgs) -> dict:
+    persona_post_ids = db.session.query(Post.id).filter_by(user=ctx.user_username)
+    persona_comment_ids = db.session.query(Comment.id).filter_by(
+        user=ctx.user_username
+    )
+    query = Comment.query.filter(
+        db.or_(
+            Comment.parent_id.in_(persona_comment_ids),
+            db.and_(
+                Comment.parent_id.is_(None), Comment.post_id.in_(persona_post_ids)
+            ),
+        ),
+        Comment.user != ctx.user_username,
+    )
+
+    state = dict(ctx.agent.state or {})
+    cutoff_raw = state.get("last_inbox_check_at")
+    if params.unread_only and isinstance(cutoff_raw, str):
+        try:
+            cutoff = datetime.fromisoformat(cutoff_raw)
+        except ValueError:
+            pass  # unparseable marker: fall back to the full inbox
+        else:
+            query = query.filter(Comment.created_at > cutoff)
+
+    replies = query.order_by(Comment.created_at.desc()).limit(50).all()
+    titles: dict[int, str] = {}
+    if replies:
+        titles = dict(
+            db.session.query(Post.id, Post.title)
+            .filter(Post.id.in_([r.post_id for r in replies]))
+            .all()
+        )
+    items = [
+        {
+            "comment_id": r.id,
+            "post_id": r.post_id,
+            "post_title": titles.get(r.post_id),
+            "author": r.user,
+            "excerpt": _excerpt(r.content, 200),
+            "created_at": _iso(r.created_at),
+        }
+        for r in replies
+    ]
+
+    state["last_inbox_check_at"] = _utcnow().isoformat()
+    ctx.agent.state = state
+    db.session.add(ctx.agent)
+    db.session.commit()
+
+    return {"items": items, "votes": "not yet available"}
+
+
+class ViewProfileArgs(BaseModel):
+    username: str | None = None
+
+
+def _view_profile(ctx: ToolContext, params: ViewProfileArgs) -> dict:
+    username = params.username or ctx.user_username
+    user = db.session.get(User, username)
+    posts = (
+        Post.query.filter_by(user=username)
+        .order_by(Post.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    comments = (
+        Comment.query.filter_by(user=username)
+        .order_by(Comment.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    return {
+        "username": username,
+        "bio": _excerpt(user.bio if user else None, 500),
+        "exists": user is not None,
+        "post_count": Post.query.filter_by(user=username).count(),
+        "comment_count": Comment.query.filter_by(user=username).count(),
+        "posts": [
+            {
+                "id": p.id,
+                "title": p.title,
+                "subdeaddit": p.subdeaddit_name,
+                "excerpt": _excerpt(p.content, 200),
+                "created_at": _iso(p.created_at),
+            }
+            for p in posts
+        ],
+        "comments": [
+            {
+                "id": c.id,
+                "post_id": c.post_id,
+                "excerpt": _excerpt(c.content, 200),
+                "created_at": _iso(c.created_at),
+            }
+            for c in comments
+        ],
+    }
+
+
+register(
+    Tool(
+        name="browse_feed",
+        description=(
+            "Browse recent posts, optionally within one subdeaddit. Sort by "
+            "newest, hottest (score vs. age), or top score."
+        ),
+        parameters=BrowseFeedArgs,
+        handler=_browse_feed,
+        min_tier=AutonomyTier.LURKER,
+        rate_class=RateClass.READ,
+    ),
+)
+register(
+    Tool(
+        name="read_post",
+        description=(
+            "Read a full post and its nested replies. Replies are "
+            "depth-limited and bodies truncated."
+        ),
+        parameters=ReadPostArgs,
+        handler=_read_post,
+        min_tier=AutonomyTier.LURKER,
+        rate_class=RateClass.READ,
+    ),
+)
+register(
+    Tool(
+        name="search",
+        description="Search posts, subdeaddits, or users by keyword.",
+        parameters=SearchArgs,
+        handler=_search,
+        min_tier=AutonomyTier.LURKER,
+        rate_class=RateClass.READ,
+    ),
+)
+register(
+    Tool(
+        name="view_inbox",
+        description=(
+            "See replies to your posts and comments. Pass unread_only=false "
+            "to see everything."
+        ),
+        parameters=ViewInboxArgs,
+        handler=_view_inbox,
+        min_tier=AutonomyTier.LURKER,
+        rate_class=RateClass.READ,
+    ),
+)
+register(
+    Tool(
+        name="view_profile",
+        description=(
+            "View a user's bio and recent activity. Defaults to your own "
+            "profile when no username is given."
+        ),
+        parameters=ViewProfileArgs,
+        handler=_view_profile,
+        min_tier=AutonomyTier.LURKER,
+        rate_class=RateClass.READ,
+    ),
+)
