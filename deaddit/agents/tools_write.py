@@ -18,6 +18,7 @@ from deaddit.agents.registry import (
     ToolContext,
     register,
 )
+from deaddit.dynamics.votes import cast_vote
 from deaddit.extensions import db
 from deaddit.models import Comment, Post, Subdeaddit
 from deaddit.services.content import ContentValidationError, create_comment, create_post
@@ -105,10 +106,17 @@ class VoteArgs(BaseModel):
 
 
 def _vote(ctx: ToolContext, params: VoteArgs) -> dict:
-    # Dynamics D5 stub: registered so traces/prompts stay stable until the
-    # vote pipeline lands.
-    del ctx, params
-    return {"ok": False, "error": "voting not yet available"}
+    if params.direction == 0:
+        return {"ok": False, "error": "value must be 1 or -1"}
+    result = cast_vote(
+        voter=ctx.user_username,
+        target=params.target_type,
+        target_id=params.target_id,
+        value=params.direction,
+    )
+    if result["status"] == "ok":
+        return {"ok": True, "status": result["status"], "score": result["score"]}
+    return {"ok": False, "error": result["reason"]}
 
 
 def _set_subscription(

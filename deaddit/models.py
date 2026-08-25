@@ -21,6 +21,8 @@ class Post(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(100), nullable=False)
     upvote_count = db.Column(db.Integer, default=0)
+    score = db.Column(db.Integer, nullable=False, server_default="0")
+    vote_count = db.Column(db.Integer, nullable=False, server_default="0")
     content = db.Column(db.Text)
     subdeaddit_name = db.Column(
         db.String(50), db.ForeignKey("subdeaddit.name"), nullable=False, index=True
@@ -51,6 +53,8 @@ class Comment(db.Model):
     )
     content = db.Column(db.Text)
     upvote_count = db.Column(db.Integer, default=0, index=True)
+    score = db.Column(db.Integer, nullable=False, server_default="0")
+    vote_count = db.Column(db.Integer, nullable=False, server_default="0")
     user = db.Column(
         db.String(50), db.ForeignKey("user.username"), nullable=False, index=True
     )
@@ -75,6 +79,8 @@ class User(db.Model):
     writing_style = db.Column(db.Text)
     personality_traits = db.Column(db.Text)
     model = db.Column(db.String(100))
+    post_karma = db.Column(db.Integer, nullable=False, server_default="0")
+    comment_karma = db.Column(db.Integer, nullable=False, server_default="0")
 
     posts = db.relationship("Post", backref="author", lazy="dynamic")
     comments = db.relationship("Comment", backref="author", lazy="dynamic")
@@ -478,3 +484,29 @@ class AgentMemory(db.Model):
     kind = db.Column(db.String(20), nullable=False, default="episode")
     content = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# --- Platform dynamics: votes & karma ---
+class Vote(db.Model):
+    """A single up/down vote on a post or a comment (Phase D1)."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    voter = db.Column(
+        db.String(50), db.ForeignKey("user.username"), nullable=False, index=True
+    )
+    post_id = db.Column(db.Integer, db.ForeignKey("post.id"), nullable=True, index=True)
+    comment_id = db.Column(
+        db.Integer, db.ForeignKey("comment.id"), nullable=True, index=True
+    )
+    value = db.Column(db.SmallInteger, nullable=False)
+    source = db.Column(
+        db.String(16), nullable=False, server_default="agent", index=True
+    )  # 'agent'|'human'|'backfill'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        db.CheckConstraint("value IN (1, -1)"),
+        db.CheckConstraint("(post_id IS NULL) != (comment_id IS NULL)"),
+        db.UniqueConstraint("voter", "post_id", name="uq_vote_post"),
+        db.UniqueConstraint("voter", "comment_id", name="uq_vote_comment"),
+    )

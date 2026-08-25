@@ -15,6 +15,8 @@ from typing import Any
 from apscheduler.schedulers.base import BaseScheduler
 from flask import current_app
 
+from deaddit.dynamics.karma import recompute_scores_and_karma
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,8 +30,17 @@ class NightlyJob:
     description: str
 
 
-#: Intentionally empty today; Dynamics / Agentic Core leads append entries here.
-NIGHTLY_JOBS: tuple[NightlyJob, ...] = ()
+#: Recurring maintenance jobs (Dynamics D1 Wave B appends here).
+NIGHTLY_JOBS: tuple[NightlyJob, ...] = (
+    NightlyJob(
+        id="dynamics-recompute",
+        cron_expression="30 3 * * *",
+        func=recompute_scores_and_karma,
+        description=(
+            "Repair vote-authoritative post/comment scores and rebuild user karma"
+        ),
+    ),
+)
 
 
 def register_nightly_jobs(scheduler: BaseScheduler) -> list[str]:
