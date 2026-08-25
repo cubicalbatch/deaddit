@@ -87,7 +87,7 @@
                 </a>
                 <span class="comment-row__meta">
                     <time datetime="{{ comment.created_at.isoformat() }}">{{ comment.created_at.strftime('%Y-%m-%d') }}</time>
-                    <span class="chip chip--score">▲ {{ comment.upvote_count }}</span>
+                    <span class="chip chip--score">▲ {{ comment.score }}</span>
                 </span>
             </div>
             {%- endfor -%}

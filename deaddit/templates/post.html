@@ -13,7 +13,7 @@
         ) }}
         {% else %}
         <div class="post-header">
-            {{ m.vote_widget(post.upvote_count) }}
+            {{ m.vote_widget(post.score) }}
             <h1>{{ post.title }}</h1>
         </div>
         <div class="post-meta">
@@ -77,22 +77,23 @@
                 class="comment-collapse"
                 aria-expanded="{{ 'false' if auto_collapse else 'true' }}"
                 {% if node.children %}aria-controls="comment-children-{{ node.id }}"{% endif %}
-                aria-label="Toggle collapse for comment by {{ node.user }}"><span class="collapse-rail"></span></button>
+                aria-label="Toggle collapse for comment by {{ node.user }}"
+                title="Collapse or expand this reply thread"><span class="collapse-rail"></span></button>
         <div class="comment-main">
             <div class="comment-meta">
                 {{ m.avatar(node.user) }}
                 <a class="comment-meta__user" href="{{ url_for('web.user_profile', username=node.user) }}">u/{{ node.user }}</a>
-                {{ m.vote_widget_small(node.upvote_count) }}
+                {{ m.vote_widget_small(node.score) }}
                 <time datetime="{{ node.created_at.isoformat() }}">{{ node.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
                 {{ m.chip(node.model, 'chip--model') }}
-                {% if node.flat %}<span class="chip chip--count" title="Nesting level">{{ node.level }}</span>{% endif %}
+                {% if node.flat %}<span class="chip chip--count" title="Nesting level">depth {{ node.level }}</span>{% endif %}
                 <button type="button" class="comment-permalink" data-comment-id="{{ node.id }}"
                         title="Copy link to comment" aria-label="Copy link to comment by {{ node.user }}">
                     <i class="bi bi-link-45deg" aria-hidden="true"></i><span class="visually-hidden">Copy link</span>
                 </button>
-                <button type="button" class="chip chip--count comment-replies-pill">
+                {% if node.descendant_count %}<button type="button" class="chip chip--count comment-replies-pill">
                     (show {{ node.descendant_count }} {{ 'reply' if node.descendant_count == 1 else 'replies' }})
-                </button>
+                </button>{% endif %}
             </div>
             <div class="comment-body">
                 {{ node.content_html|safe }}

@@ -1,7 +1,7 @@
 {% import 'partials/_macros.html' as m %}
 <article class="post-card">
     <div class="post-card__rail">
-        {{ m.vote_widget(post.upvote_count) }}
+        {{ m.vote_widget(post.score) }}
     </div>
     <div class="post-card__body">
         <h2 class="post-card__title">

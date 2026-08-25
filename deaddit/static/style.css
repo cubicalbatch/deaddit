@@ -130,12 +130,12 @@ body {
    cumulative inline margin-left anywhere.
    ============================================================ */
 .comments-section {
-    --comment-indent: 20px;
+    --comment-indent: 24px;
 }
 
 .comment {
     position: relative;
-    margin-bottom: var(--space-sm);
+    margin-bottom: var(--space-md);
 }
 
 .comment-main {
@@ -149,7 +149,7 @@ body {
     font-size: var(--font-size-sm);
     color: var(--text-2);
     flex-wrap: wrap;
-    margin-bottom: var(--space-xs);
+    margin-bottom: var(--space-sm);
 }
 
 .comment-meta a {
@@ -168,7 +168,8 @@ body {
 
 .comment-body {
     color: var(--text-1);
-    line-height: var(--line-height-normal);
+    line-height: var(--line-height-relaxed);
+    max-width: 72ch;
     overflow-wrap: break-word;
 }
 
@@ -316,10 +317,10 @@ body {
     margin-bottom: var(--space-md);
     line-height: var(--line-height-tight);
 }
-
 .post-body {
     margin-top: var(--space-lg);
     line-height: var(--line-height-relaxed);
+    max-width: 75ch;
 }
 
 .post-body p {
@@ -341,14 +342,15 @@ body {
     font-size: var(--font-size-xl);
     color: var(--text-1);
 }
-
 .comments-tree {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--space-lg);
 }
 
-/* Subdeaddit header */
+.comments-sortbar {
+    margin-bottom: var(--space-md);
+}
 .subdeaddit-header {
     text-align: center;
     margin-bottom: var(--space-xxl);
@@ -393,15 +395,17 @@ body {
     height: 100%;
     margin: 0 auto;
     border-radius: 2px;
-    background-color: transparent;
+    /* Always faintly visible so the collapse affordance can be discovered
+       without hovering (UX-POST comfort pass); hover/focus/chain states
+       strengthen it below. */
+    background-color: var(--rail);
     transition: background-color var(--motion-fast) var(--ease-out-quart);
 }
 
 .comment:hover > .comment-collapse .collapse-rail,
-.comment-collapse:focus-visible .collapse-rail,
 .comment.chain > .comment-collapse .collapse-rail,
 .comment:has(.comment:hover) > .comment-collapse .collapse-rail {
-    background-color: var(--rail);
+    background-color: var(--text-3);
 }
 
 .comment.is-collapsed > .comment-collapse .collapse-rail {
@@ -420,7 +424,7 @@ body {
 
 /* Rail-guided nesting: each level draws its own guide line. */
 .comment-children {
-    margin-top: var(--space-sm);
+    margin-top: var(--space-md);
     border-left: 2px solid var(--rail);
     padding-left: var(--comment-indent);
 }
@@ -445,6 +449,9 @@ body {
    in both themes: 4.56:1 light / 8.71:1 dark on canvas (4.89:1 / 8.14:1 on
    surface). */
 .continue-thread {
+    display: inline-block;
+    margin: var(--space-xs) 0 var(--space-sm);
+    padding: var(--space-xs) 0;
     color: var(--link);
 }
 
@@ -601,10 +608,6 @@ body {
     .post-meta {
         font-size: var(--font-size-xs);
     }
-
-    .comment {
-        margin-bottom: var(--space-md);
-    }
 }
 
 @media (max-width: 480px) {
@@ -629,9 +632,14 @@ body {
     }
 
     .comments-section {
-        --comment-indent: 10px;
+        --comment-indent: 12px;
+    }
+
+    .comment {
+        margin-bottom: var(--space-sm);
     }
 }
+
 .user-profile {
     background-color: var(--bg-surface);
     border: 1px solid var(--border);
@@ -1313,8 +1321,10 @@ a:focus {
     font-weight: 700;
     color: var(--text-1);
     order: -1;
+    font-variant-numeric: tabular-nums;
+    min-width: 2ch;
+    text-align: center;
 }
-
 .vote-arrow {
     appearance: none;
     border: none;
@@ -1352,11 +1362,12 @@ a:focus {
     }
 }
 
-/* Compact vote widget for comment meta lines: inline row, small arrows */
+/* Compact vote widget for comment meta lines: inline row, small arrows.
+   Score keeps a stable width so wide counts don't shift the arrows. */
 .vote-widget--sm {
     flex-direction: row;
     align-items: center;
-    gap: 0;
+    gap: 2px;
 }
 
 .vote-widget--sm .vote-arrow {
