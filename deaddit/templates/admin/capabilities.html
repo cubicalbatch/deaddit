@@ -2,6 +2,12 @@
 
 {% block title %}Capabilities{% endblock %}
 
+
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/admin-tables.css') }}" rel="stylesheet">
+{% endblock %}
+{% import "admin/_macros.html" as m with context %}
+
 {% block content %}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
     <h1 class="h2">Endpoint Capabilities</h1>
@@ -16,66 +22,56 @@
                 </h5>
             </div>
             <div class="card-body">
-                {% if capabilities %}
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th>API URL</th>
-                                <th>Model</th>
-                                <th>Tool Calling</th>
-                                <th>Streaming</th>
-                                <th>Probed At</th>
-                                <th>Method</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for cap in capabilities %}
-                            <tr>
-                                <td><code>{{ cap.api_url }}</code></td>
-                                <td>{{ cap.model_name }}</td>
-                                <td>
-                                    {% if cap.supports_tools %}
-                                        <span class="badge bg-success">Supported</span>
-                                    {% else %}
-                                        <span class="badge bg-danger">Not supported</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if cap.supports_streaming is none %}
-                                        <span class="badge bg-secondary">Unknown</span>
-                                    {% elif cap.supports_streaming %}
-                                        <span class="badge bg-success">Yes</span>
-                                    {% else %}
-                                        <span class="badge bg-danger">No</span>
-                                    {% endif %}
-                                </td>
-                                <td>{{ cap.probed_at.strftime('%Y-%m-%d %H:%M') if cap.probed_at else '-' }}</td>
-                                <td><span class="badge bg-info">{{ cap.probe_method }}</span></td>
-                                <td>
-                                    <form method="post" action="{{ url_for('admin.capabilities_override') }}" class="d-inline"
-                                          onsubmit="return confirm('Mark {{ cap.model_name }} as tool-capable?');">
-                                        <input type="hidden" name="api_url" value="{{ cap.api_url }}">
-                                        <input type="hidden" name="model_name" value="{{ cap.model_name }}">
-                                        <input type="hidden" name="supports_tools" value="true">
-                                        <button type="submit" class="btn btn-outline-success btn-sm">Allow tools</button>
-                                    </form>
-                                    <form method="post" action="{{ url_for('admin.capabilities_override') }}" class="d-inline">
-                                        <input type="hidden" name="api_url" value="{{ cap.api_url }}">
-                                        <input type="hidden" name="model_name" value="{{ cap.model_name }}">
-                                        <input type="hidden" name="supports_tools" value="false">
-                                        <button type="submit" class="btn btn-outline-danger btn-sm">Disable tools</button>
-                                    </form>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <p class="text-muted">No capability verdicts recorded yet. Run a probe below.</p>
-                {% endif %}
+                {% set cap_columns = [
+                    {'label': 'API URL'},
+                    {'label': 'Model'},
+                    {'label': 'Tool Calling'},
+                    {'label': 'Streaming'},
+                    {'label': 'Probed At'},
+                    {'label': 'Method'},
+                    {'label': 'Actions'},
+                ] %}
+                {% call(cap, loop) m.densetable(cap_columns, capabilities,
+                       empty_label='No capability verdicts recorded yet. Run a probe below.',
+                       empty_icon='bi-shield-check') %}
+                <tr>
+                    <td><code>{{ cap.api_url }}</code></td>
+                    <td>{{ cap.model_name }}</td>
+                    <td>
+                        {% if cap.supports_tools %}
+                            <span class="badge bg-success">Supported</span>
+                        {% else %}
+                            <span class="badge bg-danger">Not supported</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if cap.supports_streaming is none %}
+                            <span class="badge bg-secondary">Unknown</span>
+                        {% elif cap.supports_streaming %}
+                            <span class="badge bg-success">Yes</span>
+                        {% else %}
+                            <span class="badge bg-danger">No</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ cap.probed_at.strftime('%Y-%m-%d %H:%M') if cap.probed_at else '-' }}</td>
+                    <td><span class="badge bg-info">{{ cap.probe_method }}</span></td>
+                    <td>
+                        <form method="post" action="{{ url_for('admin.capabilities_override') }}" class="d-inline"
+                              onsubmit="return confirm('Mark {{ cap.model_name }} as tool-capable?');">
+                            <input type="hidden" name="api_url" value="{{ cap.api_url }}">
+                            <input type="hidden" name="model_name" value="{{ cap.model_name }}">
+                            <input type="hidden" name="supports_tools" value="true">
+                            <button type="submit" class="btn btn-outline-success btn-sm">Allow tools</button>
+                        </form>
+                        <form method="post" action="{{ url_for('admin.capabilities_override') }}" class="d-inline">
+                            <input type="hidden" name="api_url" value="{{ cap.api_url }}">
+                            <input type="hidden" name="model_name" value="{{ cap.model_name }}">
+                            <input type="hidden" name="supports_tools" value="false">
+                            <button type="submit" class="btn btn-outline-danger btn-sm">Disable tools</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endcall %}
             </div>
         </div>
     </div>

@@ -2,76 +2,23 @@
 
 {% block title %}Dashboard{% endblock %}
 
+
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/admin-tables.css') }}" rel="stylesheet">
+{% endblock %}
+{% import "admin/_macros.html" as m with context %}
+
 {% block content %}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
     <h1 class="h2">Dashboard</h1>
 </div>
 
 <!-- Content Statistics -->
-<div class="row mb-4">
-    <div class="col-md-3">
-        <div class="card text-white bg-primary">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h4 class="card-title">{{ stats.total_posts }}</h4>
-                        <p class="card-text">Total Posts</p>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="bi bi-file-text fs-2"></i>
-                    </div>
-                </div>
-                <small>{{ recent_stats.posts_24h }} created in last 24h</small>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card text-white bg-success">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h4 class="card-title">{{ stats.total_comments }}</h4>
-                        <p class="card-text">Total Comments</p>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="bi bi-chat fs-2"></i>
-                    </div>
-                </div>
-                <small>{{ recent_stats.comments_24h }} created in last 24h</small>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card text-white bg-info">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h4 class="card-title">{{ stats.total_users }}</h4>
-                        <p class="card-text">Total Users</p>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="bi bi-people fs-2"></i>
-                    </div>
-                </div>
-                <small>{{ recent_stats.users_24h }} created in last 24h</small>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card text-white bg-warning">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h4 class="card-title">{{ stats.total_subdeaddits }}</h4>
-                        <p class="card-text">Subdeaddits</p>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="bi bi-collection fs-2"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+<div class="row mb-4 g-3">
+    <div class="col-md-3">{{ m.stat_tile(stats.total_posts, 'Total Posts', icon='bi-file-text') }}</div>
+    <div class="col-md-3">{{ m.stat_tile(stats.total_comments, 'Total Comments', icon='bi-chat') }}</div>
+    <div class="col-md-3">{{ m.stat_tile(stats.total_users, 'Total Users', icon='bi-people') }}</div>
+    <div class="col-md-3">{{ m.stat_tile(stats.total_subdeaddits, 'Subdeaddits', icon='bi-collection') }}</div>
 </div>
 
 <!-- Job Statistics -->
@@ -80,36 +27,16 @@
         <h3>Job Queue Status</h3>
     </div>
     <div class="col-md-2">
-        <div class="card border-secondary">
-            <div class="card-body text-center">
-                <h5 class="card-title text-secondary" id="pending-jobs">{{ job_stats.pending_jobs }}</h5>
-                <p class="card-text">Pending</p>
-            </div>
-        </div>
+        {{ m.stat_tile(job_stats.pending_jobs, 'Pending', tone='warning', id='pending-jobs') }}
     </div>
     <div class="col-md-2">
-        <div class="card border-primary">
-            <div class="card-body text-center">
-                <h5 class="card-title text-primary" id="running-jobs">{{ job_stats.running_jobs }}</h5>
-                <p class="card-text">Running</p>
-            </div>
-        </div>
+        {{ m.stat_tile(job_stats.running_jobs, 'Running', tone='info', id='running-jobs') }}
     </div>
     <div class="col-md-2">
-        <div class="card border-success">
-            <div class="card-body text-center">
-                <h5 class="card-title text-success" id="completed-jobs">{{ job_stats.completed_jobs }}</h5>
-                <p class="card-text">Completed</p>
-            </div>
-        </div>
+        {{ m.stat_tile(job_stats.completed_jobs, 'Completed', tone='success', id='completed-jobs') }}
     </div>
     <div class="col-md-2">
-        <div class="card border-danger">
-            <div class="card-body text-center">
-                <h5 class="card-title text-danger" id="failed-jobs">{{ job_stats.failed_jobs }}</h5>
-                <p class="card-text">Failed</p>
-            </div>
-        </div>
+        {{ m.stat_tile(job_stats.failed_jobs, 'Failed', tone='danger', id='failed-jobs') }}
     </div>
     <div class="col-md-4">
         <div class="card">
@@ -142,66 +69,46 @@
 <div class="row mb-4">
     <div class="col-md-12">
         <h3>Recent Jobs</h3>
-        <div class="card">
-            <div class="card-body">
-                {% if recent_jobs %}
-                <div class="table-responsive">
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Type</th>
-                                <th>Status</th>
-                                <th>Progress</th>
-                                <th>Created</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for job in recent_jobs %}
-                            <tr>
-                                <td>{{ job.id }}</td>
-                                <td>
-                                    <span class="badge bg-secondary">{{ job.type.value.replace('_', ' ').title() }}</span>
-                                </td>
-                                <td>
-                                    <span class="job-status-{{ job.status.value }}" data-job-id="{{ job.id }}">
-                                        {{ job.status.value.upper() }}
-                                    </span>
-                                </td>
-                                <td>
-                                    {% if job.total_items > 1 %}
-                                    <div class="progress" style="height: 20px;">
-                                        <div class="progress-bar {% if job.status.value == 'running' %}progress-bar-striped progress-bar-animated{% endif %}" 
-                                             style="width: {{ (job.progress / job.total_items * 100) if job.total_items > 0 else 0 }}%"
-                                             data-job-progress="{{ job.id }}">
-                                            {{ job.progress }}/{{ job.total_items }}
-                                        </div>
-                                    </div>
-                                    {% else %}
-                                    <span class="text-muted">Single item</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <small class="text-muted">{{ job.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
-                                </td>
-                                <td>
-                                    <a href="{{ url_for('admin.job_detail', job_id=job.id) }}" class="btn btn-sm btn-outline-primary">
-                                        <i class="bi bi-eye"></i>
-                                    </a>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                <div class="text-center">
-                    <a href="{{ url_for('admin.jobs') }}" class="btn btn-outline-primary">View All Jobs</a>
+        {% set recent_columns = [
+            {'label': 'ID'},
+            {'label': 'Type'},
+            {'label': 'Status'},
+            {'label': 'Progress'},
+            {'label': 'Created'},
+            {'label': 'Actions'},
+        ] %}
+        {% call(job, loop) m.densetable(recent_columns, recent_jobs, empty_label='No jobs found.', empty_icon='bi-list-task') %}
+        <tr>
+            <td>{{ job.id }}</td>
+            <td><span class="badge bg-secondary">{{ job.type.value.replace('_', ' ').title() }}</span></td>
+            <td>
+                <span class="job-status-{{ job.status.value }}" data-job-id="{{ job.id }}">
+                    {{ job.status.value.upper() }}
+                </span>
+            </td>
+            <td>
+                {% if job.total_items > 1 %}
+                <div class="progress" style="height: 20px;">
+                    <div class="progress-bar {% if job.status.value == 'running' %}progress-bar-striped progress-bar-animated{% endif %}"
+                         style="width: {{ (job.progress / job.total_items * 100) if job.total_items > 0 else 0 }}%"
+                         data-job-progress="{{ job.id }}">
+                        {{ job.progress }}/{{ job.total_items }}
+                    </div>
                 </div>
                 {% else %}
-                <p class="text-muted text-center">No jobs found. <a href="{{ url_for('admin.generate') }}">Create your first job</a>.</p>
+                <span class="text-muted">Single item</span>
                 {% endif %}
-            </div>
+            </td>
+            <td><small class="text-muted">{{ job.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+            <td>
+                <a href="{{ url_for('admin.job_detail', job_id=job.id) }}" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-eye"></i>
+                </a>
+            </td>
+        </tr>
+        {% endcall %}
+        <div class="text-center mt-3">
+            <a href="{{ url_for('admin.jobs') }}" class="btn btn-outline-primary">View All Jobs</a>
         </div>
     </div>
 </div>

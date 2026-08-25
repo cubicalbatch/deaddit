@@ -1,585 +1,626 @@
 [
- {
-  "rule": "/",
-  "endpoint": "index",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/",
-  "endpoint": "admin.dashboard",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/analytics",
-  "endpoint": "admin.analytics",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/clear-jobs",
-  "endpoint": "admin.clear_jobs_api",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/comments",
-  "endpoint": "admin.api_comments",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/comments/<int:comment_id>",
-  "endpoint": "admin.api_update_comment",
-  "methods": [
-   "PUT"
-  ]
- },
- {
-  "rule": "/admin/api/comments/<int:comment_id>",
-  "endpoint": "admin.api_delete_comment",
-  "methods": [
-   "DELETE"
-  ]
- },
- {
-  "rule": "/admin/api/comments/bulk-delete",
-  "endpoint": "admin.api_bulk_delete_comments",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/endpoint-config",
-  "endpoint": "admin.save_endpoint_default_model_api",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/endpoint-config/<api_url_hash>",
-  "endpoint": "admin.get_endpoint_config_api",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/get-endpoint-key",
-  "endpoint": "admin.get_endpoint_key_api",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/hide-default-data",
-  "endpoint": "admin.hide_default_data_api",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/jobs/<int:job_id>/status",
-  "endpoint": "admin.job_status_api",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/jobs/stats",
-  "endpoint": "admin.jobs_stats_api",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/load-default-data",
-  "endpoint": "admin.load_default_data_api",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/load-models",
-  "endpoint": "admin.load_models_api",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/models/<api_url_hash>",
-  "endpoint": "admin.get_cached_models_api",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/posts",
-  "endpoint": "admin.api_posts",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/posts/<int:post_id>",
-  "endpoint": "admin.api_update_post",
-  "methods": [
-   "PUT"
-  ]
- },
- {
-  "rule": "/admin/api/posts/<int:post_id>",
-  "endpoint": "admin.api_delete_post",
-  "methods": [
-   "DELETE"
-  ]
- },
- {
-  "rule": "/admin/api/posts/bulk-delete",
-  "endpoint": "admin.api_bulk_delete_posts",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/routes",
-  "endpoint": "admin.routes_api",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/save-config",
-  "endpoint": "admin.save_config_api",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/save-deaddit-config",
-  "endpoint": "admin.save_deaddit_config_api",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/subdeaddits",
-  "endpoint": "admin.api_subdeaddits",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/subdeaddits/<name>",
-  "endpoint": "admin.api_update_subdeaddit",
-  "methods": [
-   "PUT"
-  ]
- },
- {
-  "rule": "/admin/api/subdeaddits/<name>",
-  "endpoint": "admin.api_delete_subdeaddit",
-  "methods": [
-   "DELETE"
-  ]
- },
- {
-  "rule": "/admin/api/subdeaddits/bulk-delete",
-  "endpoint": "admin.api_bulk_delete_subdeaddits",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/system-info",
-  "endpoint": "admin.system_info_api",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/test-connection",
-  "endpoint": "admin.test_connection_api",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/usage/summary",
-  "endpoint": "admin.usage_summary_api",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/users",
-  "endpoint": "admin.api_users",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/users/<username>",
-  "endpoint": "admin.api_update_user",
-  "methods": [
-   "PUT"
-  ]
- },
- {
-  "rule": "/admin/api/users/<username>",
-  "endpoint": "admin.api_delete_user",
-  "methods": [
-   "DELETE"
-  ]
- },
- {
-  "rule": "/admin/api/users/bulk-delete",
-  "endpoint": "admin.api_bulk_delete_users",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/capabilities",
-  "endpoint": "admin.capabilities",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/capabilities/override",
-  "endpoint": "admin.capabilities_override",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/capabilities/probe",
-  "endpoint": "admin.capabilities_probe",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/content",
-  "endpoint": "admin.content",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/dashboard",
-  "endpoint": "admin.dashboard",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/generate",
-  "endpoint": "admin.generate",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/generate/comment",
-  "endpoint": "admin.generate_comment",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/generate/post",
-  "endpoint": "admin.generate_post",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/generate/subdeaddit",
-  "endpoint": "admin.generate_subdeaddit",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/generate/user",
-  "endpoint": "admin.generate_user",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/jobs",
-  "endpoint": "admin.jobs",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/jobs/<int:job_id>",
-  "endpoint": "admin.job_detail",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/jobs/<int:job_id>/cancel",
-  "endpoint": "admin.cancel_job_route",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/jobs/<int:job_id>/retry",
-  "endpoint": "admin.retry_job_route",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/login",
-  "endpoint": "admin.login",
-  "methods": [
-   "GET",
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/logout",
-  "endpoint": "admin.logout",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/settings",
-  "endpoint": "admin.settings",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/api/available_models",
-  "endpoint": "available_models",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/api/ingest",
-  "endpoint": "ingest",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/api/ingest/user",
-  "endpoint": "ingest_user",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/api/post/<post_id>",
-  "endpoint": "api_post",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/api/posts",
-  "endpoint": "api_posts",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/api/subdeaddits",
-  "endpoint": "api_subdeaddits",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/api/users",
-  "endpoint": "get_users",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/d/<subdeaddit_name>",
-  "endpoint": "subdeaddit",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/d/<subdeaddit_name>/<int:post_id>",
-  "endpoint": "post",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/list_subdeaddit",
-  "endpoint": "list_subdeaddit",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/search",
-  "endpoint": "search",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/static/<path:filename>",
-  "endpoint": "static",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/user/<username>",
-  "endpoint": "user_profile",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/users",
-  "endpoint": "list_users",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/agents",
-  "endpoint": "admin.agents_dashboard",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/agents/<username>",
-  "endpoint": "admin.agent_detail",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/agents",
-  "endpoint": "admin.api_agents_list",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/agents",
-  "endpoint": "admin.api_create_agent",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/agents/<int:agent_id>/force-run",
-  "endpoint": "admin.api_force_run",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/agents/<int:agent_id>/runs",
-  "endpoint": "admin.api_agent_runs",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/agents/<int:agent_id>/toggle",
-  "endpoint": "admin.api_toggle_agent",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/agents/pause-all",
-  "endpoint": "admin.api_agents_pause_all",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/agents/presets",
-  "endpoint": "admin.api_agent_presets",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/agents/start-all",
-  "endpoint": "admin.api_agents_start_all",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/api/runs/<int:run_id>/turns",
-  "endpoint": "admin.api_run_turns",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/turns/<int:turn_id>/tool_calls",
-  "endpoint": "admin.api_turn_tool_calls",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/api/personas/candidates",
-  "endpoint": "admin.api_persona_candidates",
-  "methods": [
-   "GET"
-  ]
- }
- ,
- {
-  "rule": "/admin/reports",
-  "endpoint": "admin.reports",
-  "methods": [
-   "GET"
-  ]
- },
- {
-  "rule": "/admin/reports/<int:report_id>/ban",
-  "endpoint": "admin.report_ban",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/reports/<int:report_id>/dismiss",
-  "endpoint": "admin.report_dismiss",
-  "methods": [
-   "POST"
-  ]
- },
- {
-  "rule": "/admin/reports/<int:report_id>/remove",
-  "endpoint": "admin.report_remove",
-  "methods": [
-   "POST"
-  ]
- }
+  {
+    "rule": "/",
+    "endpoint": "index",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/",
+    "endpoint": "dashboard",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/agents",
+    "endpoint": "agents_dashboard",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/agents/<username>",
+    "endpoint": "agent_detail",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/analytics",
+    "endpoint": "analytics",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/agents",
+    "endpoint": "api_agents_list",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/agents",
+    "endpoint": "api_create_agent",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/agents/<int:agent_id>/force-run",
+    "endpoint": "api_force_run",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/agents/<int:agent_id>/runs",
+    "endpoint": "api_agent_runs",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/agents/<int:agent_id>/toggle",
+    "endpoint": "api_toggle_agent",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/agents/pause-all",
+    "endpoint": "api_agents_pause_all",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/agents/presets",
+    "endpoint": "api_agent_presets",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/agents/start-all",
+    "endpoint": "api_agents_start_all",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/clear-jobs",
+    "endpoint": "clear_jobs_api",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/comments",
+    "endpoint": "api_comments",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/comments/<int:comment_id>",
+    "endpoint": "api_update_comment",
+    "methods": [
+      "PUT"
+    ]
+  },
+  {
+    "rule": "/admin/api/comments/<int:comment_id>",
+    "endpoint": "api_get_comment",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/comments/<int:comment_id>",
+    "endpoint": "api_delete_comment",
+    "methods": [
+      "DELETE"
+    ]
+  },
+  {
+    "rule": "/admin/api/comments/bulk-delete",
+    "endpoint": "api_bulk_delete_comments",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/endpoint-config",
+    "endpoint": "save_endpoint_default_model_api",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/endpoint-config/<api_url_hash>",
+    "endpoint": "get_endpoint_config_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/get-endpoint-key",
+    "endpoint": "get_endpoint_key_api",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/hide-default-data",
+    "endpoint": "hide_default_data_api",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/jobs/<int:job_id>/log",
+    "endpoint": "job_log_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/jobs/<int:job_id>/status",
+    "endpoint": "job_status_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/jobs/stats",
+    "endpoint": "jobs_stats_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/load-default-data",
+    "endpoint": "load_default_data_api",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/load-models",
+    "endpoint": "load_models_api",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/models/<api_url_hash>",
+    "endpoint": "get_cached_models_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/personas/candidates",
+    "endpoint": "api_persona_candidates",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/posts",
+    "endpoint": "api_posts",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/posts/<int:post_id>",
+    "endpoint": "api_update_post",
+    "methods": [
+      "PUT"
+    ]
+  },
+  {
+    "rule": "/admin/api/posts/<int:post_id>",
+    "endpoint": "api_get_post",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/posts/<int:post_id>",
+    "endpoint": "api_delete_post",
+    "methods": [
+      "DELETE"
+    ]
+  },
+  {
+    "rule": "/admin/api/posts/bulk-delete",
+    "endpoint": "api_bulk_delete_posts",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/routes",
+    "endpoint": "routes_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/runs/<int:run_id>/turns",
+    "endpoint": "api_run_turns",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/save-config",
+    "endpoint": "save_config_api",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/save-deaddit-config",
+    "endpoint": "save_deaddit_config_api",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/subdeaddits",
+    "endpoint": "api_subdeaddits",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/subdeaddits/<name>",
+    "endpoint": "api_update_subdeaddit",
+    "methods": [
+      "PUT"
+    ]
+  },
+  {
+    "rule": "/admin/api/subdeaddits/<name>",
+    "endpoint": "api_get_subdeaddit",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/subdeaddits/<name>",
+    "endpoint": "api_delete_subdeaddit",
+    "methods": [
+      "DELETE"
+    ]
+  },
+  {
+    "rule": "/admin/api/subdeaddits/bulk-delete",
+    "endpoint": "api_bulk_delete_subdeaddits",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/system-info",
+    "endpoint": "system_info_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/test-connection",
+    "endpoint": "test_connection_api",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/turns/<int:turn_id>/tool_calls",
+    "endpoint": "api_turn_tool_calls",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/usage/summary",
+    "endpoint": "usage_summary_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/users",
+    "endpoint": "api_users",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/users/<username>",
+    "endpoint": "api_update_user",
+    "methods": [
+      "PUT"
+    ]
+  },
+  {
+    "rule": "/admin/api/users/<username>",
+    "endpoint": "api_get_user",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/users/<username>",
+    "endpoint": "api_delete_user",
+    "methods": [
+      "DELETE"
+    ]
+  },
+  {
+    "rule": "/admin/api/users/bulk-delete",
+    "endpoint": "api_bulk_delete_users",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/capabilities",
+    "endpoint": "capabilities",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/capabilities/override",
+    "endpoint": "capabilities_override",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/capabilities/probe",
+    "endpoint": "capabilities_probe",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/content",
+    "endpoint": "content",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/dashboard",
+    "endpoint": "dashboard",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/generate",
+    "endpoint": "generate",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/generate/comment",
+    "endpoint": "generate_comment",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/generate/post",
+    "endpoint": "generate_post",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/generate/subdeaddit",
+    "endpoint": "generate_subdeaddit",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/generate/user",
+    "endpoint": "generate_user",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/jobs",
+    "endpoint": "jobs",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/jobs/<int:job_id>",
+    "endpoint": "job_detail",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/jobs/<int:job_id>/cancel",
+    "endpoint": "cancel_job_route",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/jobs/<int:job_id>/retry",
+    "endpoint": "retry_job_route",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/llm/stream-token",
+    "endpoint": "llm_stream_admin.llm_stream_token",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/login",
+    "endpoint": "login",
+    "methods": [
+      "GET",
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/logout",
+    "endpoint": "logout",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/reports",
+    "endpoint": "reports",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/reports/<int:report_id>/ban",
+    "endpoint": "report_ban",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/reports/<int:report_id>/dismiss",
+    "endpoint": "report_dismiss",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/reports/<int:report_id>/remove",
+    "endpoint": "report_remove",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/settings",
+    "endpoint": "settings",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/api/available_models",
+    "endpoint": "available_models",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/api/ingest",
+    "endpoint": "ingest",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/api/ingest/user",
+    "endpoint": "ingest_user",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/api/post/<post_id>",
+    "endpoint": "api_post",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/api/posts",
+    "endpoint": "api_posts",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/api/subdeaddits",
+    "endpoint": "api_subdeaddits",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/api/users",
+    "endpoint": "get_users",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/d/<subdeaddit_name>",
+    "endpoint": "subdeaddit",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/d/<subdeaddit_name>/<int:post_id>",
+    "endpoint": "post",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/list_subdeaddit",
+    "endpoint": "list_subdeaddit",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/search",
+    "endpoint": "search",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/static/<path:filename>",
+    "endpoint": "static",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/user/<username>",
+    "endpoint": "user_profile",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/users",
+    "endpoint": "list_users",
+    "methods": [
+      "GET"
+    ]
+  }
 ]

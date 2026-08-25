@@ -79,6 +79,10 @@ def execute_job(job_id: int, app=None) -> dict[str, Any]:
         # Emit job started update
         _emit_job_update(job)
 
+        # UX-5: capture deaddit.* log lines as JobLog rows for the live
+        # admin log pane. Failure-isolated: log writes never break the job.
+        _job_log_handler = _attach_job_log_handler(job_id)
+
         try:
             logger.info(f"Executing job {job_id} ({job.type.value})")
 
@@ -147,7 +151,25 @@ def execute_job(job_id: int, app=None) -> dict[str, Any]:
 
             logger.error(f"Job {job_id} failed: {e}")
             raise
+        finally:
+            _job_log_handler.detach()
 
+
+
+def _attach_job_log_handler(job_id: int):
+    """Attach the UX-5 log-capture handler (best-effort, never fatal)."""
+    from deaddit.runtime.joblog import capture_job_logs
+
+    try:
+        return capture_job_logs(job_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("JobLog capture unavailable for job %s: %s", job_id, exc)
+
+        class _Null:
+            def detach(self):
+                pass
+
+        return _Null()
 
 def _get_partial_subdeaddit_result() -> dict[str, Any]:
     """Get partial results for failed subdeaddit creation job."""

@@ -1,0 +1,129 @@
+/* ============================================================
+   admin-tables.css - DenseTable + StatTile component rules.
+
+   Consumes semantic roles from tokens.css only - no raw hex.
+   Owned by the UX-5 tables slice; candidate for consolidation
+   into admin.css by the base owner in a later wave.
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   DenseTable (.dt)
+   ------------------------------------------------------------ */
+
+.dt-wrap {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    max-width: 100%;
+    overflow: auto;
+}
+
+table.dt {
+    width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+    font-size: var(--font-size-sm);
+}
+
+/* Sticky header so long lists keep column context while scrolling */
+table.dt thead th {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-dropdown);
+    background: var(--bg-surface);
+    color: var(--text-2);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    padding: var(--space-sm) var(--space-md);
+    border-bottom: 1px solid var(--border);
+}
+
+table.dt tbody td {
+    padding: var(--space-sm) var(--space-md);
+    vertical-align: middle;
+    color: var(--text-1);
+    border-bottom: 1px solid var(--border);
+}
+
+table.dt tbody tr:last-child td {
+    border-bottom: none;
+}
+
+table.dt tbody tr:hover td {
+    background: var(--bg-canvas);
+}
+
+/* Sortable headers */
+.dt-sort {
+    align-items: center;
+    color: inherit;
+    display: inline-flex;
+    gap: var(--space-xs);
+    text-decoration: none;
+}
+
+.dt-sort:hover,
+.dt-sort:focus-visible {
+    color: var(--link);
+}
+
+.dt-sort-icon {
+    color: var(--text-3);
+    font-size: 10px;
+    line-height: 1;
+}
+
+.dt-sorted .dt-sort,
+.dt-sorted .dt-sort-icon {
+    color: var(--link);
+}
+
+/* Empty state row */
+tr.dt-empty td {
+    color: var(--text-3);
+    padding: var(--space-lg);
+    text-align: center;
+}
+
+/* Pager spacing under the table */
+.dt-pager {
+    margin-top: var(--space-md);
+}
+
+/* ------------------------------------------------------------
+   StatTile - uniform metric cards on token status roles
+   ------------------------------------------------------------ */
+
+.stat-tile {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    height: 100%;
+    padding: var(--space-md);
+}
+
+.stat-tile .stat-value {
+    color: var(--text-1);
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+    line-height: var(--line-height-tight);
+}
+
+.stat-tile .stat-label {
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+}
+
+/* Semantic tone rails + value tint (inset shadow avoids layout shift) */
+.stat-tile--success { box-shadow: inset 3px 0 0 var(--status-success); }
+.stat-tile--warning { box-shadow: inset 3px 0 0 var(--status-warning); }
+.stat-tile--danger  { box-shadow: inset 3px 0 0 var(--status-danger); }
+.stat-tile--info    { box-shadow: inset 3px 0 0 var(--status-info); }
+
+.stat-tile--success .stat-value { color: var(--status-success); }
+.stat-tile--warning .stat-value { color: var(--status-warning); }
+.stat-tile--danger  .stat-value { color: var(--status-danger); }
+.stat-tile--info    .stat-value { color: var(--status-info); }

@@ -1,0 +1,127 @@
+{# ============================================================
+   Admin DenseTable macro family.
+
+   Import WITH context so the macros can read request.args and
+   build sort/pager URLs that preserve every active query arg:
+
+       {% import "admin/_macros.html" as m with context %}
+
+   Styling lives in static/css/admin-tables.css (.dt family,
+   .stat-tile family) - token-based, no raw hex here or there.
+   ============================================================ #}
+
+{#- Internal: build a URL for endpoint, preserving current query
+    args (empty values dropped) merged over with `overrides`.
+    An override of None removes the key (e.g. resetting page). -#}
+{% macro _qs(endpoint, overrides) -%}
+{%- set args = {} -%}
+{%- for k, v in request.args.to_dict().items() -%}
+{%- if v %}{% set _ = args.update({k: v}) %}{% endif -%}
+{%- endfor -%}
+{%- set _ = args.update(overrides) -%}
+{{- url_for(endpoint, **args) -}}
+{%- endmacro %}
+
+{#- Internal: one sortable column header. Clicking toggles asc/desc
+    (first click follows col.default_dir) and resets to page 1 while
+    preserving all other query args (filters, per_page). -#}
+{% macro _sort_th(col) -%}
+{%- set cur_sort = request.args.get('sort', '') -%}
+{%- set cur_dir = request.args.get('dir', '') -%}
+{%- set active = cur_sort == col.sort_key -%}
+{%- set fallback_dir = 'desc' if col.default_dir == 'desc' else 'asc' -%}
+{%- set next_dir = (('desc' if cur_dir != 'desc' else 'asc') if active else fallback_dir) -%}
+<th scope="col" class="dt-sortable{% if active %} dt-sorted{% endif %}"
+    aria-sort="{% if not active %}none{% elif cur_dir == 'desc' %}descending{% else %}ascending{% endif %}">
+    <a class="dt-sort" href="{{ _qs(request.endpoint, {'sort': col.sort_key, 'dir': next_dir, 'page': None}) }}"
+       title="Sort by {{ col.label }} {{ next_dir }}ending">
+        <span>{{ col.label }}</span>
+        <span class="dt-sort-icon" aria-hidden="true">{% if active %}{% if cur_dir == 'desc' %}&#9660;{% else %}&#9650;{% endif %}{% else %}&#8645;{% endif %}</span>
+    </a>
+</th>
+{%- endmacro %}
+
+{#- densetable: dense, sticky-headed table.
+
+    columns: list of dicts:
+        { "label": "Created", "sort_key": "created_at",
+          "default_dir": "desc",       # optional, first-click direction
+          "th_class": "d-none d-lg-table-cell" }   # optional
+    rows:    iterable; when empty an empty-state row is rendered.
+    Caller:  invoked per row as {{ caller(row, loop) }} and must emit
+             the <td> cells of one row (the <tr> is provided).
+
+    Usage:
+        {% call(job, loop) m.densetable(JOB_COLUMNS, jobs,
+               empty_label='No jobs found.') %}
+            <tr><td>...</td></tr>
+        {% endcall %}
+-#}
+{% macro densetable(columns, rows, empty_label='No records found.', empty_icon='bi-inbox') %}
+<div class="dt-wrap">
+    <table class="table dt">
+        <thead>
+            <tr>
+                {% for col in columns -%}
+                {% if col.sort_key -%}
+                {{ _sort_th(col) }}
+                {%- else -%}
+                <th scope="col"{% if col.th_class %} class="{{ col.th_class }}"{% endif %}>{{ col.label }}</th>
+                {%- endif %}
+                {%- endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}{{ caller(row, loop) }}{% endfor %}
+            {% if not rows %}
+            <tr class="dt-empty">
+                <td colspan="{{ columns|length }}"><i class="bi {{ empty_icon }} me-1"></i>{{ empty_label }}</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endmacro %}
+
+{#- paginate: server-driven pager for a Flask-SQLAlchemy pagination
+    object. Preserves ALL current query args (filters, per_page,
+    sort, dir) on every generated link. -#}
+{% macro paginate(pagination) %}
+{% if pagination.pages > 1 %}
+<nav class="dt-pager" aria-label="Table pagination">
+    <ul class="pagination justify-content-center mb-0">
+        {% if pagination.has_prev %}
+        <li class="page-item"><a class="page-link" href="{{ _qs(request.endpoint, {'page': pagination.prev_num}) }}">Previous</a></li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">Previous</span></li>
+        {% endif %}
+        {% for p in pagination.iter_pages() %}
+        {% if p %}
+        {% if p != pagination.page %}
+        <li class="page-item"><a class="page-link" href="{{ _qs(request.endpoint, {'page': p}) }}">{{ p }}</a></li>
+        {% else %}
+        <li class="page-item active" aria-current="page"><span class="page-link">{{ p }}</span></li>
+        {% endif %}
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+        {% endif %}
+        {% endfor %}
+        {% if pagination.has_next %}
+        <li class="page-item"><a class="page-link" href="{{ _qs(request.endpoint, {'page': pagination.next_num}) }}">Next</a></li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">Next</span></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% endmacro %}
+
+{#- stat_tile: single metric card on token status roles.
+    tone: '' (neutral) | success | warning | danger | info
+    id:   optional element id for the value node (live updates). -#}
+{% macro stat_tile(value, label, tone='', icon=None, id=None) %}
+<div class="stat-tile{% if tone %} stat-tile--{{ tone }}{% endif %}">
+    <div class="stat-value"{% if id %} id="{{ id }}"{% endif %}>{{ value }}</div>
+    <div class="stat-label">{% if icon %}<i class="bi {{ icon }} me-1"></i>{% endif %}{{ label }}</div>
+</div>
+{% endmacro %}

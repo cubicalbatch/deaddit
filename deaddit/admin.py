@@ -29,11 +29,10 @@ from deaddit.llm.capabilities import probe_endpoint, set_manual_override
 from deaddit.models import (
     ApiEndpointConfig,
     ApiModel,
-    Ban,
     Comment,
     EndpointCapability,
-    GenerationTemplate,
     Job,
+    JobLog,
     JobStatus,
     JobType,
     LLMUsage,
@@ -346,7 +345,6 @@ def dashboard():
 @admin_required
 def generate():
     """Content generation management page."""
-    templates = GenerationTemplate.query.all()
     subdeaddits = Subdeaddit.query.all()
 
     # Check if default data has been loaded
@@ -354,7 +352,6 @@ def generate():
 
     return render_template(
         "admin/generate.html",
-        templates=templates,
         subdeaddits=subdeaddits,
         default_data_loaded=default_data_loaded,
     )
@@ -494,9 +491,27 @@ def jobs():
 
     if type_filter:
         query = query.filter(Job.type == JobType(type_filter))
+    # Server-side sort: strict whitelist mapping -> order_by expression.
+    job_sort_columns = {
+        "created_at": Job.created_at,
+        "priority": Job.priority,
+        "status": Job.status,
+        "type": Job.type,
+        "progress": Job.progress,
+    }
+    sort_key = request.args.get("sort", "created_at")
+    if sort_key not in job_sort_columns:
+        sort_key = "created_at"
+    sort_dir = request.args.get("dir", "desc")
+    if sort_dir not in ("asc", "desc"):
+        sort_dir = "desc"
 
-    # Order by creation date (newest first)
-    query = query.order_by(desc(Job.created_at))
+    sort_column = job_sort_columns[sort_key]
+    query = query.order_by(
+        desc(sort_column) if sort_dir == "desc" else sort_column.asc()
+    )
+    # Stable tiebreaker so equal sort values paginate deterministically.
+    query = query.order_by(desc(Job.id))
 
     # Paginate
     jobs_pagination = query.paginate(page=page, per_page=per_page, error_out=False)
@@ -523,6 +538,8 @@ def jobs():
         current_status=status_filter,
         current_type=type_filter,
         job_counts=job_counts,
+        current_sort=sort_key,
+        current_dir=sort_dir,
         current_per_page=per_page,
     )
 
@@ -548,14 +565,34 @@ def job_detail(job_id):
         .all()
     )
 
+    # Resolve generated-content references (usernames / ids / names)
+    # route-side so the template never touches the ORM.
+    result = job.result or {}
+    content_users = {
+        username: User.query.filter_by(username=username).first()
+        for username in (result.get("users") or [])[:10]
+    }
+    content_posts = {
+        post_id: db.session.get(Post, post_id)
+        for post_id in (result.get("posts") or [])[:10]
+    }
+    content_subdeaddits = {
+        name: Subdeaddit.query.filter_by(name=name).first()
+        for name in (result.get("subdeaddits") or [])[:10]
+    }
+    content_comments = {
+        comment_id: db.session.get(Comment, comment_id)
+        for comment_id in (result.get("comments") or [])[:10]
+    }
+
     return render_template(
         "admin/job_detail.html",
         job=job,
         related_jobs=related_jobs,
-        User=User,
-        Post=Post,
-        Comment=Comment,
-        Subdeaddit=Subdeaddit,
+        content_users=content_users,
+        content_posts=content_posts,
+        content_subdeaddits=content_subdeaddits,
+        content_comments=content_comments,
     )
 
 
@@ -631,8 +668,6 @@ def jobs_stats_api():
         "failed": Job.query.filter_by(status=JobStatus.FAILED).count(),
     }
 
-    return jsonify(stats)
-
 
 @admin_bp.route("/content")
 @production_disabled
@@ -652,15 +687,40 @@ def content():
     recent_posts = Post.query.order_by(desc(Post.created_at)).limit(10).all()
     recent_comments = Comment.query.order_by(desc(Comment.created_at)).limit(10).all()
 
+    # Subdeaddit filter options rendered server-side in the template
+    # (replaces the old per_page=1000 client-side fetch).
+    subdeaddit_names = [
+        name
+        for (name,) in db.session.query(Subdeaddit.name).order_by(Subdeaddit.name)
+    ]
+
     return render_template(
         "admin/content.html",
         content_stats=content_stats,
         recent_posts=recent_posts,
         recent_comments=recent_comments,
+        subdeaddit_names=subdeaddit_names,
     )
 
 
 # CRUD API endpoints for content management
+
+
+def _user_payload(user):
+    """Serialize a user row for the admin content API."""
+    return {
+        "username": user.username,
+        "age": user.age,
+        "gender": user.gender,
+        "occupation": user.occupation,
+        "education": user.education,
+        "bio": user.bio,
+        "interests": user.interests or "",
+        "personality_traits": user.personality_traits or "",
+        "writing_style": user.writing_style or "",
+        "posts_count": Post.query.filter_by(user=user.username).count(),
+        "comments_count": Comment.query.filter_by(user=user.username).count(),
+    }
 
 
 @admin_bp.route("/api/users")
@@ -686,24 +746,7 @@ def api_users():
 
     return jsonify(
         {
-            "users": [
-                {
-                    "username": user.username,
-                    "age": user.age,
-                    "gender": user.gender,
-                    "occupation": user.occupation,
-                    "education": user.education,
-                    "bio": user.bio,
-                    "interests": user.interests or "",
-                    "personality_traits": user.personality_traits or "",
-                    "writing_style": user.writing_style or "",
-                    "posts_count": Post.query.filter_by(user=user.username).count(),
-                    "comments_count": Comment.query.filter_by(
-                        user=user.username
-                    ).count(),
-                }
-                for user in users.items
-            ],
+            "users": [_user_payload(user) for user in users.items],
             "total": users.total,
             "pages": users.pages,
             "current_page": page,
@@ -739,6 +782,15 @@ def api_update_user(username):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@admin_bp.route("/api/users/<username>", methods=["GET"])
+@production_disabled
+@admin_required
+def api_get_user(username):
+    """Fetch one user by username (targeted single-row read for edit flows)."""
+    user = User.query.get_or_404(username)
+    return jsonify(_user_payload(user))
+
+
 @admin_bp.route("/api/users/<username>", methods=["DELETE"])
 @production_disabled
 @admin_required
@@ -747,7 +799,6 @@ def api_delete_user(username):
     user = User.query.get_or_404(username)
 
     try:
-        # Get impact stats before deletion
         posts_count = Post.query.filter_by(user=username).count()
         comments_count = Comment.query.filter_by(user=username).count()
 
@@ -820,6 +871,16 @@ def api_bulk_delete_users():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _subdeaddit_payload(sub):
+    """Serialize a subdeaddit row for the admin content API."""
+    return {
+        "name": sub.name,
+        "description": sub.description or "",
+        "post_types": sub.post_types or "",
+        "posts_count": Post.query.filter_by(subdeaddit_name=sub.name).count(),
+    }
+
+
 @admin_bp.route("/api/subdeaddits")
 @production_disabled
 @admin_required
@@ -842,15 +903,7 @@ def api_subdeaddits():
     return jsonify(
         {
             "subdeaddits": [
-                {
-                    "name": sub.name,
-                    "description": sub.description or "",
-                    "post_types": sub.post_types or "",
-                    "posts_count": Post.query.filter_by(
-                        subdeaddit_name=sub.name
-                    ).count(),
-                }
-                for sub in subdeaddits.items
+                _subdeaddit_payload(sub) for sub in subdeaddits.items
             ],
             "total": subdeaddits.total,
             "pages": subdeaddits.pages,
@@ -891,6 +944,15 @@ def api_update_subdeaddit(name):
         db.session.rollback()
         logger.error(f"Error updating subdeaddit {name}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@admin_bp.route("/api/subdeaddits/<name>", methods=["GET"])
+@production_disabled
+@admin_required
+def api_get_subdeaddit(name):
+    """Fetch one subdeaddit by name (targeted single-row read for edit flows)."""
+    subdeaddit = Subdeaddit.query.get_or_404(name)
+    return jsonify(_subdeaddit_payload(subdeaddit))
 
 
 @admin_bp.route("/api/subdeaddits/<name>", methods=["DELETE"])
@@ -996,6 +1058,27 @@ def api_bulk_delete_subdeaddits():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _post_payload(post):
+    """Serialize a post row for the admin content API."""
+    return {
+        "id": post.id,
+        "title": post.title or "",
+        "content": (
+            post.content[:200] + "..."
+            if post.content and len(post.content) > 200
+            else post.content
+        )
+        or "",
+        "username": post.user,
+        "subdeaddit_name": post.subdeaddit_name,
+        "upvote_count": post.upvote_count or 0,
+        "post_type": post.post_type or "",
+        "comments_count": Comment.query.filter_by(post_id=post.id).count(),
+        "created_at": post.created_at.isoformat() if post.created_at else "",
+        "model": post.model or "",
+    }
+
+
 @admin_bp.route("/api/posts")
 @production_disabled
 @admin_required
@@ -1020,28 +1103,7 @@ def api_posts():
 
     return jsonify(
         {
-            "posts": [
-                {
-                    "id": post.id,
-                    "title": post.title or "",
-                    "content": (
-                        post.content[:200] + "..."
-                        if post.content and len(post.content) > 200
-                        else post.content
-                    )
-                    or "",
-                    "username": post.user,
-                    "subdeaddit_name": post.subdeaddit_name,
-                    "upvote_count": post.upvote_count or 0,
-                    "post_type": post.post_type or "",
-                    "comments_count": Comment.query.filter_by(post_id=post.id).count(),
-                    "created_at": post.created_at.isoformat()
-                    if post.created_at
-                    else "",
-                    "model": post.model or "",
-                }
-                for post in posts.items
-            ],
+            "posts": [_post_payload(post) for post in posts.items],
             "total": posts.total,
             "pages": posts.pages,
             "current_page": page,
@@ -1069,6 +1131,15 @@ def api_update_post(post_id):
         db.session.rollback()
         logger.error(f"Error updating post {post_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@admin_bp.route("/api/posts/<int:post_id>", methods=["GET"])
+@production_disabled
+@admin_required
+def api_get_post(post_id):
+    """Fetch one post by id (targeted single-row read for edit flows)."""
+    post = Post.query.get_or_404(post_id)
+    return jsonify(_post_payload(post))
 
 
 @admin_bp.route("/api/posts/<int:post_id>", methods=["DELETE"])
@@ -1134,6 +1205,26 @@ def api_bulk_delete_posts():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _comment_payload(comment):
+    """Serialize a comment row for the admin content API."""
+    return {
+        "id": comment.id,
+        "content": (
+            comment.content[:150] + "..."
+            if comment.content and len(comment.content) > 150
+            else comment.content
+        )
+        or "",
+        "username": comment.user,
+        "post_id": comment.post_id,
+        "post_title": comment.post.title if comment.post else "Unknown",
+        "parent_id": comment.parent_id,
+        "upvote_count": comment.upvote_count or 0,
+        "created_at": comment.created_at.isoformat() if comment.created_at else "",
+        "model": comment.model or "",
+    }
+
+
 @admin_bp.route("/api/comments")
 @production_disabled
 @admin_required
@@ -1153,27 +1244,7 @@ def api_comments():
 
     return jsonify(
         {
-            "comments": [
-                {
-                    "id": comment.id,
-                    "content": (
-                        comment.content[:150] + "..."
-                        if comment.content and len(comment.content) > 150
-                        else comment.content
-                    )
-                    or "",
-                    "username": comment.user,
-                    "post_id": comment.post_id,
-                    "post_title": comment.post.title if comment.post else "Unknown",
-                    "parent_id": comment.parent_id,
-                    "upvote_count": comment.upvote_count or 0,
-                    "created_at": comment.created_at.isoformat()
-                    if comment.created_at
-                    else "",
-                    "model": comment.model or "",
-                }
-                for comment in comments.items
-            ],
+            "comments": [_comment_payload(c) for c in comments.items],
             "total": comments.total,
             "pages": comments.pages,
             "current_page": page,
@@ -1199,6 +1270,15 @@ def api_update_comment(comment_id):
         db.session.rollback()
         logger.error(f"Error updating comment {comment_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@admin_bp.route("/api/comments/<int:comment_id>", methods=["GET"])
+@production_disabled
+@admin_required
+def api_get_comment(comment_id):
+    """Fetch one comment by id (targeted single-row read for edit flows)."""
+    comment = Comment.query.get_or_404(comment_id)
+    return jsonify(_comment_payload(comment))
 
 
 @admin_bp.route("/api/comments/<int:comment_id>", methods=["DELETE"])
@@ -1460,19 +1540,19 @@ def save_config_api():
             endpoint_url = data["openai_api_url"].rstrip("/")
             Config.set("OPENAI_API_URL", endpoint_url)
 
-        # Handle per-endpoint API key storage
-        if data.get("openai_key"):
+        # Empty-means-unchanged: an absent or blank secret never overwrites the
+        # stored value. Only a non-empty key is written.
+        openai_key = (data.get("openai_key") or "").strip()
+        if openai_key:
             if endpoint_url:
-                Config.set_api_key_for_endpoint(endpoint_url, data["openai_key"])
+                Config.set_api_key_for_endpoint(endpoint_url, openai_key)
             else:
                 # If no endpoint URL, use current endpoint
                 current_endpoint = Config.get("OPENAI_API_URL")
                 if current_endpoint:
-                    Config.set_api_key_for_endpoint(
-                        current_endpoint, data["openai_key"]
-                    )
+                    Config.set_api_key_for_endpoint(current_endpoint, openai_key)
                 else:
-                    Config.set("OPENAI_KEY", data["openai_key"])
+                    Config.set("OPENAI_KEY", openai_key)
 
         if data.get("openai_model"):
             Config.set("OPENAI_MODEL", data["openai_model"])
@@ -1518,9 +1598,10 @@ def save_deaddit_config_api():
         if data.get("api_base_url"):
             Config.set("API_BASE_URL", data["api_base_url"].rstrip("/"))
 
-        if data.get("api_token"):
-            # Validate minimum length
-            token = data["api_token"].strip()
+        # Empty-means-unchanged: an absent or blank token never overwrites the
+        # stored value. Only a non-empty token is validated and written.
+        token = (data.get("api_token") or "").strip()
+        if token:
             if len(token) < 3:
                 return jsonify(
                     {
@@ -1868,12 +1949,12 @@ def get_endpoint_key_api():
 
         api_key = Config.get_api_key_for_endpoint(endpoint_url)
 
+        # Never echo the secret itself; only its presence and last 4 chars.
         return jsonify(
             {
                 "success": True,
-                "api_key": api_key,
-                "masked_key": "••••••••••••••••" if api_key else None,
                 "has_key": bool(api_key),
+                "last4": api_key[-4:] if api_key else None,
             }
         )
 
@@ -2748,3 +2829,36 @@ def report_ban(report_id):
     duration_label = f" until {ban.expires_at:%Y-%m-%d}" if ban.expires_at else ""
     flash(f"Banned u/{username} ({scope_label}){duration_label}.", "success")
     return redirect(url_for("admin.reports"))
+
+
+@admin_bp.route("/api/jobs/<int:job_id>/log")
+@production_disabled
+@admin_required
+def job_log_api(job_id):
+    """HTTP fallback for the streamed admin job log (Phase UX-5).
+
+    Contract (consumed by the UX-6 log pane and its poll reconciler):
+    ``?after=<seq>&limit=<n>`` -> ``{job_id, lines: [{seq, ts, level,
+    message}], last_seq, status, progress}``. Lines are ordered by seq.
+    """
+    after = request.args.get("after", 0, type=int) or 0
+    limit = min(request.args.get("limit", 200, type=int) or 200, 1000)
+
+    job = Job.query.get_or_404(job_id)
+
+    query = JobLog.query.filter_by(job_id=job_id).order_by(JobLog.seq.asc())
+    if after:
+        query = query.filter(JobLog.seq > after)
+    rows = query.limit(limit).all()
+
+    return jsonify(
+        {
+            "job_id": job.id,
+            "lines": [row.to_dict() for row in rows],
+            "last_seq": rows[-1].seq if rows else after,
+            "status": job.status.value if job.status else None,
+            "progress": job.progress or 0,
+        }
+    )
+
+

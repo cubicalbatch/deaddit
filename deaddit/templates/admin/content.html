@@ -2,7 +2,10 @@
 
 {% block title %}Content Management{% endblock %}
 
+{% import "admin/_macros.html" as m with context %}
+
 {% block extra_css %}
+<link href="{{ url_for('static', filename='css/admin-tables.css') }}" rel="stylesheet">
 <style>
     /* Mobile-optimized styles for content management */
     @media (max-width: 767px) {
@@ -100,61 +103,11 @@
     <div class="row">
         <div class="col-12">
             <h1>Content Management</h1>
-            
-            <!-- Content Statistics -->
             <div class="row mb-4 g-2">
-                <div class="col-6 col-lg-3">
-                    <div class="card text-center h-100">
-                        <div class="card-body py-3">
-                            <div class="d-flex align-items-center justify-content-center">
-                                <i class="bi bi-people text-primary me-2 fs-4"></i>
-                                <div>
-                                    <div class="fs-6 text-muted">Users</div>
-                                    <div class="h5 mb-0 text-primary">{{ content_stats.users }}</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-6 col-lg-3">
-                    <div class="card text-center h-100">
-                        <div class="card-body py-3">
-                            <div class="d-flex align-items-center justify-content-center">
-                                <i class="bi bi-collection text-success me-2 fs-4"></i>
-                                <div>
-                                    <div class="fs-6 text-muted">Subdeaddits</div>
-                                    <div class="h5 mb-0 text-success">{{ content_stats.subdeaddits }}</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-6 col-lg-3">
-                    <div class="card text-center h-100">
-                        <div class="card-body py-3">
-                            <div class="d-flex align-items-center justify-content-center">
-                                <i class="bi bi-file-text text-info me-2 fs-4"></i>
-                                <div>
-                                    <div class="fs-6 text-muted">Posts</div>
-                                    <div class="h5 mb-0 text-info">{{ content_stats.posts }}</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-6 col-lg-3">
-                    <div class="card text-center h-100">
-                        <div class="card-body py-3">
-                            <div class="d-flex align-items-center justify-content-center">
-                                <i class="bi bi-chat text-warning me-2 fs-4"></i>
-                                <div>
-                                    <div class="fs-6 text-muted">Comments</div>
-                                    <div class="h5 mb-0 text-warning">{{ content_stats.comments }}</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <div class="col-6 col-lg-3">{{ m.stat_tile(content_stats.users, 'Users', icon='bi-people') }}</div>
+                <div class="col-6 col-lg-3">{{ m.stat_tile(content_stats.subdeaddits, 'Subdeaddits', icon='bi-collection') }}</div>
+                <div class="col-6 col-lg-3">{{ m.stat_tile(content_stats.posts, 'Posts', icon='bi-file-text') }}</div>
+                <div class="col-6 col-lg-3">{{ m.stat_tile(content_stats.comments, 'Comments', icon='bi-chat') }}</div>
             </div>
 
             <!-- Content Management Tabs -->
@@ -210,10 +163,10 @@
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-striped" id="usersTable">
+                                <table class="table dt" id="usersTable">
                                     <thead>
                                         <tr>
-                                            <th><input type="checkbox" id="selectAllUsers"></th>
+                                            <th><input type="checkbox" id="selectAllUsers" aria-label="Select all users"></th>
                                             <th>Username</th>
                                             <th class="d-none d-md-table-cell">Age</th>
                                             <th class="d-none d-lg-table-cell">Gender</th>
@@ -258,10 +211,10 @@
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-striped" id="subdeadditsTable">
+                                <table class="table dt" id="subdeadditsTable">
                                     <thead>
                                         <tr>
-                                            <th><input type="checkbox" id="selectAllSubdeaddits"></th>
+                                            <th><input type="checkbox" id="selectAllSubdeaddits" aria-label="Select all subdeaddits"></th>
                                             <th>Name</th>
                                             <th class="d-none d-md-table-cell">Description</th>
                                             <th class="d-none d-sm-table-cell">Posts</th>
@@ -295,6 +248,11 @@
                                 <div class="d-flex flex-column flex-md-row gap-2">
                                     <select class="form-select" id="postsSubdeadditFilter">
                                         <option value="">All Subdeaddits</option>
+                                        {# Options rendered server-side by
+                                           the /admin/content route. #}
+                                        {% for sub_name in subdeaddit_names %}
+                                        <option value="{{ sub_name }}">{{ sub_name }}</option>
+                                        {% endfor %}
                                     </select>
                                     <input type="text" class="form-control flex-grow-1" id="postsSearch" placeholder="Search posts...">
                                     <button class="btn btn-danger" id="deleteSelectedPosts">
@@ -307,10 +265,10 @@
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-striped" id="postsTable">
+                                <table class="table dt" id="postsTable">
                                     <thead>
                                         <tr>
-                                            <th><input type="checkbox" id="selectAllPosts"></th>
+                                            <th><input type="checkbox" id="selectAllPosts" aria-label="Select all posts"></th>
                                             <th>Title</th>
                                             <th class="d-none d-sm-table-cell">Author</th>
                                             <th class="d-none d-md-table-cell">Subdeaddit</th>
@@ -355,10 +313,10 @@
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-striped" id="commentsTable">
+                                <table class="table dt" id="commentsTable">
                                     <thead>
                                         <tr>
-                                            <th><input type="checkbox" id="selectAllComments"></th>
+                                            <th><input type="checkbox" id="selectAllComments" aria-label="Select all comments"></th>
                                             <th>Content</th>
                                             <th class="d-none d-sm-table-cell">Author</th>
                                             <th class="d-none d-md-table-cell">Post</th>

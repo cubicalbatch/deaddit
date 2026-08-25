@@ -4,55 +4,57 @@
 
 {% block content %}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-    <h1 class="h2">Settings & Configuration</h1>
+    <h1 class="h2">Settings &amp; Configuration</h1>
 </div>
 
-<!-- OpenAI Configuration -->
+<!-- Section 1: AI Endpoint & Models -->
 <div class="row mb-4">
     <div class="col-md-12">
         <div class="card">
             <div class="card-header">
                 <h5 class="card-title mb-0">
-                    <i class="bi bi-robot"></i> OpenAI Configuration
+                    <i class="bi bi-robot"></i> AI Endpoint &amp; Models
                 </h5>
             </div>
             <div class="card-body">
-                <form id="openai-config-form">
+                <form id="ai-endpoint-form">
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="openai_api_url" class="form-label">
                                     API Endpoint URL <span class="text-danger">*</span>
                                 </label>
-                                <div class="mb-2">
-                                    <select class="form-select" id="api_preset" onchange="setPresetUrl()">
-                                        <option value="">Select a preset...</option>
-                                        <option value="openai">OpenAI</option>
-                                        <option value="groq">Groq</option>
-                                        <option value="openrouter">OpenRouter</option>
-                                        <option value="custom">Custom</option>
-                                    </select>
-                                </div>
-                                <input type="url" class="form-control" id="openai_api_url" name="openai_api_url" 
-                                       value="{{ config.openai_api_url if config.openai_api_url != 'Not set' else '' }}" 
+                                <select class="form-select mb-2" id="api_preset" aria-label="Endpoint preset">
+                                    <option value="">Select a preset...</option>
+                                    <option value="openai">OpenAI</option>
+                                    <option value="groq">Groq</option>
+                                    <option value="openrouter">OpenRouter</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                                <input type="url" class="form-control" id="openai_api_url" name="openai_api_url"
+                                       value="{{ config.openai_api_url if config.openai_api_url != 'Not set' else '' }}"
                                        placeholder="http://localhost:11434/v1" required>
                                 <div class="form-text">The base URL for your OpenAI-compatible API. Typically ends with /v1</div>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="openai_key" class="form-label">
-                                    API Key <span class="text-danger">*</span>
-                                </label>
+                                <label for="openai_key" class="form-label">API Key</label>
                                 <div class="input-group">
-                                    <input type="password" class="form-control" id="openai_key" name="openai_key" 
-                                           placeholder="Enter API key" required
-                                           {% if config.openai_key_set %}value="••••••••••••••••"{% endif %}>
-                                    <button type="button" class="btn btn-outline-secondary" onclick="togglePasswordVisibility('openai_key')">
-                                        <i class="bi bi-eye" id="openai_key_toggle_icon"></i>
+                                    <input type="password" class="form-control" id="openai_key" name="openai_key"
+                                           placeholder="{% if config.openai_key_set %}Stored - leave blank to keep{% else %}Enter API key{% endif %}"
+                                           autocomplete="new-password">
+                                    <button type="button" class="btn btn-outline-secondary" data-toggle-password="openai_key"
+                                            aria-label="Show or hide API key">
+                                        <i class="bi bi-eye"></i>
                                     </button>
                                 </div>
-                                <div class="form-text">Your API authentication key</div>
+                                <div class="form-text">
+                                    Status: <span id="openai-key-status">
+                                        {%- if config.openai_key_set %}<span class="text-success">set</span>{% else %}<span class="text-danger">not set</span>{% endif -%}
+                                    </span>.
+                                    Leave blank to keep the stored key.
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -61,53 +63,49 @@
                             <div class="mb-3">
                                 <label for="openai_model" class="form-label">Default Model</label>
                                 <div class="input-group">
-                                    <select class="form-select" id="openai_model" name="openai_model" 
-                                            data-placeholder="Search or type model name...">
-                                        <option value="">Select a model...</option>
-                                        {% if config.openai_model != 'Not set' %}
-                                        <option value="{{ config.openai_model }}" selected>{{ config.openai_model }}</option>
-                                        {% endif %}
-                                    </select>
-                                    <button type="button" class="btn btn-outline-secondary" onclick="refreshModels(this)">
+                                    <input type="text" class="form-control" id="openai_model" name="openai_model"
+                                           list="model-options" autocomplete="off"
+                                           value="{{ config.openai_model if config.openai_model != 'Not set' else '' }}"
+                                           placeholder="Pick a loaded model or type a name...">
+                                    <datalist id="model-options"></datalist>
+                                    <button type="button" class="btn btn-outline-secondary" id="refresh-models-btn"
+                                            aria-label="Refresh model list from endpoint">
                                         <i class="bi bi-arrow-clockwise"></i>
                                     </button>
                                 </div>
                                 <div class="form-text">
-                                    Default model name for content generation. 
+                                    Default model name for content generation.
                                     <span id="model-cache-info" class="text-muted"></span>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-12">
-                            <div class="d-flex gap-2">
+                        <div class="col-md-6 d-flex align-items-end">
+                            <div class="d-flex gap-2 pb-3">
                                 <button type="submit" class="btn btn-primary">
-                                    <i class="bi bi-check-circle"></i> Save Configuration
+                                    <i class="bi bi-check-circle"></i> Save Endpoint
                                 </button>
-                                <button type="button" class="btn btn-outline-info" onclick="testConnection()">
+                                <button type="button" class="btn btn-outline-info" id="test-connection-btn">
                                     <i class="bi bi-wifi"></i> Test Connection
                                 </button>
                             </div>
                         </div>
                     </div>
                 </form>
-                
+
                 <!-- Connection Test Results -->
                 <div id="connection-test-result" class="mt-3" style="display: none;"></div>
-                
             </div>
         </div>
     </div>
 </div>
 
-<!-- Deaddit Configuration -->
+<!-- Section 2: Deaddit API & Security -->
 <div class="row mb-4">
     <div class="col-md-12">
         <div class="card">
             <div class="card-header">
                 <h5 class="card-title mb-0">
-                    <i class="bi bi-gear-fill"></i> Deaddit Configuration
+                    <i class="bi bi-shield-lock"></i> Deaddit API &amp; Security
                 </h5>
             </div>
             <div class="card-body">
@@ -116,24 +114,30 @@
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="api_base_url" class="form-label">Application Base URL</label>
-                                <input type="url" class="form-control" id="api_base_url" name="api_base_url" 
-                                       value="{{ config.api_base_url if config.api_base_url != 'Not set' else '' }}" 
+                                <input type="url" class="form-control" id="api_base_url" name="api_base_url"
+                                       value="{{ config.api_base_url if config.api_base_url != 'Not set' else '' }}"
                                        placeholder="http://localhost:5000">
                                 <div class="form-text">Public base URL of this deaddit instance</div>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="api_token" class="form-label">API Token</label>
+                                <label for="api_token" class="form-label">Admin API Token</label>
                                 <div class="input-group">
-                                    <input type="password" class="form-control" id="api_token" name="api_token" 
-                                           placeholder="Enter API token (minimum 3 characters)" minlength="3"
-                                           {% if config.api_token_set %}value="••••••••••••••••"{% endif %}>
-                                    <button type="button" class="btn btn-outline-secondary" onclick="togglePasswordVisibility('api_token')">
-                                        <i class="bi bi-eye" id="api_token_toggle_icon"></i>
+                                    <input type="password" class="form-control" id="api_token" name="api_token"
+                                           placeholder="{% if config.api_token_set %}Stored - leave blank to keep{% else %}Enter token (minimum 3 characters){% endif %}"
+                                           autocomplete="new-password">
+                                    <button type="button" class="btn btn-outline-secondary" data-toggle-password="api_token"
+                                            aria-label="Show or hide API token">
+                                        <i class="bi bi-eye"></i>
                                     </button>
                                 </div>
-                                <div class="form-text">Secure token for admin access (minimum 3 characters)</div>
+                                <div class="form-text">
+                                    Status: <span id="api-token-status">
+                                        {%- if config.api_token_set %}<span class="text-success">set</span>{% else %}<span class="text-danger">not set</span>{% endif -%}
+                                    </span>.
+                                    Leave blank to keep the stored token.
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -159,14 +163,10 @@
                             </div>
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col-md-12">
-                            <div class="d-flex gap-2">
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="bi bi-check-circle"></i> Save Configuration
-                                </button>
-                            </div>
-                        </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-circle"></i> Save Security Settings
+                        </button>
                     </div>
                 </form>
             </div>
@@ -174,17 +174,52 @@
     </div>
 </div>
 
-<!-- Current Configuration Status -->
+<!-- Section 3: Per-endpoint Defaults & Keys -->
 <div class="row mb-4">
     <div class="col-md-12">
         <div class="card">
             <div class="card-header">
                 <h5 class="card-title mb-0">
-                    <i class="bi bi-info-circle"></i> Configuration Status
+                    <i class="bi bi-key"></i> Per-endpoint Keys
                 </h5>
             </div>
             <div class="card-body">
+                <p class="form-text">
+                    Each endpoint URL can carry its own API key. Saving a key in the
+                    <strong>AI Endpoint &amp; Models</strong> section stores it against the endpoint URL entered there.
+                    Check a stored key below &mdash; values are never displayed, only whether one exists.
+                </p>
                 <div class="row">
+                    <div class="col-md-8">
+                        <label for="endpoint-check-url" class="form-label visually-hidden">Endpoint URL to check</label>
+                        <input type="url" class="form-control" id="endpoint-check-url"
+                               placeholder="https://api.example.com/v1" aria-label="Endpoint URL to check">
+                    </div>
+                    <div class="col-md-4">
+                        <button type="button" class="btn btn-outline-secondary w-100" id="check-endpoint-key-btn">
+                            <i class="bi bi-search"></i> Check Stored Key
+                        </button>
+                    </div>
+                </div>
+                <div id="endpoint-key-status" class="mt-3" role="status" aria-live="polite"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Section 4: Advanced -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-sliders"></i> Advanced
+                </h5>
+            </div>
+            <div class="card-body">
+                <!-- Current Configuration Status -->
+                <h6>Configuration Status</h6>
+                <div class="row mb-4">
                     <div class="col-md-3">
                         <div class="text-center">
                             <div class="h4" id="api-url-status">
@@ -230,116 +265,61 @@
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
-</div>
 
-<!-- Job Scheduler Status -->
-<div class="row mb-4">
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">
-                    <i class="bi bi-clock"></i> Job Scheduler
-                </h5>
-            </div>
-            <div class="card-body">
-                <div class="row">
+                <div class="row mb-4">
                     <div class="col-md-6">
-                        <h6>Status</h6>
-                        <div id="scheduler-status">
-                            <span class="badge bg-success">Running</span>
-                            <small class="text-muted d-block">APScheduler</small>
+                        <h6>Job Scheduler</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div id="scheduler-status">
+                                    <span class="badge bg-success">Running</span>
+                                    <small class="text-muted d-block">APScheduler</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                Active Jobs
+                                <div id="active-jobs-count">
+                                    <span class="h4">-</span>
+                                    <small class="text-muted d-block">Loading...</small>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="col-md-6">
-                        <h6>Active Jobs</h6>
-                        <div id="active-jobs-count">
-                            <span class="h4">-</span>
-                            <small class="text-muted d-block">Loading...</small>
-                        </div>
+                        <h6>Database</h6>
+                        <p><code>instance/deaddit.db</code> &middot; SQLite</p>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">
-                    <i class="bi bi-database"></i> Database
-                </h5>
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6>Location</h6>
-                        <p><code>instance/deaddit.db</code></p>
-                    </div>
-                    <div class="col-md-6">
-                        <h6>Type</h6>
-                        <p>SQLite</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
 
-
-<!-- System Information -->
-<div class="row mb-4">
-    <div class="col-md-12">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">
-                    <i class="bi bi-info-circle"></i> System Information
-                </h5>
-            </div>
-            <div class="card-body">
-                <div class="row">
+                <h6>System Information</h6>
+                <div class="row mb-4">
                     <div class="col-md-3">
-                        <h6>Python Version</h6>
                         <p id="python-version">Loading...</p>
+                        <small class="text-muted">Python</small>
                     </div>
                     <div class="col-md-3">
-                        <h6>Flask Version</h6>
                         <p id="flask-version">Loading...</p>
+                        <small class="text-muted">Flask</small>
                     </div>
                     <div class="col-md-3">
-                        <h6>SQLAlchemy Version</h6>
                         <p id="sqlalchemy-version">Loading...</p>
+                        <small class="text-muted">SQLAlchemy</small>
                     </div>
                     <div class="col-md-3">
-                        <h6>APScheduler Version</h6>
                         <p id="apscheduler-version">Loading...</p>
+                        <small class="text-muted">APScheduler</small>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
-</div>
 
-<!-- Quick Actions -->
-<div class="row">
-    <div class="col-md-12">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">
-                    <i class="bi bi-tools"></i> Quick Actions
-                </h5>
-            </div>
-            <div class="card-body">
+                <h6>Quick Actions</h6>
                 <div class="row">
                     <div class="col-md-3">
-                        <button class="btn btn-outline-primary w-100" onclick="testConnection()">
+                        <button class="btn btn-outline-primary w-100" id="quick-test-connection-btn">
                             <i class="bi bi-wifi"></i> Test API Connection
                         </button>
                     </div>
                     <div class="col-md-3">
-                        <button class="btn btn-outline-info w-100" onclick="refreshStats()">
+                        <button class="btn btn-outline-info w-100" id="refresh-stats-btn">
                             <i class="bi bi-arrow-clockwise"></i> Refresh Stats
                         </button>
                     </div>
@@ -362,636 +342,464 @@
 
 {% block extra_js %}
 <script>
-// Load system information
-document.addEventListener('DOMContentLoaded', function() {
-    loadSystemInfo();
-    loadSchedulerStats();
-    
-    // Set up form submission
-    document.getElementById('openai-config-form').addEventListener('submit', saveConfiguration);
-    document.getElementById('deaddit-config-form').addEventListener('submit', saveDeadditsConfiguration);
-    
-    // Set preset selection based on current URL
-    setCurrentPreset();
-    
-    // Add event listener to URL input for manual changes
-    document.getElementById('openai_api_url').addEventListener('blur', function() {
-        const url = this.value.trim();
-        if (url) {
-            loadApiKeyForEndpoint(url);
-        }
-    });
-});
+(function () {
+    'use strict';
 
-function loadSystemInfo() {
-    fetch('/admin/api/system-info')
-        .then(response => response.json())
-        .then(data => {
-            document.getElementById('python-version').textContent = data.python_version || 'Unknown';
-            document.getElementById('flask-version').textContent = data.flask_version || 'Unknown';
-            document.getElementById('sqlalchemy-version').textContent = data.sqlalchemy_version || 'Unknown';
-            document.getElementById('apscheduler-version').textContent = data.apscheduler_version || 'Unknown';
-        })
-        .catch(error => {
-            console.error('Error loading system info:', error);
-            document.getElementById('python-version').textContent = 'Error loading';
-            document.getElementById('flask-version').textContent = 'Error loading';
-            document.getElementById('sqlalchemy-version').textContent = 'Error loading';
-            document.getElementById('apscheduler-version').textContent = 'Error loading';
-        });
-}
+    // ---------- small helpers ----------
 
-function loadSchedulerStats() {
-    fetch('/admin/api/jobs/stats')
-        .then(response => response.json())
-        .then(data => {
-            const status = data.scheduler_running ? 'Running' : 'Stopped';
-            const statusClass = data.scheduler_running ? 'bg-success' : 'bg-danger';
-            
-            document.getElementById('scheduler-status').innerHTML = `
-                <span class="badge ${statusClass}">${status}</span>
-                <small class="text-muted d-block">APScheduler</small>
-            `;
-            
-            const activeJobs = data.database ? data.database.running : 0;
-            document.getElementById('active-jobs-count').innerHTML = `
-                <span class="h4">${activeJobs}</span>
-                <small class="text-muted d-block">Running</small>
-            `;
-        })
-        .catch(error => {
-            console.error('Error loading scheduler stats:', error);
-            document.getElementById('scheduler-status').innerHTML = `
-                <span class="badge bg-secondary">Unknown</span>
-                <small class="text-muted d-block">Error loading</small>
-            `;
-            document.getElementById('active-jobs-count').innerHTML = `
-                <span class="h4">-</span>
-                <small class="text-muted d-block">Error loading</small>
-            `;
-        });
-}
-
-function saveConfiguration(event) {
-    event.preventDefault();
-    
-    const formData = new FormData(event.target);
-    const keyInput = document.getElementById('openai_key');
-    
-    const data = {
-        openai_api_url: formData.get('openai_api_url'),
-        openai_key: formData.get('openai_key'),
-        openai_model: formData.get('openai_model'),
-        api_base_url: formData.get('api_base_url')
-    };
-    
-    // Handle masked key - use actual key if available
-    if (data.openai_key === '••••••••••••••••') {
-        const actualKey = keyInput.getAttribute('data-actual-key');
-        if (actualKey) {
-            data.openai_key = actualKey;
-        } else {
-            delete data.openai_key;
-        }
-    }
-    
-    const submitButton = event.target.querySelector('button[type="submit"]');
-    const originalText = submitButton.innerHTML;
-    
-    submitButton.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving...';
-    submitButton.disabled = true;
-    
-    fetch('/admin/api/save-config', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showAlert('<i class="bi bi-check-circle"></i> Configuration saved successfully!', 'alert-success');
-            updateConfigurationStatus(data.config);
-            
-            // Clear the actual key data attribute since we just saved
-            const keyInput = document.getElementById('openai_key');
-            keyInput.removeAttribute('data-actual-key');
-            if (keyInput.value && keyInput.value !== '••••••••••••••••') {
-                keyInput.value = '••••••••••••••••';
+    function showAlert(message, alertClass) {
+        const alertContainer = document.createElement('div');
+        alertContainer.className = 'alert ' + alertClass + ' alert-dismissible fade show position-fixed';
+        alertContainer.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+        alertContainer.innerHTML = message +
+            '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+        document.body.appendChild(alertContainer);
+        setTimeout(() => {
+            if (alertContainer.parentNode) {
+                bootstrap.Alert.getOrCreateInstance(alertContainer).close();
             }
-        } else {
-            showAlert('<i class="bi bi-x-circle"></i> Failed to save configuration: ' + data.message, 'alert-danger');
-        }
-    })
-    .catch(error => {
-        showAlert('<i class="bi bi-x-circle"></i> Error saving configuration: ' + error.message, 'alert-danger');
-    })
-    .finally(() => {
-        submitButton.innerHTML = originalText;
-        submitButton.disabled = false;
-    });
-}
+        }, 5000);
+    }
 
-function saveDeadditsConfiguration(event) {
-    event.preventDefault();
-    
-    const formData = new FormData(event.target);
-    const tokenInput = document.getElementById('api_token');
-    
-    const data = {
-        api_base_url: formData.get('api_base_url'),
-        api_token: formData.get('api_token'),
-        subdeaddit_selection_strategy: formData.get('subdeaddit_selection_strategy')
-    };
-    
-    // Handle masked token - use actual token if available
-    if (data.api_token === '••••••••••••••••') {
-        const actualToken = tokenInput.getAttribute('data-actual-token');
-        if (actualToken) {
-            data.api_token = actualToken;
-        } else {
-            delete data.api_token;
-        }
+    function postJson(url, payload) {
+        return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload || {})
+        }).then(response => response.json());
     }
-    
-    // Validate API token minimum length
-    if (data.api_token && data.api_token.length < 3) {
-        showAlert('<i class="bi bi-exclamation-triangle"></i> API Token must be at least 3 characters long', 'alert-warning');
-        return;
-    }
-    
-    const submitButton = event.target.querySelector('button[type="submit"]');
-    const originalText = submitButton.innerHTML;
-    
-    submitButton.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving...';
-    submitButton.disabled = true;
-    
-    fetch('/admin/api/save-deaddit-config', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showAlert('<i class="bi bi-check-circle"></i> Deaddit configuration saved successfully!', 'alert-success');
-            
-            // Clear the actual token data attribute since we just saved
-            const tokenInput = document.getElementById('api_token');
-            tokenInput.removeAttribute('data-actual-token');
-            if (tokenInput.value && tokenInput.value !== '••••••••••••••••') {
-                tokenInput.value = '••••••••••••••••';
-            }
-            
-            // Reload page to show/hide warning box
-            setTimeout(() => {
-                window.location.reload();
-            }, 1500);
-        } else {
-            showAlert('<i class="bi bi-x-circle"></i> Failed to save configuration: ' + data.message, 'alert-danger');
-        }
-    })
-    .catch(error => {
-        showAlert('<i class="bi bi-x-circle"></i> Error saving configuration: ' + error.message, 'alert-danger');
-    })
-    .finally(() => {
-        submitButton.innerHTML = originalText;
-        submitButton.disabled = false;
-    });
-}
 
-function testConnection() {
-    const apiUrl = document.getElementById('openai_api_url').value;
-    const apiKey = document.getElementById('openai_key').value;
-    
-    if (!apiUrl) {
-        showAlert('<i class="bi bi-exclamation-triangle"></i> Please enter an API URL first', 'alert-warning');
-        return;
-    }
-    
-    // Allow testing with masked key (will use saved environment variable)
-    if (!apiKey) {
-        showAlert('<i class="bi bi-exclamation-triangle"></i> Please enter an API key first', 'alert-warning');
-        return;
-    }
-    
-    const button = event.target;
-    const originalText = button.innerHTML;
-    
-    button.innerHTML = '<i class="bi bi-hourglass-split"></i> Testing...';
-    button.disabled = true;
-    
-    const data = {
-        api_url: apiUrl,
-        api_key: apiKey
-    };
-    
-    fetch('/admin/api/test-connection', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(data => {
-        displayConnectionTestResult(data);
-        updateConnectionStatus(data.success);
-    })
-    .catch(error => {
-        const errorResult = {
-            success: false,
-            message: 'Connection test failed: ' + error.message,
-            status_code: null
+    function busy(button, busyText) {
+        const original = button.innerHTML;
+        button.innerHTML = '<i class="bi bi-hourglass-split"></i> ' + busyText;
+        button.disabled = true;
+        return function done() {
+            button.innerHTML = original;
+            button.disabled = false;
         };
-        displayConnectionTestResult(errorResult);
-        updateConnectionStatus(false);
-    })
-    .finally(() => {
-        button.innerHTML = originalText;
-        button.disabled = false;
-    });
-}
-
-function displayConnectionTestResult(data) {
-    const resultDiv = document.getElementById('connection-test-result');
-    const alertClass = data.success ? 'alert-success' : 'alert-danger';
-    const icon = data.success ? 'check-circle' : 'x-circle';
-    
-    let statusCodeBadge = '';
-    if (data.status_code !== null && data.status_code !== undefined) {
-        const badgeClass = data.status_code >= 200 && data.status_code < 300 ? 'bg-success' : 'bg-danger';
-        statusCodeBadge = `<span class="badge ${badgeClass} ms-2">HTTP ${data.status_code}</span>`;
     }
-    
-    resultDiv.innerHTML = `
-        <div class="alert ${alertClass}" role="alert">
-            <i class="bi bi-${icon}"></i> ${data.message}${statusCodeBadge}
-        </div>
-    `;
-    resultDiv.style.display = 'block';
-}
 
-async function loadEndpointConfig(apiUrl) {
-    if (!apiUrl) return;
-    
-    try {
-        const encodedUrl = btoa(apiUrl);
-        const response = await fetch(`/admin/api/endpoint-config/${encodedUrl}`);
-        const data = await response.json();
-        
-        if (data.success) {
-            // Populate models dropdown
-            if (data.models && data.models.length > 0) {
-                populateModelsDropdown(data.models, true);
-                updateModelCacheInfo(data);
-            } else {
-                // Clear models if none cached
-                populateModelsDropdown([], true);
-                updateModelCacheInfo({});
-            }
-            
-            // Set the default model for this endpoint
-            if (data.default_model) {
-                $('#openai_model').val(data.default_model).trigger('change');
-                console.log(`Loaded default model '${data.default_model}' for ${apiUrl}`);
-            } else {
-                $('#openai_model').val('').trigger('change');
-            }
-        }
-    } catch (error) {
-        console.warn('Could not load endpoint config:', error);
+    // ---------- system info / scheduler ----------
+
+    function setText(id, text) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
     }
-}
 
-async function saveEndpointDefaultModel(apiUrl, modelName) {
-    if (!apiUrl || !modelName) return;
-    
-    try {
-        const response = await fetch('/admin/api/endpoint-config', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                api_url: apiUrl,
-                default_model: modelName
+    function loadSystemInfo() {
+        fetch('/admin/api/system-info')
+            .then(response => response.json())
+            .then(data => {
+                setText('python-version', data.python_version || 'Unknown');
+                setText('flask-version', data.flask_version || 'Unknown');
+                setText('sqlalchemy-version', data.sqlalchemy_version || 'Unknown');
+                setText('apscheduler-version', data.apscheduler_version || 'Unknown');
             })
-        });
-        
-        const data = await response.json();
-        if (data.success) {
-            console.log(`Saved default model '${modelName}' for ${apiUrl}`);
-        } else {
-            console.warn('Failed to save default model:', data.message);
-        }
-    } catch (error) {
-        console.warn('Error saving default model:', error);
+            .catch(() => {
+                ['python-version', 'flask-version', 'sqlalchemy-version', 'apscheduler-version']
+                    .forEach(id => setText(id, 'Error loading'));
+            });
     }
-}
 
-async function refreshModels(buttonElement) {
-    const apiUrl = document.getElementById('openai_api_url').value;
-    const apiKey = document.getElementById('openai_key').value;
-    
-    if (!apiUrl) {
-        showAlert('<i class="bi bi-exclamation-triangle"></i> Please enter API URL first', 'alert-warning');
-        return;
-    }
-    
-    if (!apiKey) {
-        showAlert('<i class="bi bi-exclamation-triangle"></i> Please enter an API key first', 'alert-warning');
-        return;
-    }
-    
-    const button = buttonElement || document.querySelector('button[onclick*="refreshModels"]');
-    if (!button) {
-        console.error('Could not find refresh button');
-        return;
-    }
-    
-    const icon = button.querySelector('i');
-    const originalIcon = icon ? icon.className : 'bi bi-arrow-clockwise';
-    
-    if (icon) {
-        icon.className = 'bi bi-hourglass-split';
-    }
-    button.disabled = true;
-    
-    try {
-        const response = await fetch('/admin/api/load-models', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                api_url: apiUrl,
-                api_key: apiKey
+    function loadSchedulerStats() {
+        fetch('/admin/api/jobs/stats')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('scheduler-status').innerHTML =
+                    '<span class="badge ' + (data.scheduler_running ? 'bg-success' : 'bg-danger') + '">' +
+                    (data.scheduler_running ? 'Running' : 'Stopped') + '</span>' +
+                    '<small class="text-muted d-block">APScheduler</small>';
+                const activeJobs = data.database ? data.database.running : 0;
+                document.getElementById('active-jobs-count').innerHTML =
+                    '<span class="h4">' + activeJobs + '</span>' +
+                    '<small class="text-muted d-block">Running</small>';
             })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            populateModelsDropdown(data.models, true);
-            const alertType = data.cached ? 'alert-warning' : 'alert-success';
-            const icon = data.cached ? 'exclamation-triangle' : 'check-circle';
-            showAlert(`<i class="bi bi-${icon}"></i> ${data.message}`, alertType);
-            updateModelCacheInfo(data);
-        } else {
-            showAlert('<i class="bi bi-x-circle"></i> Failed to load models: ' + data.message, 'alert-danger');
-        }
-    } catch (error) {
-        showAlert('<i class="bi bi-x-circle"></i> Network error - trying cached models', 'alert-warning');
-        await loadCachedModels(apiUrl);
-    } finally {
-        if (icon) {
-            icon.className = originalIcon;
-        }
-        button.disabled = false;
+            .catch(() => {
+                document.getElementById('scheduler-status').innerHTML =
+                    '<span class="badge bg-secondary">Unknown</span>' +
+                    '<small class="text-muted d-block">Error loading</small>';
+                document.getElementById('active-jobs-count').innerHTML =
+                    '<span class="h4">-</span><small class="text-muted d-block">Error loading</small>';
+            });
     }
-}
 
-function populateModelsDropdown(models, clearFirst = false) {
-    const select = $('#openai_model');
-    const currentValue = select.val();
-    
-    if (clearFirst) {
-        select.empty().append('<option value="">Select a model...</option>');
+    function refreshStats(button) {
+        const done = busy(button, 'Refreshing...');
+        loadSystemInfo();
+        loadSchedulerStats();
+        setTimeout(() => {
+            done();
+            showAlert('<i class="bi bi-check-circle"></i> Stats refreshed successfully', 'alert-success');
+        }, 1000);
     }
-    
-    if (models && models.length > 0) {
-        models.forEach(model => {
-            // Avoid duplicates
-            if (!select.find(`option[value="${model}"]`).length) {
-                select.append(`<option value="${model}">${model}</option>`);
-            }
-        });
-    }
-    
-    // Restore previous selection if it still exists
-    if (currentValue && select.find(`option[value="${currentValue}"]`).length) {
-        select.val(currentValue);
-    }
-    
-    select.trigger('change');
-}
 
-function updateModelCacheInfo(data) {
-    const info = document.getElementById('model-cache-info');
-    if (data.cached && data.last_fetched) {
-        const date = new Date(data.last_fetched).toLocaleString();
-        info.textContent = `(Cached models from ${date})`;
-    } else if (data.models && data.models.length > 0) {
-        info.textContent = `(${data.models.length} models loaded)`;
-    } else {
-        info.textContent = '';
-    }
-}
+    // ---------- status indicators ----------
 
-function updateConfigurationStatus(config) {
-    // Update status indicators
-    const updateStatus = (elementId, isSet) => {
+    function setStatusIcon(elementId, ok, warnWhenMissing) {
         const element = document.getElementById(elementId);
-        if (isSet) {
+        if (!element) return;
+        if (ok) {
             element.innerHTML = '<i class="bi bi-check-circle text-success"></i>';
         } else {
-            element.innerHTML = '<i class="bi bi-x-circle text-danger"></i>';
+            element.innerHTML = warnWhenMissing
+                ? '<i class="bi bi-exclamation-triangle text-warning"></i>'
+                : '<i class="bi bi-x-circle text-danger"></i>';
         }
-    };
-    
-    updateStatus('api-url-status', config.openai_api_url && config.openai_api_url !== 'Not set');
-    updateStatus('api-key-status', config.openai_key_set);
-    updateStatus('model-status', config.openai_model && config.openai_model !== 'Not set');
-}
-
-function updateConnectionStatus(success) {
-    const element = document.getElementById('connection-status');
-    if (success) {
-        element.innerHTML = '<i class="bi bi-check-circle text-success"></i>';
-    } else {
-        element.innerHTML = '<i class="bi bi-x-circle text-danger"></i>';
     }
-}
 
-function togglePasswordVisibility(inputId) {
-    const input = document.getElementById(inputId);
-    const icon = document.getElementById(inputId + '_toggle_icon');
-    
-    if (input.type === 'password') {
-        input.type = 'text';
-        icon.className = 'bi bi-eye-slash';
-    } else {
-        input.type = 'password';
-        icon.className = 'bi bi-eye';
+    function updateConfigurationStatus(configStatus) {
+        setStatusIcon('api-url-status',
+            configStatus.openai_api_url && configStatus.openai_api_url !== 'Not set');
+        setStatusIcon('api-key-status', !!configStatus.openai_key_set);
+        setStatusIcon('model-status',
+            configStatus.openai_model && configStatus.openai_model !== 'Not set', true);
+        setSecretStatus('openai-key-status', !!configStatus.openai_key_set);
     }
-}
 
-function refreshStats() {
-    const button = event.target;
-    const originalText = button.innerHTML;
-    
-    button.innerHTML = '<i class="bi bi-hourglass-split"></i> Refreshing...';
-    button.disabled = true;
-    
-    loadSystemInfo();
-    loadSchedulerStats();
-    
-    setTimeout(() => {
-        button.innerHTML = originalText;
-        button.disabled = false;
-        showAlert('<i class="bi bi-check-circle"></i> Stats refreshed successfully', 'alert-success');
-    }, 1000);
-}
+    function setSecretStatus(spanId, isSet) {
+        const el = document.getElementById(spanId);
+        if (!el) return;
+        el.innerHTML = isSet
+            ? '<span class="text-success">set</span>'
+            : '<span class="text-danger">not set</span>';
+    }
 
-function showAlert(message, alertClass) {
-    const alertContainer = document.createElement('div');
-    alertContainer.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;
-    alertContainer.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-    
-    alertContainer.innerHTML = `
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
-    
-    document.body.appendChild(alertContainer);
-    
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-        if (alertContainer.parentNode) {
-            const alert = new bootstrap.Alert(alertContainer);
-            alert.close();
-        }
-    }, 5000);
-}
+    function updateConnectionStatus(success) {
+        setStatusIcon('connection-status', success);
+    }
 
-function setPresetUrl() {
-    const preset = document.getElementById('api_preset').value;
-    const urlInput = document.getElementById('openai_api_url');
-    
-    const urls = {
-        'openai': 'https://api.openai.com/v1',
-        'groq': 'https://api.groq.com/openai/v1',
-        'openrouter': 'https://openrouter.ai/api/v1',
-        'custom': ''
+    // ---------- presets ----------
+
+    const PRESET_URLS = {
+        openai: 'https://api.openai.com/v1',
+        groq: 'https://api.groq.com/openai/v1',
+        openrouter: 'https://openrouter.ai/api/v1'
     };
-    
-    if (preset && urls[preset] !== undefined) {
-        urlInput.value = urls[preset];
+
+    function setPresetUrl() {
+        const preset = document.getElementById('api_preset').value;
+        const urlInput = document.getElementById('openai_api_url');
+        if (!preset) return;
         if (preset === 'custom') {
             urlInput.focus();
+            return;
+        }
+        urlInput.value = PRESET_URLS[preset];
+        loadEndpointConfig(PRESET_URLS[preset]);
+    }
+
+    function setCurrentPreset() {
+        const currentUrl = document.getElementById('openai_api_url').value.trim();
+        const presetSelect = document.getElementById('api_preset');
+        let matched = 'custom';
+        for (const [name, url] of Object.entries(PRESET_URLS)) {
+            if (currentUrl === url) matched = name;
+        }
+        if (currentUrl) presetSelect.value = matched;
+    }
+
+    // ---------- models (native input + datalist, replaces Select2) ----------
+
+    function populateModelOptions(models) {
+        const datalist = document.getElementById('model-options');
+        const seen = new Set();
+        datalist.innerHTML = '';
+        (models || []).forEach(model => {
+            if (seen.has(model)) return;
+            seen.add(model);
+            const option = document.createElement('option');
+            option.value = model;
+            datalist.appendChild(option);
+        });
+    }
+
+    function updateModelCacheInfo(data) {
+        const info = document.getElementById('model-cache-info');
+        if (data.cached && data.last_fetched) {
+            info.textContent = '(Cached models from ' + new Date(data.last_fetched).toLocaleString() + ')';
+        } else if (data.models && data.models.length > 0) {
+            info.textContent = '(' + data.models.length + ' models loaded)';
         } else {
-            // Load the API key for this endpoint
-            loadApiKeyForEndpoint(urls[preset]);
+            info.textContent = '';
         }
     }
-}
 
-function setCurrentPreset() {
-    const currentUrl = document.getElementById('openai_api_url').value;
-    const presetSelect = document.getElementById('api_preset');
-    
-    const presets = {
-        'https://api.openai.com/v1': 'openai',
-        'https://api.groq.com/openai/v1': 'groq',
-        'https://openrouter.ai/api/v1': 'openrouter'
-    };
-    
-    if (currentUrl && presets[currentUrl]) {
-        presetSelect.value = presets[currentUrl];
-    } else if (currentUrl) {
-        presetSelect.value = 'custom';
-    }
-}
-
-function loadApiKeyForEndpoint(endpointUrl) {
-    if (!endpointUrl) return;
-    
-    fetch('/admin/api/get-endpoint-key', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            endpoint_url: endpointUrl
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        const keyInput = document.getElementById('openai_key');
-        if (data.success && data.has_key) {
-            keyInput.value = data.masked_key;
-            keyInput.setAttribute('data-actual-key', data.api_key);
-        } else {
-            keyInput.value = '';
-            keyInput.removeAttribute('data-actual-key');
-        }
-    })
-    .catch(error => {
-        console.error('Error loading API key for endpoint:', error);
-    });
-}
-
-// Initialize Select2 and endpoint-specific model management
-$(document).ready(function() {
-    // Initialize Select2 for model dropdown
-    $('#openai_model').select2({
-        tags: true,
-        placeholder: "Search or type model name...",
-        allowClear: true,
-        width: '100%',
-        theme: 'bootstrap',
-        createTag: function (params) {
-            const term = $.trim(params.term);
-            if (term === '') {
-                return null;
+    async function loadEndpointConfig(apiUrl) {
+        if (!apiUrl) return;
+        try {
+            const encodedUrl = btoa(apiUrl);
+            const data = await postJson('/admin/api/endpoint-config/' + encodedUrl);
+            if (!data.success) return;
+            populateModelOptions(data.models || []);
+            updateModelCacheInfo(data.models && data.models.length ? data : {});
+            if (data.default_model) {
+                document.getElementById('openai_model').value = data.default_model;
             }
-            return {
-                id: term,
-                text: term,
-                newTag: true
-            };
+        } catch (error) {
+            console.warn('Could not load endpoint config:', error);
         }
-    });
-    
-    // Auto-save default model when selection changes
-    $('#openai_model').on('change', function() {
-        const apiUrl = document.getElementById('openai_api_url').value;
-        const selectedModel = $(this).val();
-        
-        if (apiUrl && selectedModel) {
-            saveEndpointDefaultModel(apiUrl, selectedModel);
-        }
-    });
-    
-    // Load endpoint config when API URL is set on page load
-    const apiUrl = document.getElementById('openai_api_url').value;
-    if (apiUrl) {
-        loadEndpointConfig(apiUrl);
     }
-    
-    // Load endpoint config when API URL changes
-    $('#openai_api_url').on('blur', function() {
-        const url = this.value;
-        if (url) {
-            loadEndpointConfig(url);
+
+    async function saveEndpointDefaultModel(apiUrl, modelName) {
+        if (!apiUrl || !modelName) return;
+        try {
+            await postJson('/admin/api/endpoint-config', {
+                api_url: apiUrl,
+                default_model: modelName
+            });
+        } catch (error) {
+            console.warn('Error saving default model:', error);
         }
-    });
-    
-    // Also trigger on preset changes
-    $('#api_preset').on('change', function() {
-        // Small delay to allow the URL to be set by setPresetUrl()
-        setTimeout(() => {
-            const url = document.getElementById('openai_api_url').value;
-            if (url) {
-                loadEndpointConfig(url);
+    }
+
+    async function refreshModels() {
+        const apiUrl = document.getElementById('openai_api_url').value.trim();
+        const apiKey = document.getElementById('openai_key').value;
+        const button = document.getElementById('refresh-models-btn');
+
+        if (!apiUrl) {
+            showAlert('<i class="bi bi-exclamation-triangle"></i> Please enter API URL first', 'alert-warning');
+            return;
+        }
+
+        const icon = button.querySelector('i');
+        const originalIcon = icon ? icon.className : '';
+        const done = busy(button, '');
+        if (icon) icon.className = 'bi bi-hourglass-split';
+
+        try {
+            // Blank key: the backend falls back to the stored key for this endpoint.
+            const data = await postJson('/admin/api/load-models', {
+                api_url: apiUrl,
+                api_key: apiKey
+            });
+            if (data.success) {
+                populateModelOptions(data.models);
+                showAlert(
+                    '<i class="bi bi-' + (data.cached ? 'exclamation-triangle' : 'check-circle') + '"></i> ' +
+                    data.message,
+                    data.cached ? 'alert-warning' : 'alert-success'
+                );
+                updateModelCacheInfo(data);
+            } else {
+                showAlert('<i class="bi bi-x-circle"></i> Failed to load models: ' + data.message, 'alert-danger');
             }
-        }, 100);
+        } catch (error) {
+            showAlert('<i class="bi bi-x-circle"></i> Network error loading models', 'alert-warning');
+        } finally {
+            if (icon) icon.className = originalIcon;
+            done();
+        }
+    }
+
+    // ---------- connection test ----------
+
+    function displayConnectionTestResult(data) {
+        const resultDiv = document.getElementById('connection-test-result');
+        const alertClass = data.success ? 'alert-success' : 'alert-danger';
+        const icon = data.success ? 'check-circle' : 'x-circle';
+        let statusCodeBadge = '';
+        if (data.status_code !== null && data.status_code !== undefined) {
+            const badgeClass = data.status_code >= 200 && data.status_code < 300 ? 'bg-success' : 'bg-danger';
+            statusCodeBadge = '<span class="badge ' + badgeClass + ' ms-2">HTTP ' + data.status_code + '</span>';
+        }
+        resultDiv.innerHTML =
+            '<div class="alert ' + alertClass + '" role="alert">' +
+            '<i class="bi bi-' + icon + '"></i> ' + data.message + statusCodeBadge + '</div>';
+        resultDiv.style.display = 'block';
+    }
+
+    function testConnection(button) {
+        const apiUrl = document.getElementById('openai_api_url').value.trim();
+        const apiKey = document.getElementById('openai_key').value;
+
+        if (!apiUrl) {
+            showAlert('<i class="bi bi-exclamation-triangle"></i> Please enter an API URL first', 'alert-warning');
+            return;
+        }
+
+        const done = busy(button, 'Testing...');
+
+        // Blank key: the backend uses the stored key for this endpoint.
+        postJson('/admin/api/test-connection', { api_url: apiUrl, api_key: apiKey })
+            .then(data => {
+                displayConnectionTestResult(data);
+                updateConnectionStatus(data.success);
+            })
+            .catch(error => {
+                displayConnectionTestResult({
+                    success: false,
+                    message: 'Connection test failed: ' + error.message,
+                    status_code: null
+                });
+                updateConnectionStatus(false);
+            })
+            .finally(done);
+    }
+
+    // ---------- per-endpoint key status ----------
+
+    function checkEndpointKey() {
+        const endpointUrl = document.getElementById('endpoint-check-url').value.trim();
+        const statusBox = document.getElementById('endpoint-key-status');
+
+        if (!endpointUrl) {
+            statusBox.innerHTML =
+                '<div class="alert alert-warning mb-0" role="alert">' +
+                '<i class="bi bi-exclamation-triangle"></i> Enter an endpoint URL to check.</div>';
+            return;
+        }
+
+        postJson('/admin/api/get-endpoint-key', { endpoint_url: endpointUrl })
+            .then(data => {
+                if (!data.success) {
+                    statusBox.innerHTML =
+                        '<div class="alert alert-danger mb-0" role="alert">' +
+                        '<i class="bi bi-x-circle"></i> ' + data.message + '</div>';
+                    return;
+                }
+                statusBox.innerHTML = data.has_key
+                    ? '<div class="alert alert-success mb-0" role="alert">' +
+                      '<i class="bi bi-check-circle"></i> Key is set for this endpoint ' +
+                      '(stored value ends in "' + data.last4 + '").</div>'
+                    : '<div class="alert alert-secondary mb-0" role="alert">' +
+                      '<i class="bi bi-x-circle"></i> No key is stored for this endpoint.</div>';
+            })
+            .catch(error => {
+                statusBox.innerHTML =
+                    '<div class="alert alert-danger mb-0" role="alert">' +
+                    '<i class="bi bi-x-circle"></i> Error checking key: ' + error.message + '</div>';
+            });
+    }
+
+    // ---------- section saves ----------
+
+    function saveConfiguration(event) {
+        event.preventDefault();
+        const form = event.target;
+        const formData = new FormData(form);
+
+        const payload = {
+            openai_api_url: formData.get('openai_api_url'),
+            openai_key: formData.get('openai_key'),
+            openai_model: formData.get('openai_model'),
+            api_base_url: formData.get('api_base_url')
+        };
+
+        const done = busy(form.querySelector('button[type="submit"]'), 'Saving...');
+
+        postJson('/admin/api/save-config', payload)
+            .then(data => {
+                if (data.success) {
+                    showAlert('<i class="bi bi-check-circle"></i> Configuration saved successfully!', 'alert-success');
+                    updateConfigurationStatus(data.config);
+                    // Secret fields stay empty: blank always means "keep stored value".
+                    document.getElementById('openai_key').value = '';
+                } else {
+                    showAlert('<i class="bi bi-x-circle"></i> Failed to save configuration: ' + data.message,
+                        'alert-danger');
+                }
+            })
+            .catch(error => {
+                showAlert('<i class="bi bi-x-circle"></i> Error saving configuration: ' + error.message,
+                    'alert-danger');
+            })
+            .finally(done);
+    }
+
+    function saveDeadditConfig(event) {
+        event.preventDefault();
+        const form = event.target;
+        const formData = new FormData(form);
+
+        const token = formData.get('api_token') || '';
+        if (token && token.length < 3) {
+            showAlert('<i class="bi bi-exclamation-triangle"></i> API Token must be at least 3 characters long',
+                'alert-warning');
+            return;
+        }
+
+        const payload = {
+            api_base_url: formData.get('api_base_url'),
+            api_token: token,
+            subdeaddit_selection_strategy: formData.get('subdeaddit_selection_strategy')
+        };
+
+        const done = busy(form.querySelector('button[type="submit"]'), 'Saving...');
+
+        postJson('/admin/api/save-deaddit-config', payload)
+            .then(data => {
+                if (data.success) {
+                    showAlert('<i class="bi bi-check-circle"></i> Deaddit configuration saved successfully!',
+                        'alert-success');
+                    document.getElementById('api_token').value = '';
+                    // Reload so login-required state picks up token changes.
+                    setTimeout(() => window.location.reload(), 1500);
+                } else {
+                    showAlert('<i class="bi bi-x-circle"></i> Failed to save configuration: ' + data.message,
+                        'alert-danger');
+                }
+            })
+            .catch(error => {
+                showAlert('<i class="bi bi-x-circle"></i> Error saving configuration: ' + error.message,
+                    'alert-danger');
+            })
+            .finally(done);
+    }
+
+    // ---------- wiring ----------
+
+    document.addEventListener('DOMContentLoaded', function () {
+        document.getElementById('ai-endpoint-form').addEventListener('submit', saveConfiguration);
+        document.getElementById('deaddit-config-form').addEventListener('submit', saveDeadditConfig);
+        document.getElementById('test-connection-btn').addEventListener('click', function () {
+            testConnection(this);
+        });
+        document.getElementById('refresh-models-btn').addEventListener('click', refreshModels);
+        document.getElementById('quick-test-connection-btn').addEventListener('click', function () {
+            testConnection(this);
+        });
+        document.getElementById('refresh-stats-btn').addEventListener('click', function () {
+            refreshStats(this);
+        });
+        document.getElementById('check-endpoint-key-btn').addEventListener('click', checkEndpointKey);
+        document.getElementById('api_preset').addEventListener('change', function () {
+            // Small delay so setPresetUrl() has written the URL before we load its config.
+            setTimeout(setPresetUrl, 0);
+        });
+
+        document.querySelectorAll('[data-toggle-password]').forEach(button => {
+            button.addEventListener('click', function () {
+                const input = document.getElementById(this.getAttribute('data-toggle-password'));
+                const icon = this.querySelector('i');
+                if (input.type === 'password') {
+                    input.type = 'text';
+                    icon.className = 'bi bi-eye-slash';
+                } else {
+                    input.type = 'password';
+                    icon.className = 'bi bi-eye';
+                }
+            });
+        });
+
+        const urlInput = document.getElementById('openai_api_url');
+        urlInput.addEventListener('blur', function () {
+            const url = this.value.trim();
+            if (url) loadEndpointConfig(url);
+        });
+
+        document.getElementById('openai_model').addEventListener('change', function () {
+            const apiUrl = document.getElementById('openai_api_url').value.trim();
+            if (apiUrl && this.value) saveEndpointDefaultModel(apiUrl, this.value);
+        });
+
+        loadSystemInfo();
+        loadSchedulerStats();
+        setCurrentPreset();
+
+        const initialUrl = urlInput.value.trim();
+        if (initialUrl) loadEndpointConfig(initialUrl);
     });
-    
-    // Set current preset on page load
-    setCurrentPreset();
-});
+})();
 </script>
 {% endblock %}

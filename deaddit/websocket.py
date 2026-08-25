@@ -78,6 +78,46 @@ def handle_ping():
 
 
 # ---------------------------------------------------------------------------
+# UX-5: streamed job logs. Contiguous block -- later phases append below.
+# ---------------------------------------------------------------------------
+
+
+@socketio.on("join_job_log", namespace="/admin")
+@handle_socket_errors
+def join_job_log(data):
+    """Join a specific job's live-log room and confirm readiness."""
+    job_id = int((data or {}).get("job_id", 0))
+    if not job_id:
+        emit("error", {"message": "join_job_log requires a job_id"})
+        return
+
+    from deaddit.runtime.tailer import get_tailer
+
+    join_room(f"job_log:{job_id}")
+    # Lazy-start the DB->socket pump; it also repairs job_update emissions.
+    get_tailer().note_join(job_id)
+    logger.info("Client joined job_log room for job %s", job_id)
+    emit("job_log_ready", {"job_id": job_id})
+
+
+@socketio.on("leave_job_log", namespace="/admin")
+@handle_socket_errors
+def leave_job_log(data):
+    """Leave a specific job's live-log room."""
+    job_id = int((data or {}).get("job_id", 0))
+    if not job_id:
+        emit("error", {"message": "leave_job_log requires a job_id"})
+        return
+
+    from deaddit.runtime.tailer import get_tailer
+
+    leave_room(f"job_log:{job_id}")
+    get_tailer().note_leave(job_id)
+    logger.info("Client left job_log room for job %s", job_id)
+    emit("left", {"room": f"job_log:{job_id}"})
+
+
+# ---------------------------------------------------------------------------
 # LLM-4: live token streaming (watch-thoughts). Rooms are per request_id;
 # events are emitted server-side by deaddit/llm/stream_admin.py as
 # "llm_stream" {request_id, kind, data, ts} while a streamed generation runs.

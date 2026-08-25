@@ -1,6 +1,11 @@
 {% extends "admin/base.html" %}
+{% import "admin/_macros.html" as m with context %}
 
 {% block title %}Jobs{% endblock %}
+
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/admin-tables.css') }}" rel="stylesheet">
+{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
@@ -12,7 +17,7 @@
             </a>
         </div>
         <div class="btn-group">
-            <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearJobsHistory()">
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearJobsHistory(event)">
                 <i class="bi bi-trash"></i> Clear History
             </button>
         </div>
@@ -64,236 +69,134 @@
     </div>
 </div>
 
-<!-- Jobs Table -->
-<div class="card">
-    <div class="card-body">
-        {% if jobs %}
-        <div class="table-responsive">
-            <table class="table table-hover">
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Type</th>
-                        <th>Status</th>
-                        <th>Progress</th>
-                        <th>Priority</th>
-                        <th>Created</th>
-                        <th>Duration</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for job in jobs %}
-                    <tr>
-                        <td>
-                            <a href="{{ url_for('admin.job_detail', job_id=job.id) }}" class="text-decoration-none">
-                                #{{ job.id }}
-                            </a>
-                        </td>
-                        <td>
-                            <span class="badge bg-secondary">
-                                {{ job.type.value.replace('_', ' ').title() }}
-                            </span>
-                        </td>
-                        <td>
-                            <span class="job-status-{{ job.status.value }}" data-job-id="{{ job.id }}">
-                                {% if job.status.value == 'pending' %}
-                                    <i class="bi bi-clock"></i>
-                                {% elif job.status.value == 'running' %}
-                                    <i class="bi bi-play-circle"></i>
-                                {% elif job.status.value == 'completed' %}
-                                    <i class="bi bi-check-circle"></i>
-                                {% elif job.status.value == 'failed' %}
-                                    <i class="bi bi-x-circle"></i>
-                                {% elif job.status.value == 'cancelled' %}
-                                    <i class="bi bi-dash-circle"></i>
-                                {% endif %}
-                                {{ job.status.value.upper() }}
-                            </span>
-                        </td>
-                        <td>
-                            {% if job.total_items > 1 %}
-                            <div class="progress" style="height: 20px; width: 100px;">
-                                <div class="progress-bar {% if job.status.value == 'running' %}progress-bar-striped progress-bar-animated{% endif %}" 
-                                     style="width: {{ (job.progress / job.total_items * 100) if job.total_items > 0 else 0 }}%"
-                                     data-job-progress="{{ job.id }}">
-                                    {{ job.progress }}/{{ job.total_items }}
-                                </div>
-                            </div>
-                            {% else %}
-                            <span class="text-muted">Single</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if job.priority >= 8 %}
-                                <span class="badge bg-danger">High</span>
-                            {% elif job.priority <= 3 %}
-                                <span class="badge bg-secondary">Low</span>
-                            {% else %}
-                                <span class="badge bg-primary">Normal</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <small class="text-muted">
-                                {{ job.created_at.strftime('%Y-%m-%d %H:%M:%S') }}
-                            </small>
-                        </td>
-                        <td>
-                            <small class="text-muted">
-                                {% if job.completed_at and job.started_at %}
-                                    {% set duration = (job.completed_at - job.started_at).total_seconds() %}
-                                    {% if duration < 60 %}
-                                        {{ "%.1f"|format(duration) }}s
-                                    {% else %}
-                                        {{ "%.1f"|format(duration/60) }}m
-                                    {% endif %}
-                                {% elif job.started_at %}
-                                    Running...
-                                {% else %}
-                                    -
-                                {% endif %}
-                            </small>
-                        </td>
-                        <td>
-                            <div class="btn-group btn-group-sm">
-                                <a href="{{ url_for('admin.job_detail', job_id=job.id) }}" 
-                                   class="btn btn-outline-primary" title="View Details">
-                                    <i class="bi bi-eye"></i>
-                                </a>
-                                {% if job.status.value in ['pending', 'running'] %}
-                                <form method="post" action="{{ url_for('admin.cancel_job_route', job_id=job.id) }}" 
-                                      style="display: inline;">
-                                    <button type="submit" class="btn btn-outline-danger" 
-                                            title="Cancel Job" 
-                                            onclick="return confirm('Are you sure you want to cancel this job?')">
-                                        <i class="bi bi-x-circle"></i>
-                                    </button>
-                                </form>
-                                {% elif job.status.value in ['failed', 'cancelled'] %}
-                                <form method="post" action="{{ url_for('admin.retry_job_route', job_id=job.id) }}" 
-                                      style="display: inline;">
-                                    <button type="submit" class="btn btn-outline-warning" 
-                                            title="Retry Job" 
-                                            onclick="return confirm('Are you sure you want to retry this job? This will create a new job with the same parameters.')">
-                                        <i class="bi bi-arrow-clockwise"></i>
-                                    </button>
-                                </form>
-                                {% endif %}
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Pagination -->
-        {% if pagination.pages > 1 %}
-        <nav aria-label="Job pagination">
-            <ul class="pagination justify-content-center">
-                {% if pagination.has_prev %}
-                <li class="page-item">
-                    <a class="page-link" href="{{ url_for('admin.jobs', page=pagination.prev_num, status=current_status, type=current_type, per_page=current_per_page) }}">Previous</a>
-                </li>
-                {% endif %}
-                
-                {% for page_num in pagination.iter_pages() %}
-                    {% if page_num %}
-                        {% if page_num != pagination.page %}
-                        <li class="page-item">
-                            <a class="page-link" href="{{ url_for('admin.jobs', page=page_num, status=current_status, type=current_type, per_page=current_per_page) }}">{{ page_num }}</a>
-                        </li>
-                        {% else %}
-                        <li class="page-item active">
-                            <span class="page-link">{{ page_num }}</span>
-                        </li>
-                        {% endif %}
-                    {% else %}
-                    <li class="page-item disabled">
-                        <span class="page-link">...</span>
-                    </li>
-                    {% endif %}
-                {% endfor %}
-                
-                {% if pagination.has_next %}
-                <li class="page-item">
-                    <a class="page-link" href="{{ url_for('admin.jobs', page=pagination.next_num, status=current_status, type=current_type, per_page=current_per_page) }}">Next</a>
-                </li>
-                {% endif %}
-            </ul>
-        </nav>
-        {% endif %}
-
-        {% else %}
-        <div class="text-center py-5">
-            <i class="bi bi-list-task fs-1 text-muted"></i>
-            <h4 class="text-muted">No jobs found</h4>
-            <p class="text-muted">Get started by <a href="{{ url_for('admin.generate') }}">creating your first job</a>.</p>
-        </div>
-        {% endif %}
-    </div>
-</div>
-
-<!-- Job Statistics Summary -->
-<div class="row mt-4">
-    <div class="col-md-12">
-        <div class="card">
-            <div class="card-body">
-                <h6 class="card-title">Quick Stats</h6>
-                <div class="row">
-                    <div class="col-md-2">
-                        <div class="text-center">
-                            <div class="h4 text-secondary">{{ pagination.total }}</div>
-                            <small class="text-muted">Total Jobs</small>
-                        </div>
-                    </div>
-                    <div class="col-md-2">
-                        <div class="text-center">
-                            <div class="h4 text-warning">{{ job_counts.pending }}</div>
-                            <small class="text-muted">Pending</small>
-                        </div>
-                    </div>
-                    <div class="col-md-2">
-                        <div class="text-center">
-                            <div class="h4 text-primary">{{ job_counts.running }}</div>
-                            <small class="text-muted">Running</small>
-                        </div>
-                    </div>
-                    <div class="col-md-2">
-                        <div class="text-center">
-                            <div class="h4 text-success">{{ job_counts.completed }}</div>
-                            <small class="text-muted">Completed</small>
-                        </div>
-                    </div>
-                    <div class="col-md-2">
-                        <div class="text-center">
-                            <div class="h4 text-danger">{{ job_counts.failed }}</div>
-                            <small class="text-muted">Failed</small>
-                        </div>
-                    </div>
-                    <div class="col-md-2">
-                        <div class="text-center">
-                            <div class="h4 text-muted">{{ job_counts.cancelled }}</div>
-                            <small class="text-muted">Cancelled</small>
-                        </div>
-                    </div>
-                </div>
+<!-- Jobs Table (server-sorted via whitelisted ?sort= / ?dir=; filters
+     and per_page are threaded through every sort/pager link) -->
+{% set job_columns = [
+    {'label': 'ID'},
+    {'label': 'Type', 'sort_key': 'type'},
+    {'label': 'Status', 'sort_key': 'status'},
+    {'label': 'Progress', 'sort_key': 'progress'},
+    {'label': 'Priority', 'sort_key': 'priority'},
+    {'label': 'Created', 'sort_key': 'created_at', 'default_dir': 'desc'},
+    {'label': 'Duration'},
+    {'label': 'Actions'},
+] %}
+{% call(job, loop) m.densetable(job_columns, jobs, empty_label='No jobs found.', empty_icon='bi-list-task') %}
+<tr>
+    <td>
+        <a href="{{ url_for('admin.job_detail', job_id=job.id) }}" class="text-decoration-none">
+            #{{ job.id }}
+        </a>
+    </td>
+    <td><span class="badge bg-secondary">{{ job.type.value.replace('_', ' ').title() }}</span></td>
+    <td>
+        <span class="job-status-{{ job.status.value }}" data-job-id="{{ job.id }}">
+            {% if job.status.value == 'pending' %}
+                <i class="bi bi-clock"></i>
+            {% elif job.status.value == 'running' %}
+                <i class="bi bi-play-circle"></i>
+            {% elif job.status.value == 'completed' %}
+                <i class="bi bi-check-circle"></i>
+            {% elif job.status.value == 'failed' %}
+                <i class="bi bi-x-circle"></i>
+            {% elif job.status.value == 'cancelled' %}
+                <i class="bi bi-dash-circle"></i>
+            {% endif %}
+            {{ job.status.value.upper() }}
+        </span>
+    </td>
+    <td>
+        {% if job.total_items > 1 %}
+        <div class="progress" style="height: 20px; width: 100px;">
+            <div class="progress-bar {% if job.status.value == 'running' %}progress-bar-striped progress-bar-animated{% endif %}"
+                 style="width: {{ (job.progress / job.total_items * 100) if job.total_items > 0 else 0 }}%"
+                 data-job-progress="{{ job.id }}">
+                {{ job.progress }}/{{ job.total_items }}
             </div>
         </div>
-    </div>
+        {% else %}
+        <span class="text-muted">Single</span>
+        {% endif %}
+    </td>
+    <td>
+        {% if job.priority >= 8 %}
+            <span class="badge bg-danger">High</span>
+        {% elif job.priority <= 3 %}
+            <span class="badge bg-secondary">Low</span>
+        {% else %}
+            <span class="badge bg-primary">Normal</span>
+        {% endif %}
+    </td>
+    <td><small class="text-muted">{{ job.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</small></td>
+    <td>
+        <small class="text-muted">
+            {% if job.completed_at and job.started_at %}
+                {% set duration = (job.completed_at - job.started_at).total_seconds() %}
+                {% if duration < 60 %}
+                    {{ "%.1f"|format(duration) }}s
+                {% else %}
+                    {{ "%.1f"|format(duration/60) }}m
+                {% endif %}
+            {% elif job.started_at %}
+                Running...
+            {% else %}
+                -
+            {% endif %}
+        </small>
+    </td>
+    <td>
+        <div class="btn-group btn-group-sm">
+            <a href="{{ url_for('admin.job_detail', job_id=job.id) }}"
+               class="btn btn-outline-primary" title="View Details">
+                <i class="bi bi-eye"></i>
+            </a>
+            {% if job.status.value in ['pending', 'running'] %}
+            <form method="post" action="{{ url_for('admin.cancel_job_route', job_id=job.id) }}"
+                  style="display: inline;">
+                <button type="submit" class="btn btn-outline-danger"
+                        title="Cancel Job"
+                        onclick="return confirm('Are you sure you want to cancel this job?')">
+                    <i class="bi bi-x-circle"></i>
+                </button>
+            </form>
+            {% elif job.status.value in ['failed', 'cancelled'] %}
+            <form method="post" action="{{ url_for('admin.retry_job_route', job_id=job.id) }}"
+                  style="display: inline;">
+                <button type="submit" class="btn btn-outline-warning"
+                        title="Retry Job"
+                        onclick="return confirm('Are you sure you want to retry this job? This will create a new job with the same parameters.')">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </td>
+</tr>
+{% endcall %}
+
+{{ m.paginate(pagination) }}
+
+<!-- Job Statistics Summary -->
+<div class="row mt-4 g-2">
+    <div class="col-6 col-md-2">{{ m.stat_tile(pagination.total, 'Total Jobs') }}</div>
+    <div class="col-6 col-md-2">{{ m.stat_tile(job_counts.pending, 'Pending', tone='warning') }}</div>
+    <div class="col-6 col-md-2">{{ m.stat_tile(job_counts.running, 'Running', tone='info') }}</div>
+    <div class="col-6 col-md-2">{{ m.stat_tile(job_counts.completed, 'Completed', tone='success') }}</div>
+    <div class="col-6 col-md-2">{{ m.stat_tile(job_counts.failed, 'Failed', tone='danger') }}</div>
+    <div class="col-6 col-md-2">{{ m.stat_tile(job_counts.cancelled, 'Cancelled') }}</div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-function clearJobsHistory() {
+function clearJobsHistory(event) {
     if (confirm('Are you sure you want to clear all jobs history?\n\nThis will permanently delete all job records and cannot be undone.')) {
         const button = event.target.closest('button');
         const originalText = button.innerHTML;
-        
+
         button.innerHTML = '<i class="bi bi-hourglass-split"></i> Clearing...';
         button.disabled = true;
-        
+
         fetch('/admin/api/clear-jobs', {
             method: 'POST',
             headers: {
@@ -326,14 +229,14 @@ function showAlert(message, alertClass) {
     const alertContainer = document.createElement('div');
     alertContainer.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;
     alertContainer.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-    
+
     alertContainer.innerHTML = `
         ${message}
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     `;
-    
+
     document.body.appendChild(alertContainer);
-    
+
     // Auto-remove after 5 seconds
     setTimeout(() => {
         if (alertContainer.parentNode) {

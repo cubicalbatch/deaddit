@@ -1,0 +1,69 @@
+/* UX-5 streamed job log pane (job_detail.html) + single-task generate form.
+   Token-only colors: no literal hex values here. */
+
+.job-log-pane {
+    background: var(--bg-canvas);
+    color: var(--text-2);
+    border-top: 1px solid var(--border);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    max-height: 22rem;
+    overflow-y: auto;
+    padding: 0.5rem 0;
+}
+
+.job-log-line {
+    display: flex;
+    gap: 0.625rem;
+    padding: 0.0625rem 0.875rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.job-log-line .log-ts {
+    color: var(--text-2);
+    flex: none;
+}
+
+.job-log-line .log-level {
+    flex: none;
+    width: 4.5rem;
+    font-weight: 600;
+}
+
+.job-log-line .log-msg {
+    flex: 1;
+    min-width: 0;
+}
+
+.job-log-line.level-info .log-level {
+    color: var(--status-info);
+}
+.job-log-line.level-warning .log-level {
+    color: var(--status-warning-strong);
+}
+.job-log-line.level-error,
+.job-log-line.level-critical {
+    color: var(--status-danger);
+}
+
+.job-log-empty {
+    color: var(--text-2);
+    padding: 0.75rem 0.875rem;
+    font-style: italic;
+}
+
+/* Generate-page stream log: Bootstrap's fixed bg-light wash breaks
+   in dark mode - ride the token canvas instead. */
+#llm-stream-log {
+    color: var(--text-1) !important;
+    background-color: var(--bg-canvas) !important;
+    border-color: var(--border);
+}
+
+/* Generate page: keep the advanced drawer visually quiet */
+details > summary.form-label {
+    cursor: pointer;
+    user-select: none;
+}

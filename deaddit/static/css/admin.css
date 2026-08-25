@@ -1,0 +1,282 @@
+/* ============================================================
+   admin.css - Admin chrome component rules.
+   Consumes semantic roles from tokens.css only - no raw hex.
+   ============================================================ */
+
+/* Page canvas & typography ride the token system so dark mode
+   is a pure attribute swap on <html data-theme>. */
+body {
+    background-color: var(--bg-canvas);
+    color: var(--text-1);
+    font-family: var(--font-family);
+
+    /* Bridge Bootstrap's component theme variables onto the token
+       roles so dark mode restyles cards, tables, forms and muted
+       text instead of leaving stock light-chrome values. */
+    --bs-body-color: var(--text-1);
+    --bs-secondary-color: var(--text-2);
+    --bs-emphasis-color: var(--text-1);
+    --bs-body-bg: var(--bg-canvas);
+    --bs-secondary-bg: var(--bg-surface);
+    --bs-tertiary-bg: var(--bg-elevated);
+    --bs-border-color: var(--border);
+    --bs-code-color: var(--text-1);
+}
+
+/* Bootstrap contextual text utilities re-tuned onto status tokens
+   (!important matches the utility's own specificity guard). */
+.text-danger { color: var(--status-danger) !important; }
+.text-success { color: var(--status-success) !important; }
+.text-warning { color: var(--status-warning-strong) !important; }
+.text-info { color: var(--status-info) !important; }
+
+/* Content-area anchors: Bootstrap's stock link blue fails AA on
+   the canvas in dark mode. */
+main a {
+    color: var(--link);
+}
+
+/* Top brand bar */
+.navbar-brand {
+    padding-top: .75rem;
+    padding-bottom: .75rem;
+}
+
+.admin-topbar {
+    background-color: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow-1);
+    z-index: var(--z-sticky);
+}
+
+.admin-topbar .navbar-brand {
+    color: var(--text-1);
+}
+
+.admin-topbar .nav-link {
+    color: var(--text-2);
+}
+
+.admin-topbar .nav-link:hover,
+.admin-topbar .nav-link:focus {
+    color: var(--link);
+}
+
+/* Theme toggle (same id/class contract as the public site header) */
+.theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-2);
+    transition: color var(--motion-fast) ease-in-out,
+                border-color var(--motion-fast) ease-in-out;
+}
+
+.theme-toggle:hover {
+    color: var(--text-1);
+    border-color: var(--text-3);
+}
+
+.theme-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* Section navigation pills */
+.admin-nav {
+    background-color: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0.5rem 0;
+    overflow-x: auto;
+}
+
+.admin-nav .nav {
+    flex-wrap: nowrap;
+    min-width: max-content;
+}
+
+.admin-nav .nav-link {
+    font-weight: 500;
+    color: var(--text-2);
+    padding: 0.75rem 1rem;
+    margin: 0 0.25rem;
+    border-radius: 0.375rem;
+    transition: all var(--motion-fast) ease-in-out;
+    white-space: nowrap;
+}
+
+.admin-nav .nav-link .bi {
+    margin-right: 6px;
+    color: var(--text-3);
+}
+
+.admin-nav .nav-link.active {
+    color: var(--on-accent);
+    background-color: var(--accent-strong);
+}
+
+.admin-nav .nav-link.active .bi {
+    color: var(--on-accent);
+}
+
+.admin-nav .nav-link:hover {
+    color: var(--link);
+    background-color: var(--bg-canvas);
+}
+
+.admin-nav .nav-link:hover .bi {
+    color: var(--link);
+}
+
+@media (max-width: 768px) {
+    .admin-nav {
+        overflow-x: visible;
+    }
+
+    .admin-nav .nav {
+        flex-wrap: wrap;
+        justify-content: center;
+        min-width: auto;
+    }
+
+    .admin-nav .nav-link {
+        padding: 0.6rem;
+        margin: 0.1rem;
+        font-size: 1.1rem;
+        min-width: 44px;
+        text-align: center;
+    }
+
+    .admin-nav .nav-link .bi {
+        margin-right: 0;
+        display: block;
+    }
+
+    .admin-nav .nav-link .nav-text {
+        display: none;
+    }
+}
+
+main {
+    padding: 20px;
+    margin-top: 0;
+}
+
+.feather {
+    width: 16px;
+    height: 16px;
+    vertical-align: text-bottom;
+}
+
+/* Job status colors */
+.job-status-pending { color: var(--text-2); }
+.job-status-running { color: var(--status-info); }
+.job-status-completed { color: var(--status-success); }
+.job-status-failed { color: var(--status-danger); }
+.job-status-cancelled { color: var(--text-2); }
+
+/* Striped progress animation */
+.progress-bar-striped.active {
+    animation: progress-bar-stripes 2s linear infinite;
+}
+
+@keyframes progress-bar-stripes {
+    from { background-position: 40px 0; }
+    to { background-position: 0 0; }
+}
+
+/* Bootstrap alerts re-tuned onto status tokens for both themes */
+.alert-warning {
+    background-color: var(--status-warning-soft);
+    border-color: var(--status-warning);
+    color: var(--text-1);
+}
+
+.alert-danger {
+    background-color: var(--status-danger-soft);
+    border-color: var(--status-danger);
+    color: var(--text-1);
+}
+
+.alert-success {
+    background-color: var(--status-success-soft);
+    border-color: var(--status-success);
+    color: var(--text-1);
+}
+
+.alert-info {
+    background-color: var(--status-info-soft);
+    border-color: var(--status-info);
+    color: var(--text-1);
+}
+
+/* ------------------------------------------------------------
+   Bootstrap component re-tuning onto token roles (AA in both
+   themes). Resting-state text/border colors only; hover/focus
+   machinery stays stock Bootstrap.
+   ------------------------------------------------------------ */
+
+.btn-outline-primary {
+    --bs-btn-color: var(--link);
+    --bs-btn-border-color: var(--link);
+}
+
+.btn-outline-secondary {
+    --bs-btn-color: var(--text-2);
+    --bs-btn-border-color: var(--text-2);
+}
+
+.btn-outline-success {
+    --bs-btn-color: var(--status-success);
+    --bs-btn-border-color: var(--status-success);
+}
+
+.btn-outline-danger {
+    --bs-btn-color: var(--status-danger);
+    --bs-btn-border-color: var(--status-danger);
+}
+
+.btn-outline-warning {
+    --bs-btn-color: var(--status-warning-strong);
+    --bs-btn-border-color: var(--status-warning-strong);
+}
+
+.btn-outline-info {
+    --bs-btn-color: var(--status-info);
+    --bs-btn-border-color: var(--status-info);
+}
+
+/* Surfaces follow the token system so dark mode is not stuck on
+   Bootstrap's white cards/modals. */
+.card,
+.modal-content {
+    background-color: var(--bg-surface);
+    border-color: var(--border);
+}
+
+.text-muted {
+    color: var(--text-2);
+}
+
+/* Links inside soft-tinted alerts need a role that clears 4.5:1
+   against both light and dark alert washes. */
+.alert a {
+    color: var(--status-info);
+}
+
+/* Content-page tab strip: Bootstrap default link blue fails AA
+   on the canvas in dark mode. */
+.nav-tabs .nav-link {
+    color: var(--text-2);
+}
+
+.nav-tabs .nav-link:hover,
+.nav-tabs .nav-link:focus {
+    color: var(--link);
+}

@@ -610,3 +610,30 @@ class Ban(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     expires_at = db.Column(db.DateTime, nullable=True)
     lifted_at = db.Column(db.DateTime, nullable=True, index=True)
+# --- UX-5: streamed job logs ---
+class JobLog(db.Model):
+    """One captured log line emitted while a job executed (Phase UX-5).
+
+    Written by the worker-side ``JobLogHandler`` (deaddit.runtime.joblog) and
+    streamed to the web process through these rows -- no broker involved.
+    """
+
+    id = db.Column(db.Integer, primary_key=True)
+    job_id = db.Column(
+        db.Integer, db.ForeignKey("job.id"), nullable=False, index=True
+    )
+    seq = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    level = db.Column(db.String(16), nullable=False, default="INFO")
+    message = db.Column(db.Text, nullable=False)
+
+    __table_args__ = (db.Index("ix_job_log_job_seq", "job_id", "seq"),)
+
+    def to_dict(self):
+        return {
+            "seq": self.seq,
+            "ts": self.created_at.isoformat() if self.created_at else None,
+            "level": self.level,
+            "message": self.message,
+        }
+

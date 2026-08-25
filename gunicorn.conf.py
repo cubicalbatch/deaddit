@@ -4,11 +4,16 @@
 # Server socket
 bind = "0.0.0.0:5000"
 backlog = 2048
-
-# Worker processes
-workers = 2
-worker_class = "sync"
-worker_connections = 1000
+# Worker processes.
+# Socket.IO constraint (UX-5, verified live): flask-socketio WITHOUT a message
+# queue keeps connection state per-process, so multiple sync workers split the
+# /admin namespace across processes and clients miss events; a single sync
+# worker additionally starves on socket.io long-poll. The broker-free shape
+# (Resolution 5: sync gunicorn + async_mode="threading") is therefore ONE
+# process with thread concurrency:
+workers = 1
+worker_class = "gthread"
+threads = 8
 timeout = 120
 keepalive = 5
 
