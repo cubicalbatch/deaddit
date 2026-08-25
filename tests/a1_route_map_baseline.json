@@ -231,6 +231,27 @@
   ]
  },
  {
+  "rule": "/admin/capabilities",
+  "endpoint": "admin.capabilities",
+  "methods": [
+   "GET"
+  ]
+ },
+ {
+  "rule": "/admin/capabilities/override",
+  "endpoint": "admin.capabilities_override",
+  "methods": [
+   "POST"
+  ]
+ },
+ {
+  "rule": "/admin/capabilities/probe",
+  "endpoint": "admin.capabilities_probe",
+  "methods": [
+   "POST"
+  ]
+ },
+ {
   "rule": "/admin/content",
   "endpoint": "admin.content",
   "methods": [
