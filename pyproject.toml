@@ -25,6 +25,7 @@ dependencies = [
 
 [project.scripts]
 deaddit = "deaddit.cli:cli"
+deaddit-worker = "deaddit.runtime.scheduler:main"
 
 [dependency-groups]
 dev = [

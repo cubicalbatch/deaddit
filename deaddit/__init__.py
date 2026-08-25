@@ -79,16 +79,6 @@ def create_app(config: Any = None) -> Flask:
                 "No API_TOKEN set in database or environment. Admin and API routes will be publicly accessible."
             )
 
-        # Restart any pending jobs after app restart.
-        # NOTE: the scheduler still starts in the web process; acceptable
-        # until Phase A5 introduces a dedicated worker process.
-        try:
-            from .jobs import restart_pending_jobs
-
-            restart_pending_jobs()
-        except Exception as e:
-            logger.error(f"Failed to restart pending jobs: {e}")
-
     # Template context processor: config available in templates
     app.context_processor(inject_config)
 

@@ -1,6 +1,7 @@
 """
 Job management system for Deaddit admin UI.
-Handles background job processing using APScheduler (no Redis required).
+Job execution is owned by the dedicated worker process (deaddit/runtime);
+the web process only creates and inspects job rows.
 """
 
 import logging
@@ -10,54 +11,25 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from apscheduler.executors.pool import ThreadPoolExecutor
-from apscheduler.jobstores.memory import MemoryJobStore
-from apscheduler.schedulers.background import BackgroundScheduler
-
 from deaddit.config import Config
 from deaddit.extensions import db
 from deaddit.llm import routing
 from deaddit.llm.client import STOP_VALUES, ChatRequest, LLMClient, Sampling
 from deaddit.models import Job, JobStatus, JobType
+from deaddit.runtime.claim import liveness_is_fresh
 from deaddit.services import content
 
 logger = logging.getLogger(__name__)
-
-# APScheduler configuration
-jobstores = {"default": MemoryJobStore()}
-executors = {
-    "default": ThreadPoolExecutor(max_workers=1),
-    "high_priority": ThreadPoolExecutor(max_workers=1),
-    "low_priority": ThreadPoolExecutor(max_workers=1),
-}
-job_defaults = {
-    "coalesce": False,
-    "max_instances": 1,
-    "misfire_grace_time": 86400,  # 24 hours
-}
-
-# Global scheduler instance
-scheduler = BackgroundScheduler(
-    jobstores=jobstores, executors=executors, job_defaults=job_defaults
-)
-
 
 # Thread-local storage for job progress updates
 _thread_local = threading.local()
 
 
-def start_scheduler():
-    """Start the APScheduler if not already running."""
-    if not scheduler.running:
-        scheduler.start()
-        logger.info("APScheduler started successfully")
+def _default_app():
+    """Lazily resolve the Flask app; callers may pass their own instead."""
+    from deaddit import app as _lazy
 
-
-def stop_scheduler():
-    """Stop the APScheduler."""
-    if scheduler.running:
-        scheduler.shutdown()
-        logger.info("APScheduler stopped")
+    return _lazy
 
 
 def create_job(
@@ -67,7 +39,7 @@ def create_job(
     total_items: int = 1,
     delay_seconds: int = 0,
 ) -> Job:
-    """Create a new job and schedule it for execution."""
+    """Create a new pending job row for the worker process to pick up."""
 
     # Create job record in database
     job = Job(
@@ -82,40 +54,13 @@ def create_job(
     db.session.add(job)
     db.session.commit()
 
-    # Start scheduler if not running
-    start_scheduler()
-
-    # Select executor based on priority
-    if priority >= 8:
-        executor = "high_priority"
-    elif priority <= 3:
-        executor = "low_priority"
-    else:
-        executor = "default"
-
-    # Schedule the job
-    scheduled_job = scheduler.add_job(
-        execute_job,
-        "date",
-        run_date=datetime.now()
-        if delay_seconds == 0
-        else datetime.now().timestamp() + delay_seconds,
-        args=[job.id],
-        id=job.rq_job_id,
-        executor=executor,
-        replace_existing=True,
-    )
-
-    logger.info(
-        f"Scheduled job {job.id} ({job_type.value}) with scheduler ID {scheduled_job.id}"
-    )
     return job
 
 
-def execute_job(job_id: int) -> dict[str, Any]:
+def execute_job(job_id: int, app=None) -> dict[str, Any]:
     """Execute a job based on its type."""
 
-    from deaddit import app
+    app = app or _default_app()
 
     with app.app_context():
         # Store job ID in thread-local storage for progress updates
@@ -1351,14 +1296,6 @@ def cancel_job(job_id: int) -> bool:
         return False
 
     if job.status in [JobStatus.PENDING, JobStatus.RUNNING]:
-        # Cancel the scheduled job
-        if job.rq_job_id:
-            try:
-                scheduler.remove_job(job.rq_job_id)
-                logger.info(f"Removed scheduled job {job.rq_job_id}")
-            except Exception as e:
-                logger.warning(f"Could not cancel scheduled job {job.rq_job_id}: {e}")
-
         # Update job status
         job.status = JobStatus.CANCELLED
         job.completed_at = datetime.utcnow()
@@ -1371,146 +1308,19 @@ def cancel_job(job_id: int) -> bool:
 
 
 def get_queue_stats() -> dict[str, Any]:
-    """Get statistics about the job queues."""
-    if not scheduler.running:
-        return {
-            "scheduler_running": False,
-            "total_jobs": 0,
-            "pending_jobs": 0,
-            "running_jobs": 0,
-        }
-
-    # Get APScheduler job info
-    scheduled_jobs = scheduler.get_jobs()
+    """Get statistics about the job queue."""
+    total_jobs = Job.query.count()
+    pending_jobs = Job.query.filter_by(status=JobStatus.PENDING).count()
+    running_jobs = Job.query.filter_by(status=JobStatus.RUNNING).count()
 
     return {
-        "scheduler_running": True,
-        "total_jobs": len(scheduled_jobs),
-        "pending_jobs": len([j for j in scheduled_jobs if j.next_run_time]),
-        "running_jobs": 0,  # APScheduler doesn't easily track running jobs
+        "scheduler_running": liveness_is_fresh(),
+        "total_jobs": total_jobs,
+        "pending_jobs": pending_jobs,
+        "running_jobs": running_jobs,
         "high_priority": {"pending": 0, "failed": 0},
-        "normal": {"pending": len(scheduled_jobs), "failed": 0},
+        "normal": {"pending": pending_jobs, "failed": 0},
         "low_priority": {"pending": 0, "failed": 0},
     }
 
 
-def schedule_recurring_job(
-    job_type: JobType,
-    parameters: dict[str, Any],
-    cron_expression: str,
-    job_id: str = None,
-) -> str:
-    """Schedule a recurring job using cron expression."""
-
-    if not job_id:
-        job_id = f"recurring_{job_type.value}_{uuid.uuid4().hex[:8]}"
-
-    # Parse cron expression (simplified - you might want more robust parsing)
-    # For now, support basic expressions like "0 */6 * * *" (every 6 hours)
-
-    start_scheduler()
-
-    scheduler.add_job(
-        lambda: create_job(job_type, parameters),
-        "cron",
-        id=job_id,
-        **_parse_cron_kwargs(cron_expression),
-        replace_existing=True,
-    )
-
-    logger.info(f"Scheduled recurring job {job_id} with cron: {cron_expression}")
-    return job_id
-
-
-def _parse_cron_kwargs(cron_expression: str) -> dict[str, Any]:
-    """Parse basic cron expression into APScheduler kwargs."""
-    # This is a simplified parser - in production you'd want more robust parsing
-    parts = cron_expression.split()
-    if len(parts) != 5:
-        raise ValueError(
-            "Cron expression must have 5 parts: minute hour day month day_of_week"
-        )
-
-    minute, hour, day, month, day_of_week = parts
-
-    kwargs = {}
-    if minute != "*":
-        kwargs["minute"] = minute
-    if hour != "*":
-        kwargs["hour"] = hour
-    if day != "*":
-        kwargs["day"] = day
-    if month != "*":
-        kwargs["month"] = month
-    if day_of_week != "*":
-        kwargs["day_of_week"] = day_of_week
-
-    return kwargs
-
-
-def restart_pending_jobs():
-    """Restart any jobs that were pending when the app was shut down."""
-    from deaddit.models import Job, JobStatus
-
-    # Find all pending jobs in the database
-    pending_jobs = Job.query.filter_by(status=JobStatus.PENDING).all()
-
-    if not pending_jobs:
-        logger.info("No pending jobs to restart")
-        return
-
-    logger.info(f"Restarting {len(pending_jobs)} pending jobs")
-
-    # Start scheduler if not running
-    start_scheduler()
-
-    for job in pending_jobs:
-        try:
-            # Select executor based on priority
-            if job.priority >= 8:
-                executor = "high_priority"
-            elif job.priority <= 3:
-                executor = "low_priority"
-            else:
-                executor = "default"
-
-            # Re-schedule the job to run immediately
-            scheduler.add_job(
-                execute_job,
-                "date",
-                run_date=datetime.now(),
-                args=[job.id],
-                id=job.rq_job_id,
-                executor=executor,
-                replace_existing=True,
-            )
-
-            logger.info(f"Restarted job {job.id} ({job.type.value})")
-
-        except Exception as e:
-            logger.error(f"Failed to restart job {job.id}: {e}")
-
-
-def get_scheduler_info() -> dict[str, Any]:
-    """Get information about the scheduler and its jobs."""
-    if not scheduler.running:
-        return {"running": False, "jobs": []}
-
-    jobs = []
-    for job in scheduler.get_jobs():
-        jobs.append(
-            {
-                "id": job.id,
-                "name": job.name or job.func.__name__,
-                "next_run": job.next_run_time.isoformat()
-                if job.next_run_time
-                else None,
-                "executor": job.executor,
-            }
-        )
-
-    return {
-        "running": True,
-        "jobs": jobs,
-        "executors": list(scheduler._executors.keys()),
-    }

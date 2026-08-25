@@ -12,7 +12,8 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY deaddit deaddit
-COPY app.py wsgi.py gunicorn.conf.py ./
+COPY app.py gunicorn.conf.py ./
+COPY migrations migrations
 RUN uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
@@ -20,4 +21,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 5000
 
 # Production serving via gunicorn + tracked WSGI entrypoint (not the Flask dev server)
-CMD ["gunicorn", "-c", "gunicorn.conf.py", "wsgi:app"]
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "deaddit.wsgi:app"]

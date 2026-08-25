@@ -119,6 +119,9 @@ class Job(db.Model):
     completed_at = db.Column(db.DateTime)
     estimated_completion = db.Column(db.DateTime)
     rq_job_id = db.Column(db.String(36), unique=True, index=True)
+    claimed_at = db.Column(db.DateTime)
+    worker_id = db.Column(db.String(64))
+    heartbeat_at = db.Column(db.DateTime)
 
     __table_args__ = (db.Index("ix_job_status_priority", "status", "priority"),)
 
@@ -142,6 +145,11 @@ class Job(db.Model):
             if self.estimated_completion
             else None,
             "rq_job_id": self.rq_job_id,
+            "claimed_at": self.claimed_at.isoformat() if self.claimed_at else None,
+            "worker_id": self.worker_id,
+            "heartbeat_at": self.heartbeat_at.isoformat()
+            if self.heartbeat_at
+            else None,
         }
 
 

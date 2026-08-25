@@ -34,7 +34,11 @@ limit_request_field_size = 8190
 # keyfile = "/path/to/keyfile"
 # certfile = "/path/to/certfile"
 
-# Preload app for better memory usage
+# Preload app for better memory usage and faster worker startup. Safe since A5:
+# create_app() no longer starts any scheduler or background thread at import
+# time (threads would not survive fork — historical hazard documented in
+# refactor/architecture.md). Background work now lives in the dedicated
+# `deaddit-worker` process instead.
 preload_app = True
 
 # Graceful timeout for worker restart
