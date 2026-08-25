@@ -32,3 +32,12 @@ def get_provider():
     if callable(_provider):
         return _provider
     return _provider.post_chat
+
+
+def get_stream_provider():
+    """Return the registered provider's streaming transport, else HTTP SSE."""
+    if _provider is None:
+        return _transport.stream_chat
+    if callable(_provider):
+        return _provider
+    return _provider.stream_chat

@@ -53,12 +53,14 @@ def create_app(config: Any = None) -> Flask:
     # Import routes after extensions are initialized to avoid circular imports
     from .admin import admin_bp
     from .api import bp as api_bp
+    from .llm.stream_admin import stream_admin_bp
     from .routes import bp as web_bp
 
     # Register blueprints
     app.register_blueprint(api_bp)
     app.register_blueprint(web_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(stream_admin_bp)
 
     # Import websocket handlers so their @socketio.on decorators register
     from . import websocket  # noqa: F401

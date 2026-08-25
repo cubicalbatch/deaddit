@@ -35,11 +35,12 @@ from pydantic import BaseModel
 from deaddit.extensions import db
 from deaddit.llm.errors import (
     CapabilityError,
+    LLMError,
     PermanentLLMError,
     SchemaValidationError,
     TransientLLMError,
 )
-from deaddit.llm.provider import get_provider
+from deaddit.llm.provider import get_provider, get_stream_provider
 from deaddit.llm.tools import ToolSpec, validate_tool_args
 from deaddit.models import EndpointCapability
 
@@ -187,6 +188,103 @@ def probe_endpoint(
         "arguments": validated_args,
     }
     return _record_verdict(api_url, model_name, supports_tools=supports_tools)
+
+
+LAST_STREAM_PROBE_EVIDENCE: dict | None = None
+"""Evidence from the most recent probe_streaming call.
+
+Keys: ``chunk_count``, ``finish_reason``, ``sample`` (first token-delta
+text) and ``request_id``. Cleared at the start of each stream probe.
+"""
+
+
+def _stream_probe_payload(model_name: str) -> dict:
+    """Minimal streaming chat payload: a tiny ping, a few tokens at most."""
+    return {
+        "model": model_name,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 5,
+        "stream": True,
+    }
+
+
+def _delta_has_token(delta: dict) -> bool:
+    return bool(
+        delta.get("content")
+        or delta.get("reasoning")
+        or delta.get("reasoning_content")
+        or delta.get("tool_calls")
+    )
+
+
+def probe_streaming(
+    api_url: str,
+    model_name: str,
+    api_key: str | None = None,
+    read_timeout: int = 30,
+) -> bool:
+    """Probe-and-set ``supports_streaming`` on the EndpointCapability row.
+
+    A ``probe_method='manual'`` row is never overwritten — its stored value
+    is returned as-is. When NO row exists yet, :func:`probe_endpoint` runs
+    FIRST so an honest tools verdict (``supports_tools`` is NOT NULL) lands
+    before ``supports_streaming`` is updated on that same row. At least one
+    token delta before ``[DONE]`` counts as streaming-capable. Transient
+    failures record no streaming verdict and raise :class:`TransientLLMError`.
+    """
+    global LAST_STREAM_PROBE_EVIDENCE
+    existing = get_capability(api_url, model_name)
+    if existing is not None and existing.probe_method == "manual":
+        return bool(existing.supports_streaming)
+    LAST_STREAM_PROBE_EVIDENCE = None
+
+    cap = get_capability(api_url, model_name)
+    if cap is None:
+        # Create the honest row first; supports_tools must not stay NULL.
+        cap = probe_endpoint(
+            api_url, model_name, api_key=api_key, read_timeout=read_timeout
+        )
+
+    request_id = f"stream-probe-{uuid.uuid4().hex[:12]}"
+    chunk_count = 0
+    finish_reason = None
+    sample = None
+    try:
+        for chunk in get_stream_provider()(
+            api_url=api_url,
+            payload=_stream_probe_payload(model_name),
+            api_key=api_key,
+            request_id=request_id,
+            read_timeout=read_timeout,
+        ):
+            choices = chunk.get("choices") or []
+            choice = choices[0] if choices else {}
+            if choice.get("finish_reason"):
+                finish_reason = choice["finish_reason"]
+            delta = choice.get("delta") or {}
+            if _delta_has_token(delta):
+                chunk_count += 1
+                if sample is None:
+                    sample = (
+                        delta.get("content")
+                        or delta.get("reasoning")
+                        or delta.get("reasoning_content")
+                    )
+    except TransientLLMError:
+        raise
+    except LLMError as exc:
+        raise TransientLLMError(f"Streaming probe failed: {exc}") from exc
+
+    supports_streaming = chunk_count >= 1
+    LAST_STREAM_PROBE_EVIDENCE = {
+        "chunk_count": chunk_count,
+        "finish_reason": finish_reason,
+        "sample": sample,
+        "request_id": request_id,
+    }
+    cap.supports_streaming = supports_streaming
+    db.session.commit()
+    return supports_streaming
 
 
 def ensure_tools_allowed(

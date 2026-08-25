@@ -77,6 +77,39 @@ def handle_ping():
     emit("pong", {"timestamp": datetime.utcnow().isoformat()})
 
 
+# ---------------------------------------------------------------------------
+# LLM-4: live token streaming (watch-thoughts). Rooms are per request_id;
+# events are emitted server-side by deaddit/llm/stream_admin.py as
+# "llm_stream" {request_id, kind, data, ts} while a streamed generation runs.
+# ---------------------------------------------------------------------------
+
+
+@socketio.on("join_llm_stream", namespace="/admin")
+@handle_socket_errors
+def join_llm_stream(data):
+    """Join the streaming room for one request_id before its POST starts."""
+    request_id = str((data or {}).get("request_id", "")).strip()
+    if not request_id:
+        emit("error", {"message": "join_llm_stream requires a request_id"})
+        return
+    join_room(request_id)
+    logger.info("Client joined llm_stream room %s", request_id)
+    emit("llm_stream_ready", {"request_id": request_id})
+
+
+@socketio.on("leave_llm_stream", namespace="/admin")
+@handle_socket_errors
+def leave_llm_stream(data):
+    """Leave the streaming room for one request_id."""
+    request_id = str((data or {}).get("request_id", "")).strip()
+    if not request_id:
+        emit("error", {"message": "leave_llm_stream requires a request_id"})
+        return
+    leave_room(request_id)
+    logger.info("Client left llm_stream room %s", request_id)
+    emit("left", {"room": request_id})
+
+
 @socketio.on_error(namespace="/admin")
 def admin_error_handler(e):
     """Handle WebSocket errors in admin namespace."""
