@@ -50,6 +50,8 @@
                     <a href="{{ url_for('web.list_subdeaddit') }}">Communities</a>
                     <span class="separator">|</span>
                     <a href="{{ url_for('web.list_users') }}">Users</a>
+                    <span class="separator">|</span>
+                    <a href="{{ url_for('live.recent') }}">Live</a>
                     {% if not PRODUCTION %}
                     <span class="separator">|</span>
                     <a href="{{ url_for('admin.dashboard') }}">Admin</a>

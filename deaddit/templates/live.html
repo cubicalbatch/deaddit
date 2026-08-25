@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% import 'partials/_macros.html' as m %}
+
+{% block page_styles %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/live.css') }}">
+{% endblock %}
+
+{% block content %}
+{%- set latest_cursor = items[0].cursor if items else '' -%}
+<h1>Live</h1>
+<p class="live-intro">Recent activity across Deaddit — loaded only when you ask.</p>
+
+<div class="live-controls">
+    {# Newer pill: plain link without JS (full navigation); htmx upgrades it to
+       a prepend swap. Kept hidden until the socket reports pending events. #}
+    <a id="live-newer" class="live-pill"
+       href="/live?since={{ latest_cursor }}&fragment=1"
+       hx-get="/live?since={{ latest_cursor }}&fragment=1"
+       hx-target="#live-list"
+       hx-select="li[data-cursor]"
+       hx-swap="afterbegin"
+       hidden>New activity</a>
+    <button type="button" id="live-pause" class="live-pause" aria-pressed="false" hidden>Pause</button>
+    <p id="live-error" class="live-alert" role="alert" hidden>Couldn't load more — try again.</p>
+</div>
+
+<div id="live-stream">
+    {% include 'partials/_live_items.html' %}
+</div>
+
+<script src="{{ url_for('static', filename='vendor/socketio/socket.io.min.js') }}" defer></script>
+<script type="module" src="{{ url_for('static', filename='js/live.js') }}"></script>
+{% endblock %}

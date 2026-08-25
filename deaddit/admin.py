@@ -2200,6 +2200,79 @@ def _run_json(run):
     }
 
 
+def _truncate(text, limit=80):
+    """First ``limit`` chars of text with an ellipsis when cut."""
+    text = str(text or "")
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _as_int(value):
+    """Tolerant int coercion for JSON-sourced ids; None when not coercible."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _tool_content_card(result):
+    """Resolve a ToolCall.result blob to a produced-content card, or None.
+
+    Cards link to the post/comment a successful create_post/create_comment
+    call produced; hard-deleted rows, non-dict results, and preview-wrapper
+    results ({'truncated': ..., 'preview': ...}) all resolve to None.
+    Removed content renders as plain text: href is None and the label gains a
+    " (removed)" suffix.
+    """
+    from deaddit.models import Comment, Post
+
+    if not isinstance(result, dict):
+        return None
+    post_id = _as_int(result.get("post_id"))
+    comment_id = _as_int(result.get("comment_id"))
+    if not post_id and not comment_id:
+        return None
+    try:
+        if post_id:
+            post = db.session.get(Post, post_id)
+            if post is None:
+                return None
+            label = _truncate(post.title)
+            href = url_for(
+                "web.post", subdeaddit_name=post.subdeaddit_name, post_id=post.id
+            )
+            removed = bool(post.removed)
+            if removed:
+                href = None
+                label += " (removed)"
+            return {"kind": "post", "href": href, "label": label, "removed": removed}
+        comment = db.session.get(Comment, comment_id)
+        if comment is None:
+            return None
+        post = db.session.get(Post, comment.post_id)
+        if post is None:
+            return None
+        label = _truncate(comment.content)
+        removed = bool(comment.removed or post.removed)
+        href = None
+        if removed:
+            label += " (removed)"
+        else:
+            href = (
+                url_for(
+                    "web.post",
+                    subdeaddit_name=post.subdeaddit_name,
+                    post_id=post.id,
+                )
+                + f"#comment-{comment.id}"
+            )
+        return {"kind": "comment", "href": href, "label": label, "removed": removed}
+    except SQLAlchemyError:
+        # Malformed id types or vanished rows must never break serialization.
+        return None
+
+
 @admin_bp.route("/api/agents")
 @production_disabled
 @admin_required
@@ -2452,14 +2525,23 @@ def api_agent_runs(agent_id):
     agent = db.session.get(Agent, agent_id)
     if agent is None:
         return jsonify({"success": False, "error": "agent not found"}), 404
-    limit = request.args.get("limit", 25, type=int) or 25
+    limit = max(1, min(request.args.get("limit", 25, type=int) or 25, 200))
+    query = AgentRun.query.filter_by(agent_id=agent_id)
+    before_id = request.args.get("before_id", type=int)
+    if before_id is not None:
+        query = query.filter(AgentRun.id < before_id)
     runs = (
-        AgentRun.query.filter_by(agent_id=agent_id)
-        .order_by(desc(AgentRun.started_at), desc(AgentRun.id))
-        .limit(max(1, min(limit, 200)))
+        query.order_by(desc(AgentRun.started_at), desc(AgentRun.id))
+        .limit(limit)
         .all()
     )
-    return jsonify({"runs": [_run_json(run) for run in runs]})
+    return jsonify(
+        {
+            "runs": [_run_json(run) for run in runs],
+            # Null when the page came up short: no older page to fetch.
+            "next_before_id": runs[-1].id if len(runs) == limit else None,
+        }
+    )
 
 
 @admin_bp.route("/api/runs/<int:run_id>/turns")
@@ -2512,6 +2594,8 @@ def api_turn_tool_calls(turn_id):
                     "created_at": (
                         call.created_at.isoformat() if call.created_at else None
                     ),
+                    # Produced-content link card (post/comment), or null.
+                    "content": _tool_content_card(call.result),
                 }
                 for call in calls
             ]

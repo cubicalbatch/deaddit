@@ -66,6 +66,7 @@ def create_app(config: Any = None) -> Flask:
     from .admin import admin_bp
     from .api import bp as api_bp
     from .llm.stream_admin import stream_admin_bp
+    from .live import bp as live_bp
     from .routes import bp as web_bp
 
     # Register blueprints
@@ -73,6 +74,7 @@ def create_app(config: Any = None) -> Flask:
     app.register_blueprint(web_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(stream_admin_bp)
+    app.register_blueprint(live_bp)
     # Register the drain command on the Flask CLI too (lazy import:
     # deaddit.cli imports create_app from this module at its own import time).
     from .cli import secrets_drain_command  # noqa: E402

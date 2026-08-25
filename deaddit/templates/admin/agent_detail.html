@@ -48,6 +48,13 @@
     <div class="card-header"><strong>Run Timeline</strong></div>
     <div class="card-body p-2">
         <div id="runs-list" class="list-group list-group-flush"></div>
+        <div class="p-2 border-top">
+            <button type="button" id="older-runs-btn"
+                    class="btn btn-sm btn-outline-secondary w-100"
+                    style="display: none;">Older runs</button>
+            <p id="runs-error" class="text-danger small mb-0 mt-1"
+               role="alert" style="display: none;"></p>
+        </div>
     </div>
 </div>
 
@@ -90,6 +97,21 @@
 
     function fmtDate(iso) {
         return iso ? iso.replace("T", " ").slice(0, 19) : "-";
+    }
+
+    // token_usage.total_tokens preferred, prompt+completion fallback, else null.
+    function runTokens(run) {
+        const usage = run && run.token_usage;
+        if (!usage || typeof usage !== "object") return null;
+        if (usage.total_tokens != null) return usage.total_tokens;
+        if (usage.total != null) return usage.total;
+        const prompt = usage.prompt_tokens != null ? usage.prompt_tokens : usage.prompt;
+        const completion = usage.completion_tokens != null
+            ? usage.completion_tokens : usage.completion;
+        if (prompt != null && completion != null) return prompt + completion;
+        if (prompt != null) return prompt;
+        if (completion != null) return completion;
+        return null;
     }
 
     async function api(path) {
@@ -155,48 +177,114 @@
         document.getElementById("state-pre").textContent = JSON.stringify(agent.state, null, 2);
     }
 
+    const RUN_BADGE = { running: "bg-primary", completed: "bg-success", failed: "bg-danger", interrupted: "bg-secondary" };
+    let nextBeforeId = null;
+    let expandedBtn = null;
+    let currentRun = null;
+
+    function runsUrl(before) {
+        let url = "/admin/api/agents/" + agent.id + "/runs?limit=25";
+        if (before != null) url += "&before_id=" + before;
+        return url;
+    }
+
+    function updateOlderControl() {
+        const btn = document.getElementById("older-runs-btn");
+        btn.style.display = nextBeforeId != null ? "" : "none";
+    }
+
+    function showRunsError(message) {
+        const err = document.getElementById("runs-error");
+        if (message == null) {
+            err.style.display = "none";
+            return;
+        }
+        err.textContent = message;
+        err.style.display = "";
+    }
+
+    function runItem(run) {
+        const item = el("button",
+            "list-group-item list-group-item-action text-start w-100 flex-column align-items-start");
+        item.type = "button";
+        item.setAttribute("aria-expanded", "false");
+        const head = el("div", "d-flex w-100 justify-content-between");
+        const left = el("div");
+        left.appendChild(el("strong", null, "#" + run.id));
+        left.appendChild(el("span", "ms-2 text-muted small", run.trigger));
+        left.appendChild(document.createTextNode(" "));
+        left.appendChild(el("span", "badge ms-2 " + (RUN_BADGE[run.status] || "bg-dark"), run.status));
+        head.appendChild(left);
+        head.appendChild(el("small", "text-muted",
+            fmtDate(run.started_at) + " → " + fmtDate(run.finished_at)));
+        item.appendChild(head);
+        item.appendChild(el("div", "small text-muted mt-1",
+            "turns " + (run.turn_count ?? 0) + " · actions " + (run.action_count ?? 0) +
+            " · tokens " + (runTokens(run) ?? 0)));
+        if (run.error_message) {
+            item.appendChild(el("div", "small text-danger mt-1", run.error_message));
+        }
+        item.addEventListener("click", () => {
+            Array.from(item.parentElement.querySelectorAll(".list-group-item"))
+                .forEach((node) => node.classList.remove("active"));
+            item.classList.add("active");
+            setExpanded(item);
+            openRun(run);
+        });
+        return item;
+    }
+
+    // aria-expanded tracks the one expandable entry currently open.
+    function setExpanded(btn) {
+        if (expandedBtn && expandedBtn !== btn) {
+            expandedBtn.setAttribute("aria-expanded", "false");
+        }
+        if (btn) {
+            btn.setAttribute("aria-expanded", "true");
+        }
+        expandedBtn = btn || null;
+    }
+
     async function loadRuns() {
         const list = document.getElementById("runs-list");
         list.innerHTML = "";
-        if (!agent) return;
-        let runs = [];
+        nextBeforeId = null;
+        updateOlderControl();
+        showRunsError(null);
+        expandedBtn = null;
+        currentRun = null;
+        let data;
         try {
-            runs = (await api("/admin/api/agents/" + agent.id + "/runs?limit=25")).runs;
+            data = await api(runsUrl());
         } catch (err) {
             list.appendChild(el("div", "text-danger p-2", "Failed to load runs: " + err.message));
             return;
         }
-        if (!runs.length) {
+        if (!data.runs.length) {
             list.appendChild(el("div", "text-muted p-2", "No runs yet."));
             return;
         }
-        const RUN_BADGE = { running: "bg-primary", completed: "bg-success", failed: "bg-danger", interrupted: "bg-secondary" };
-        runs.forEach((run) => {
-            const item = el("a", "list-group-item list-group-item-action flex-column align-items-start");
-            item.href = "#";
-            const head = el("div", "d-flex w-100 justify-content-between");
-            const left = el("div");
-            left.appendChild(el("strong", null, "#" + run.id));
-            left.appendChild(el("span", "ms-2 text-muted small", run.trigger));
-            left.appendChild(document.createTextNode(" "));
-            left.appendChild(el("span", "badge ms-2 " + (RUN_BADGE[run.status] || "bg-dark"), run.status));
-            head.appendChild(left);
-            head.appendChild(el("small", "text-muted",
-                fmtDate(run.started_at) + " → " + fmtDate(run.finished_at)));
-            item.appendChild(head);
-            const meta = el("div", "small text-muted mt-1",
-                "turns " + run.turn_count + " · actions " + run.action_count +
-                " · tokens " + ((run.token_usage && run.token_usage.total_tokens) || 0));
-            item.appendChild(meta);
-            if (run.error_message) {
-                item.appendChild(el("div", "small text-danger mt-1", run.error_message));
-            }
-            item.addEventListener("click", (event) => {
-                event.preventDefault();
-                openRun(run.id);
-            });
-            list.appendChild(item);
-        });
+        data.runs.forEach((run) => list.appendChild(runItem(run)));
+        nextBeforeId = data.next_before_id;
+        updateOlderControl();
+    }
+
+    async function loadOlderRuns() {
+        if (!agent || nextBeforeId == null) return;
+        const btn = document.getElementById("older-runs-btn");
+        btn.disabled = true;
+        showRunsError(null);
+        try {
+            const data = await api(runsUrl(nextBeforeId));
+            const list = document.getElementById("runs-list");
+            data.runs.forEach((run) => list.appendChild(runItem(run)));
+            nextBeforeId = data.next_before_id;
+            updateOlderControl();
+        } catch (err) {
+            showRunsError("Couldn't load older runs: " + err.message);
+        } finally {
+            btn.disabled = false;
+        }
     }
 
     function messageBlock(message) {
@@ -211,6 +299,25 @@
         return wrap;
     }
 
+    function contentCard(content) {
+        const icon = content.kind === "comment" ? "bi-chat" : "bi-file-post";
+        if (!content.href) {
+            // Removed content: plain text, no link.
+            const plain = el("div", "small text-muted d-flex align-items-center gap-1 mb-1");
+            plain.appendChild(el("i", "bi " + icon));
+            plain.appendChild(document.createTextNode(content.label || "(removed)"));
+            return plain;
+        }
+        const link = document.createElement("a");
+        link.className = "small d-flex align-items-center gap-1 mb-1";
+        link.href = content.href;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.appendChild(el("i", "bi " + icon));
+        link.appendChild(document.createTextNode(content.label));
+        return link;
+    }
+
     function toolCallBlock(call) {
         const wrap = el("div", "border rounded p-2 mb-2");
         const head = el("div", "d-flex align-items-center gap-2 mb-1");
@@ -221,6 +328,9 @@
             head.appendChild(el("span", "text-muted small", call.duration_ms + " ms"));
         }
         wrap.appendChild(head);
+        if (call.content) {
+            wrap.appendChild(contentCard(call.content));
+        }
         const args = el("pre", "bg-light p-2 rounded small mb-1");
         args.textContent = JSON.stringify(call.arguments, null, 2);
         wrap.appendChild(el("div", "small text-muted", "arguments:"));
@@ -234,16 +344,18 @@
         return wrap;
     }
 
-    function turnItem(turn, runId) {
-        const item = el("a", "list-group-item list-group-item-action");
-        item.href = "#";
+    function turnItem(turn) {
+        const item = el("button",
+            "list-group-item list-group-item-action text-start w-100");
+        item.type = "button";
+        item.setAttribute("aria-expanded", "false");
         const head = el("div", "d-flex w-100 justify-content-between");
         const left = el("div");
         left.appendChild(el("strong", null, "turn " + turn.seq));
-        left.appendChild(el("span", "ms-2 text-muted small", turn.model || "?"));
+        left.appendChild(el("span", "ms-2 text-muted small", turn.model || "—"));
         head.appendChild(left);
         head.appendChild(el("small", "text-muted",
-            turn.latency_ms != null ? turn.latency_ms + " ms" : ""));
+            turn.latency_ms != null ? turn.latency_ms + " ms" : "—"));
         item.appendChild(head);
         let responseSummary = "";
         try {
@@ -252,23 +364,38 @@
                 : JSON.stringify(turn.response_message).slice(0, 120);
         } catch (err) { /* leave summary empty */ }
         item.appendChild(el("div", "small text-truncate text-muted mt-1", responseSummary));
-        item.addEventListener("click", (event) => {
-            event.preventDefault();
-            openTurn(runId, turn, item);
+        item.addEventListener("click", () => {
+            openTurn(turn, item);
         });
         return item;
     }
 
-    async function openTurn(runId, turn, itemNode) {
+    async function openTurn(turn, itemNode) {
         const list = document.getElementById("turns-list");
         Array.from(list.querySelectorAll(".list-group-item")).forEach((node) => {
             node.classList.remove("active");
         });
         itemNode.classList.add("active");
+        setExpanded(itemNode);
 
         // Full prompt chain for this turn.
         document.getElementById("turn-detail").replaceChildren();
         const detail = document.getElementById("turn-detail");
+
+        // Null-safe turn metadata: em dash when the field never landed.
+        const meta = el("dl", "row row-cols-sm-3 small text-muted border rounded p-2 mb-2 bg-light");
+        [
+            ["Model", turn.model || "—"],
+            ["Latency", turn.latency_ms != null ? turn.latency_ms + " ms" : "—"],
+            ["Tokens (run)", String(runTokens(currentRun) ?? "—")],
+        ].forEach(([label, value]) => {
+            const wrapCol = el("div", "col-sm-4 mb-0");
+            wrapCol.appendChild(el("dt", "col-sm-5", label));
+            wrapCol.appendChild(el("dd", "col-sm-7 mb-0", value));
+            meta.appendChild(wrapCol);
+        });
+        detail.appendChild(meta);
+
         detail.appendChild(el("h6", "mt-3 mb-2", "Request messages (verbatim)"));
         (turn.request_messages || []).forEach((message) => {
             detail.appendChild(messageBlock(message));
@@ -292,14 +419,15 @@
         }
     }
 
-    async function openRun(runId) {
+    async function openRun(run) {
+        currentRun = run || null;
         const panel = document.getElementById("turns-panel");
         const title = document.getElementById("turns-title");
-        title.textContent = "Run #" + runId + " — loading turns…";
+        title.textContent = "Run #" + run.id + " — loading turns…";
         panel.style.display = "";
         try {
-            const data = await api("/admin/api/runs/" + runId + "/turns");
-            title.textContent = "Run #" + runId + " — " + data.turns.length + " turn(s)";
+            const data = await api("/admin/api/runs/" + run.id + "/turns");
+            title.textContent = "Run #" + run.id + " — " + data.turns.length + " turn(s)";
             const list = document.getElementById("turns-list");
             list.replaceChildren();
             document.getElementById("turn-detail").replaceChildren();
@@ -308,15 +436,19 @@
                 return;
             }
             data.turns.forEach((turn) => {
-                list.appendChild(turnItem(turn, runId));
+                list.appendChild(turnItem(turn));
             });
         } catch (err) {
-            title.textContent = "Run #" + runId;
+            title.textContent = "Run #" + run.id;
             const list = document.getElementById("turns-list");
             list.replaceChildren();
             list.appendChild(el("div", "text-danger p-2", "Failed to load turns: " + err.message));
         }
     }
+
+    document.getElementById("older-runs-btn").addEventListener("click", () => {
+        loadOlderRuns();
+    });
 
     document.getElementById("toggle-btn").addEventListener("click", async () => {
         if (!agent) return;

@@ -1,0 +1,171 @@
+/* Live activity page (UX-6 Slice B). Token roles only — light/dark adapt
+   automatically. No raw colors, no framework classes. */
+
+.live-intro {
+    color: var(--text-2);
+    margin: 0 var(--space-md) var(--space-md);
+}
+
+/* Controls row ---------------------------------------------------------- */
+
+.live-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    margin: 0 var(--space-md) var(--space-md);
+}
+
+.live-pill,
+.live-pause,
+.live-older {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: var(--space-sm) var(--space-lg);
+    border-radius: 999px;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.live-pill {
+    background-color: var(--accent);
+    border: none;
+    color: var(--on-accent);
+}
+
+.live-pill:hover {
+    background-color: var(--accent-hover);
+    color: var(--on-accent);
+}
+
+.live-pause,
+.live-older {
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--border);
+    color: var(--text-1);
+}
+
+.live-pause:hover,
+.live-older:hover {
+    background-color: var(--bg-surface);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.live-alert {
+    margin: 0;
+    padding: var(--space-xs) var(--space-sm);
+    color: var(--status-danger);
+    font-size: var(--font-size-sm);
+}
+
+/* Activity list ---------------------------------------------------------- */
+
+.live-list {
+    list-style: none;
+    margin: 0 var(--space-md);
+    padding: 0;
+    max-width: 760px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background-color: var(--bg-surface);
+    overflow: hidden;
+}
+
+.live-item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    min-height: 44px;
+    box-sizing: border-box;
+}
+
+.live-item + .live-item {
+    border-top: 1px solid var(--border);
+}
+
+.live-item__id {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    margin-top: 2px;
+}
+
+.live-item__dash {
+    color: var(--text-3);
+    font-weight: 700;
+}
+
+.live-item__body {
+    flex: 1;
+    min-width: 0;
+}
+
+.live-item__title {
+    margin: 0;
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-tight);
+    overflow-wrap: anywhere;
+}
+
+.live-item__link {
+    color: var(--link);
+    text-decoration: none;
+}
+
+.live-item__link:hover {
+    text-decoration: underline;
+}
+
+.live-item__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-top: var(--space-xs);
+    font-size: var(--font-size-xs);
+    color: var(--text-2);
+}
+
+.live-item__actor {
+    color: var(--text-2);
+}
+
+.live-item time {
+    color: var(--text-3);
+}
+
+.live-item__kind {
+    flex: none;
+    margin-left: auto;
+    font-size: var(--font-size-lg);
+    color: var(--text-3);
+}
+
+.live-item--post .live-item__kind {
+    color: var(--accent);
+}
+
+.live-item--comment .live-item__kind {
+    color: var(--link);
+}
+
+.live-item--vote .live-item__kind {
+    color: var(--up);
+}
+
+/* Older control ----------------------------------------------------------- */
+
+.live-older-row {
+    display: flex;
+    justify-content: center;
+    margin: var(--space-md);
+}

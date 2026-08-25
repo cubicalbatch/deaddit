@@ -629,5 +629,12 @@
     "methods": [
       "POST"
     ]
+  },
+  {
+    "rule": "/live",
+    "endpoint": "live.recent",
+    "methods": [
+      "GET"
+    ]
   }
 ]

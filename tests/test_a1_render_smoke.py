@@ -48,3 +48,11 @@ def test_subdeaddit_and_user_pages_render_with_data(app):
     client = app.test_client()
     assert client.get("/d/testsub").status_code == 200
     assert client.get("/user/alice").status_code == 200
+
+
+def test_live_page_renders_on_empty_db(app):
+    """UX-6: the public live ticker joins the smoke set (empty-DB render)."""
+    client = app.test_client()
+    resp = client.get("/live")
+    assert resp.status_code == 200
+    assert b"<h1>Live</h1>" in resp.data

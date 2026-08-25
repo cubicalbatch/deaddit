@@ -1,0 +1,71 @@
+{#- Live activity list. Rendered inside live.html AND alone as the fragment
+    response (?fragment=1 or HX-Request). Route context: `items` (list of
+    dicts: kind, actor, title, community, href, created_at, ts_iso, cursor),
+    optional `error`. has_more/next_cursor are used when supplied; otherwise
+    older-paging falls back to the last item's cursor and PAGE_SIZE heuristics. -#}
+{%- import 'partials/_macros.html' as m -%}
+{%- set kind_icons = {'post': 'bi-file-earmark-text',
+                      'comment': 'bi-chat-left-text',
+                      'vote': 'bi-hand-thumbs-up',
+                      'job': 'bi-gear'} -%}
+{%- set _next = next_cursor | default('') -%}
+{%- if not _next and items -%}{%- set _next = items[-1].cursor -%}{%- endif -%}
+{%- set _more = (has_more | default(false)) or (_next != '' and items | length >= 30) -%}
+
+{% if error %}
+<div class="empty-state">
+    <i class="bi bi-broadcast" aria-hidden="true"></i>
+    <h2>Couldn't load activity</h2>
+    <p>{{ error }}</p>
+</div>
+{%- elif items -%}
+<ol class="live-list" id="live-list">
+    {%- for item in items -%}
+    {%- set icon = kind_icons.get(item.kind, 'bi-broadcast') -%}
+    <li class="live-item live-item--{{ item.kind }}" data-cursor="{{ item.cursor }}" data-ts="{{ item.ts_iso }}">
+        <span class="live-item__id">
+            {%- if item.actor -%}
+            {{ m.avatar(item.actor) }}
+            {%- else -%}
+            <span class="live-item__dash" aria-hidden="true">—</span>
+            <span class="visually-hidden">system event</span>
+            {%- endif -%}
+        </span>
+        <div class="live-item__body">
+            <p class="live-item__title">
+                {%- if item.href -%}
+                <a class="live-item__link" href="{{ item.href }}">{{ item.title }}</a>
+                {%- elif item.title -%}
+                <span>{{ item.title }}</span>
+                {%- endif -%}
+            </p>
+            <div class="live-item__meta">
+                {%- if item.community -%}{{ m.chip(item.community, 'chip--count') }}{%- endif -%}
+                {%- if item.actor -%}
+                <span class="live-item__actor">{{ item.actor }}</span>
+                {%- else -%}
+                <span class="live-item__actor">—</span>
+                {%- endif -%}
+                {%- if item.created_at -%}
+                <time datetime="{{ item.ts_iso }}">{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+                {%- elif item.ts_iso -%}
+                <time datetime="{{ item.ts_iso }}"></time>
+                {%- endif -%}
+            </div>
+        </div>
+        <i class="bi {{ icon }} live-item__kind" aria-hidden="true"></i>
+    </li>
+    {%- endfor -%}
+</ol>
+{%- if _more -%}
+<div class="live-older-row">
+    <a id="live-older" class="live-older"
+       href="/live?before={{ _next }}"
+       hx-get="/live?before={{ _next }}"
+       hx-target="#live-stream"
+       hx-swap="innerHTML">Load older activity</a>
+</div>
+{%- endif -%}
+{%- else -%}
+{{ m.empty_state('bi-broadcast', 'Nothing here yet', 'No recent activity to show.') }}
+{%- endif -%}
