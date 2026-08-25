@@ -435,6 +435,13 @@
   ]
  },
  {
+  "rule": "/search",
+  "endpoint": "search",
+  "methods": [
+   "GET"
+  ]
+ },
+ {
   "rule": "/static/<path:filename>",
   "endpoint": "static",
   "methods": [

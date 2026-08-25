@@ -2,43 +2,47 @@
 {% extends 'base.html' %}
 
 {% block content %}
-    <div class="users-header">
-        <h1 class="users-title">👥 Community Members</h1>
-    </div>
+<header class="users-header">
+    <h1 class="users-title">👥 Community Members</h1>
+    <nav class="sort-bar" aria-label="Sort members">
+        {%- set sort_options = [('username', 'A–Z'), ('activity', 'Most active')] -%}
+        {%- for value, label in sort_options -%}
+        {#- Changing sort resets to page 1 (omitting `page` falls back to the route default). -#}
+        {%- set params = {'sort': value} -%}
+        {%- for key in request.args if key != 'page' and key != 'sort' -%}
+        {%- set _ = params.update({key: request.args.get(key)}) -%}
+        {%- endfor -%}
+        <a class="sort-bar__link{{ ' is-active' if sort == value }}"
+           href="{{ url_for(request.endpoint, **params) }}"
+           {% if sort == value %}aria-current="page"{% endif %}>{{ label }}</a>
+        {%- endfor -%}
+    </nav>
+</header>
 
-    <div class="users-grid">
-        {% for user in users.items %}
-            <div class="user-card">
-                <div class="user-avatar">
-                    <div class="avatar-circle">
-                        {{ user.username[0].upper() }}
-                    </div>
-                </div>
-                <div class="user-info">
-                    <h2 class="user-name">
-                        <a href="{{ url_for('web.user_profile', username=user.username) }}">
-                            u/{{ user.username }}
-                        </a>
-                    </h2>
-                    <div class="user-details">
-                        <span class="user-demographic">
-                            {% if user.gender %}{{ user.gender.title() }}{% endif %}
-                            {% if user.age and user.gender %}, {% endif %}
-                            {% if user.age %}{{ user.age }} years old{% endif %}
-                        </span>
-                    </div>
-                    <div class="user-bio">
-                        {{ user.bio[:120] }}{% if user.bio|length > 120 %}...{% endif %}
-                    </div>
-                    <div class="user-footer">
-                        <a href="{{ url_for('web.user_profile', username=user.username) }}" class="view-profile-btn">
-                            View Profile →
-                        </a>
-                    </div>
-                </div>
+<div class="users-grid">
+    {%- for user in users -%}
+    <article class="user-card">
+        {{ m.avatar(user.username) }}
+        <div class="user-info">
+            <h2 class="user-name">
+                <a href="{{ url_for('web.user_profile', username=user.username) }}">u/{{ user.username }}</a>
+            </h2>
+            <div class="user-details">
+                <span class="user-demographic">
+                    {%- if user.gender %}{{ user.gender.title() }}{% endif -%}
+                    {%- if user.age and user.gender %}, {% endif -%}
+                    {%- if user.age %}{{ user.age }} years old{% endif -%}
+                </span>
             </div>
-        {% endfor %}
-    </div>
+            <p class="user-bio">{% set bio = user.bio or '' %}{{ bio[:120] }}{% if bio|length > 120 %}…{% endif %}</p>
+            <div class="user-stats">📄 {{ user.post_count }} posts · 💬 {{ user.comment_count }} comments</div>
+            <div class="user-footer">
+                <a href="{{ url_for('web.user_profile', username=user.username) }}" class="view-profile-btn">View Profile →</a>
+            </div>
+        </div>
+    </article>
+    {%- endfor -%}
+</div>
 
-    {{ m.pagenav(users.page, users.pages, 'Community members') }}
+{{ m.pagenav(page, total_pages, 'Community members') }}
 {% endblock %}

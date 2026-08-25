@@ -41,6 +41,11 @@
                 <a class="header-github" href="https://github.com/CubicalBatch/deaddit" target="_blank" rel="noopener"><i class="bi bi-github"></i> Github</a>
             </div>
             <div class="right-content">
+                <form class="header-search" role="search" action="{{ url_for('web.search') }}" method="get">
+                    <label class="visually-hidden" for="site-search">Search Deaddit</label>
+                    <input id="site-search" type="search" name="q" value="{{ request.args.get('q', '') }}" placeholder="Search Deaddit" autocomplete="off">
+                    <button type="submit" aria-label="Search"><i class="bi bi-search" aria-hidden="true"></i></button>
+                </form>
                 <nav class="nav-links">
                     <a href="{{ url_for('web.list_subdeaddit') }}">Communities</a>
                     <span class="separator">|</span>

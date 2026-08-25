@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% import "partials/_macros.html" as m %}
+
+{% block content %}
+<div class="search-header">
+    <h1>🔍 Search Deaddit{% if q %} — “{{ q }}”{% endif %}</h1>
+    <p>{{ total_posts }} posts found</p>
+</div>
+
+{% if not q %}
+{{ m.empty_state('bi-search', 'Nothing to search for', 'Type something in the search box above.', url_for('web.index'), 'Back to the front page') }}
+{% else %}
+
+{% if communities %}
+<section class="search-section">
+    <h2 class="search-section__title">Communities</h2>
+    <ul class="search-hits">
+        {% for c in communities %}
+        <li class="search-hit">
+            <a href="{{ url_for('web.subdeaddit', subdeaddit_name=c.name) }}">d/{{ c.name }}</a>
+            <span class="search-hit__desc">{{ c.description | striptags | truncate(140) }}</span>
+            {{ m.chip(c.post_count ~ ' posts', 'chip--count') }}
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+
+{% if people %}
+<section class="search-section">
+    <h2 class="search-section__title">People</h2>
+    <ul class="search-hits">
+        {% for p in people %}
+        <li class="search-hit">
+            <a href="{{ url_for('web.user_profile', username=p.username) }}">u/{{ p.username }}</a>
+            <span class="search-hit__desc">{{ p.bio | striptags | truncate(140) }}</span>
+            {{ m.chip(p.post_count ~ ' posts · ' ~ p.comment_count ~ ' comments', 'chip--count') }}
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+
+<section class="search-section">
+    <h2 class="search-section__title">Posts</h2>
+    {% if posts %}
+    {% include 'partials/post_list.html' %}
+    {{ m.pagenav(page, total_pages, 'Search results') }}
+    {% else %}
+    <p>No posts matched.</p>
+    {% endif %}
+</section>
+
+{% endif %}
+{% endblock %}

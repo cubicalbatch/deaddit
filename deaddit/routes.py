@@ -1,5 +1,8 @@
+import json
+from collections import namedtuple
+
 from flask import Blueprint, render_template, request
-from sqlalchemy import func
+from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import joinedload
 
 from deaddit.extensions import db
@@ -344,63 +347,224 @@ def list_subdeaddit():
 def user_profile(username):
     user = User.query.get_or_404(username)
 
-    # Get the 20 most recent posts for the user
-    posts = (
-        Post.query.filter_by(user=username)
-        .order_by(Post.created_at.desc())
-        .limit(20)
-        .all()
-    )
+    tab = request.args.get("tab", "posts")
+    if tab not in ("posts", "comments"):
+        tab = "posts"
+    page = request.args.get("page", default=1, type=int)
+    per_page = 20
+    offset = (page - 1) * per_page
 
-    # Get the 20 most recent comments for the user
-    comments = (
-        Comment.query.options(joinedload(Comment.post))
-        .filter_by(user=username)
-        .order_by(Comment.created_at.desc())
-        .limit(20)
-        .all()
-    )
-
-    # Get total counts for posts and comments
     total_posts = Post.query.filter_by(user=username).count()
     total_comments = Comment.query.filter_by(user=username).count()
 
-    # Get comment counts efficiently
-    post_ids = [post.id for post in posts]
-    comment_counts = get_comment_counts_bulk(post_ids)
-
-    return render_template(
-        "user_profile.html",
-        user=user,
-        # post_list.html expects feed paging vars; profile lists are uncapped
-        # single pages.
-        page=1,
-        has_more=False,
-        posts=posts,
-        comments=comments,
-        total_posts=total_posts,
-        total_comments=total_comments,
-        comment_counts=comment_counts,
-        title=f"Deaddit - User Profile: {username}",
+    post_upvotes = (
+        db.session.query(func.coalesce(func.sum(Post.upvote_count), 0))
+        .filter(Post.user == username)
+        .scalar()
     )
+    comment_upvotes = (
+        db.session.query(func.coalesce(func.sum(Comment.upvote_count), 0))
+        .filter(Comment.user == username)
+        .scalar()
+    )
+    stats = {
+        "post_count": total_posts,
+        "comment_count": total_comments,
+        "total_upvotes": post_upvotes + comment_upvotes,
+    }
+
+    def _safe_json_list(raw):
+        """Parse a JSON list column, falling back to [] on NULL/invalid."""
+        try:
+            parsed = json.loads(raw) if raw else []
+        except (TypeError, ValueError):
+            return []
+        return parsed if isinstance(parsed, list) else []
+
+    context = {
+        "user": user,
+        "active_tab": tab,
+        "page": page,
+        "total_posts": total_posts,
+        "total_comments": total_comments,
+        "stats": stats,
+        "traits": _safe_json_list(user.personality_traits),
+        "interests": _safe_json_list(user.interests),
+        "bio_html": format_content_html(user.bio),
+        "title": f"Deaddit - User Profile: {username}",
+    }
+
+    if tab == "posts":
+        posts = (
+            Post.query.filter_by(user=username)
+            .order_by(Post.created_at.desc(), Post.id.desc())
+            .offset(offset)
+            .limit(per_page)
+            .all()
+        )
+        for post in posts:
+            post.title = process_post_title(post.title)
+        context["posts"] = posts
+        context["comment_counts"] = get_comment_counts_bulk(
+            [post.id for post in posts]
+        )
+        total = total_posts
+    else:
+        context["comments"] = (
+            Comment.query.options(joinedload(Comment.post))
+            .filter_by(user=username)
+            .order_by(Comment.created_at.desc(), Comment.id.desc())
+            .offset(offset)
+            .limit(per_page)
+            .all()
+        )
+        total = total_comments
+
+    context["total_pages"] = (total + per_page - 1) // per_page
+    context["has_more"] = total > page * per_page
+
+    return render_template("user_profile.html", **context)
+
+
+_UserRow = namedtuple(
+    "UserRow",
+    ["username", "bio", "age", "gender", "post_count", "comment_count", "activity"],
+)
 
 
 @bp.route("/users")
 def list_users():
     page = request.args.get("page", default=1, type=int)
+    sort = request.args.get("sort", "username")
+    if sort not in ("username", "activity"):
+        sort = "username"
     users_per_page = 50
+    offset = (page - 1) * users_per_page
 
-    # Count the total number of users
     total_users = db.session.query(func.count(User.username)).scalar()
 
-    # Query users with pagination
-    users = User.query.order_by(User.username).paginate(
-        page=page, per_page=users_per_page
+    # Two independent outerjoins multiply post/comment rows per user, so the
+    # counts must be DISTINCT to stay accurate.
+    pc = func.count(distinct(Post.id))
+    cc = func.count(distinct(Comment.id))
+    query = (
+        db.session.query(
+            User.username,
+            User.bio,
+            User.age,
+            User.gender,
+            pc.label("post_count"),
+            cc.label("comment_count"),
+        )
+        .outerjoin(Post, Post.user == User.username)
+        .outerjoin(Comment, Comment.user == User.username)
+        .group_by(User.username, User.bio, User.age, User.gender)
     )
+    if sort == "activity":
+        query = query.order_by((pc + cc).desc(), User.username.asc())
+    else:
+        query = query.order_by(User.username.asc())
+
+    rows = query.offset(offset).limit(users_per_page).all()
+    users = [
+        _UserRow(
+            username=row.username,
+            bio=row.bio,
+            age=row.age,
+            gender=row.gender,
+            post_count=row.post_count,
+            comment_count=row.comment_count,
+            activity=row.post_count + row.comment_count,
+        )
+        for row in rows
+    ]
 
     return render_template(
         "users_list.html",
         users=users,
+        sort=sort,
+        page=page,
+        total_pages=(total_users + users_per_page - 1) // users_per_page,
+        has_more=total_users > page * users_per_page,
         total_users=total_users,
         title="Deaddit - List of Users",
+    )
+
+
+@bp.route("/search")
+def search():
+    q = (request.args.get("q") or "").strip()
+    page = request.args.get("page", default=1, type=int)
+    posts_per_page = 20
+    offset = (page - 1) * posts_per_page
+
+    posts = []
+    comment_counts = {}
+    communities = []
+    people = []
+    total_posts = 0
+
+    if q:
+        # contains(autoescape=True) escapes %, _ and the escape char inside
+        # q before SQLAlchemy wraps it in %...% for LIKE.
+        def like(col):
+            return col.contains(q, autoescape=True)
+
+        posts_query = Post.query.filter(
+            or_(like(Post.title), like(Post.content))
+        ).order_by(Post.created_at.desc(), Post.id.desc())
+        total_posts = posts_query.count()
+        posts = posts_query.offset(offset).limit(posts_per_page).all()
+        for post in posts:
+            post.title = process_post_title(post.title)
+        comment_counts = get_comment_counts_bulk([post.id for post in posts])
+
+        sub_pc = func.count(Post.id)
+        communities_rows = (
+            db.session.query(
+                Subdeaddit.name,
+                Subdeaddit.description,
+                sub_pc.label("post_count"),
+            )
+            .outerjoin(Post, Subdeaddit.name == Post.subdeaddit_name)
+            .filter(or_(like(Subdeaddit.name), like(Subdeaddit.description)))
+            .group_by(Subdeaddit.name, Subdeaddit.description)
+            .order_by(sub_pc.desc(), Subdeaddit.name.asc())
+            .limit(8)
+            .all()
+        )
+        communities = communities_rows
+
+        upc = func.count(distinct(Post.id))
+        ucc = func.count(distinct(Comment.id))
+        people_rows = (
+            db.session.query(
+                User.username,
+                User.bio,
+                upc.label("post_count"),
+                ucc.label("comment_count"),
+            )
+            .outerjoin(Post, Post.user == User.username)
+            .outerjoin(Comment, Comment.user == User.username)
+            .filter(or_(like(User.username), like(User.bio)))
+            .group_by(User.username, User.bio)
+            .order_by((upc + ucc).desc(), User.username.asc())
+            .limit(8)
+            .all()
+        )
+        people = people_rows
+
+    return render_template(
+        "search.html",
+        q=q,
+        posts=posts,
+        comment_counts=comment_counts,
+        communities=communities,
+        people=people,
+        total_posts=total_posts,
+        page=page,
+        total_pages=(total_posts + posts_per_page - 1) // posts_per_page,
+        has_more=total_posts > page * posts_per_page,
+        title=f"Deaddit - Search: {q}" if q else "Deaddit - Search",
+        description="Search Deaddit posts, communities, and people.",
     )

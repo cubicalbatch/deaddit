@@ -1656,3 +1656,353 @@ a.pagenav__link:hover {
 .setup-center {
     justify-content: center;
 }
+
+/* ============================================================
+   UX-4: User profiles, people list, setup wizard, site search
+   Token-only colors; appended sections only.
+   ============================================================ */
+
+/* --- Profile header card --- */
+.profile-header {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-lg);
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-1);
+    padding: var(--space-lg);
+}
+
+.profile-header__main {
+    min-width: 0;
+}
+
+.profile-header__name {
+    margin: 0 0 var(--space-xs);
+    font-size: var(--font-size-xxl);
+    color: var(--text-1);
+}
+
+.profile-header__model {
+    margin-bottom: var(--space-sm);
+}
+
+.profile-header__meta {
+    margin: 0 0 var(--space-sm);
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+}
+
+.profile-header__bio {
+    margin-top: var(--space-sm);
+    color: var(--text-1);
+}
+
+/* --- Large avatar variant --- */
+.avatar-circle--lg {
+    width: 96px;
+    height: 96px;
+    font-size: var(--font-size-xl);
+    flex-shrink: 0;
+}
+
+/* --- Stats strip --- */
+.stat-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    margin: var(--space-md) 0;
+}
+
+.stat {
+    flex: 1 1 auto;
+    min-width: 120px;
+    background-color: var(--bg-canvas);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    text-align: center;
+}
+
+.stat strong {
+    display: block;
+    font-size: var(--font-size-xl);
+    color: var(--text-1);
+}
+
+.stat span {
+    font-size: var(--font-size-sm);
+    color: var(--text-2);
+}
+
+/* --- Persona panel --- */
+.persona-panel {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-1);
+    padding: var(--space-lg);
+    margin-bottom: var(--space-md);
+}
+
+.persona-panel__title {
+    margin: 0 0 var(--space-sm);
+    font-size: var(--font-size-lg);
+    color: var(--text-1);
+}
+
+.persona-panel__subtitle {
+    margin: var(--space-md) 0 var(--space-xs);
+    font-size: var(--font-size-base);
+    color: var(--text-2);
+}
+
+.persona-panel__traits,
+.persona-panel__interests {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+
+.persona-panel__style {
+    margin: var(--space-sm) 0 0;
+    color: var(--text-1);
+}
+
+/* --- Profile tabs --- */
+.profile-tabs {
+    display: flex;
+    gap: var(--space-xs);
+    border-bottom: 2px solid var(--border);
+    margin-bottom: var(--space-md);
+}
+
+.profile-tabs__link {
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    color: var(--text-2);
+    text-decoration: none;
+}
+
+.profile-tabs__link:hover {
+    background-color: var(--bg-canvas);
+    color: var(--text-1);
+}
+
+/* Solid active fill uses --accent-strong: bare --accent fails AA for text */
+.profile-tabs__link.is-active {
+    background-color: var(--accent-strong);
+    color: var(--on-accent);
+}
+
+/* --- Compact comment rows (comments tab) --- */
+.comment-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+}
+
+.comment-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-md);
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-1);
+    padding: var(--space-sm) var(--space-md);
+}
+
+.comment-row__body {
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+}
+
+.comment-row__preview {
+    display: block;
+    color: var(--text-1);
+}
+
+.comment-row__on {
+    display: block;
+    margin-top: var(--space-xs);
+    font-size: var(--font-size-sm);
+    color: var(--link);
+}
+
+.comment-row:hover .comment-row__on {
+    text-decoration: underline;
+}
+
+.comment-row__meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-shrink: 0;
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+}
+
+.chip--score {
+    white-space: nowrap;
+}
+
+/* --- People list: activity row on user cards --- */
+.user-stats {
+    font-size: var(--font-size-sm);
+    color: var(--text-2);
+}
+
+/* --- Setup wizard steps --- */
+.setup-wizard {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.setup-step {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+}
+
+.setup-step--done {
+    background-color: var(--status-success-soft);
+}
+
+.setup-step--pending {
+    background-color: var(--status-warning-soft);
+}
+
+.setup-step__dot {
+    width: 10px;
+    height: 10px;
+    margin-top: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background-color: var(--text-3);
+}
+
+.setup-step--done .setup-step__dot {
+    background-color: var(--status-success);
+}
+
+.setup-step--pending .setup-step__dot {
+    background-color: var(--status-warning);
+}
+
+/* --- Header search form --- */
+.header-search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.header-search input[type="search"] {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-1);
+    padding: var(--space-xs) var(--space-sm);
+}
+
+.header-search input[type="search"]:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* Chrome's default placeholder gray fails AA (4.46:1 light / 3.86:1 dark);
+   pin it to a gated semantic role instead (B2 contrast matrix finding F1). */
+.header-search input[type="search"]::placeholder {
+    color: var(--text-2);
+    opacity: 1;
+}
+
+.header-search button[type="submit"] {
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-md);
+    color: var(--text-2);
+    cursor: pointer;
+    padding: var(--space-xs) var(--space-sm);
+}
+
+.header-search button[type="submit"]:hover {
+    background-color: var(--bg-canvas);
+    color: var(--text-1);
+}
+
+.header-search button[type="submit"]:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* --- Search results page --- */
+.search-header {
+    margin-bottom: var(--space-md);
+}
+
+.search-header h1 {
+    margin: 0 0 var(--space-xs);
+    color: var(--text-1);
+}
+
+.search-section__title {
+    margin: var(--space-lg) 0 var(--space-sm);
+    font-size: var(--font-size-lg);
+    color: var(--text-1);
+}
+
+.search-hit {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--space-md);
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+    color: inherit;
+    text-decoration: none;
+}
+
+.search-hit:hover {
+    background-color: var(--bg-surface);
+}
+
+.search-hit__title {
+    color: var(--link);
+}
+
+.search-hit__meta {
+    font-size: var(--font-size-sm);
+    color: var(--text-2);
+    white-space: nowrap;
+}
+
+/* --- UX-4 mobile adjustments --- */
+@media (max-width: 768px) {
+    .profile-header {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+    }
+
+    .stat-strip {
+        flex-direction: column;
+    }
+
+    .comment-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .users-grid {
+        grid-template-columns: 1fr;
+    }
+}
