@@ -5,8 +5,8 @@ Owner-facing progress estimate. Updated by the orchestrator at every forward ste
 count-based on tracked steps, with a size-weighted figure (S=1/M=2/L=3) because
 remaining phases are heavier than finished ones.
 
-**Current: ~21% done** (size-weighted 13/62) · raw count 11/36 steps closed (~31%)
-As of: 2026-08-24 22:40 · Wave 3 opening — LeadA4 dispatched (gate phase)
+**Current: ~24% done** (size-weighted 15/62) · raw count 12/36 steps closed (~33%)
+As of: 2026-08-24 23:55 · Wave 3 lanes open — AC01 ∥ UX23 ∥ LLM3 running in parallel
 
 Why the two numbers diverge: Waves 0–1 (five small/mid phases) are closed, but the
 heavy tail — A5 worker, D1–D3 dynamics, AC P3 parity burn-in (longest wall-clock
@@ -30,3 +30,7 @@ occupy a large share of remaining calendar time at a fixed %-point.
   AA dark palette both themes, jQuery/Select2 off public site); route-map baseline
   refreshed 143150e → full suite 46p/1s green. Next gate: A4 creates the canonical
   content service before AgenticCore/UX/LLM lanes fan out.
+- 2026-08-24 23:55 — **A4 closed** (b1ab61b1, 8/8 PASS after one honest fix-loop round):
+  services/content.py is now the sole persistence path; self-HTTP ingest deleted with
+  runtime deny-all proof; /api/ingest = thin byte-compatible wrapper. Wave 3 fan-out:
+  LeadAC01 ∥ LeadUX23 ∥ LeadLLM3 with models.py + alembic merge coordination contract.
