@@ -100,9 +100,11 @@ def _extract_response(response: dict) -> tuple[str, list[dict] | None]:
         tool_calls = message.get("tool_calls") or None
         if tool_calls is not None:
             return content, tool_calls
-        if not content and message.get("reasoning"):
+        if not content and (message.get("reasoning") or message.get("reasoning_content")):
+            # Some OpenAI-compatible servers (e.g. qwen deployments) name the
+            # hidden-reasoning field `reasoning_content` instead of `reasoning`.
             logger.info("Using reasoning field as content")
-            return message["reasoning"], None
+            return message.get("reasoning") or message.get("reasoning_content"), None
         if content:
             return content, None
     except (KeyError, IndexError, TypeError, AttributeError):

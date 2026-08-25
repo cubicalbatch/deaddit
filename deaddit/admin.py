@@ -2137,3 +2137,423 @@ def routes_api():
             },
         }
     )
+
+
+# --- AgenticCore: agent administration ---
+# JSON API + pages for the autonomous-agent runtime (Phase 2). All routes are
+# admin-gated like the rest of this blueprint; scheduling itself lives in the
+# worker process (runtime.scheduler), never here.
+
+_AGENTIC_TIERS = ("lurker", "regular", "power_user")
+
+
+def _agent_json(agent, counts=None):
+    """Serialize an Agent row; ``counts`` maps run status -> count."""
+    from deaddit.models import AgentRun
+
+    if counts is None:
+        rows = (
+            db.session.query(AgentRun.status, func.count(AgentRun.id))
+            .filter(AgentRun.agent_id == agent.id)
+            .group_by(AgentRun.status)
+            .all()
+        )
+        counts = dict(rows)
+    return {
+        "id": agent.id,
+        "user_username": agent.user_username,
+        "autonomy_tier": agent.autonomy_tier,
+        "is_enabled": bool(agent.is_enabled),
+        "status": agent.status,
+        "config": agent.config or {},
+        "state": agent.state or {},
+        "last_run_at": agent.last_run_at.isoformat() if agent.last_run_at else None,
+        "next_run_at": agent.next_run_at.isoformat() if agent.next_run_at else None,
+        "consecutive_failures": int(agent.consecutive_failures or 0),
+        "runs_completed": int(counts.get("completed", 0)),
+        "runs_failed": int(counts.get("failed", 0)),
+        "runs_interrupted": int(counts.get("interrupted", 0)),
+        "runs_total": int(sum(counts.values())),
+    }
+
+
+def _run_json(run):
+    return {
+        "id": run.id,
+        "agent_id": run.agent_id,
+        "trigger": run.trigger,
+        "status": run.status,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+        "turn_count": run.turn_count,
+        "action_count": run.action_count,
+        "token_usage": run.token_usage or {},
+        "error_message": run.error_message,
+    }
+
+
+@admin_bp.route("/api/agents")
+@production_disabled
+@admin_required
+def api_agents_list():
+    """List every registered agent with run tallies."""
+    from deaddit.models import Agent, AgentRun
+
+    agents = Agent.query.order_by(Agent.user_username).all()
+    tally_rows = (
+        db.session.query(
+            AgentRun.agent_id, AgentRun.status, func.count(AgentRun.id)
+        )
+        .group_by(AgentRun.agent_id, AgentRun.status)
+        .all()
+    )
+    tallies = {}
+    for agent_id, status, count in tally_rows:
+        tallies.setdefault(agent_id, {})[status] = count
+    return jsonify(
+        {
+            "agents": [
+                _agent_json(agent, tallies.get(agent.id, {})) for agent in agents
+            ]
+        }
+    )
+
+
+@admin_bp.route("/api/personas/candidates")
+@production_disabled
+@admin_required
+def api_persona_candidates():
+    """Users that are not yet agents, ranked by activity (posts + comments)."""
+    from deaddit.models import Agent
+
+    posts_sq = (
+        db.session.query(Post.user.label("username"), func.count(Post.id).label("n"))
+        .group_by(Post.user)
+        .subquery()
+    )
+    comments_sq = (
+        db.session.query(
+            Comment.user.label("username"), func.count(Comment.id).label("n")
+        )
+        .group_by(Comment.user)
+        .subquery()
+    )
+    taken = [username for (username,) in db.session.query(Agent.user_username).all()]
+    activity = func.coalesce(posts_sq.c.n, 0) + func.coalesce(comments_sq.c.n, 0)
+    rows = (
+        db.session.query(User, posts_sq.c.n, comments_sq.c.n)
+        .outerjoin(posts_sq, User.username == posts_sq.c.username)
+        .outerjoin(comments_sq, User.username == comments_sq.c.username)
+    )
+    if taken:
+        rows = rows.filter(~User.username.in_(taken))
+    candidates = []
+    for user, post_count, comment_count in (
+        rows.order_by(desc(activity), User.username).limit(50).all()
+    ):
+        bio = (user.bio or "").strip()
+        traits = (user.personality_traits or "").strip()
+        preview_source = bio or traits
+        candidates.append(
+            {
+                "username": user.username,
+                "personality_preview": (
+                    preview_source[:120] + "…" if len(preview_source) > 120
+                    else preview_source
+                ),
+                "post_count": int(post_count or 0),
+                "comment_count": int(comment_count or 0),
+            }
+        )
+    return jsonify({"candidates": candidates})
+
+
+@admin_bp.route("/api/agents/presets")
+@production_disabled
+@admin_required
+def api_agent_presets():
+    """Named presets powering the create-agent form."""
+    return jsonify(
+        {
+            "tiers": list(_AGENTIC_TIERS),
+            "cadence": {
+                "slow": [1800, 7200],
+                "normal": [900, 3600],
+                "active": [300, 1500],
+            },
+            "daily_request_ceiling": {"light": 200, "standard": 2000, "heavy": 8000},
+            "cohort_size": {"small": 5, "medium": 12, "large": 20},
+        }
+    )
+
+
+@admin_bp.route("/api/agents", methods=["POST"])
+@production_disabled
+@admin_required
+def api_create_agent():
+    """Create an agent from an existing user persona (created disabled by default)."""
+    from deaddit.agents.loop import DEFAULT_CONFIG
+    from deaddit.llm.capabilities import CapabilityError, ensure_tools_allowed
+    from deaddit.models import Agent
+
+    payload = request.get_json(silent=True) or {}
+    username = str(payload.get("username") or "").strip()
+    if not username:
+        return jsonify({"success": False, "error": "username is required"}), 400
+    if db.session.get(User, username) is None:
+        return (
+            jsonify({"success": False, "error": f"User '{username}' does not exist"}),
+            400,
+        )
+    if Agent.query.filter_by(user_username=username).first() is not None:
+        return (
+            jsonify({"success": False, "error": f"'{username}' already has an agent"}),
+            409,
+        )
+
+    tier = payload.get("autonomy_tier") or "regular"
+    if tier not in _AGENTIC_TIERS:
+        return jsonify({"success": False, "error": f"Unknown tier '{tier}'"}), 400
+
+    api_url = payload.get("api_url") or Config.get("OPENAI_API_URL") or ""
+    model = payload.get("model") or Config.get("OPENAI_MODEL", "llama3")
+    try:
+        min_delay = int(payload.get("min_delay", DEFAULT_CONFIG["min_delay"]))
+        max_delay = int(payload.get("max_delay", DEFAULT_CONFIG["max_delay"]))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "min/max delay must be integers"}), 400
+    if min_delay < 0 or max_delay < min_delay:
+        return (
+            jsonify({"success": False, "error": "max_delay must be >= min_delay >= 0"}),
+            400,
+        )
+
+    config = {
+        "api_url": api_url,
+        "model": model,
+        "min_delay": min_delay,
+        "max_delay": max_delay,
+        "max_actions_per_run": DEFAULT_CONFIG["max_actions_per_run"],
+        "max_run_seconds": DEFAULT_CONFIG["max_run_seconds"],
+    }
+    daily_ceiling = payload.get("daily_request_ceiling")
+    if daily_ceiling is not None:
+        try:
+            config["daily_request_ceiling"] = int(daily_ceiling)
+        except (TypeError, ValueError):
+            return (
+                jsonify(
+                    {"success": False, "error": "daily_request_ceiling must be an int"}
+                ),
+                400,
+            )
+
+    # Owner decision 2: probe at cohort creation so a tool-less endpoint/model
+    # is rejected before any agent exists.
+    try:
+        ensure_tools_allowed(api_url, model, auto_probe=True)
+    except CapabilityError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+    # Owner decision 1: nothing runs by default - enable is opt-in.
+    enable = bool(payload.get("enable", False))
+    agent = Agent(
+        user_username=username,
+        autonomy_tier=tier,
+        is_enabled=enable,
+        status="idle",
+        config=config,
+        state={},
+        consecutive_failures=0,
+        next_run_at=datetime.utcnow() if enable else None,
+    )
+    db.session.add(agent)
+    db.session.commit()
+
+    episodes = 0
+    warning = None
+    if payload.get("backfill_memory", True):
+        try:
+            from deaddit.agents.memory import backfill_persona_history
+        except ImportError as exc:
+            warning = f"backfill unavailable: {exc}"
+        else:
+            try:
+                episodes = int(
+                    backfill_persona_history(username, api_url=api_url, model=model)
+                )
+            except Exception as exc:
+                logger.warning("Backfill failed for '%s': %s", username, exc)
+                warning = f"backfill failed: {exc}"
+
+    result = {"agent": _agent_json(agent), "episodes": episodes}
+    if warning:
+        result["warning"] = warning
+    return jsonify(result), 201
+
+
+@admin_bp.route("/api/agents/<int:agent_id>/toggle", methods=["POST"])
+@production_disabled
+@admin_required
+def api_toggle_agent(agent_id):
+    """Enable/disable one agent. Enabling resets the failure strike count."""
+    from deaddit.models import Agent
+
+    agent = db.session.get(Agent, agent_id)
+    if agent is None:
+        return jsonify({"success": False, "error": "agent not found"}), 404
+    if agent.is_enabled:
+        agent.is_enabled = False
+        agent.next_run_at = None
+        agent.status = "idle"
+    else:
+        # Explicit human re-enable: clear strikes and wake on next poll.
+        agent.is_enabled = True
+        agent.consecutive_failures = 0
+        agent.next_run_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({"agent": _agent_json(agent)})
+
+
+@admin_bp.route("/api/agents/<int:agent_id>/force-run", methods=["POST"])
+@production_disabled
+@admin_required
+def api_force_run(agent_id):
+    """Run one agent visit synchronously; bounded by its max_run_seconds budget."""
+    from deaddit.agents.loop import run_once
+    from deaddit.models import Agent
+
+    agent = db.session.get(Agent, agent_id)
+    if agent is None:
+        return jsonify({"success": False, "error": "agent not found"}), 404
+    try:
+        run = run_once(agent.user_username, trigger="manual")
+    except ValueError as exc:
+        # Already running / no agent registered.
+        return jsonify({"success": False, "error": str(exc)}), 409
+    return jsonify({"run": _run_json(run)})
+
+
+@admin_bp.route("/api/agents/<int:agent_id>/runs")
+@production_disabled
+@admin_required
+def api_agent_runs(agent_id):
+    """Recent runs for one agent, newest first."""
+    from deaddit.models import Agent, AgentRun
+
+    agent = db.session.get(Agent, agent_id)
+    if agent is None:
+        return jsonify({"success": False, "error": "agent not found"}), 404
+    limit = request.args.get("limit", 25, type=int) or 25
+    runs = (
+        AgentRun.query.filter_by(agent_id=agent_id)
+        .order_by(desc(AgentRun.started_at), desc(AgentRun.id))
+        .limit(max(1, min(limit, 200)))
+        .all()
+    )
+    return jsonify({"runs": [_run_json(run) for run in runs]})
+
+
+@admin_bp.route("/api/runs/<int:run_id>/turns")
+@production_disabled
+@admin_required
+def api_run_turns(run_id):
+    """Seq-ordered LLM turns with verbatim prompt chains (View Thoughts)."""
+    from deaddit.models import AgentRun, AgentTurn
+
+    if db.session.get(AgentRun, run_id) is None:
+        return jsonify({"success": False, "error": "run not found"}), 404
+    turns = AgentTurn.query.filter_by(run_id=run_id).order_by(AgentTurn.seq).all()
+    return jsonify(
+        {
+            "turns": [
+                {
+                    "id": turn.id,
+                    "seq": turn.seq,
+                    "model": turn.model,
+                    "latency_ms": turn.latency_ms,
+                    "request_messages": turn.request_messages,
+                    "response_message": turn.response_message,
+                }
+                for turn in turns
+            ]
+        }
+    )
+
+
+@admin_bp.route("/api/turns/<int:turn_id>/tool_calls")
+@production_disabled
+@admin_required
+def api_turn_tool_calls(turn_id):
+    """Tool invocations recorded against one turn."""
+    from deaddit.models import AgentTurn, ToolCall
+
+    if db.session.get(AgentTurn, turn_id) is None:
+        return jsonify({"success": False, "error": "turn not found"}), 404
+    calls = ToolCall.query.filter_by(turn_id=turn_id).order_by(ToolCall.id).all()
+    return jsonify(
+        {
+            "tool_calls": [
+                {
+                    "name": call.name,
+                    "arguments": call.arguments,
+                    "result": call.result,
+                    "ok": bool(call.ok),
+                    "error": call.error,
+                    "duration_ms": call.duration_ms,
+                    "created_at": (
+                        call.created_at.isoformat() if call.created_at else None
+                    ),
+                }
+                for call in calls
+            ]
+        }
+    )
+
+
+@admin_bp.route("/api/agents/start-all", methods=["POST"])
+@production_disabled
+@admin_required
+def api_agents_start_all():
+    """Bulk enable with toggle semantics."""
+    from deaddit.models import Agent
+
+    disabled = Agent.query.filter(Agent.is_enabled.is_(False)).all()
+    for agent in disabled:
+        agent.is_enabled = True
+        agent.consecutive_failures = 0
+        agent.next_run_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({"started": len(disabled)})
+
+
+@admin_bp.route("/api/agents/pause-all", methods=["POST"])
+@production_disabled
+@admin_required
+def api_agents_pause_all():
+    """Bulk disable with toggle semantics."""
+    from deaddit.models import Agent
+
+    enabled = Agent.query.filter(Agent.is_enabled.is_(True)).all()
+    for agent in enabled:
+        agent.is_enabled = False
+        agent.next_run_at = None
+        agent.status = "idle"
+    db.session.commit()
+    return jsonify({"paused": len(enabled)})
+
+
+@admin_bp.route("/agents")
+@production_disabled
+@admin_required
+def agents_dashboard():
+    """AgenticCore agent administration dashboard page."""
+    return render_template("admin/agents.html")
+
+
+@admin_bp.route("/agents/<username>")
+@production_disabled
+@admin_required
+def agent_detail(username):
+    """Single-agent detail page with run timeline and thought drill-down."""
+    return render_template("admin/agent_detail.html", username=username)

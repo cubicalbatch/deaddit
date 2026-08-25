@@ -146,13 +146,13 @@
    "POST"
   ]
  },
-{
- "rule": "/admin/api/routes",
- "endpoint": "admin.routes_api",
- "methods": [
-  "GET"
- ]
-},
+ {
+  "rule": "/admin/api/routes",
+  "endpoint": "admin.routes_api",
+  "methods": [
+   "GET"
+  ]
+ },
  {
   "rule": "/admin/api/save-config",
   "endpoint": "admin.save_config_api",
@@ -209,15 +209,15 @@
    "POST"
   ]
  },
-{
- "rule": "/admin/api/usage/summary",
- "endpoint": "admin.usage_summary_api",
- "methods": [
-  "GET"
- ]
-},
-{
- "rule": "/admin/api/users",
+ {
+  "rule": "/admin/api/usage/summary",
+  "endpoint": "admin.usage_summary_api",
+  "methods": [
+   "GET"
+  ]
+ },
+ {
+  "rule": "/admin/api/users",
   "endpoint": "admin.api_users",
   "methods": [
    "GET"
@@ -451,6 +451,97 @@
  {
   "rule": "/users",
   "endpoint": "list_users",
+  "methods": [
+   "GET"
+  ]
+ },
+ {
+  "rule": "/admin/agents",
+  "endpoint": "admin.agents_dashboard",
+  "methods": [
+   "GET"
+  ]
+ },
+ {
+  "rule": "/admin/agents/<username>",
+  "endpoint": "admin.agent_detail",
+  "methods": [
+   "GET"
+  ]
+ },
+ {
+  "rule": "/admin/api/agents",
+  "endpoint": "admin.api_agents_list",
+  "methods": [
+   "GET"
+  ]
+ },
+ {
+  "rule": "/admin/api/agents",
+  "endpoint": "admin.api_create_agent",
+  "methods": [
+   "POST"
+  ]
+ },
+ {
+  "rule": "/admin/api/agents/<int:agent_id>/force-run",
+  "endpoint": "admin.api_force_run",
+  "methods": [
+   "POST"
+  ]
+ },
+ {
+  "rule": "/admin/api/agents/<int:agent_id>/runs",
+  "endpoint": "admin.api_agent_runs",
+  "methods": [
+   "GET"
+  ]
+ },
+ {
+  "rule": "/admin/api/agents/<int:agent_id>/toggle",
+  "endpoint": "admin.api_toggle_agent",
+  "methods": [
+   "POST"
+  ]
+ },
+ {
+  "rule": "/admin/api/agents/pause-all",
+  "endpoint": "admin.api_agents_pause_all",
+  "methods": [
+   "POST"
+  ]
+ },
+ {
+  "rule": "/admin/api/agents/presets",
+  "endpoint": "admin.api_agent_presets",
+  "methods": [
+   "GET"
+  ]
+ },
+ {
+  "rule": "/admin/api/agents/start-all",
+  "endpoint": "admin.api_agents_start_all",
+  "methods": [
+   "POST"
+  ]
+ },
+ {
+  "rule": "/admin/api/runs/<int:run_id>/turns",
+  "endpoint": "admin.api_run_turns",
+  "methods": [
+   "GET"
+  ]
+ },
+ {
+  "rule": "/admin/api/turns/<int:turn_id>/tool_calls",
+  "endpoint": "admin.api_turn_tool_calls",
+  "methods": [
+   "GET"
+  ]
+ },
+ {
+  "rule": "/admin/api/personas/candidates",
+  "endpoint": "admin.api_persona_candidates",
   "methods": [
    "GET"
   ]

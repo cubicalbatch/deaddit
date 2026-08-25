@@ -7,6 +7,7 @@ invocation is always allowed.
 """
 
 import json
+import logging
 import random
 import time
 from datetime import datetime, timedelta
@@ -14,7 +15,7 @@ from typing import Any
 
 from deaddit import Config
 from deaddit.agents.executor import execute
-from deaddit.agents.memory import build_initial_messages
+from deaddit.agents.memory import build_initial_messages, summarize_run
 from deaddit.agents.registry import ToolContext, specs_for
 from deaddit.extensions import db
 from deaddit.llm import (
@@ -24,6 +25,8 @@ from deaddit.llm import (
     Sampling,
 )
 from deaddit.models import Agent, AgentRun, AgentTurn, Setting
+
+logger = logging.getLogger(__name__)
 
 # Budget defaults applied when absent from agent.config.
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -271,5 +274,9 @@ def run_once(username: str, *, trigger: str = "manual") -> AgentRun:
         min_delay = _int_budget(config, "min_delay")
         max_delay = max(min_delay, _int_budget(config, "max_delay"))
         agent.next_run_at = now + timedelta(seconds=random.uniform(min_delay, max_delay))
+    try:
+        summarize_run(agent, run)
+    except Exception:
+        logger.exception("summarize_run failed; ignoring.")
     db.session.commit()
     return run

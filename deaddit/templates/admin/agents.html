@@ -3,673 +3,350 @@
 {% block title %}Agents{% endblock %}
 
 {% block content %}
-<div class="container-fluid">
-    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-        <h1 class="h2">AI Agents</h1>
-        <div class="btn-toolbar mb-2 mb-md-0">
-            <div class="btn-group me-2">
-                <button type="button" class="btn btn-success" onclick="startAllAgents()">
-                    <i class="bi bi-play-fill"></i> Start All
-                </button>
-                <button type="button" class="btn btn-warning" onclick="stopAllAgents()">
-                    <i class="bi bi-stop-fill"></i> Stop All
-                </button>
-            </div>
-            <button type="button" class="btn btn-outline-secondary" onclick="refreshStatus()">
-                <i class="bi bi-arrow-clockwise"></i> Refresh
-            </button>
-        </div>
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Agents</h1>
+    <div class="btn-toolbar">
+        <button id="start-all-btn" class="btn btn-sm btn-outline-success me-2">
+            <i class="bi bi-play-fill"></i> Start All
+        </button>
+        <button id="pause-all-btn" class="btn btn-sm btn-outline-warning">
+            <i class="bi bi-pause-fill"></i> Pause All
+        </button>
     </div>
+</div>
 
-    <!-- Status Overview -->
-    <div class="row mb-4">
-        <div class="col-md-3">
-            <div class="card bg-info text-white">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <h4 class="card-title">{{ agents|length }}</h4>
-                            <p class="card-text">Total Agents</p>
-                        </div>
-                        <div class="align-self-center">
-                            <i class="bi bi-robot" style="font-size: 2rem;"></i>
-                        </div>
-                    </div>
+<!-- Create Agent -->
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0">Create Agent</h5></div>
+    <div class="card-body">
+        <form id="create-form" class="row g-3">
+            <div class="col-md-4">
+                <label for="persona-select" class="form-label">Persona</label>
+                <select id="persona-select" class="form-select" required>
+                    <option value="">Loading personas…</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="tier-select" class="form-label">Autonomy tier</label>
+                <select id="tier-select" class="form-select">
+                    <option value="lurker">lurker</option>
+                    <option value="regular" selected>regular</option>
+                    <option value="power_user">power_user</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="api-url-input" class="form-label">API URL</label>
+                <input type="text" id="api-url-input" class="form-control" placeholder="(server default)">
+            </div>
+            <div class="col-md-3">
+                <label for="model-input" class="form-label">Model</label>
+                <input type="text" id="model-input" class="form-control" placeholder="(server default)">
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label d-block">Cadence (delay seconds)</label>
+                <div id="cadence-presets" class="btn-group btn-group-sm mb-2" role="group"></div>
+                <div class="d-flex gap-2">
+                    <input type="number" id="min-delay-input" class="form-control form-control-sm" min="0" placeholder="min delay">
+                    <input type="number" id="max-delay-input" class="form-control form-control-sm" min="0" placeholder="max delay">
                 </div>
             </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card bg-success text-white">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <h4 class="card-title">{{ total_scheduled_jobs }}</h4>
-                            <p class="card-text">Active Agents</p>
-                        </div>
-                        <div class="align-self-center">
-                            <i class="bi bi-play-circle" style="font-size: 2rem;"></i>
-                        </div>
-                    </div>
+            <div class="col-md-6">
+                <label class="form-label d-block">Daily request ceiling</label>
+                <div id="ceiling-presets" class="btn-group btn-group-sm mb-2" role="group"></div>
+                <input type="number" id="ceiling-input" class="form-control form-control-sm" min="1" placeholder="(unlimited)">
+            </div>
+
+            <div class="col-12">
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" id="backfill-check" checked>
+                    <label class="form-check-label" for="backfill-check">Backfill memory from persona history</label>
+                </div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" id="enable-check">
+                    <label class="form-check-label" for="enable-check">Enable immediately (otherwise created disabled)</label>
                 </div>
             </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card {% if scheduler_running %}bg-success{% else %}bg-danger{% endif %} text-white">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <h4 class="card-title">{{ "Running" if scheduler_running else "Stopped" }}</h4>
-                            <p class="card-text">Scheduler Status</p>
-                        </div>
-                        <div class="align-self-center">
-                            <i class="bi bi-gear" style="font-size: 2rem;"></i>
-                        </div>
-                    </div>
-                </div>
+
+            <div class="col-12">
+                <button type="submit" id="create-submit" class="btn btn-primary btn-sm">
+                    <i class="bi bi-plus-lg"></i> Create Agent
+                </button>
+                <span id="create-feedback" class="ms-2 small"></span>
             </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card bg-primary text-white">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <h4 class="card-title" id="total-actions-today">-</h4>
-                            <p class="card-text">Actions Today</p>
-                        </div>
-                        <div class="align-self-center">
-                            <i class="bi bi-activity" style="font-size: 2rem;"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        </form>
     </div>
+</div>
 
-    <!-- Agents Table -->
-    <div class="table-responsive">
-        <table class="table table-striped table-hover">
-            <thead class="table-dark">
+<!-- Registered Agents -->
+<div class="card">
+    <div class="card-header"><h5 class="mb-0">Registered Agents</h5></div>
+    <div class="card-body table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
                 <tr>
-                    <th>Agent</th>
+                    <th>Persona</th>
+                    <th>Tier</th>
                     <th>Status</th>
-                    <th>State</th>
-                    <th>Mood</th>
-                    <th>Activity</th>
+                    <th>Enabled</th>
+                    <th>Last Run</th>
                     <th>Next Run</th>
+                    <th>Fails</th>
+                    <th>Runs (ok/bad/int)</th>
                     <th>Actions</th>
                 </tr>
             </thead>
-            <tbody>
-                {% for agent in agents %}
-                <tr id="agent-{{ agent.username }}">
-                    <td>
-                        <div>
-                            <strong>{{ agent.username }}</strong>
-                            <br>
-                            <small class="text-muted">
-                                {{ agent.occupation }}, {{ agent.age }} years old
-                            </small>
-                        </div>
-                    </td>
-                    <td>
-                        <span class="badge {% if agent.enabled %}bg-success{% else %}bg-secondary{% endif %}">
-                            {% if agent.enabled %}
-                                {% if agent.scheduled %}
-                                    <i class="bi bi-play-fill"></i> Active
-                                {% else %}
-                                    <i class="bi bi-pause-fill"></i> Enabled
-                                {% endif %}
-                            {% else %}
-                                <i class="bi bi-stop-fill"></i> Disabled
-                            {% endif %}
-                        </span>
-                    </td>
-                    <td>
-                        <span class="badge 
-                            {% if agent.current_state == 'browsing' %}bg-info
-                            {% elif agent.current_state == 'engaging' %}bg-warning
-                            {% elif agent.current_state == 'responding' %}bg-primary
-                            {% elif agent.current_state == 'offline' %}bg-secondary
-                            {% else %}bg-light text-dark{% endif %}">
-                            {{ agent.current_state.title() }}
-                        </span>
-                    </td>
-                    <td>
-                        <span class="badge 
-                            {% if 'positive' in agent.current_mood %}bg-success
-                            {% elif 'negative' in agent.current_mood %}bg-danger
-                            {% else %}bg-secondary{% endif %}">
-                            {{ agent.current_mood.replace('_', ' ').title() }}
-                        </span>
-                    </td>
-                    <td>
-                        <div class="d-flex align-items-center">
-                            <div class="me-2">
-                                <small>Posts: <strong>{{ agent.daily_posts }}</strong></small><br>
-                                <small>Comments: <strong>{{ agent.daily_comments }}</strong></small>
-                            </div>
-                        </div>
-                        {% if agent.last_activity %}
-                        <small class="text-muted">
-                            Last: {{ moment(agent.last_activity).fromNow() if moment else agent.last_activity }}
-                        </small>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if agent.next_run %}
-                        <small>{{ moment(agent.next_run).fromNow() if moment else agent.next_run }}</small>
-                        {% else %}
-                        <small class="text-muted">Not scheduled</small>
-                        {% endif %}
-                    </td>
-                    <td>
-                        <div class="btn-group btn-group-sm">
-                            <button type="button" class="btn {% if agent.enabled %}btn-warning{% else %}btn-success{% endif %}" 
-                                    onclick="toggleAgent('{{ agent.username }}')">
-                                <i class="bi {% if agent.enabled %}bi-pause{% else %}bi-play{% endif %}"></i>
-                            </button>
-                            <a href="{{ url_for('admin.agent_detail', username=agent.username) }}" class="btn btn-info">
-                                <i class="bi bi-activity"></i>
-                            </a>
-                            <button type="button" class="btn btn-outline-info" onclick="showAgentDetails('{{ agent.username }}')">
-                                <i class="bi bi-info-circle"></i>
-                            </button>
-                            <button type="button" class="btn btn-secondary" onclick="configureAgent('{{ agent.username }}')">
-                                <i class="bi bi-gear"></i>
-                            </button>
-                            <div class="btn-group" role="group">
-                                <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
-                                    <i class="bi bi-three-dots"></i>
-                                </button>
-                                <ul class="dropdown-menu">
-                                    <li><a class="dropdown-item" href="#" onclick="forceAction('{{ agent.username }}', 'comment')">
-                                        <i class="bi bi-chat"></i> Force Comment
-                                    </a></li>
-                                    <li><a class="dropdown-item" href="#" onclick="forceAction('{{ agent.username }}', 'post')">
-                                        <i class="bi bi-file-post"></i> Force Post
-                                    </a></li>
-                                    <li><a class="dropdown-item" href="#" onclick="forceAction('{{ agent.username }}', 'browse')">
-                                        <i class="bi bi-search"></i> Force Browse
-                                    </a></li>
-                                    <li><hr class="dropdown-divider"></li>
-                                    <li><a class="dropdown-item" href="#" onclick="simulateActivity('{{ agent.username }}')">
-                                        <i class="bi bi-play-circle"></i> Simulate Activity
-                                    </a></li>
-                                </ul>
-                            </div>
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-                {% if not agents %}
-                <tr>
-                    <td colspan="7" class="text-center text-muted">
-                        No agents configured. 
-                        <a href="{{ url_for('admin.content') }}">Convert users to agents</a> to get started.
-                    </td>
-                </tr>
-                {% endif %}
+            <tbody id="agents-tbody">
+                <tr><td colspan="9" class="text-muted text-center">Loading…</td></tr>
             </tbody>
         </table>
-    </div>
-</div>
-
-<!-- Agent Details Modal -->
-<div class="modal fade" id="agentDetailsModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Agent Details</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div id="agentDetailsContent">
-                    <div class="text-center">
-                        <div class="spinner-border" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Agent Configuration Modal -->
-<div class="modal fade" id="agentConfigModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Configure Agent</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <form id="agentConfigForm">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <h6>Action Delays</h6>
-                            <div class="mb-3">
-                                <label for="minActionDelay" class="form-label">Minimum Delay (seconds)</label>
-                                <input type="number" class="form-control" id="minActionDelay" min="1" max="3600">
-                                <div class="form-text">Minimum time between agent actions</div>
-                            </div>
-                            <div class="mb-3">
-                                <label for="maxActionDelay" class="form-label">Maximum Delay (seconds)</label>
-                                <input type="number" class="form-control" id="maxActionDelay" min="1" max="3600">
-                                <div class="form-text">Maximum time between agent actions</div>
-                            </div>
-                            <div class="mb-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="randomDelay">
-                                    <label class="form-check-label" for="randomDelay">
-                                        Use random delays
-                                    </label>
-                                    <div class="form-text">If unchecked, will always use minimum delay</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <h6>Daily Limits</h6>
-                            <div class="mb-3">
-                                <label for="postsPerDayLimit" class="form-label">Posts per Day</label>
-                                <input type="number" class="form-control" id="postsPerDayLimit" min="0" max="100">
-                                <div class="form-text">Maximum posts this agent can create per day</div>
-                            </div>
-                            <div class="mb-3">
-                                <label for="commentsPerDayLimit" class="form-label">Comments per Day</label>
-                                <input type="number" class="form-control" id="commentsPerDayLimit" min="0" max="500">
-                                <div class="form-text">Maximum comments this agent can create per day</div>
-                            </div>
-                            <div class="mb-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="dailyLimitsEnabled">
-                                    <label class="form-check-label" for="dailyLimitsEnabled">
-                                        Enable daily limits
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <h6>Cycle Settings</h6>
-                            <div class="mb-3">
-                                <label for="cycleIntervalMinutes" class="form-label">Cycle Interval (minutes)</label>
-                                <input type="number" class="form-control" id="cycleIntervalMinutes" min="1" max="1440">
-                                <div class="form-text">Minutes between agent activity cycles</div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <h6>Enabled Actions</h6>
-                            <div class="mb-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="enablePost" value="post">
-                                    <label class="form-check-label" for="enablePost">Create Posts</label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="enableComment" value="comment">
-                                    <label class="form-check-label" for="enableComment">Create Comments</label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="enableBrowse" value="browse">
-                                    <label class="form-check-label" for="enableBrowse">Browse Content</label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="saveAgentConfig()">Save Configuration</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Simulation Modal -->
-<div class="modal fade" id="simulationModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Simulate Agent Activity</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <form id="simulationForm">
-                    <div class="mb-3">
-                        <label for="simulationDuration" class="form-label">Duration (minutes)</label>
-                        <input type="number" class="form-control" id="simulationDuration" value="10" min="1" max="60">
-                        <div class="form-text">Simulate agent activity for the specified duration (max 60 minutes)</div>
-                    </div>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="startSimulation()">Start Simulation</button>
-            </div>
-        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-let currentAgentForSimulation = null;
-let currentAgentForConfig = null;
+(function () {
+    "use strict";
 
-function refreshStatus() {
-    location.reload();
-}
+    const STATUS_BADGE = {
+        idle: "bg-success",
+        running: "bg-primary",
+        failed: "bg-danger",
+        interrupted: "bg-secondary",
+    };
 
-function toggleAgent(username) {
-    fetch(`/admin/api/agents/${username}/toggle`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
+    function esc(value) {
+        return String(value == null ? "" : value);
+    }
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = esc(text);
+        return node;
+    }
+
+    function fmtDate(iso) {
+        return iso ? iso.replace("T", " ").slice(0, 19) : "-";
+    }
+
+    async function api(path, options) {
+        const response = await fetch(path, Object.assign({headers: {"Content-Type": "application/json"}}, options || {}));
+        let data = {};
+        try { data = await response.json(); } catch (err) { /* non-JSON body */ }
+        if (!response.ok) {
+            throw new Error(data.error || data.message || ("HTTP " + response.status));
         }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showToast(`Agent ${username} ${data.action}`, 'success');
-            setTimeout(() => location.reload(), 1000);
-        } else {
-            showToast(`Failed to toggle agent: ${data.error}`, 'error');
-        }
-    })
-    .catch(error => {
-        showToast(`Error: ${error}`, 'error');
-    });
-}
+        return data;
+    }
 
-function startAllAgents() {
-    fetch('/admin/api/agents/start-all', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
+    async function loadPresets() {
+        try {
+            const presets = await api("{{ url_for('admin.api_agent_presets') }}");
+            const cadenceWrap = document.getElementById("cadence-presets");
+            cadenceWrap.innerHTML = "";
+            Object.entries(presets.cadence).forEach(([name, pair]) => {
+                const btn = el("button", "btn btn-outline-secondary", name + " (" + pair[0] + "/" + pair[1] + ")");
+                btn.type = "button";
+                btn.addEventListener("click", () => {
+                    document.getElementById("min-delay-input").value = pair[0];
+                    document.getElementById("max-delay-input").value = pair[1];
+                });
+                cadenceWrap.appendChild(btn);
+            });
+            const ceilingWrap = document.getElementById("ceiling-presets");
+            ceilingWrap.innerHTML = "";
+            Object.entries(presets.daily_request_ceiling).forEach(([name, value]) => {
+                const btn = el("button", "btn btn-outline-secondary", name + " (" + value + ")");
+                btn.type = "button";
+                btn.addEventListener("click", () => {
+                    document.getElementById("ceiling-input").value = value;
+                });
+                ceilingWrap.appendChild(btn);
+            });
+        } catch (err) {
+            console.error("Failed to load presets:", err);
         }
-    })
-    .then(response => response.json())
-    .then(data => {
-        showToast(`Started ${data.started} agents, ${data.failed} failed`, 'success');
-        setTimeout(() => location.reload(), 1000);
-    })
-    .catch(error => {
-        showToast(`Error: ${error}`, 'error');
-    });
-}
+    }
 
-function stopAllAgents() {
-    fetch('/admin/api/agents/stop-all', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
+    async function loadCandidates() {
+        const select = document.getElementById("persona-select");
+        try {
+            const data = await api("{{ url_for('admin.api_persona_candidates') }}");
+            select.innerHTML = "";
+            if (!data.candidates.length) {
+                select.appendChild(el("option", "", "No candidate personas"));
+                return;
+            }
+            select.appendChild(el("option", "", "Choose a persona…")).value = "";
+            data.candidates.forEach((candidate) => {
+                const label = candidate.username +
+                    " — posts " + candidate.post_count +
+                    ", comments " + candidate.comment_count +
+                    (candidate.personality_preview ? " — " + candidate.personality_preview : "");
+                select.appendChild(el("option", "", label)).value = candidate.username;
+            });
+        } catch (err) {
+            select.innerHTML = "";
+            select.appendChild(el("option", "", "Failed to load candidates"));
+            console.error(err);
         }
-    })
-    .then(response => response.json())
-    .then(data => {
-        showToast(`Stopped ${data.stopped} agents, ${data.failed} failed`, 'success');
-        setTimeout(() => location.reload(), 1000);
-    })
-    .catch(error => {
-        showToast(`Error: ${error}`, 'error');
-    });
-}
+    }
 
-function forceAction(username, action) {
-    fetch(`/admin/api/agents/${username}/force-action`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ action: action })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showToast(`Forced ${action} action completed for ${username}`, 'success');
-        } else {
-            showToast(`Failed to force action: ${data.error}`, 'error');
+    function actionsCell(agent) {
+        const cell = el("td");
+        const toggleBtn = el("button", "btn btn-sm " + (agent.is_enabled ? "btn-outline-warning" : "btn-outline-success"),
+            agent.is_enabled ? "Disable" : "Enable");
+        toggleBtn.addEventListener("click", async () => {
+            toggleBtn.disabled = true;
+            try {
+                await api("/admin/api/agents/" + agent.id + "/toggle", {method: "POST"});
+                await loadAgents();
+                await loadCandidates();
+            } catch (err) { alert(err.message); toggleBtn.disabled = false; }
+        });
+        const runBtn = el("button", "btn btn-sm btn-outline-primary ms-1", "Force Run");
+        if (agent.status === "running") runBtn.disabled = true;
+        runBtn.title = "Runs one visit synchronously (may take a few minutes)";
+        runBtn.addEventListener("click", () => runForceRun(agent.id, runBtn));
+        const viewLink = el("a", "btn btn-sm btn-outline-secondary ms-1", "View");
+        viewLink.href = {{ url_for('admin.agent_detail', username='__U__') | tojson }}.replace("__U__", encodeURIComponent(agent.user_username));
+        cell.appendChild(toggleBtn);
+        cell.appendChild(runBtn);
+        cell.appendChild(viewLink);
+        return cell;
+    }
+
+    async function runForceRun(agentId, btn) {
+        btn.disabled = true;
+        btn.textContent = "Running…";
+        try {
+            await api("/admin/api/agents/" + agentId + "/force-run", {method: "POST"});
+            await loadAgents();
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Force Run";
         }
-    })
-    .catch(error => {
-        showToast(`Error: ${error}`, 'error');
-    });
-}
+    }
 
-function showAgentDetails(username) {
-    const modal = new bootstrap.Modal(document.getElementById('agentDetailsModal'));
-    
-    fetch(`/admin/api/agents/${username}/stats`)
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            document.getElementById('agentDetailsContent').innerHTML = 
-                `<div class="alert alert-danger">Error: ${data.error}</div>`;
-        } else {
-            document.getElementById('agentDetailsContent').innerHTML = buildAgentDetailsHTML(data);
+    async function loadAgents() {
+        const tbody = document.getElementById("agents-tbody");
+        try {
+            const data = await api("{{ url_for('admin.api_agents_list') }}");
+            tbody.innerHTML = "";
+            if (!data.agents.length) {
+                const row = el("tr");
+                row.appendChild(el("td", "text-muted text-center", "No agents registered yet."));
+                row.firstChild.colSpan = 9;
+                tbody.appendChild(row);
+                return;
+            }
+            data.agents.forEach((agent) => {
+                const row = el("tr");
+                const personaCell = el("td");
+                const link = document.createElement("a");
+                link.href = {{ url_for('admin.agent_detail', username='__U__') | tojson }}.replace("__U__", encodeURIComponent(agent.user_username));
+                link.textContent = agent.user_username;
+                personaCell.appendChild(link);
+                row.appendChild(personaCell);
+                row.appendChild(el("td", null, agent.autonomy_tier));
+                const status = el("td");
+                status.appendChild(el("span", "badge " + (STATUS_BADGE[agent.status] || "bg-dark"), agent.status));
+                row.appendChild(status);
+                const enabled = el("td");
+                enabled.appendChild(el("span", "badge " + (agent.is_enabled ? "bg-success" : "bg-secondary"), agent.is_enabled ? "enabled" : "disabled"));
+                row.appendChild(enabled);
+                row.appendChild(el("td", null, fmtDate(agent.last_run_at)));
+                row.appendChild(el("td", null, fmtDate(agent.next_run_at)));
+                row.appendChild(el("td", null, agent.consecutive_failures));
+                row.appendChild(el("td", null,
+                    agent.runs_completed + "/" + agent.runs_failed + "/" + agent.runs_interrupted +
+                    " (" + agent.runs_total + ")"));
+                row.appendChild(actionsCell(agent));
+                tbody.appendChild(row);
+            });
+        } catch (err) {
+            tbody.innerHTML = "";
+            const row = el("tr");
+            row.appendChild(el("td", "text-danger text-center", "Failed to load agents: " + err.message));
+            row.firstChild.colSpan = 9;
+            tbody.appendChild(row);
         }
-        modal.show();
-    })
-    .catch(error => {
-        document.getElementById('agentDetailsContent').innerHTML = 
-            `<div class="alert alert-danger">Error loading details: ${error}</div>`;
-        modal.show();
-    });
-}
+    }
 
-function buildAgentDetailsHTML(data) {
-    const summary = data.summary;
-    const recentPosts = data.recent_posts || [];
-    const recentComments = data.recent_comments || [];
-    
-    return `
-        <div class="row">
-            <div class="col-md-6">
-                <h6>Profile</h6>
-                <ul class="list-unstyled">
-                    <li><strong>Username:</strong> ${summary.username}</li>
-                    <li><strong>State:</strong> ${summary.current_state}</li>
-                    <li><strong>Mood:</strong> ${summary.current_mood}</li>
-                    <li><strong>Enabled:</strong> ${summary.is_enabled ? 'Yes' : 'No'}</li>
-                </ul>
-            </div>
-            <div class="col-md-6">
-                <h6>Activity</h6>
-                <ul class="list-unstyled">
-                    <li><strong>Daily Posts:</strong> ${summary.daily_posts}</li>
-                    <li><strong>Daily Comments:</strong> ${summary.daily_comments}</li>
-                    <li><strong>Activity Score:</strong> ${summary.activity_score}</li>
-                    <li><strong>Last Activity:</strong> ${summary.last_activity || 'Never'}</li>
-                </ul>
-            </div>
-        </div>
-        
-        <h6>Personality</h6>
-        <p><strong>Interests:</strong> ${summary.interests.join(', ')}</p>
-        <p><strong>Traits:</strong> ${summary.personality_traits.join(', ')}</p>
-        
-        <h6>Recent Posts (${recentPosts.length})</h6>
-        ${recentPosts.length > 0 ? 
-            '<ul class="list-unstyled">' + 
-            recentPosts.map(post => 
-                `<li class="mb-2">
-                    <strong>${post.title}</strong> <small class="text-muted">in ${post.subdeaddit}</small><br>
-                    <small>${post.created_at} • ${post.upvote_count} upvotes</small>
-                </li>`
-            ).join('') + 
-            '</ul>' 
-            : '<p class="text-muted">No recent posts</p>'
-        }
-        
-        <h6>Recent Comments (${recentComments.length})</h6>
-        ${recentComments.length > 0 ? 
-            '<ul class="list-unstyled">' + 
-            recentComments.map(comment => 
-                `<li class="mb-2">
-                    <div class="border p-2 rounded">
-                        ${comment.content}<br>
-                        <small class="text-muted">${comment.created_at} • ${comment.upvote_count} upvotes</small>
-                    </div>
-                </li>`
-            ).join('') + 
-            '</ul>'
-            : '<p class="text-muted">No recent comments</p>'
-        }
-    `;
-}
-
-function simulateActivity(username) {
-    currentAgentForSimulation = username;
-    const modal = new bootstrap.Modal(document.getElementById('simulationModal'));
-    modal.show();
-}
-
-function configureAgent(username) {
-    currentAgentForConfig = username;
-    const modal = new bootstrap.Modal(document.getElementById('agentConfigModal'));
-    
-    // Load current configuration
-    fetch(`/admin/api/agents/${username}/configure`)
-    .then(response => response.json())
-    .then(config => {
-        if (config.error) {
-            showToast(`Error loading config: ${config.error}`, 'error');
+    document.getElementById("create-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const feedback = document.getElementById("create-feedback");
+        const submit = document.getElementById("create-submit");
+        const username = document.getElementById("persona-select").value;
+        feedback.textContent = "";
+        feedback.className = "ms-2 small";
+        if (!username) {
+            feedback.textContent = "Pick a persona first.";
+            feedback.classList.add("text-danger");
             return;
         }
-        
-        // Populate form with current values
-        document.getElementById('minActionDelay').value = config.min_action_delay || 30;
-        document.getElementById('maxActionDelay').value = config.max_action_delay || 300;
-        document.getElementById('randomDelay').checked = config.random_delay !== false;
-        document.getElementById('postsPerDayLimit').value = config.posts_per_day_limit || 5;
-        document.getElementById('commentsPerDayLimit').value = config.comments_per_day_limit || 20;
-        document.getElementById('dailyLimitsEnabled').checked = config.daily_limits_enabled !== false;
-        document.getElementById('cycleIntervalMinutes').value = config.cycle_interval_minutes || 15;
-        
-        // Set enabled actions checkboxes
-        const enabledActions = config.enabled_actions || ['post', 'comment', 'browse'];
-        document.getElementById('enablePost').checked = enabledActions.includes('post');
-        document.getElementById('enableComment').checked = enabledActions.includes('comment');
-        document.getElementById('enableBrowse').checked = enabledActions.includes('browse');
-        
-        modal.show();
-    })
-    .catch(error => {
-        showToast(`Error loading configuration: ${error}`, 'error');
-    });
-}
-
-function saveAgentConfig() {
-    const config = {
-        min_action_delay: parseInt(document.getElementById('minActionDelay').value),
-        max_action_delay: parseInt(document.getElementById('maxActionDelay').value),
-        random_delay: document.getElementById('randomDelay').checked,
-        posts_per_day_limit: parseInt(document.getElementById('postsPerDayLimit').value),
-        comments_per_day_limit: parseInt(document.getElementById('commentsPerDayLimit').value),
-        daily_limits_enabled: document.getElementById('dailyLimitsEnabled').checked,
-        cycle_interval_minutes: parseInt(document.getElementById('cycleIntervalMinutes').value),
-        enabled_actions: []
-    };
-    
-    // Collect enabled actions
-    if (document.getElementById('enablePost').checked) config.enabled_actions.push('post');
-    if (document.getElementById('enableComment').checked) config.enabled_actions.push('comment');
-    if (document.getElementById('enableBrowse').checked) config.enabled_actions.push('browse');
-    
-    // Validate
-    if (config.min_action_delay > config.max_action_delay) {
-        showToast('Minimum delay cannot be greater than maximum delay', 'error');
-        return;
-    }
-    
-    if (config.enabled_actions.length === 0) {
-        showToast('At least one action type must be enabled', 'error');
-        return;
-    }
-    
-    fetch(`/admin/api/agents/${currentAgentForConfig}/configure`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(config)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.message) {
-            showToast(`Configuration saved for ${currentAgentForConfig}`, 'success');
-            bootstrap.Modal.getInstance(document.getElementById('agentConfigModal')).hide();
-        } else {
-            showToast(`Failed to save config: ${data.error}`, 'error');
-        }
-    })
-    .catch(error => {
-        showToast(`Error: ${error}`, 'error');
-    });
-}
-
-function startSimulation() {
-    const duration = document.getElementById('simulationDuration').value;
-    
-    fetch(`/admin/api/agents/${currentAgentForSimulation}/simulate`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ duration: parseInt(duration) })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.message) {
-            showToast(data.message, 'success');
-            bootstrap.Modal.getInstance(document.getElementById('simulationModal')).hide();
-        } else {
-            showToast(`Simulation failed: ${data.error}`, 'error');
-        }
-    })
-    .catch(error => {
-        showToast(`Error: ${error}`, 'error');
-    });
-}
-
-function showToast(message, type) {
-    // Simple toast notification
-    const toast = document.createElement('div');
-    toast.className = `alert alert-${type === 'success' ? 'success' : 'danger'} alert-dismissible fade show position-fixed`;
-    toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-    toast.innerHTML = `
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-        if (toast.parentNode) {
-            toast.parentNode.removeChild(toast);
-        }
-    }, 5000);
-}
-
-// Calculate total actions today
-document.addEventListener('DOMContentLoaded', function() {
-    const rows = document.querySelectorAll('#agent-table tbody tr');
-    let totalActions = 0;
-    
-    rows.forEach(row => {
-        const postsCell = row.querySelector('td:nth-child(5)');
-        if (postsCell) {
-            const postsText = postsCell.textContent;
-            const postsMatch = postsText.match(/Posts: (\d+)/);
-            const commentsMatch = postsText.match(/Comments: (\d+)/);
-            
-            if (postsMatch) totalActions += parseInt(postsMatch[1]);
-            if (commentsMatch) totalActions += parseInt(commentsMatch[1]);
+        submit.disabled = true;
+        feedback.textContent = "Creating… (backfill may take a while)";
+        const payload = {
+            username: username,
+            autonomy_tier: document.getElementById("tier-select").value,
+            enable: document.getElementById("enable-check").checked,
+            backfill_memory: document.getElementById("backfill-check").checked,
+        };
+        const apiUrl = document.getElementById("api-url-input").value.trim();
+        const model = document.getElementById("model-input").value.trim();
+        if (apiUrl) payload.api_url = apiUrl;
+        if (model) payload.model = model;
+        const minDelay = document.getElementById("min-delay-input").value;
+        const maxDelay = document.getElementById("max-delay-input").value;
+        const ceiling = document.getElementById("ceiling-input").value;
+        if (minDelay !== "") payload.min_delay = Number(minDelay);
+        if (maxDelay !== "") payload.max_delay = Number(maxDelay);
+        if (ceiling !== "") payload.daily_request_ceiling = Number(ceiling);
+        try {
+            const data = await api("{{ url_for('admin.api_create_agent') }}", {method: "POST", body: JSON.stringify(payload)});
+            let message = "Created agent for '" + data.agent.user_username + "'";
+            if (payload.backfill_memory && !data.warning) message += ", backfilled " + data.episodes + " episodes";
+            if (data.warning) message += " (warning: " + data.warning + ")";
+            feedback.textContent = message;
+            feedback.classList.add(data.warning ? "text-warning" : "text-success");
+            await loadAgents();
+            await loadCandidates();
+        } catch (err) {
+            feedback.textContent = err.message;
+            feedback.classList.add("text-danger");
+        } finally {
+            submit.disabled = false;
         }
     });
-    
-    document.getElementById('total-actions-today').textContent = totalActions;
-});
+
+    document.getElementById("start-all-btn").addEventListener("click", async (event) => {
+        event.target.disabled = true;
+        try {
+            const data = await api("{{ url_for('admin.api_agents_start_all') }}", {method: "POST"});
+            alert("Started " + data.started + " agent(s)");
+            await loadAgents();
+        } catch (err) { alert(err.message); }
+        event.target.disabled = false;
+    });
+
+    document.getElementById("pause-all-btn").addEventListener("click", async (event) => {
+        event.target.disabled = true;
+        try {
+            const data = await api("{{ url_for('admin.api_agents_pause_all') }}", {method: "POST"});
+            alert("Paused " + data.paused + " agent(s)");
+            await loadAgents();
+        } catch (err) { alert(err.message); }
+        event.target.disabled = false;
+    });
+
+    loadPresets();
+    loadCandidates();
+    loadAgents();
+})();
 </script>
 {% endblock %}

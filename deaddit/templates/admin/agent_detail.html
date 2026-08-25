@@ -1,769 +1,365 @@
 {% extends "admin/base.html" %}
 
-{% block title %}Agent {{ agent.username }} - Activity Monitor{% endblock %}
+{% block title %}Agent {{ username }}{% endblock %}
 
 {% block content %}
-<div class="container-fluid">
-    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-        <h1 class="h2">
-            <i class="bi bi-robot"></i> Agent {{ agent.username }}
-            <span class="badge {% if agent.agent_enabled %}bg-success{% else %}bg-secondary{% endif %} ms-2">
-                {{ "Active" if agent.agent_enabled else "Disabled" }}
-            </span>
-        </h1>
-        <div class="btn-toolbar mb-2 mb-md-0">
-            <div class="btn-group me-2">
-                <button type="button" class="btn {% if agent.agent_enabled %}btn-warning{% else %}btn-success{% endif %}" 
-                        onclick="toggleAgent()">
-                    <i class="bi {% if agent.agent_enabled %}bi-pause{% else %}bi-play{% endif %}"></i>
-                    {{ "Disable" if agent.agent_enabled else "Enable" }}
-                </button>
-                <button type="button" class="btn btn-info" onclick="configureAgent()">
-                    <i class="bi bi-gear"></i> Configure
-                </button>
-                <button type="button" class="btn btn-outline-secondary" onclick="refreshData()">
-                    <i class="bi bi-arrow-clockwise"></i> Refresh
-                </button>
-            </div>
-            <a href="{{ url_for('admin.agents_dashboard') }}" class="btn btn-outline-primary">
-                <i class="bi bi-arrow-left"></i> Back to Agents
-            </a>
-        </div>
-    </div>
-
-    <!-- Agent Overview -->
-    <div class="row mb-4">
-        <div class="col-md-8">
-            <div class="card">
-                <div class="card-header">
-                    <h5><i class="bi bi-person-badge"></i> Agent Profile</h5>
-                </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <p><strong>Username:</strong> {{ agent.username }}</p>
-                            <p><strong>Age:</strong> {{ agent.age }}</p>
-                            <p><strong>Gender:</strong> {{ agent.gender }}</p>
-                            <p><strong>Occupation:</strong> {{ agent.occupation }}</p>
-                            <p><strong>Education:</strong> {{ agent.education }}</p>
-                        </div>
-                        <div class="col-md-6">
-                            {% if status %}
-                            <p><strong>Current State:</strong> 
-                                <span class="badge 
-                                    {% if status.current_state.value == 'browsing' %}bg-info
-                                    {% elif status.current_state.value == 'engaging' %}bg-warning
-                                    {% elif status.current_state.value == 'responding' %}bg-primary
-                                    {% elif status.current_state.value == 'offline' %}bg-secondary
-                                    {% else %}bg-light text-dark{% endif %}" data-agent-state>
-                                    {{ status.current_state.value.title() }}
-                                </span>
-                            </p>
-                            <p><strong>Current Mood:</strong> 
-                                <span class="badge 
-                                    {% if 'positive' in status.current_mood.value %}bg-success
-                                    {% elif 'negative' in status.current_mood.value %}bg-danger
-                                    {% else %}bg-secondary{% endif %}" data-mood>
-                                    {{ status.current_mood.value.replace('_', ' ').title() }}
-                                </span>
-                            </p>
-                            <p><strong>Activity Score:</strong> <span data-activity-score>{{ "%.2f"|format(status.activity_score) }}</span></p>
-                            <p><strong>Daily Posts:</strong> <span data-daily-posts>{{ status.daily_posts }}</span></p>
-                            <p><strong>Daily Comments:</strong> <span data-daily-comments>{{ status.daily_comments }}</span></p>
-                            {% if status.last_activity %}
-                            <p><strong>Last Activity:</strong> {{ moment(status.last_activity).fromNow() if moment else status.last_activity }}</p>
-                            {% endif %}
-                            {% endif %}
-                        </div>
-                    </div>
-                    <div class="mt-3">
-                        <p><strong>Bio:</strong> {{ agent.bio }}</p>
-                        <p><strong>Interests:</strong> 
-                            {% if agent.get_interests() %}
-                                {% for interest in agent.get_interests() %}
-                                    <span class="badge bg-primary me-1">{{ interest }}</span>
-                                {% endfor %}
-                            {% else %}
-                                <em>None specified</em>
-                            {% endif %}
-                        </p>
-                        <p><strong>Personality Traits:</strong> 
-                            {% if agent.get_personality_traits() %}
-                                {% for trait in agent.get_personality_traits() %}
-                                    <span class="badge bg-secondary me-1">{{ trait }}</span>
-                                {% endfor %}
-                            {% else %}
-                                <em>None specified</em>
-                            {% endif %}
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-header">
-                    <h5><i class="bi bi-bar-chart"></i> Activity Statistics</h5>
-                </div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <h6>Total Activities: <span class="badge bg-info">{{ total_activities }}</span></h6>
-                    </div>
-                    {% for action_type, count in activity_stats.items() %}
-                    <div class="d-flex justify-content-between mb-2">
-                        <span>{{ action_type.title() }}:</span>
-                        <span class="badge bg-secondary" data-stat-type="{{ action_type }}">{{ count }}</span>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Activity Timeline -->
-    <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5><i class="bi bi-clock-history"></i> Activity Timeline</h5>
-            <div class="btn-group btn-group-sm">
-                <button type="button" class="btn btn-outline-secondary" onclick="loadActivities(1)">
-                    <i class="bi bi-arrow-clockwise"></i> Refresh
-                </button>
-                <button type="button" class="btn btn-outline-secondary" id="autoRefreshToggle" onclick="toggleAutoRefresh()">
-                    <i class="bi bi-pause"></i> <span id="autoRefreshText">Pause Auto-refresh</span>
-                </button>
-                <button type="button" class="btn btn-outline-secondary" onclick="forceAction('comment')">
-                    <i class="bi bi-chat"></i> Force Comment
-                </button>
-                <button type="button" class="btn btn-outline-secondary" onclick="forceAction('post')">
-                    <i class="bi bi-file-post"></i> Force Post
-                </button>
-            </div>
-        </div>
-        <div class="card-body">
-            <div id="activities-container">
-                <div class="text-center py-4">
-                    <div class="spinner-border" role="status">
-                        <span class="visually-hidden">Loading activities...</span>
-                    </div>
-                </div>
-            </div>
-            <nav id="activities-pagination" class="mt-3" style="display: none;">
-                <ul class="pagination justify-content-center">
-                </ul>
-            </nav>
-        </div>
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">
+        Agent: <span id="agent-username">{{ username }}</span>
+        <span id="agent-status-chip" class="badge bg-secondary ms-2" style="display: none;"></span>
+    </h1>
+    <div class="btn-toolbar">
+        <button id="toggle-btn" class="btn btn-sm btn-outline-success me-2" disabled></button>
+        <button id="force-run-btn" class="btn btn-sm btn-outline-primary" disabled
+                title="Runs one visit synchronously (may take a few minutes)">
+            <i class="bi bi-lightning"></i> Force Run
+        </button>
+        <a href="{{ url_for('admin.agents_dashboard') }}" class="btn btn-sm btn-outline-secondary ms-2">All Agents</a>
     </div>
 </div>
 
-<!-- Activity Detail Modal -->
-<div class="modal fade" id="activityDetailModal" tabindex="-1">
-    <div class="modal-dialog modal-xl">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Activity Details</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+<!-- Agent overview -->
+<div class="row mb-4">
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header"><strong>Overview</strong></div>
+            <div class="card-body">
+                <dl class="row mb-0" id="overview-dl">
+                    <dt class="col-sm-5">Loading…</dt><dd class="col-sm-7"></dd>
+                </dl>
             </div>
-            <div class="modal-body">
-                <div id="activityDetailContent">
-                    <div class="text-center">
-                        <div class="spinner-border" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                    </div>
-                </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header"><strong>Config &amp; State</strong></div>
+            <div class="card-body">
+                <h6>config</h6>
+                <pre id="config-pre" class="bg-light p-2 rounded small mb-3">loading…</pre>
+                <h6>state</h6>
+                <pre id="state-pre" class="bg-light p-2 rounded small mb-0">loading…</pre>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Agent Configuration Modal -->
-<div class="modal fade" id="agentConfigModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Configure Agent</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <form id="agentConfigForm">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <h6>Action Delays</h6>
-                            <div class="mb-3">
-                                <label for="minActionDelay" class="form-label">Minimum Delay (seconds)</label>
-                                <input type="number" class="form-control" id="minActionDelay" min="1" max="3600">
-                            </div>
-                            <div class="mb-3">
-                                <label for="maxActionDelay" class="form-label">Maximum Delay (seconds)</label>
-                                <input type="number" class="form-control" id="maxActionDelay" min="1" max="3600">
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <h6>Daily Limits</h6>
-                            <div class="mb-3">
-                                <label for="postsPerDayLimit" class="form-label">Posts per Day</label>
-                                <input type="number" class="form-control" id="postsPerDayLimit" min="0" max="100">
-                            </div>
-                            <div class="mb-3">
-                                <label for="commentsPerDayLimit" class="form-label">Comments per Day</label>
-                                <input type="number" class="form-control" id="commentsPerDayLimit" min="0" max="500">
-                            </div>
-                        </div>
-                    </div>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="saveAgentConfig()">Save Configuration</button>
-            </div>
-        </div>
+<!-- Run timeline -->
+<div class="card">
+    <div class="card-header"><strong>Run Timeline</strong></div>
+    <div class="card-body p-2">
+        <div id="runs-list" class="list-group list-group-flush"></div>
+    </div>
+</div>
+
+<!-- Thought drill-down modal-ish panel -->
+<div id="turns-panel" class="card mt-4" style="display: none;">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <strong id="turns-title">Turns</strong>
+        <button id="turns-close" class="btn btn-sm btn-outline-secondary" type="button">Close</button>
+    </div>
+    <div class="card-body p-2">
+        <div id="turns-list" class="list-group list-group-flush"></div>
+        <div id="turn-detail" class="p-2"></div>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-const agentUsername = '{{ agent.username }}';
-let currentPage = 1;
-let autoRefreshInterval;
+(function () {
+    "use strict";
 
-// Load activities on page load and setup auto-refresh
-document.addEventListener('DOMContentLoaded', function() {
-    loadActivities(1);
-    startAutoRefresh();
-});
-
-// Clean up auto-refresh when leaving the page
-window.addEventListener('beforeunload', function() {
-    stopAutoRefresh();
-});
-
-function startAutoRefresh() {
-    // Refresh every 10 seconds
-    autoRefreshInterval = setInterval(function() {
-        loadActivities(currentPage);
-        updateActivityStats();
-    }, 10000);
-    
-    // Show auto-refresh indicator
-    updateConnectionStatus(true);
-}
-
-function stopAutoRefresh() {
-    if (autoRefreshInterval) {
-        clearInterval(autoRefreshInterval);
-        autoRefreshInterval = null;
-        updateConnectionStatus(false);
-    }
-}
-
-function updateConnectionStatus(refreshing) {
-    // Add/update refresh indicator
-    let indicator = document.getElementById('auto-refresh-indicator');
-    if (!indicator) {
-        indicator = document.createElement('div');
-        indicator.id = 'auto-refresh-indicator';
-        indicator.style.cssText = 'position: fixed; top: 10px; left: 10px; z-index: 9999;';
-        document.body.appendChild(indicator);
-    }
-    
-    indicator.innerHTML = `
-        <span class="badge ${refreshing ? 'bg-success' : 'bg-secondary'}">
-            <i class="bi ${refreshing ? 'bi-arrow-clockwise' : 'bi-pause'}"></i>
-            ${refreshing ? 'Auto-refresh (10s)' : 'Refresh paused'}
-        </span>
-    `;
-}
-
-function toggleAutoRefresh() {
-    if (autoRefreshInterval) {
-        stopAutoRefresh();
-        document.getElementById('autoRefreshToggle').innerHTML = '<i class="bi bi-play"></i> <span id="autoRefreshText">Resume Auto-refresh</span>';
-    } else {
-        startAutoRefresh();
-        document.getElementById('autoRefreshToggle').innerHTML = '<i class="bi bi-pause"></i> <span id="autoRefreshText">Pause Auto-refresh</span>';
-    }
-}
-
-function updateActivityStats() {
-    // Refresh the activity statistics in the sidebar
-    fetch(`/admin/api/agents/${agentUsername}/stats`)
-    .then(response => response.json())
-    .then(stats => {
-        if (!stats.error) {
-            updateStatsDisplay(stats);
-        }
-    })
-    .catch(error => console.log('Error updating stats:', error));
-}
-
-function updateStatsDisplay(stats) {
-    // Update total activities badge
-    const totalBadge = document.querySelector('.card-body h6 .badge');
-    if (totalBadge && stats.total_activities !== undefined) {
-        totalBadge.textContent = stats.total_activities;
-    }
-    
-    // Update individual activity type counts
-    Object.entries(stats.activity_stats || {}).forEach(([actionType, count]) => {
-        const statElement = document.querySelector(`[data-stat-type="${actionType}"]`);
-        if (statElement) {
-            statElement.textContent = count;
-        }
-    });
-}
-
-function loadActivities(page = 1) {
-    currentPage = page;
-    
-    fetch(`/admin/api/agents/${agentUsername}/activities?page=${page}&per_page=10`)
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            document.getElementById('activities-container').innerHTML = 
-                `<div class="alert alert-danger">Error: ${data.error}</div>`;
-            return;
-        }
-        
-        displayActivities(data.activities);
-        setupPagination(data);
-    })
-    .catch(error => {
-        document.getElementById('activities-container').innerHTML = 
-            `<div class="alert alert-danger">Error loading activities</div>`;
-    });
-}
-
-function displayActivities(activities) {
-    const container = document.getElementById('activities-container');
-    
-    if (!activities || activities.length === 0) {
-        container.innerHTML = '<div class="text-center text-muted py-4">No activities found</div>';
-        return;
-    }
-    
-    let html = '<div class="timeline">';
-    
-    activities.forEach(activity => {
-        const startTime = new Date(activity.started_at);
-        const duration = activity.duration_seconds ? activity.duration_seconds.toFixed(2) + 's' : 'Ongoing';
-        const statusClass = activity.status === 'completed' ? 'success' : 
-                           activity.status === 'failed' ? 'danger' : 'warning';
-        
-        html += '<div class="timeline-item mb-4 p-3 border rounded" data-activity-id="' + activity.id + '">';
-        html += '<div class="d-flex justify-content-between align-items-start">';
-        html += '<div class="flex-grow-1">';
-        html += '<div class="d-flex align-items-center mb-2">';
-        html += '<span class="badge bg-info me-2">' + activity.action_type.toUpperCase() + '</span>';
-        html += '<span class="badge bg-' + statusClass + ' me-2">' + activity.status.toUpperCase() + '</span>';
-        html += '<small class="text-muted">' + startTime.toLocaleString() + ' • Duration: ' + duration + '</small>';
-        html += '</div>';
-        html += '<div class="activity-summary">' + buildActivitySummary(activity) + '</div>';
-        html += '</div>';
-        html += '<div class="ms-3">';
-        html += '<button type="button" class="btn btn-outline-secondary btn-sm" onclick="showActivityDetail(' + activity.id + ')">';
-        html += '<i class="bi bi-eye"></i> Details';
-        html += '</button>';
-        html += '</div>';
-        html += '</div>';
-        html += '</div>';
-    });
-    
-    html += '</div>';
-    container.innerHTML = html;
-}
-
-function buildActivitySummary(activity) {
-    let summary = '';
-    
-    switch (activity.action_type) {
-        case 'comment':
-            if (activity.context && activity.context.post_title) {
-                summary = `Commented on: "${activity.context.post_title}"`;
-                if (activity.context.subdeaddit) {
-                    summary += ` in ${activity.context.subdeaddit}`;
-                }
-            } else {
-                summary = 'Created a comment';
-            }
-            break;
-        case 'post':
-            if (activity.result && activity.result.title) {
-                summary = `Created post: "${activity.result.title}"`;
-                if (activity.context && activity.context.subdeaddit) {
-                    summary += ` in ${activity.context.subdeaddit}`;
-                }
-            } else {
-                summary = 'Created a post';
-            }
-            break;
-        case 'browse':
-            if (activity.result && activity.result.posts_found !== undefined) {
-                summary = `Browsed ${activity.result.posts_found} posts`;
-                if (activity.result.comments_made) {
-                    summary += `, made ${activity.result.comments_made} comments`;
-                }
-            } else {
-                summary = 'Browsed content';
-            }
-            break;
-        case 'force_action':
-            summary = `Forced action: ${activity.context?.forced_action || 'unknown'}`;
-            break;
-        case 'simulate':
-            summary = `Simulation (${activity.context?.duration_minutes || '?'} minutes)`;
-            break;
-        default:
-            summary = 'Agent activity';
-    }
-    
-    return summary;
-}
-
-function getActionTypeBadgeClass(actionType) {
-    switch (actionType) {
-        case 'comment': return 'primary';
-        case 'post': return 'success';
-        case 'browse': return 'info';
-        case 'force_action': return 'warning';
-        case 'simulate': return 'secondary';
-        default: return 'secondary';
-    }
-}
-
-function setupPagination(data) {
-    const pagination = document.getElementById('activities-pagination');
-    const paginationList = pagination.querySelector('.pagination');
-    
-    if (data.pages <= 1) {
-        pagination.style.display = 'none';
-        return;
-    }
-    
-    pagination.style.display = 'block';
-    let html = '';
-    
-    // Previous button
-    html += `<li class="page-item ${!data.has_prev ? 'disabled' : ''}">
-        <a class="page-link" href="#" onclick="loadActivities(${data.current_page - 1})">Previous</a>
-    </li>`;
-    
-    // Page numbers
-    for (let i = Math.max(1, data.current_page - 2); i <= Math.min(data.pages, data.current_page + 2); i++) {
-        html += `<li class="page-item ${i === data.current_page ? 'active' : ''}">
-            <a class="page-link" href="#" onclick="loadActivities(${i})">${i}</a>
-        </li>`;
-    }
-    
-    // Next button
-    html += `<li class="page-item ${!data.has_next ? 'disabled' : ''}">
-        <a class="page-link" href="#" onclick="loadActivities(${data.current_page + 1})">Next</a>
-    </li>`;
-    
-    paginationList.innerHTML = html;
-}
-
-function showActivityDetail(activityId) {
-    const modal = new bootstrap.Modal(document.getElementById('activityDetailModal'));
-    
-    fetch(`/admin/api/agents/${agentUsername}/activity/${activityId}`)
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            document.getElementById('activityDetailContent').innerHTML = 
-                `<div class="alert alert-danger">Error: ${data.error}</div>`;
-        } else {
-            document.getElementById('activityDetailContent').innerHTML = buildActivityDetailHTML(data);
-        }
-        modal.show();
-    })
-    .catch(error => {
-        document.getElementById('activityDetailContent').innerHTML = 
-            `<div class="alert alert-danger">Error loading details: ${error}</div>`;
-        modal.show();
-    });
-}
-
-function buildActivityDetailHTML(activity) {
-    const startTime = new Date(activity.started_at);
-    const completedTime = activity.completed_at ? new Date(activity.completed_at) : null;
-    const duration = activity.duration_seconds ? `${activity.duration_seconds.toFixed(2)} seconds` : 'Not completed';
-    
-    let html = `
-        <div class="row mb-4">
-            <div class="col-md-6">
-                <h6>Activity Information</h6>
-                <table class="table table-sm">
-                    <tr><td><strong>ID:</strong></td><td>${activity.id}</td></tr>
-                    <tr><td><strong>Type:</strong></td><td><span class="badge bg-${getActionTypeBadgeClass(activity.action_type)}">${activity.action_type.toUpperCase()}</span></td></tr>
-                    <tr><td><strong>Status:</strong></td><td><span class="badge bg-${activity.status === 'completed' ? 'success' : activity.status === 'failed' ? 'danger' : 'warning'}">${activity.status.toUpperCase()}</span></td></tr>
-                    <tr><td><strong>Started:</strong></td><td>${startTime.toLocaleString()}</td></tr>
-                    ${completedTime ? `<tr><td><strong>Completed:</strong></td><td>${completedTime.toLocaleString()}</td></tr>` : ''}
-                    <tr><td><strong>Duration:</strong></td><td>${duration}</td></tr>
-                </table>
-            </div>
-            <div class="col-md-6">
-                <h6>Context</h6>
-                <pre class="bg-light p-2 rounded"><code>${JSON.stringify(activity.context || {}, null, 2)}</code></pre>
-            </div>
-        </div>
-    `;
-    
-    if (activity.result) {
-        html += `
-            <div class="mb-4">
-                <h6>Result</h6>
-                <pre class="bg-light p-2 rounded"><code>${JSON.stringify(activity.result, null, 2)}</code></pre>
-            </div>
-        `;
-    }
-    
-    if (activity.error_message) {
-        html += `
-            <div class="mb-4">
-                <h6>Error</h6>
-                <div class="alert alert-danger">${activity.error_message}</div>
-            </div>
-        `;
-    }
-    
-    if (activity.created_content) {
-        html += `
-            <div class="mb-4">
-                <h6>Created Content</h6>
-                <div class="card">
-                    <div class="card-body">
-                        <h6 class="card-title">${activity.created_content.type.toUpperCase()} #${activity.created_content.id}</h6>
-                        ${activity.created_content.title ? `<h6>${activity.created_content.title}</h6>` : ''}
-                        <p class="card-text">${activity.created_content.content}</p>
-                        <small class="text-muted">
-                            ${activity.created_content.upvote_count || 0} upvotes • 
-                            Created: ${new Date(activity.created_content.created_at).toLocaleString()}
-                        </small>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-    
-    if (activity.llm_interactions && activity.llm_interactions.length > 0) {
-        html += `
-            <div class="mb-4">
-                <h6><i class="bi bi-cpu"></i> LLM Interactions (${activity.llm_interactions.length})</h6>
-        `;
-        
-        activity.llm_interactions.forEach((interaction, index) => {
-            const requestTime = new Date(interaction.requested_at);
-            const responseTime = interaction.responded_at ? new Date(interaction.responded_at) : null;
-            
-            html += `
-                <div class="card mb-3">
-                    <div class="card-header">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <span>
-                                <strong>${interaction.interaction_type}</strong>
-                                ${interaction.model_name ? `• ${interaction.model_name}` : ''}
-                            </span>
-                            <span class="badge bg-${interaction.success ? 'success' : 'danger'}">
-                                ${interaction.success ? 'SUCCESS' : 'FAILED'}
-                            </span>
-                        </div>
-                        <small class="text-muted">
-                            Requested: ${requestTime.toLocaleString()}
-                            ${responseTime ? ` • Responded: ${responseTime.toLocaleString()}` : ''}
-                            ${interaction.response_time_ms ? ` • ${interaction.response_time_ms}ms` : ''}
-                        </small>
-                    </div>
-                    <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <h6>Prompt</h6>
-                                <div class="prompt-container">
-                                    <button class="btn btn-sm btn-outline-secondary mb-2" onclick="togglePrompt(${index})">
-                                        <i class="bi bi-eye"></i> Toggle Prompt
-                                    </button>
-                                    <div id="prompt-${index}" class="prompt-content" style="display: none;">
-                                        <pre class="bg-light p-2 rounded small" style="max-height: 300px; overflow-y: auto;"><code>${interaction.prompt || 'No prompt recorded'}</code></pre>
-                                    </div>
-                                </div>
-                                ${interaction.system_prompt ? `
-                                    <div class="mt-2">
-                                        <h6>System Prompt</h6>
-                                        <button class="btn btn-sm btn-outline-secondary mb-2" onclick="toggleSystemPrompt(${index})">
-                                            <i class="bi bi-eye"></i> Toggle System Prompt
-                                        </button>
-                                        <div id="system-prompt-${index}" class="system-prompt-content" style="display: none;">
-                                            <pre class="bg-light p-2 rounded small" style="max-height: 200px; overflow-y: auto;"><code>${interaction.system_prompt}</code></pre>
-                                        </div>
-                                    </div>
-                                ` : ''}
-                            </div>
-                            <div class="col-md-6">
-                                <h6>Response</h6>
-                                ${interaction.success ? `
-                                    <div class="response-container">
-                                        <button class="btn btn-sm btn-outline-secondary mb-2" onclick="toggleResponse(${index})">
-                                            <i class="bi bi-eye"></i> Toggle Response
-                                        </button>
-                                        <div id="response-${index}" class="response-content" style="display: none;">
-                                            <pre class="bg-light p-2 rounded small" style="max-height: 300px; overflow-y: auto;"><code>${interaction.response || 'No response recorded'}</code></pre>
-                                        </div>
-                                    </div>
-                                ` : `
-                                    <div class="alert alert-danger">
-                                        ${interaction.error_message || 'Unknown error'}
-                                    </div>
-                                `}
-                                
-                                ${interaction.success ? `
-                                    <div class="mt-2">
-                                        <small class="text-muted">
-                                            ${interaction.tokens_used ? `Tokens: ${interaction.tokens_used} • ` : ''}
-                                            ${interaction.temperature ? `Temperature: ${interaction.temperature} • ` : ''}
-                                            ${interaction.max_tokens ? `Max Tokens: ${interaction.max_tokens}` : ''}
-                                        </small>
-                                    </div>
-                                ` : ''}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        
-        html += '</div>';
-    }
-    
-    return html;
-}
-
-function togglePrompt(index) {
-    const element = document.getElementById(`prompt-${index}`);
-    element.style.display = element.style.display === 'none' ? 'block' : 'none';
-}
-
-function toggleSystemPrompt(index) {
-    const element = document.getElementById(`system-prompt-${index}`);
-    element.style.display = element.style.display === 'none' ? 'block' : 'none';
-}
-
-function toggleResponse(index) {
-    const element = document.getElementById(`response-${index}`);
-    element.style.display = element.style.display === 'none' ? 'block' : 'none';
-}
-
-function toggleAgent() {
-    fetch(`/admin/api/agents/${agentUsername}/toggle`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'}
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showToast(`Agent ${data.action}`, 'success');
-            setTimeout(() => location.reload(), 1000);
-        } else {
-            showToast(`Failed to toggle agent: ${data.error}`, 'error');
-        }
-    })
-    .catch(error => {
-        showToast(`Error: ${error}`, 'error');
-    });
-}
-
-function configureAgent() {
-    const modal = new bootstrap.Modal(document.getElementById('agentConfigModal'));
-    
-    // Load current configuration
-    fetch(`/admin/api/agents/${agentUsername}/configure`)
-    .then(response => response.json())
-    .then(config => {
-        if (config.error) {
-            showToast(`Error loading config: ${config.error}`, 'error');
-            return;
-        }
-        
-        // Populate form
-        document.getElementById('minActionDelay').value = config.min_action_delay || 30;
-        document.getElementById('maxActionDelay').value = config.max_action_delay || 300;
-        document.getElementById('postsPerDayLimit').value = config.posts_per_day_limit || 5;
-        document.getElementById('commentsPerDayLimit').value = config.comments_per_day_limit || 20;
-        
-        modal.show();
-    })
-    .catch(error => {
-        showToast(`Error loading configuration: ${error}`, 'error');
-    });
-}
-
-function saveAgentConfig() {
-    const config = {
-        min_action_delay: parseInt(document.getElementById('minActionDelay').value),
-        max_action_delay: parseInt(document.getElementById('maxActionDelay').value),
-        posts_per_day_limit: parseInt(document.getElementById('postsPerDayLimit').value),
-        comments_per_day_limit: parseInt(document.getElementById('commentsPerDayLimit').value)
+    const USERNAME = {{ username | tojson }};
+    const STATUS_BADGE = {
+        idle: "bg-success",
+        running: "bg-primary",
+        failed: "bg-danger",
+        interrupted: "bg-secondary",
     };
-    
-    fetch(`/admin/api/agents/${agentUsername}/configure`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(config)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.message) {
-            showToast('Configuration saved', 'success');
-            bootstrap.Modal.getInstance(document.getElementById('agentConfigModal')).hide();
-        } else {
-            showToast(`Failed to save config: ${data.error}`, 'error');
+
+    function esc(value) {
+        return String(value == null ? "" : value);
+    }
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = esc(text);
+        return node;
+    }
+
+    function fmtDate(iso) {
+        return iso ? iso.replace("T", " ").slice(0, 19) : "-";
+    }
+
+    async function api(path) {
+        const response = await fetch(path);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || ("HTTP " + response.status));
+        return data;
+    }
+
+    let agent = null;
+
+    function detailUrl(name) {
+        return {{ url_for('admin.agent_detail', username='__U__') | tojson }}.replace("__U__", encodeURIComponent(name));
+    }
+
+    async function loadAgent() {
+        const data = await api("{{ url_for('admin.api_agents_list') }}");
+        agent = data.agents.find((candidate) => candidate.user_username === USERNAME) || null;
+        const chip = document.getElementById("agent-status-chip");
+        const toggleBtn = document.getElementById("toggle-btn");
+        const runBtn = document.getElementById("force-run-btn");
+        if (!agent) {
+            chip.style.display = "";
+            chip.className = "badge bg-dark ms-2";
+            chip.textContent = "no agent registered";
+            toggleBtn.disabled = true;
+            runBtn.disabled = true;
+            document.getElementById("overview-dl").innerHTML = "";
+            document.getElementById("overview-dl")
+                .appendChild(el("dt", "col-sm-5", "Error"));
+            document.getElementById("overview-dl")
+                .appendChild(el("dd", "col-sm-7", "No agent registered for '" + USERNAME + "'."));
+            document.getElementById("runs-list").innerHTML = "";
+            return;
         }
-    })
-    .catch(error => {
-        showToast(`Error: ${error}`, 'error');
+        chip.style.display = "";
+        chip.className = "badge ms-2 " + (STATUS_BADGE[agent.status] || "bg-dark");
+        chip.textContent = agent.status;
+        toggleBtn.disabled = false;
+        toggleBtn.className = "btn btn-sm me-2 " + (agent.is_enabled ? "btn-outline-warning" : "btn-outline-success");
+        toggleBtn.textContent = agent.is_enabled ? "Disable" : "Enable";
+        runBtn.disabled = agent.status === "running";
+
+        const dl = document.getElementById("overview-dl");
+        dl.innerHTML = "";
+        const rows = [
+            ["Persona", agent.user_username],
+            ["Tier", agent.autonomy_tier],
+            ["Enabled", agent.is_enabled ? "yes" : "no"],
+            ["Consecutive failures", String(agent.consecutive_failures)],
+            ["Last run", fmtDate(agent.last_run_at)],
+            ["Next run", fmtDate(agent.next_run_at)],
+            ["Runs completed", String(agent.runs_completed)],
+            ["Runs failed", String(agent.runs_failed)],
+            ["Runs interrupted", String(agent.runs_interrupted)],
+            ["Total runs", String(agent.runs_total)],
+        ];
+        rows.forEach(([label, value]) => {
+            dl.appendChild(el("dt", "col-sm-5", label));
+            dl.appendChild(el("dd", "col-sm-7", value));
+        });
+        document.getElementById("config-pre").textContent = JSON.stringify(agent.config, null, 2);
+        document.getElementById("state-pre").textContent = JSON.stringify(agent.state, null, 2);
+    }
+
+    async function loadRuns() {
+        const list = document.getElementById("runs-list");
+        list.innerHTML = "";
+        if (!agent) return;
+        let runs = [];
+        try {
+            runs = (await api("/admin/api/agents/" + agent.id + "/runs?limit=25")).runs;
+        } catch (err) {
+            list.appendChild(el("div", "text-danger p-2", "Failed to load runs: " + err.message));
+            return;
+        }
+        if (!runs.length) {
+            list.appendChild(el("div", "text-muted p-2", "No runs yet."));
+            return;
+        }
+        const RUN_BADGE = { running: "bg-primary", completed: "bg-success", failed: "bg-danger", interrupted: "bg-secondary" };
+        runs.forEach((run) => {
+            const item = el("a", "list-group-item list-group-item-action flex-column align-items-start");
+            item.href = "#";
+            const head = el("div", "d-flex w-100 justify-content-between");
+            const left = el("div");
+            left.appendChild(el("strong", null, "#" + run.id));
+            left.appendChild(el("span", "ms-2 text-muted small", run.trigger));
+            left.appendChild(document.createTextNode(" "));
+            left.appendChild(el("span", "badge ms-2 " + (RUN_BADGE[run.status] || "bg-dark"), run.status));
+            head.appendChild(left);
+            head.appendChild(el("small", "text-muted",
+                fmtDate(run.started_at) + " → " + fmtDate(run.finished_at)));
+            item.appendChild(head);
+            const meta = el("div", "small text-muted mt-1",
+                "turns " + run.turn_count + " · actions " + run.action_count +
+                " · tokens " + ((run.token_usage && run.token_usage.total_tokens) || 0));
+            item.appendChild(meta);
+            if (run.error_message) {
+                item.appendChild(el("div", "small text-danger mt-1", run.error_message));
+            }
+            item.addEventListener("click", (event) => {
+                event.preventDefault();
+                openRun(run.id);
+            });
+            list.appendChild(item);
+        });
+    }
+
+    function messageBlock(message) {
+        const wrap = el("div", "border rounded p-2 mb-2");
+        const role = (message && message.role) || "?";
+        wrap.appendChild(el("div", "badge bg-info mb-1", role));
+        const content = message && message.content !== undefined ? message.content : message;
+        const pre = el("pre", "bg-light p-2 rounded small mb-0");
+        pre.style.whiteSpace = "pre-wrap";
+        pre.textContent = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+        wrap.appendChild(pre);
+        return wrap;
+    }
+
+    function toolCallBlock(call) {
+        const wrap = el("div", "border rounded p-2 mb-2");
+        const head = el("div", "d-flex align-items-center gap-2 mb-1");
+        head.appendChild(el("strong", null, call.name));
+        head.appendChild(el("span", "badge " + (call.ok ? "bg-success" : "bg-danger"),
+            call.ok ? "ok" : "failed"));
+        if (call.duration_ms != null) {
+            head.appendChild(el("span", "text-muted small", call.duration_ms + " ms"));
+        }
+        wrap.appendChild(head);
+        const args = el("pre", "bg-light p-2 rounded small mb-1");
+        args.textContent = JSON.stringify(call.arguments, null, 2);
+        wrap.appendChild(el("div", "small text-muted", "arguments:"));
+        wrap.appendChild(args);
+        const result = el("pre", "bg-light p-2 rounded small mb-0");
+        result.textContent = call.ok
+            ? JSON.stringify(call.result, null, 2)
+            : String(call.error || "");
+        wrap.appendChild(el("div", "small text-muted", call.ok ? "result:" : "error:"));
+        wrap.appendChild(result);
+        return wrap;
+    }
+
+    function turnItem(turn, runId) {
+        const item = el("a", "list-group-item list-group-item-action");
+        item.href = "#";
+        const head = el("div", "d-flex w-100 justify-content-between");
+        const left = el("div");
+        left.appendChild(el("strong", null, "turn " + turn.seq));
+        left.appendChild(el("span", "ms-2 text-muted small", turn.model || "?"));
+        head.appendChild(left);
+        head.appendChild(el("small", "text-muted",
+            turn.latency_ms != null ? turn.latency_ms + " ms" : ""));
+        item.appendChild(head);
+        let responseSummary = "";
+        try {
+            responseSummary = typeof turn.response_message.content === "string"
+                ? turn.response_message.content.slice(0, 120)
+                : JSON.stringify(turn.response_message).slice(0, 120);
+        } catch (err) { /* leave summary empty */ }
+        item.appendChild(el("div", "small text-truncate text-muted mt-1", responseSummary));
+        item.addEventListener("click", (event) => {
+            event.preventDefault();
+            openTurn(runId, turn, item);
+        });
+        return item;
+    }
+
+    async function openTurn(runId, turn, itemNode) {
+        const list = document.getElementById("turns-list");
+        Array.from(list.querySelectorAll(".list-group-item")).forEach((node) => {
+            node.classList.remove("active");
+        });
+        itemNode.classList.add("active");
+
+        // Full prompt chain for this turn.
+        document.getElementById("turn-detail").replaceChildren();
+        const detail = document.getElementById("turn-detail");
+        detail.appendChild(el("h6", "mt-3 mb-2", "Request messages (verbatim)"));
+        (turn.request_messages || []).forEach((message) => {
+            detail.appendChild(messageBlock(message));
+        });
+        detail.appendChild(el("h6", "mt-3 mb-2", "Response message (verbatim)"));
+        detail.appendChild(messageBlock(turn.response_message));
+
+        detail.appendChild(el("h6", "mt-3 mb-2", "Tool calls"));
+        const callsWrap = el("div");
+        detail.appendChild(callsWrap);
+        try {
+            const data = await api("/admin/api/turns/" + turn.id + "/tool_calls");
+            if (!data.tool_calls.length) {
+                callsWrap.appendChild(el("div", "text-muted small", "No tool calls in this turn."));
+            }
+            data.tool_calls.forEach((call) => {
+                callsWrap.appendChild(toolCallBlock(call));
+            });
+        } catch (err) {
+            callsWrap.appendChild(el("div", "text-danger small", "Failed to load tool calls: " + err.message));
+        }
+    }
+
+    async function openRun(runId) {
+        const panel = document.getElementById("turns-panel");
+        const title = document.getElementById("turns-title");
+        title.textContent = "Run #" + runId + " — loading turns…";
+        panel.style.display = "";
+        try {
+            const data = await api("/admin/api/runs/" + runId + "/turns");
+            title.textContent = "Run #" + runId + " — " + data.turns.length + " turn(s)";
+            const list = document.getElementById("turns-list");
+            list.replaceChildren();
+            document.getElementById("turn-detail").replaceChildren();
+            if (!data.turns.length) {
+                list.appendChild(el("div", "text-muted p-2", "No LLM turns recorded."));
+                return;
+            }
+            data.turns.forEach((turn) => {
+                list.appendChild(turnItem(turn, runId));
+            });
+        } catch (err) {
+            title.textContent = "Run #" + runId;
+            const list = document.getElementById("turns-list");
+            list.replaceChildren();
+            list.appendChild(el("div", "text-danger p-2", "Failed to load turns: " + err.message));
+        }
+    }
+
+    document.getElementById("toggle-btn").addEventListener("click", async () => {
+        if (!agent) return;
+        const btn = document.getElementById("toggle-btn");
+        btn.disabled = true;
+        try {
+            await api("/admin/api/agents/" + agent.id + "/toggle", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+            });
+            await loadAgent();
+            await loadRuns();
+        } catch (err) {
+            alert(err.message);
+            btn.disabled = false;
+        }
     });
-}
 
-function forceAction(action) {
-    fetch(`/admin/api/agents/${agentUsername}/force-action`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({action: action})
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showToast(`Forced ${action} action completed`, 'success');
-            // Refresh activities after a short delay
-            setTimeout(() => loadActivities(currentPage), 2000);
-        } else {
-            showToast(`Failed to force action: ${data.error}`, 'error');
+    document.getElementById("force-run-btn").addEventListener("click", async () => {
+        if (!agent) return;
+        const btn = document.getElementById("force-run-btn");
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Running…';
+        try {
+            await api("/admin/api/agents/" + agent.id + "/force-run", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+            });
+            await loadAgent();
+            await loadRuns();
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-lightning"></i> Force Run';
         }
-    })
-    .catch(error => {
-        showToast(`Error: ${error}`, 'error');
     });
-}
 
-function refreshData() {
-    loadActivities(currentPage);
-    showToast('Activity data refreshed', 'info');
-}
+    document.getElementById("turns-close").addEventListener("click", () => {
+        document.getElementById("turns-panel").style.display = "none";
+    });
 
-function showToast(message, type) {
-    const toast = document.createElement('div');
-    toast.className = `alert alert-${type === 'success' ? 'success' : type === 'error' ? 'danger' : 'info'} alert-dismissible fade show position-fixed`;
-    toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-    toast.innerHTML = `
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-        if (toast.parentNode) {
-            toast.parentNode.removeChild(toast);
-        }
-    }, 5000);
-}
+    loadAgent().then(loadRuns).catch((err) => console.error(err));
+})();
 </script>
 {% endblock %}
