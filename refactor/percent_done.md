@@ -5,8 +5,8 @@ Owner-facing progress estimate. Updated by the orchestrator at every forward ste
 count-based on tracked steps, with a size-weighted figure (S=1/M=2/L=3) because
 remaining phases are heavier than finished ones.
 
-**Current: ~15% done** (size-weighted 9/62) · raw count 9/36 steps closed (~25%)
-As of: 2026-08-24 21:35 · Wave 2 open — LLM-2 ∥ UX-1 running in parallel
+**Current: ~21% done** (size-weighted 13/62) · raw count 11/36 steps closed (~31%)
+As of: 2026-08-24 22:40 · Wave 3 opening — LeadA4 dispatched (gate phase)
 
 Why the two numbers diverge: Waves 0–1 (five small/mid phases) are closed, but the
 heavy tail — A5 worker, D1–D3 dynamics, AC P3 parity burn-in (longest wall-clock
@@ -25,3 +25,8 @@ occupy a large share of remaining calendar time at a fixed %-point.
   composite indexes+SQL feed pagination; inherited owner WIP folded. Live production DB
   migrated safely against verified pre-copy. Wave 2 gate OPEN → LeadLLM2 ∥ LeadUX1
   dispatched together.
+- 2026-08-24 22:40 — **Wave 2 closed**: LLM-2 eae7bb4 (live probe verdict green,
+  capabilities + pydantic ToolSpec gating) ∥ UX-1 0178f59 (tokens, self-hosted assets,
+  AA dark palette both themes, jQuery/Select2 off public site); route-map baseline
+  refreshed 143150e → full suite 46p/1s green. Next gate: A4 creates the canonical
+  content service before AgenticCore/UX/LLM lanes fan out.
