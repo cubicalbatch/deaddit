@@ -35,7 +35,8 @@ Run started: 2026-08-24 · Branch: `refactor` · Commits local only, NEVER push 
 | UX-0 quick wins | LeadUX0 | **done** | 498255d | 4/4 PASS (indep. tester, axe 4.10.2 live :5097; collapse keyboard PASS after fix-loop on toggleComment) | Scoped `.comment-collapse-bar` <style> in post.html ~L70-99 → fold into tokens.css at UX-1. `.empty-state` component in partials/post_list.html → generalize at UX-2. Dead `GenerationTemplate.query.all()` in generate() route → drop at UX-5/P4. Pre-existing axe leftovers (contrast serious x21/x101, heading-order) = UX-1/UX-2 fodder. |
 | LLM-1 client consolidation | LeadLLM1 | **done** | deeb753 | 4/4 PASS (indep. tester; C2 full admin-job flow vs stub LLM on throwaway DB copy; C3 retry/typed-error after fix-loop) | `deaddit/llm/{client,transport,errors}.py` exist: ChatRequest/Sampling/ChatResult, complete(), STOP_VALUES, Transient/PermanentLLMError — LLM-2 EXTENDS this package. X-Request-Id: base id logged, wire header carries `<base>-<attempt>`. Mechanical ruff cleanup ridden along in loader.py/jobs.py (no behavior change). KNOWN BUG for A4: loader.get_api_base_url() reads Config key 'get_api_base_url()' instead of 'API_BASE_URL' (jobs.py correct). Legacy parsers frozen per Res. 11. |
 | A1 app factory & blueprints | LeadA1 | **done** | 8c12505 | 5/5 PASS (indep. tester; import-zero-IO sweep, gunicorn+dev boot, stub-LLM e2e job, route-map equality 60==60 vs baseline JSON, init-db 9 tables) | `from deaddit import create_app`; extensions at `deaddit.extensions` (db/cache/socketio init_app); blueprints `deaddit.routes.bp`('web') / `deaddit.api.bp`('api'); endpoints prefixed web.*, api./admin.* unchanged. create_app(config=None) takes dict/obj overrides → A2 conftest uses sqlite:// or tmp-path. wsgi.py moved into package (deaddit.wsgi:app), Dockerfile CMD matches. Scheduler still starts in web process by design until A5. Route-map baseline: tests/a1_route_map_baseline.json; render-smoke test pattern reusable. |
-| A3 migrations/WAL/indexes/feed-SQL | — | pending | — | — | Wave 2 GATE for all new schema + UX pagination; DB copy must exist before first migration |
+| A2 tests + fake-LLM seam + CI | LeadA2 | **done** | 5854af0 | accepted (see Rulings 2026-08-24; no separate tester tally recorded) | Fake-LLM seam = `deaddit/llm/provider.py` (production falls back to transport.post_chat); ALL deterministic LLM tests go through `tests.fakes.FakeProvider`, never network. `ruff format --check` NOT in CI (9 files unformatted) — first lead with appetite may run a format pass as rider; A6 hygiene fallback. |
+| A3 migrations/WAL/indexes/feed-SQL | LeadA3 | **done** | b4b8d46 | 9/9 PASS (indep. TesterA3c; upgrade-on-copy <30s zero row loss all 9 tables, EQP index-usage no SCAN, PRAGMA wal via app engine, route-map equality, pytest 16p/1s + ruff clean, live boot :5097 read-only vs prod DB, deletion greps zero, stamp procedure documented) | Alembic baseline 359878740bb0 → head 5b2dab0b6816; ALL new schema now branches from migrations/ (Res 6 open). Driver pattern for revisions: create_app({'SQLALCHEMY_DATABASE_URI': explicit}) + test_cli_runner — NEVER `flask --app deaddit.wsgi db …` (boots LIVE instance DB). Fresh DB = flask init-db; create_app no longer creates tables. Live DB stamped+upgraded post-PASS: alembic_version=5b2dab0b6816, WAL, 4 composite indexes, row counts == pre-a3 copy. Rollback point intact. Feeds deterministic created_at DESC,id DESC; ?page=N+has_more unchanged; ?models= still threaded (dies at decision 12 later). Inherited WIP folded incl. subdeaddit() NameError fix + regression test. |
 | UX-1 tokens + asset hygiene | — | pending | — | — | Wave 2; tokens.css, self-hosted assets, real dark palette, jQuery/Select2 removal |
 | A4 service layer; self-HTTP ingest deleted | — | pending | — | — | Wave 3; creates `deaddit/services/content.py` (Resolution 1); `/api/ingest` → wrapper |
 | AgenticCore P0+1 | — | pending | — | — | Wave 3; restore `deaddit/agents/` fresh; Agent/Run/Turn/ToolCall/Memory schema; `deaddit agent run-once`; feature-flagged off by default |
@@ -100,3 +101,22 @@ Run started: 2026-08-24 · Branch: `refactor` · Commits local only, NEVER push 
   deterministic LLM test goes through tests.fakes.FakeProvider, never network.
   `ruff format --check` NOT in CI (9 files unformatted) — first lead with appetite may run
   a format pass as rider; A6 hygiene fallback.
+
+- 2026-08-24 — DirtyAudit2 verdict (scout): four NEW dirty files (extensions.py, routes.py,
+  pyproject.toml, uv.lock) are INCOMPLETE A3 groundwork, coherent theme: sqlite WAL/FK
+  pragma connect-listener + `Migrate()` singleton (NOT yet init_app'd) in extensions.py;
+  routes.index() rewritten to SQL count + created_at LIMIT/OFFSET (matches architecture.md);
+  additive flask-migrate 4.1.0 / alembic 1.19.1 / mako 1.4.1 in lock. BROKEN as-is:
+  routes.subdeaddit() still calls removed `paginate_posts_with_model_cycling` → NameError
+  on /d/<name>; duplicated `query = Post.query` line. loader.py/jobs.py untouched.
+  Ruling: fold into A3 — LeadA3 completes the WIP (fix subdeaddit(), wire migrate init_app,
+  dedupe) as the phase's first slice and stages those exact paths explicitly, noting
+  ridden-along hunks in the commit message. Never `git add -A`.
+
+- 2026-08-24 — A3 closed (b4b8d46), Wave 2 gate OPEN → LLM-2 ∥ UX-1 dispatched in
+  parallel (disjoint surfaces; contract: only LLM-2 touches pyproject.toml/uv.lock this
+  wave — pydantic v2 per decision 18). Deviation accepted: stamp-baseline-then-upgrade
+  replaces plan's 'stamp head' (stamping HEAD would skip index creation on existing DBs).
+  Incident note for lead spawns: two tester spawns died pre-execution on provider 429s
+  (`reviewer` agent type); retry or fall back to general task agent — coverage verified
+  complete by third spawn.
