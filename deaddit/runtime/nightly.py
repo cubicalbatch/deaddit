@@ -15,6 +15,7 @@ from typing import Any
 from apscheduler.schedulers.base import BaseScheduler
 from flask import current_app
 
+from deaddit.dynamics.inbox import purge_read_notifications
 from deaddit.dynamics.karma import recompute_scores_and_karma
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,12 @@ NIGHTLY_JOBS: tuple[NightlyJob, ...] = (
         description=(
             "Repair vote-authoritative post/comment scores and rebuild user karma"
         ),
+    ),
+    NightlyJob(
+        id="dynamics-notification-purge",
+        cron_expression="45 3 * * *",
+        func=purge_read_notifications,
+        description="Purge read notifications older than 90 days",
     ),
 )
 

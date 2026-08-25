@@ -7,6 +7,7 @@ from datetime import datetime
 
 from deaddit import Config
 from deaddit.agents.prompts import build_system_prompt
+from deaddit.dynamics.inbox import unread_count
 from deaddit.extensions import db
 from deaddit.llm import ChatRequest, LLMClient, Sampling
 from deaddit.models import Agent, AgentMemory, AgentRun, Comment, Post, ToolCall, User
@@ -18,11 +19,6 @@ KICKOFF_PROMPT = (
     "then finish."
 )
 
-INBOX_NOTICE = (
-    "If you have unread replies, use the view_inbox tool to read them before "
-    "deciding what to do."
-)
-
 def build_initial_messages(agent: Agent) -> list[dict]:
     """Build the opening messages array for an agent conversation."""
     user = db.session.get(User, agent.user_username)
@@ -30,10 +26,23 @@ def build_initial_messages(agent: Agent) -> list[dict]:
         {"role": "system", "content": build_system_prompt(agent, user)},
         {"role": "user", "content": KICKOFF_PROMPT},
     ]
-    messages[-1]["content"] += " " + INBOX_NOTICE
     memory_block = _memory_block(agent)
     if memory_block:
         messages[-1]["content"] += "\n\n" + memory_block
+    try:
+        unread = unread_count(agent.user_username)
+    except Exception:
+        logger.warning(
+            "Unread-notification count failed for %s",
+            agent.user_username,
+            exc_info=True,
+        )
+    else:
+        if unread > 0:
+            messages[-1]["content"] += (
+                f"\n\nYou have {unread} unread replies. Use the view_inbox "
+                "tool to read them before deciding what to do."
+            )
     return messages
 
 

@@ -19,6 +19,7 @@ from functools import cache
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from deaddit.dynamics import notifications
 from deaddit.extensions import cache as flask_cache
 from deaddit.extensions import db
 from deaddit.models import Comment, Post, Subdeaddit, User
@@ -105,6 +106,7 @@ def create_post(
     db.session.add(post)
     _commit()
     _clear_read_caches()
+    notifications.notify_post_created(post)
     return post
 
 
@@ -144,6 +146,7 @@ def create_comment(
     db.session.add(comment)
     _commit()
     _clear_read_caches()
+    notifications.notify_comment_created(comment)
     return comment
 
 

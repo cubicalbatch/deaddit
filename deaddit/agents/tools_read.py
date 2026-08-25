@@ -19,6 +19,7 @@ from deaddit.agents.registry import (
     ToolContext,
     register,
 )
+from deaddit.dynamics.inbox import get_inbox, mark_inbox_read
 from deaddit.extensions import db
 from deaddit.models import Comment, Post, Subdeaddit, User
 
@@ -247,56 +248,11 @@ class ViewInboxArgs(BaseModel):
 
 
 def _view_inbox(ctx: ToolContext, params: ViewInboxArgs) -> dict:
-    persona_post_ids = db.session.query(Post.id).filter_by(user=ctx.user_username)
-    persona_comment_ids = db.session.query(Comment.id).filter_by(
-        user=ctx.user_username
-    )
-    query = Comment.query.filter(
-        db.or_(
-            Comment.parent_id.in_(persona_comment_ids),
-            db.and_(
-                Comment.parent_id.is_(None), Comment.post_id.in_(persona_post_ids)
-            ),
-        ),
-        Comment.user != ctx.user_username,
-    )
-
-    state = dict(ctx.agent.state or {})
-    cutoff_raw = state.get("last_inbox_check_at")
-    if params.unread_only and isinstance(cutoff_raw, str):
-        try:
-            cutoff = datetime.fromisoformat(cutoff_raw)
-        except ValueError:
-            pass  # unparseable marker: fall back to the full inbox
-        else:
-            query = query.filter(Comment.created_at > cutoff)
-
-    replies = query.order_by(Comment.created_at.desc()).limit(50).all()
-    titles: dict[int, str] = {}
-    if replies:
-        titles = dict(
-            db.session.query(Post.id, Post.title)
-            .filter(Post.id.in_([r.post_id for r in replies]))
-            .all()
-        )
-    items = [
-        {
-            "comment_id": r.id,
-            "post_id": r.post_id,
-            "post_title": titles.get(r.post_id),
-            "author": r.user,
-            "excerpt": _excerpt(r.content, 200),
-            "created_at": _iso(r.created_at),
-        }
-        for r in replies
-    ]
-
-    state["last_inbox_check_at"] = _utcnow().isoformat()
-    ctx.agent.state = state
-    db.session.add(ctx.agent)
-    db.session.commit()
-
-    return {"items": items, "votes": "not yet available"}
+    data = get_inbox(ctx.user_username, unread_only=params.unread_only, limit=50)
+    mark_inbox_read(
+        ctx.user_username, ids=[item["id"] for item in data["items"]]
+    )  # commits internally
+    return {"items": data["items"], "unread": data["unread"]}
 
 
 class ViewProfileArgs(BaseModel):

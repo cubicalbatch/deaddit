@@ -510,3 +510,22 @@ class Vote(db.Model):
         db.UniqueConstraint("voter", "post_id", name="uq_vote_post"),
         db.UniqueConstraint("voter", "comment_id", name="uq_vote_comment"),
     )
+
+
+# --- Platform dynamics: notifications ---
+class Notification(db.Model):
+    """An inbox item for a user: reply, mention, or mod action (Phase D3)."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    recipient = db.Column(
+        db.String(50), db.ForeignKey("user.username"), nullable=False, index=True
+    )
+    kind = db.Column(db.String(16), nullable=False)  # 'reply'|'mention'|'mod_action'
+    actor = db.Column(db.String(50), db.ForeignKey("user.username"), nullable=True)
+    post_id = db.Column(db.Integer, db.ForeignKey("post.id"), nullable=True, index=True)
+    comment_id = db.Column(db.Integer, db.ForeignKey("comment.id"), nullable=True)
+    snippet = db.Column(
+        db.Text, nullable=True
+    )  # first ~200 chars, frozen at write time
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    read_at = db.Column(db.DateTime, nullable=True, index=True)
