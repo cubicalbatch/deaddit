@@ -25,6 +25,10 @@ class Config:
         "DEFAULT_DATA_LOADED": "false",
         "API_TOKEN": None,
         "PRODUCTION": "false",
+        "SEED_VOTE_MAX": "150",
+        "SEED_VOTE_PROBABILITY": "1.0",
+        "SEED_DECAY_DAYS": "30",
+        "SEED_ANCHOR_AT": None,
         "AGENT_RUNTIME_ENABLED": "false",
     }
 
@@ -41,6 +45,10 @@ class Config:
         "DEFAULT_DATA_LOADED": "Whether default subdeaddits and users have been loaded",
         "PRODUCTION": "Production mode - disables admin interface and ingestion endpoints (true/false)",
         "API_TOKEN": "Security token for admin access (minimum 3 characters)",
+        "SEED_VOTE_MAX": "Max synthetic votes (total attention) per item during history seeding",
+        "SEED_VOTE_PROBABILITY": "Base probability an item receives synthetic attention during history seeding (0-1)",
+        "SEED_DECAY_DAYS": "Days over which seed vote probability decays linearly to zero from the anchor",
+        "SEED_ANCHOR_AT": "ISO timestamp anchor for seed decay; written on first non-dry-run history seed",
         "AGENT_RUNTIME_ENABLED": "Whether the autonomous agent runtime is enabled (true/false); manual run-once is always allowed",
     }
 

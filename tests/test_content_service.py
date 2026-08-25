@@ -195,8 +195,8 @@ def test_create_user_gender_coercion_and_preserialized_json(db_session, cache_sp
     assert User.query.get(female.username).interests == '["pre-serialized"]'
 
 
-def test_create_user_created_at_kwarg_is_accepted_but_ignored(db_session, cache_spy):
-    # User has no created_at column; passing the kwarg must neither crash nor persist.
+def test_create_user_created_at_kwarg_is_persisted(db_session, cache_spy):
+    # Phase D5: User has a created_at column; the kwarg must be persisted.
     user = create_user(
         username="frank",
         age=20,
@@ -209,8 +209,7 @@ def test_create_user_created_at_kwarg_is_accepted_but_ignored(db_session, cache_
         personality_traits=[],
         created_at=datetime(2019, 1, 1),
     )
-    assert not hasattr(User, "created_at")
-    assert User.query.get(user.username).username == "frank"
+    assert User.query.get(user.username).created_at == datetime(2019, 1, 1)
 
 
 def test_duplicate_username_rolls_back_and_session_stays_usable(

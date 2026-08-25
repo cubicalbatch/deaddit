@@ -9,6 +9,7 @@ class Subdeaddit(db.Model):
     name = db.Column(db.String(50), primary_key=True)
     description = db.Column(db.Text)
     post_types = db.Column(db.Text)
+    created_at = db.Column(db.DateTime)  # Phase D5: history seeding
 
     def get_post_types(self):
         return json.loads(self.post_types) if self.post_types else []
@@ -97,6 +98,7 @@ class User(db.Model):
     model = db.Column(db.String(100))
     post_karma = db.Column(db.Integer, nullable=False, server_default="0")
     comment_karma = db.Column(db.Integer, nullable=False, server_default="0")
+    created_at = db.Column(db.DateTime)  # Phase D5: history seeding
 
     posts = db.relationship(
         "Post", backref="author", lazy="dynamic", foreign_keys="Post.user"
