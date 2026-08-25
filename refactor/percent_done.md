@@ -5,8 +5,8 @@ Owner-facing progress estimate. Updated by the orchestrator at every forward ste
 count-based on tracked steps, with a size-weighted figure (S=1/M=2/L=3) because
 remaining phases are heavier than finished ones.
 
-**Current: ~24% done** (size-weighted 15/62) · raw count 12/36 steps closed (~33%)
-As of: 2026-08-24 23:55 · Wave 3 lanes open — AC01 ∥ UX23 ∥ LLM3 running in parallel
+**Current: ~39% done** (size-weighted 24/62) · raw count 16/36 steps closed (~44%)
+As of: 2026-08-25 01:10 · Wave 3 closed; Wave 4 opening with LeadA5 (worker gate)
 
 Why the two numbers diverge: Waves 0–1 (five small/mid phases) are closed, but the
 heavy tail — A5 worker, D1–D3 dynamics, AC P3 parity burn-in (longest wall-clock
@@ -34,3 +34,7 @@ occupy a large share of remaining calendar time at a fixed %-point.
   services/content.py is now the sole persistence path; self-HTTP ingest deleted with
   runtime deny-all proof; /api/ingest = thin byte-compatible wrapper. Wave 3 fan-out:
   LeadAC01 ∥ LeadUX23 ∥ LeadLLM3 with models.py + alembic merge coordination contract.
+- 2026-08-25 01:10 — **Wave 3 closed**: agents runtime is alive (live run-once trace
+  green), feeds/comments rebuilt on design tokens with zero axe violations, spend ledger
+  + model routing landed. First agent-authored content is live in prod (comment 36102).
+  Next gate: A5 dedicated worker before scheduler/dynamics fan-out.
