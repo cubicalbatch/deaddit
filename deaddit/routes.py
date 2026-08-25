@@ -5,6 +5,15 @@ from flask import Blueprint, render_template, request
 from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import joinedload
 
+from deaddit.dynamics.ranking import (
+    controversy,
+    normalize_comment_sort,
+    normalize_post_sort,
+    post_order_by,
+    rising_filter,
+    up_down_split,
+    wilson_lower_bound,
+)
 from deaddit.extensions import db
 
 from .config import Config
@@ -59,17 +68,15 @@ def index():
 
     query = Post.query
 
-    sort = request.args.get("sort", "")
-    if sort not in ("new", "top"):
-        sort = ""
+    sort = normalize_post_sort(request.args.get("sort"))
+    if sort == "rising":
+        # Restrict the feed before count() so paging math sees the filtered set.
+        query = query.filter(rising_filter())
 
-    if sort == "top":
-        order_by = (Post.upvote_count.desc(), Post.id.desc())
-    else:
-        order_by = (Post.created_at.desc(), Post.id.desc())
+    total_posts = query.count()
 
     posts = (
-        query.order_by(*order_by)
+        query.order_by(*post_order_by(sort))
         .offset((page - 1) * posts_per_page)
         .limit(posts_per_page)
         .all()
@@ -139,18 +146,15 @@ def subdeaddit(subdeaddit_name):
 
     query = Post.query.filter_by(subdeaddit_name=subdeaddit_name)
 
-    total_posts = query.count()
-    sort = request.args.get("sort", "")
-    if sort not in ("new", "top"):
-        sort = ""
+    sort = normalize_post_sort(request.args.get("sort"))
+    if sort == "rising":
+        # Restrict the feed before count() so paging math sees the filtered set.
+        query = query.filter(rising_filter())
 
-    if sort == "top":
-        order_by = (Post.upvote_count.desc(), Post.id.desc())
-    else:
-        order_by = (Post.created_at.desc(), Post.id.desc())
+    total_posts = query.count()
 
     paginated_posts = (
-        query.order_by(*order_by)
+        query.order_by(*post_order_by(sort))
         .offset((page - 1) * posts_per_page)
         .limit(posts_per_page)
         .all()
@@ -197,25 +201,21 @@ DEPTH_CAP = 8
 def post(subdeaddit_name, post_id):
     post = Post.query.get_or_404(post_id)
 
-    # Comment sort whitelist: "top" (default) or "new"; garbage falls back.
-    sort = request.args.get("sort", "")
-    if sort not in ("new", "top"):
-        sort = ""
+    # Comment sort: "top" default plus new/best/controversial; garbage falls back.
+    sort = normalize_comment_sort(request.args.get("sort"))
 
-    if sort == "new":
-        query = Comment.query.filter_by(post_id=post_id).order_by(
-            Comment.created_at.desc(), Comment.id.desc()
-        )
-        sort_key = lambda node: (node["created_at"], node["id"])  # noqa: E731
-        sort_reverse = True
-    else:
-        query = Comment.query.filter_by(post_id=post_id).order_by(
-            Comment.upvote_count.desc(), Comment.id.desc()
-        )
-        sort_key = lambda node: (-node["upvote_count"], -node["id"])  # noqa: E731
-        sort_reverse = False
+    comments = Comment.query.filter_by(post_id=post_id).all()
 
-    comments = query.all()
+    def comment_rank_key(node):
+        """Single python sort-key path; id tiebreak is baked into each key."""
+        if sort == "new":
+            return (node["created_at"], node["id"])
+        up, down = up_down_split(node["score"], node["vote_count"])
+        if sort == "best":
+            return (-wilson_lower_bound(up, down), -node["id"])
+        if sort == "controversial":
+            return (-controversy(up, down), -node["id"])
+        return (-node["score"], -node["id"])
 
     def build_comment_tree(comments):
         comment_dict = {
@@ -224,6 +224,8 @@ def post(subdeaddit_name, post_id):
                 "content": comment.content,
                 "content_html": format_content_html(comment.content),
                 "upvote_count": comment.upvote_count,
+                "score": comment.score,
+                "vote_count": comment.vote_count,
                 "user": comment.user,
                 "model": comment.model,
                 "created_at": comment.created_at,
@@ -249,8 +251,8 @@ def post(subdeaddit_name, post_id):
 
         # Sort roots and children by the chosen key, with deterministic ties.
         for comment in comment_dict.values():
-            comment["children"].sort(key=sort_key, reverse=sort_reverse)
-        root_comments.sort(key=sort_key, reverse=sort_reverse)
+            comment["children"].sort(key=comment_rank_key, reverse=(sort == "new"))
+        root_comments.sort(key=comment_rank_key, reverse=(sort == "new"))
 
         return root_comments
 

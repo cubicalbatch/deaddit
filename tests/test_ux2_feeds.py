@@ -110,11 +110,13 @@ class TestIndexPaging:
 
 
 class TestIndexSort:
-    def test_default_order_is_new(self, app, ctx, feed_db):
+    def test_default_order_is_hot(self, app, ctx, feed_db):
         client = app.test_client()
         client.get("/")
         context = _index_ctx(ctx)
-        assert context["sort"] == ""
+        # All seeded posts share score=0, so hot reduces to recency
+        # (created_at asc with id) => reversed id order on the page.
+        assert context["sort"] == "hot"
         ids = [p.id for p in context["posts"]]
         assert ids == sorted(ids, reverse=True)
 
@@ -127,23 +129,31 @@ class TestIndexSort:
         assert ids == sorted(ids, reverse=True)
 
     def test_sort_top_differs_from_default(self, app, ctx, feed_db):
+        from deaddit import db as _db
+
         client = app.test_client()
+        # Seeded posts share score=0; give them distinct scores so 'top'
+        # (score DESC) is visibly different from the recency default.
+        for i, post in enumerate(feed_db["posts"]):
+            post.score = (i * 13) % 50
+        _db.session.commit()
+
         client.get("/?sort=top")
         context = _index_ctx(ctx)
         assert context["sort"] == "top"
         ids = [p.id for p in context["posts"]]
-        scores = {p.id: p.upvote_count for p in feed_db["posts"]}
+        scores = {p.id: p.score for p in feed_db["posts"]}
         page_scores = [scores[i] for i in ids]
         # Non-increasing score sequence, and not merely reversed-id order.
         assert page_scores == sorted(page_scores, reverse=True)
         assert ids != sorted(ids, reverse=True)
 
-    @pytest.mark.parametrize("garbage", ["hot", "TOP", "'; DROP TABLE", "top%00"])
-    def test_unknown_sort_falls_back_to_default(self, app, ctx, feed_db, garbage):
+    @pytest.mark.parametrize("garbage", ["TOP", "'; DROP TABLE", "top%00", "best"])
+    def test_unknown_sort_falls_back_to_hot(self, app, ctx, feed_db, garbage):
         client = app.test_client()
         client.get(f"/?sort={garbage}")
         context = _index_ctx(ctx)
-        assert context["sort"] == ""
+        assert context["sort"] == "hot"
         ids = [p.id for p in context["posts"]]
         assert ids == sorted(ids, reverse=True)
 
@@ -239,18 +249,25 @@ class TestSubdeadditContext:
         # 20 comments seeded on alpha posts (post_id < 20).
         assert context["sub_comment_count"] == 20
         assert context["total_pages"] == math.ceil(40 / 10)
-        assert context["sort"] == ""
+        assert context["sort"] == "hot"
 
     def test_subdeaddit_sort_top_reorders(self, app, ctx, feed_db):
+        from deaddit import db as _db
+
         client = app.test_client()
+        # Distinct scores so 'top' (score DESC) is a meaningful ordering.
+        for i, post in enumerate(feed_db["posts"]):
+            post.score = (i * 13) % 50
+        _db.session.commit()
+
         client.get("/d/alpha?sort=top")
         context = [c for c in ctx if c["name"] == "subdeaddit.html"][0]["context"]
         assert context["sort"] == "top"
-        scores = [p.upvote_count for p in context["posts"]]
+        scores = [p.score for p in context["posts"]]
         assert scores == sorted(scores, reverse=True)
 
-    def test_subdeaddit_garbage_sort_defaults(self, app, ctx, feed_db):
+    def test_subdeaddit_garbage_sort_defaults_to_hot(self, app, ctx, feed_db):
         client = app.test_client()
         client.get("/d/alpha?sort=nonsense")
         context = [c for c in ctx if c["name"] == "subdeaddit.html"][0]["context"]
-        assert context["sort"] == ""
+        assert context["sort"] == "hot"

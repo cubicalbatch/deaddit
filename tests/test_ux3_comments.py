@@ -117,6 +117,7 @@ def deep_thread(app, db_session):
         post_id=post.id,
         content="old but heavily upvoted",
         upvote_count=100,
+        score=100,
         user="threader",
         model="m",
     )
@@ -326,7 +327,7 @@ class TestCommentSort:
         top_roots = [n["id"] for n in top_tree]
         new_roots = [n["id"] for n in new_tree]
         assert set(top_roots) == set(new_roots)
-        assert top_roots[0] == deep_thread["old_top"]  # 100 upvotes wins top
+        assert top_roots[0] == deep_thread["old_top"]  # highest score wins top
         assert top_roots != new_roots
         # New: strictly reverse creation order — the chain root (id 1) was
         # created first, so it must come last.
@@ -341,13 +342,13 @@ class TestCommentSort:
         assert [n["id"] for n in garbage_ctx["comment_tree"]] == [
             n["id"] for n in default_ctx["comment_tree"]
         ]
-        assert garbage_ctx["sort"] == ""
+        assert garbage_ctx["sort"] == "top"
 
     def test_normalized_sort_passed_to_template(self, app, client, ctx, deep_thread):
         new_ctx, _ = _get_tree(app, client, ctx, deep_thread["post_id"], "?sort=new")
         assert new_ctx["sort"] == "new"
         default_ctx, _ = _get_tree(app, client, ctx, deep_thread["post_id"], "")
-        assert default_ctx["sort"] == ""
+        assert default_ctx["sort"] == "top"
 
 
 class TestRenderContract:

@@ -1,9 +1,14 @@
 <nav class="sort-bar" aria-label="Sort posts">
+    {#- Hot emits no sort param (it is the route default); the rest are explicit. -#}
     {%- set sort_options = [
-        ('', 'Hot', 'Ranked feeds arrive with the dynamics phase'),
+        ('', 'Hot', 'Score and recency combined'),
         ('new', 'New', ''),
-        ('top', 'Top', '')
+        ('top', 'Top', ''),
+        ('rising', 'Rising', 'Climbing posts from the last 24 hours'),
     ] -%}
+    {#- Context sort is canonical ('hot' default); map anything else onto
+        'hot' so the valueless Hot option can match it. -#}
+    {%- set current = sort if sort in ('new', 'top', 'rising') else 'hot' -%}
     {%- for value, label, hint in sort_options -%}
     {#- Keep every query arg except page/sort; changing sort resets to page 1
         (omitting `page` falls back to the route default). -#}
@@ -17,9 +22,9 @@
     {%- set _ = all_args.update({key: val}) -%}
     {%- endfor -%}
     {%- set _ = all_args.update(params) -%}
-    <a class="sort-bar__link{{ ' is-active' if (sort or '') == value }}"
+    <a class="sort-bar__link{{ ' is-active' if current == (value or 'hot') }}"
        href="{{ url_for(request.endpoint, **all_args) }}"
-       {% if (sort or '') == value %}aria-current="page"{% endif %}
+       {% if current == (value or 'hot') %}aria-current="page"{% endif %}
        {% if hint %}title="{{ hint }}"{% endif %}>{{ label }}</a>
     {%- endfor -%}
 </nav>
