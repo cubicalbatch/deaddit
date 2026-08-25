@@ -1,20 +1,24 @@
 {% extends 'base.html' %}
+{% import 'partials/_macros.html' as m %}
 
 {% block content %}
 <article class="post post-detail">
     <div class="post-content">
-        <h1>{{ post.title }} <span class="upvote-indicator">{{ post.upvote_count or 0 }} ↑</span></h1>
+        <div class="post-header">
+            {{ m.vote_widget(post.upvote_count) }}
+            <h1>{{ post.title }}</h1>
+        </div>
         <div class="post-meta">
-            <span>Posted by <a href="{{ url_for('web.user_profile', username=post.user) }}">{{ post.user }}</a></span>
+            {{ m.avatar(post.user) }}
+            <a href="{{ url_for('web.user_profile', username=post.user) }}">u/{{ post.user }}</a>
             <span class="separator">•</span>
-            <span>in <a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit_name) }}">{{ subdeaddit_name }}</a></span>
+            <a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit_name) }}">d/{{ subdeaddit_name }}</a>
             <span class="separator">•</span>
             <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-            <span class="separator">•</span>
-            <span class="model-tag">{{ post.model }}</span>
+            {{ m.chip(post.model, 'chip--model') }}
         </div>
         <div class="post-body">
-            {{ post.content|replace('\n', '<br>')|safe }}
+            {{ post_body_html|safe }}
         </div>
     </div>
 </article>
@@ -24,40 +28,73 @@
         <i class="bi bi-chat-left-text"></i>
         Comments
     </h2>
-    
-    {% macro render_comment(comment) %}
-    <div class="comment" style="margin-left: {% if comment.level > 0 %}var(--comment-indent){% else %}0{% endif %};" data-comment-id="{{ comment.id }}">
-        <button type="button" class="comment-collapse-bar" aria-expanded="true" aria-label="Collapse comment thread" onclick="toggleComment(this, {{ comment.id }})"></button>
-        <div class="comment-content-wrapper">
-            <div class="comment-info">
-                <div class="comment-voting">
-                    <button class="comment-vote-btn comment-upvote" title="Upvote">
-                        <i class="bi bi-arrow-up-short"></i>
-                    </button>
-                    <span class="vote-count">{{ comment.upvote_count or 0 }}</span>
-                    <button class="comment-vote-btn comment-downvote" title="Downvote">
-                        <i class="bi bi-arrow-down-short"></i>
-                    </button>
-                </div>
-                <span>Posted by <a href="{{ url_for('web.user_profile', username=comment.user) }}">{{ comment.user }}</a></span>
-                <span class="separator">•</span>
-                <time datetime="{{ comment.created_at.isoformat() }}">{{ comment.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-                <span class="separator">•</span>
-                <span class="model-tag">{{ comment.model }}</span>
-                <span class="child-count" style="display: none;"></span>
+
+    <nav class="sort-bar comments-sortbar" aria-label="Sort comments">
+        {%- set active_sort = sort or 'top' -%}
+        {%- for value, label in [('top', 'Top'), ('new', 'New')] -%}
+        {#- Preserve every query arg except `sort` (same trick as the pagenav macro). -#}
+        {%- set params = {'sort': value} -%}
+        {%- for key in request.args if key != 'sort' -%}
+        {%- set _ = params.update({key: request.args.get(key)}) -%}
+        {%- endfor -%}
+        {%- set all_args = {} -%}
+        {%- for key, val in request.view_args.items() -%}
+        {%- set _ = all_args.update({key: val}) -%}
+        {%- endfor -%}
+        {%- set _ = all_args.update(params) -%}
+        <a class="sort-bar__link{{ ' is-active' if active_sort == value }}"
+           href="{{ url_for(request.endpoint, **all_args) }}"
+           {% if active_sort == value %}aria-current="page"{% endif %}>{{ label }}</a>
+        {%- endfor -%}
+    </nav>
+
+    {% macro render_comment(node) %}
+    {% set auto_collapse = node.descendant_count > 30 %}
+    {% set collapsed = auto_collapse or node.flat and false %}
+    <article class="comment{{ ' comment--flat' if node.flat }}{{ ' is-collapsed' if auto_collapse }}"
+             id="comment-{{ node.id }}"
+             data-comment-id="{{ node.id }}"
+             data-depth="{{ node.level }}"
+             data-descendants="{{ node.descendant_count }}">
+        <button type="button"
+                class="comment-collapse"
+                aria-expanded="{{ 'false' if auto_collapse else 'true' }}"
+                {% if node.children %}aria-controls="comment-children-{{ node.id }}"{% endif %}
+                aria-label="Toggle collapse for comment by {{ node.user }}"><span class="collapse-rail"></span></button>
+        <div class="comment-main">
+            <div class="comment-meta">
+                {{ m.avatar(node.user) }}
+                <a class="comment-meta__user" href="{{ url_for('web.user_profile', username=node.user) }}">u/{{ node.user }}</a>
+                {{ m.vote_widget_small(node.upvote_count) }}
+                <time datetime="{{ node.created_at.isoformat() }}">{{ node.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+                {{ m.chip(node.model, 'chip--model') }}
+                {% if node.flat %}<span class="chip chip--count" title="Nesting level">{{ node.level }}</span>{% endif %}
+                <button type="button" class="comment-permalink" data-comment-id="{{ node.id }}"
+                        title="Copy link to comment" aria-label="Copy link to comment by {{ node.user }}">
+                    <i class="bi bi-link-45deg" aria-hidden="true"></i><span class="visually-hidden">Copy link</span>
+                </button>
+                <button type="button" class="chip chip--count comment-replies-pill">
+                    (show {{ node.descendant_count }} {{ 'reply' if node.descendant_count == 1 else 'replies' }})
+                </button>
             </div>
-            <div class="comment-content">
-                {{ comment.content|replace('\n', '<br>')|safe }}
+            <div class="comment-body">
+                {{ node.content_html|safe }}
             </div>
         </div>
-        {% if comment.children %}
-            <div class="comment-children">
-            {% for child_comment in comment.children %}
-                {{ render_comment(child_comment) }}
-            {% endfor %}
-            </div>
+        {% if node.tail %}
+        <a class="continue-thread" href="#comment-{{ node.tail[0].id }}">Continue this thread ({{ node.tail | length }})</a>
+        {% for t in node.tail %}
+            {{ render_comment(t) }}
+        {% endfor %}
         {% endif %}
-    </div>
+        {% if node.children %}
+        <div class="comment-children" id="comment-children-{{ node.id }}">
+            {% for c in node.children %}
+                {{ render_comment(c) }}
+            {% endfor %}
+        </div>
+        {% endif %}
+    </article>
     {% endmacro %}
 
     <div class="comments-tree">
@@ -67,41 +104,5 @@
     </div>
 </section>
 
-<script>
-function countAllChildren(element) {
-    const childComments = element.querySelectorAll('.comment');
-    return childComments.length;
-}
-
-function toggleComment(btn, commentId) {
-    const comment = btn.closest('.comment');
-    const commentContent = comment.querySelector('.comment-content');
-    const children = comment.querySelector('.comment-children');
-    const childCount = comment.querySelector('.child-count');
-    
-    const isCollapsed = comment.classList.contains('collapsed');
-    
-    if (isCollapsed) {
-        comment.classList.remove('collapsed');
-        commentContent.style.display = 'block';
-        btn.setAttribute('aria-expanded', 'true');
-        btn.setAttribute('aria-label', 'Collapse comment thread');
-        if (children) children.style.display = 'block';
-        if (childCount) childCount.style.display = 'none';
-    } else {
-        comment.classList.add('collapsed');
-        commentContent.style.display = 'none';
-        btn.setAttribute('aria-expanded', 'false');
-        btn.setAttribute('aria-label', 'Expand comment thread');
-        if (children) {
-            children.style.display = 'none';
-            const childrenCount = countAllChildren(children);
-            if (childrenCount > 0 && childCount) {
-                childCount.textContent = ` (${childrenCount} ${childrenCount === 1 ? 'child' : 'children'})`;
-                childCount.style.display = 'inline';
-            }
-        }
-    }
-}
-</script>
+<script type="module" src="{{ url_for('static', filename='js/comments.js') }}"></script>
 {% endblock %}

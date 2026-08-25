@@ -124,35 +124,82 @@ body {
     background-color: var(--bg-canvas);
 }
 
+/* ============================================================
+   Comments (UX-3): rail-guided nesting. Indentation is one step
+   per level via --comment-indent on .comment-children; no
+   cumulative inline margin-left anywhere.
+   ============================================================ */
+.comments-section {
+    --comment-indent: 20px;
+}
+
 .comment {
     position: relative;
     margin-bottom: var(--space-sm);
-    --comment-indent: 24px;
 }
 
-[data-theme="dark"] .comment-content-wrapper {
-    background-color: rgba(255, 255, 255, 0.02);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+.comment-main {
+    min-width: 0;
 }
 
-.comment-content-wrapper:hover {
-    background-color: rgba(255, 255, 255, 0.5);
+.comment-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--font-size-sm);
+    color: var(--text-2);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-xs);
 }
 
-[data-theme="dark"] .comment-content-wrapper:hover {
-    background-color: rgba(255, 255, 255, 0.04);
+.comment-meta a {
+    color: var(--text-2);
+    text-decoration: none;
+    font-weight: 500;
 }
 
+.comment-meta a:hover {
+    color: var(--accent);
+}
+
+.comment-meta time {
+    white-space: nowrap;
+}
+
+.comment-body {
+    color: var(--text-1);
+    line-height: var(--line-height-normal);
+    overflow-wrap: break-word;
+}
+
+.comment-body p {
+    margin: 0 0 var(--space-sm);
+}
+
+.comment-body p:last-child {
+    margin-bottom: 0;
+}
+
+.comment-body blockquote {
+    border-left: 2px solid var(--rail);
+    margin: 0 0 var(--space-sm);
+    padding-left: var(--space-md);
+    color: var(--text-2);
+}
+
+/* Meta row kept for user_profile.html comment listings
+   (post.html comments use .comment-meta instead). */
 .comment-info {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
     font-size: var(--font-size-sm);
     color: var(--text-2);
-    margin-bottom: var(--space-sm);
     flex-wrap: wrap;
 }
-
+/* user_profile.html comment listings still use .comment-info; anchors need
+   the same link treatment as .comment-meta a or they render UA-default blue
+   underlined and fail AA on dark. --text-2: 5.70:1 light / 7.22:1 dark on surface */
 .comment-info a {
     color: var(--text-2);
     text-decoration: none;
@@ -161,56 +208,6 @@ body {
 
 .comment-info a:hover {
     color: var(--accent);
-}
-
-.comment-content {
-    color: var(--text-1);
-    line-height: var(--line-height-normal);
-    margin-bottom: var(--space-sm);
-}
-
-.comment-voting {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-xs);
-    margin-right: var(--space-sm);
-}
-
-.comment-vote-btn {
-    background: none;
-    border: none;
-    color: var(--text-2);
-    font-size: 16px;
-    cursor: pointer;
-    /* F2a: Lighthouse target-size >= 24x24 (decorative; VoteWidget lands in UX-3) */
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 24px;
-    min-height: 24px;
-    padding: 2px;
-    border-radius: var(--radius-sm);
-    transition: all 0.2s ease;
-    line-height: 1;
-}
-
-.comment-vote-btn:hover {
-    background-color: var(--bg-canvas);
-}
-
-.comment-upvote:hover {
-    color: var(--accent);
-}
-
-.comment-downvote:hover {
-    color: var(--down-hover);
-}
-
-.comment .vote-count {
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-    min-width: 20px;
-    text-align: center;
 }
 
 
@@ -307,6 +304,13 @@ body {
 }
 
 /* Post detail specific styles */
+/* Post detail: vote rail beside the title */
+.post-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+
 .post-detail h1 {
     font-size: var(--font-size-xxl);
     margin-bottom: var(--space-md);
@@ -367,85 +371,108 @@ body {
     margin: 0;
 }
 
-/* Model tag styling */
-.model-tag {
-    background-color: var(--bg-canvas);
-    color: var(--text-2);
-    padding: 2px var(--space-xs);
-    border-radius: var(--radius-sm);
-    font-size: var(--font-size-xs);
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-/* Upvote indicator styling */
-.upvote-indicator {
-    font-size: var(--font-size-sm);
-    color: var(--text-2);
-    font-weight: 500;
-    margin-left: var(--space-sm);
-}
-
-/* Comment collapse functionality */
-.comment-collapse-bar {
+/* Collapse control: invisible button whose visible part is the rail
+   segment; hit area spans the rail zone and stays >= 44px wide/tall. */
+.comment-collapse {
     appearance: none;
+    background: none;
     border: none;
     padding: 0;
     position: absolute;
-    left: -2px;
     top: 0;
-    bottom: 0;
-    width: 24px;
-    min-height: 24px;
-    background-color: var(--border);
+    left: -32px;
+    width: 44px;
+    height: 44px;
     cursor: pointer;
-    opacity: 0.5;
-    transition: background-color var(--motion-fast) var(--ease-out-quart),
-        opacity var(--motion-fast) var(--ease-out-quart);
     border-radius: var(--radius-sm);
-    z-index: var(--z-dropdown);
 }
 
-.comment-collapse-bar:hover,
-.comment-collapse-bar:focus-visible {
+.collapse-rail {
+    display: block;
+    width: 4px;
+    height: 100%;
+    margin: 0 auto;
+    border-radius: 2px;
+    background-color: transparent;
+    transition: background-color var(--motion-fast) var(--ease-out-quart);
+}
+
+.comment:hover > .comment-collapse .collapse-rail,
+.comment-collapse:focus-visible .collapse-rail,
+.comment.chain > .comment-collapse .collapse-rail,
+.comment:has(.comment:hover) > .comment-collapse .collapse-rail {
+    background-color: var(--rail);
+}
+
+.comment.is-collapsed > .comment-collapse .collapse-rail {
+    background-color: var(--text-3);
+}
+
+.comment-collapse:hover .collapse-rail,
+.comment-collapse:focus-visible .collapse-rail {
     background-color: var(--accent);
-    opacity: 0.8;
 }
 
-.comment-collapse-bar:focus-visible {
+.comment-collapse:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
 }
 
-.comment.collapsed {
-    min-height: 40px;
-}
-
-.comment.collapsed .comment-collapse-bar {
-    background-color: var(--text-2);
-    opacity: 1;
-}
-
-.comment-content-wrapper {
-    border-left: 2px solid var(--border);
-    padding: var(--space-md);
-    background-color: rgba(255, 255, 255, 0.3);
-    transition: all 0.2s ease;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-    border-radius: var(--radius-sm);
-    position: relative;
-}
-
+/* Rail-guided nesting: each level draws its own guide line. */
 .comment-children {
     margin-top: var(--space-sm);
-    transition: all 0.2s ease;
+    border-left: 2px solid var(--rail);
+    padding-left: var(--comment-indent);
 }
 
-.child-count {
-    color: var(--text-2);
-    font-style: italic;
-    font-size: var(--font-size-sm);
+/* Hover-chain tinting on descendant rails (JS adds .chain; :has() below
+   mirrors it in pure CSS). */
+.comment.chain .comment-children,
+.comment:has(.comment:hover) .comment-children {
+    border-left-color: var(--accent-soft);
+}
+
+/* Collapsed state (server-flagged for deep threads, or user-toggled):
+   hide body, children and continue-thread link; reveal the replies pill. */
+.comment.is-collapsed > .comment-main .comment-body,
+.comment.is-collapsed > .comment-children,
+.comment.is-collapsed > .continue-thread {
+    display: none;
+}
+
+/* Deep-link "continue thread" anchor has no other color rule; without one it
+   renders UA-default #0000ee which fails dark AA at 2.02:1. --link passes AA
+   in both themes: 4.56:1 light / 8.71:1 dark on canvas (4.89:1 / 8.14:1 on
+   surface). */
+.continue-thread {
+    color: var(--link);
+}
+
+/* Flat tail rendering below a depth-capped node: constant single-step
+   indent; depth badge in the meta line marks real nesting level. */
+.comment--flat {
+    margin-left: var(--comment-indent);
+}
+/* "(show N replies)" pill: reuses .chip classes from the markup; only
+   visible while the comment is collapsed. */
+/* Scoped under .comment to out-rank .chip's display (declared later). */
+.comment .comment-replies-pill {
+    display: none;
+    appearance: none;
+    cursor: pointer;
+    min-height: 44px;
+}
+
+.comment.is-collapsed > .comment-main .comment-replies-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 0;
+}
+
+/* Permalink deep-link flash: JS adds/removes the class; transition fades. */
+.permalink-highlight {
+    background-color: var(--highlight-bg);
+    transition: background-color var(--motion-slow) var(--ease-out-quart);
 }
 
 /* Mobile filter styles */
@@ -577,20 +604,6 @@ body {
 
     .comment {
         margin-bottom: var(--space-md);
-        --comment-indent: 12px;
-    }
-    
-    .comment-content-wrapper {
-        padding: var(--space-sm);
-    }
-
-    .comment-voting {
-        flex-direction: row;
-        margin-bottom: var(--space-xs);
-    }
-
-    .comment .vote-count {
-        margin: 0 var(--space-xs);
     }
 }
 
@@ -613,6 +626,10 @@ body {
 
     .comments-header {
         font-size: var(--font-size-lg);
+    }
+
+    .comments-section {
+        --comment-indent: 10px;
     }
 }
 .user-profile {
@@ -1333,6 +1350,24 @@ a:focus {
         min-height: 44px;
         min-width: 44px;
     }
+}
+
+/* Compact vote widget for comment meta lines: inline row, small arrows */
+.vote-widget--sm {
+    flex-direction: row;
+    align-items: center;
+    gap: 0;
+}
+
+.vote-widget--sm .vote-arrow {
+    min-width: 24px;
+    min-height: 24px;
+    font-size: var(--font-size-sm);
+}
+
+.vote-widget--sm .vote-score {
+    order: 0;
+    margin: 0 2px;
 }
 
 /* Sort bar: segmented links */

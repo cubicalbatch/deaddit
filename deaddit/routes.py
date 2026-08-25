@@ -7,6 +7,7 @@ from deaddit.extensions import db
 from .config import Config
 from .models import Comment, Post, Subdeaddit, User
 from .utils import (
+    format_content_html,
     get_comment_counts_bulk,
     process_post_title,
 )
@@ -184,14 +185,32 @@ def subdeaddit(subdeaddit_name):
     )
 
 
+
+# Maximum rendered comment nesting depth; deeper replies are flattened into
+# a "continue this thread" tail on their depth-cap ancestor.
+DEPTH_CAP = 8
+
 @bp.route("/d/<subdeaddit_name>/<int:post_id>")
 def post(subdeaddit_name, post_id):
     post = Post.query.get_or_404(post_id)
 
-    # Query all comments for this post, ordered by upvote count
-    query = Comment.query.filter_by(post_id=post_id).order_by(
-        Comment.upvote_count.desc()
-    )
+    # Comment sort whitelist: "top" (default) or "new"; garbage falls back.
+    sort = request.args.get("sort", "")
+    if sort not in ("new", "top"):
+        sort = ""
+
+    if sort == "new":
+        query = Comment.query.filter_by(post_id=post_id).order_by(
+            Comment.created_at.desc(), Comment.id.desc()
+        )
+        sort_key = lambda node: (node["created_at"], node["id"])  # noqa: E731
+        sort_reverse = True
+    else:
+        query = Comment.query.filter_by(post_id=post_id).order_by(
+            Comment.upvote_count.desc(), Comment.id.desc()
+        )
+        sort_key = lambda node: (-node["upvote_count"], -node["id"])  # noqa: E731
+        sort_reverse = False
 
     comments = query.all()
 
@@ -200,6 +219,7 @@ def post(subdeaddit_name, post_id):
             comment.id: {
                 "id": comment.id,
                 "content": comment.content,
+                "content_html": format_content_html(comment.content),
                 "upvote_count": comment.upvote_count,
                 "user": comment.user,
                 "model": comment.model,
@@ -224,24 +244,59 @@ def post(subdeaddit_name, post_id):
                 if parent:
                     parent["children"].append(comment_dict[comment.id])
 
-        # Sort children by upvote count
+        # Sort roots and children by the chosen key, with deterministic ties.
         for comment in comment_dict.values():
-            comment["children"].sort(key=lambda x: x["upvote_count"], reverse=True)
-
-        # Sort root comments by upvote count
-        root_comments.sort(key=lambda x: x["upvote_count"], reverse=True)
+            comment["children"].sort(key=sort_key, reverse=sort_reverse)
+        root_comments.sort(key=sort_key, reverse=sort_reverse)
 
         return root_comments
 
-    def add_comment_levels(comments, level=0):
+    def count_descendants(node):
+        total = 0
+        stack = list(node["children"])
+        while stack:
+            current = stack.pop()
+            total += 1
+            stack.extend(current["children"])
+        return total
+
+    def flatten_inorder(nodes, start_depth):
+        """Flatten a subtree in-order; each item keeps its real absolute depth."""
+        flat = []
+
+        def walk(node, real_depth):
+            node["flat"] = True
+            node["level"] = real_depth  # real depth for data-depth / flat JS
+            node["descendant_count"] = count_descendants(node)
+            flat.append(node)
+            children = node["children"]
+            node["children"] = []  # subtree lives inline in tail order
+            for child in children:
+                walk(child, real_depth + 1)
+
+        for node in nodes:
+            walk(node, start_depth)
+        return flat
+
+    def cap_comment_depth(comments, level=0):
+        """Assign levels (capped at DEPTH_CAP) and flatten deep tails in-order.
+
+        ``descendant_count`` is computed over the FULL subtree before any
+        capping; capping affects structure only — all rows are already loaded.
+        """
         for comment in comments:
-            comment["level"] = level
-            add_comment_levels(comment["children"], level + 1)
+            comment["level"] = min(level, DEPTH_CAP)  # informational
+            comment["descendant_count"] = count_descendants(comment)
+            if level >= DEPTH_CAP and comment["children"]:
+                comment["tail"] = flatten_inorder(comment["children"], level + 1)
+                comment["children"] = []  # NOT rendered nested
+            else:
+                cap_comment_depth(comment["children"], level + 1)
         return comments
 
-    # Build the comment tree
+    # Build the comment tree, then cap nesting depth and flatten the tails.
     root_comments = build_comment_tree(comments)
-    comment_tree = add_comment_levels(root_comments)
+    comment_tree = cap_comment_depth(root_comments)
 
     # Truncate the post title for the page title
     truncated_title = (post.title[:60] + "...") if len(post.title) > 60 else post.title
@@ -250,6 +305,8 @@ def post(subdeaddit_name, post_id):
         "post.html",
         post=post,
         comment_tree=comment_tree,
+        sort=sort,
+        post_body_html=format_content_html(post.content),
         subdeaddit_name=subdeaddit_name,
         title=f"Deaddit - {truncated_title}",
     )
