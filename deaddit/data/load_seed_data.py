@@ -1,11 +1,14 @@
+"""Seed the database with base users and subdeaddits via the content service."""
+
 import json
 import os
 
-import requests
-
-# Set the API endpoints
-USER_API_ENDPOINT = "http://localhost:5000/api/ingest/user"
-SUBDEADDIT_API_ENDPOINT = "http://localhost:5000/api/ingest"
+from deaddit import create_app
+from deaddit.services.content import (
+    ContentValidationError,
+    create_subdeaddit,
+    create_user,
+)
 
 # Set the paths to your JSON files
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,21 +30,23 @@ def ingest_users(json_file):
 
     # Process each user
     for user in data.get("users", []):
-        # Send POST request to the API
         try:
-            response = requests.post(USER_API_ENDPOINT, json=user)
-            # response.raise_for_status()  # Raise an exception for bad status codes
-
-            # Check the response
-            result = response.json()
-            if result.get("message") == "User created successfully":
-                print(f"User '{user['username']}' ingested successfully.")
-            else:
-                print(
-                    f"Error ingesting user '{user['username']}': {result.get('error', 'Unknown error')}"
-                )
-        except requests.RequestException as e:
-            print(f"Error ingesting user '{user['username']}': {str(e)}")
+            create_user(
+                username=user["username"],
+                age=int(user["age"]),
+                gender=user.get("gender", "Male"),
+                bio=user["bio"],
+                interests=user.get("interests", []),
+                occupation=user["occupation"],
+                education=user["education"],
+                writing_style=user["writing_style"],
+                personality_traits=user.get("personality_traits", []),
+                model=user.get("model", "unknown"),
+            )
+        except (KeyError, TypeError, ContentValidationError) as e:
+            print(f"Error ingesting user '{user.get('username', 'unknown')}': {e}")
+            continue
+        print(f"User '{user['username']}' ingested successfully.")
 
     print("User ingestion process completed.")
 
@@ -58,29 +63,28 @@ def ingest_subdeaddits(json_file):
         print(f"Error: Invalid JSON in file '{json_file}'.")
         return
 
-    # Send POST request to the API
-    try:
-        response = requests.post(SUBDEADDIT_API_ENDPOINT, json=data)
-        response.raise_for_status()  # Raise an exception for bad status codes
-
-        # Check the response
-        result = response.json()
-        if result.get("message") == "Posts and comments created successfully":
-            print("Subdeaddits ingested successfully.")
-            for item in result.get("added", []):
-                print(f"- {item}")
-        else:
-            print(
-                f"Error ingesting subdeaddits: {result.get('error', 'Unknown error')}"
+    # Process each subdeaddit (upserted, matching the legacy ingest endpoint)
+    for subdeaddit in data.get("subdeaddits", []):
+        name = subdeaddit.get("name")
+        try:
+            create_subdeaddit(
+                name=name,
+                description=subdeaddit["description"],
+                post_types=subdeaddit.get("post_types", []),
+                update_if_exists=True,
             )
-    except requests.RequestException as e:
-        print(f"Error ingesting subdeaddits: {str(e)}")
+        except (KeyError, TypeError, ContentValidationError) as e:
+            print(f"Error ingesting subdeaddit '{name}': {e}")
+            continue
+        print(f"Subdeaddit '{name}' ingested successfully.")
 
     print("Subdeaddit ingestion process completed.")
 
 
 if __name__ == "__main__":
-    print("Starting subdeaddit ingestion...")
-    ingest_subdeaddits(SUBDEADDITS_JSON_FILE)
-    print("\nStarting user ingestion...")
-    ingest_users(USERS_JSON_FILE)
+    app = create_app()
+    with app.app_context():
+        print("Starting subdeaddit ingestion...")
+        ingest_subdeaddits(SUBDEADDITS_JSON_FILE)
+        print("\nStarting user ingestion...")
+        ingest_users(USERS_JSON_FILE)

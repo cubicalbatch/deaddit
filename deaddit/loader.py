@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import random
 import re
 import time
@@ -8,11 +7,16 @@ from collections import defaultdict
 from types import SimpleNamespace
 
 import click
-import requests
+from sqlalchemy import func
 
+from .api import build_comment_tree
 from .config import Config
+from .extensions import db
 from .llm.client import STOP_VALUES, ChatRequest, LLMClient, Sampling
 from .llm.errors import LLMError
+from .models import Comment, Post, Subdeaddit, User
+from .services import content
+from .services.content import ContentValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -32,23 +36,18 @@ _user_selection_history = []
 
 def get_subdeaddit_post_counts():
     """
-    Get current post counts for all subdeaddits from the API.
+    Get current post counts for all subdeaddits from the database.
 
     Returns:
         dict: Mapping of subdeaddit names to their post counts
     """
     try:
-        response = requests.get(
-            f"{get_api_base_url()}/api/posts?limit=10000",
-            headers=get_api_headers(),
-            timeout=30
+        rows = (
+            db.session.query(Post.subdeaddit_name, func.count(Post.id))
+            .group_by(Post.subdeaddit_name)
+            .all()
         )
-        if response.status_code == 200:
-            posts = response.json().get("posts", [])
-            counts = defaultdict(int)
-            for post in posts:
-                counts[post["subdeaddit"]] += 1
-            return dict(counts)
+        return dict(rows)
     except Exception as e:
         logger.warning(f"Failed to get post counts: {e}")
 
@@ -221,39 +220,29 @@ def select_subdeaddit_smart(subdeaddits, strategy="weighted"):
 
 def get_user_activity_counts():
     """
-    Get current post and comment counts for all users from the API.
+    Get current post and comment counts for all users from the database.
 
     Returns:
         dict: Mapping of usernames to their total activity counts (posts + comments)
     """
     try:
-        # Get posts
-        posts_response = requests.get(
-            f"{get_api_base_url()}/api/posts?limit=10000",
-            headers=get_api_headers(),
-            timeout=30
-        )
-
-        # Get comments
-        comments_response = requests.get(
-            f"{get_api_base_url()}/api/comments?limit=10000",
-            headers=get_api_headers(),
-            timeout=30
-        )
-
         activity_counts = defaultdict(int)
 
         # Count posts per user
-        if posts_response.status_code == 200:
-            posts = posts_response.json().get("posts", [])
-            for post in posts:
-                activity_counts[post.get("user", "")] += 1
+        post_rows = (
+            db.session.query(Post.user, func.count(Post.id)).group_by(Post.user).all()
+        )
+        for user, count in post_rows:
+            activity_counts[user] += count
 
         # Count comments per user
-        if comments_response.status_code == 200:
-            comments = comments_response.json().get("comments", [])
-            for comment in comments:
-                activity_counts[comment.get("user", "")] += 1
+        comment_rows = (
+            db.session.query(Comment.user, func.count(Comment.id))
+            .group_by(Comment.user)
+            .all()
+        )
+        for user, count in comment_rows:
+            activity_counts[user] += count
 
         return dict(activity_counts)
 
@@ -261,6 +250,32 @@ def get_user_activity_counts():
         logger.warning(f"Failed to get user activity counts: {e}")
 
     return {}
+
+
+def _serialize_user(user: User) -> dict:
+    """
+    Convert a User ORM object to the same dict shape the /api/users JSON
+    returned (interests / personality_traits as parsed lists) so frozen
+    selection heuristics keep working unchanged.
+    """
+    return {
+        "username": user.username,
+        "age": user.age,
+        "gender": user.gender,
+        "bio": user.bio,
+        "interests": json.loads(user.interests) if user.interests else [],
+        "occupation": user.occupation,
+        "education": user.education,
+        "writing_style": user.writing_style,
+        "personality_traits": (
+            json.loads(user.personality_traits) if user.personality_traits else []
+        ),
+        "model": user.model
+        if isinstance(user.model, str)
+        else json.loads(user.model)
+        if user.model
+        else "unknown",
+    }
 
 
 def select_user_weighted(users):
@@ -440,16 +455,16 @@ def test_subdeaddit_distribution(num_tests=100, strategy="weighted"):
     """
     logger.info(f"Testing subdeaddit distribution with {num_tests} selections using {strategy} strategy")
 
-    # Get subdeaddits from API
+    # Get subdeaddits from the database (same dict shape as /api/subdeaddits)
     try:
-        response = requests.get(
-            f"{get_api_base_url()}/api/subdeaddits", headers=get_api_headers()
-        )
-        if response.status_code != 200:
-            logger.error("Failed to retrieve subdeaddits for testing")
-            return None
-
-        subs = response.json()["subdeaddits"]
+        subs = [
+            {
+                "name": s.name,
+                "description": s.description,
+                "post_types": s.get_post_types(),
+            }
+            for s in Subdeaddit.query.all()
+        ]
         if not subs:
             logger.error("No subdeaddits found for testing")
             return None
@@ -536,16 +551,9 @@ def test_user_distribution(num_tests=100, strategy="weighted"):
     """
     logger.info(f"Testing user distribution with {num_tests} selections using {strategy} strategy")
 
-    # Get users from API
+    # Get users from the database (same dict shape as /api/users)
     try:
-        response = requests.get(
-            f"{get_api_base_url()}/api/users", headers=get_api_headers()
-        )
-        if response.status_code != 200:
-            logger.error("Failed to retrieve users for testing")
-            return None
-
-        users = response.json()["users"]
+        users = [_serialize_user(u) for u in User.query.all()]
         if not users:
             logger.error("No users found for testing")
             return None
@@ -618,32 +626,6 @@ def test_user_distribution(num_tests=100, strategy="weighted"):
 
     except Exception as e:
         logger.error(f"Error testing user distribution: {e}")
-        return None
-
-
-def get_api_base_url():
-    """Get get_api_base_url() dynamically from config."""
-    return Config.get("get_api_base_url()", "http://localhost:5000")
-
-
-def get_api_headers():
-    """Get API headers with current API token."""
-    # Use Config to get API_TOKEN (database first, then environment)
-    api_token = None
-    try:
-        from .config import Config
-
-        api_token = Config.get("API_TOKEN")
-    except Exception:
-        # Fallback to environment if Config isn't available yet
-        api_token = os.getenv("API_TOKEN")
-
-    if api_token:
-        return {
-            "Authorization": f"Bearer {api_token}",
-            "Content-Type": "application/json",
-        }
-    else:
         return None
 
 
@@ -964,46 +946,6 @@ def parse_data(api_response: dict, type: str, subdeaddit_name: str = "") -> dict
     logger.info(f"Parsed data: {data}")
     return data
 
-
-def ingest(data: dict, type: str) -> requests.Response:
-    """
-    Ingest the data into the API.
-
-    Args:
-        data (dict): The data to ingest.
-        type (str): The type of data to ingest (post, subdeaddit, or comment).
-
-    Returns:
-        requests.Response: The response from the API or None if error.
-    """
-    if not data:
-        logger.error("No data provided to ingest")
-        return None
-
-    ingest_url = f"{get_api_base_url()}/api/ingest"
-
-    to_post = {}
-    to_post[f"{type}s"] = [data]
-    logger.info(f"POSTing data to {ingest_url}")
-    logger.info(f"Data to be POSTed: {data}")
-
-    try:
-        response = requests.post(
-            ingest_url, json=to_post, headers=get_api_headers(), timeout=30
-        )
-        logger.info(f"Response received from {ingest_url}")
-        logger.info(f"Status code: {response.status_code}")
-        logger.info(f"Response content: {response.content}")
-        response.raise_for_status()  # Raise an exception for bad status codes
-        return response
-    except requests.RequestException as e:
-        logger.error(f"Error ingesting data: {str(e)}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error in ingest: {str(e)}")
-        return None
-
-
 def get_random_user(strategy="weighted"):
     """
     Get a user using smart selection that favors users with less activity.
@@ -1015,24 +957,10 @@ def get_random_user(strategy="weighted"):
         dict: Selected user or None if error
     """
     try:
-        response = requests.get(
-            f"{get_api_base_url()}/api/users", headers=get_api_headers(), timeout=30
-        )
-        if response.status_code == 401:
-            logger.error("Unauthorized. Please set the API_TOKEN environment variable.")
+        users = [_serialize_user(u) for u in User.query.all()]
+        if not users:
+            logger.error("No users found in the database")
             return None
-        if response.status_code != 200:
-            logger.error(
-                f"Failed to retrieve users. Status code: {response.status_code}"
-            )
-            return None
-
-        data = response.json()
-        if "users" not in data or not data["users"]:
-            logger.error("No users found in response")
-            return None
-
-        users = data["users"]
 
         # Use old random selection if explicitly requested
         if strategy == "random":
@@ -1051,12 +979,6 @@ def get_random_user(strategy="weighted"):
             logger.info(f"Fallback randomly selected user: {randomly_selected_user['username']}")
             return randomly_selected_user
 
-    except requests.RequestException as e:
-        logger.error(f"Error retrieving users: {str(e)}")
-        return None
-    except (KeyError, json.JSONDecodeError) as e:
-        logger.error(f"Error parsing users response: {str(e)}")
-        return None
     except Exception as e:
         logger.error(f"Unexpected error in get_random_user: {str(e)}")
         return None
@@ -1094,18 +1016,6 @@ def get_post_type_description(post_type: str) -> str:
         post_type, "Create a post relevant to the subdeaddit's theme."
     )
     return post_type_description
-
-
-def get_post_by_title(title):
-    response = requests.get(
-        f"{get_api_base_url()}/api/posts?limit=1&title={title}",
-        headers=get_api_headers(),
-    )
-    if response.status_code == 200:
-        posts = response.json()["posts"]
-        if posts:
-            return posts[0]
-    return None
 
 
 def get_personality_archetype(personality_traits):
@@ -1300,16 +1210,14 @@ def get_post_prompt(
 ) -> str:
     # Get recent posts for community culture analysis
     try:
-        recent_posts_response = requests.get(
-            f"{get_api_base_url()}/api/posts?subdeaddit={subdeaddit['name']}&limit=20",
-            headers=get_api_headers(),
-            timeout=10,
-        )
         recent_posts = (
-            recent_posts_response.json().get("posts", [])
-            if recent_posts_response.status_code == 200
-            else []
+            db.session.query(Post)
+            .filter(Post.subdeaddit_name == subdeaddit["name"])
+            .order_by(Post.created_at.desc())
+            .limit(20)
+            .all()
         )
+        recent_posts = [{"title": p.title, "content": p.content} for p in recent_posts]
     except Exception:
         recent_posts = []
 
@@ -1386,15 +1294,15 @@ def create_post(subdeaddit_name: str = "") -> dict:
         logger.error("Failed to retrieve user data. Make sure to create users first.")
         return None
 
-    # Get the subreddits from API
-    response = requests.get(
-        f"{get_api_base_url()}/api/subdeaddits", headers=get_api_headers()
-    )
-    if response.status_code != 200:
-        logger.error("Failed to retrieve subdeaddits.")
-        return None
-
-    subs = response.json()["subdeaddits"]
+    # Get the subreddits from the database (same dict shape as /api/subdeaddits)
+    subs = [
+        {
+            "name": s.name,
+            "description": s.description,
+            "post_types": s.get_post_types(),
+        }
+        for s in Subdeaddit.query.all()
+    ]
 
     if subdeaddit_name == "" or subdeaddit_name is None:
         subdeaddit = select_subdeaddit_smart(subs, strategy="weighted")
@@ -1416,25 +1324,32 @@ def create_post(subdeaddit_name: str = "") -> dict:
     logger.info(f"Selected post type: {selected_post_type}")
 
     # First, get posts with the same post type
-    same_type_posts = requests.get(
-        f"{get_api_base_url()}/api/posts?subdeaddit={subdeaddit['name']}&post_type={selected_post_type}&limit=10",
-        headers=get_api_headers(),
-    ).json()["posts"]
+    same_type_posts = (
+        db.session.query(Post)
+        .filter(Post.subdeaddit_name == subdeaddit["name"])
+        .filter(Post.post_type == selected_post_type)
+        .order_by(Post.created_at.desc())
+        .limit(10)
+        .all()
+    )
 
-    existing_titles = [post["title"] for post in same_type_posts]
+    existing_titles = [post.title for post in same_type_posts]
 
     # If we don't have 10 posts, fetch additional posts without the post type filter
     if len(existing_titles) < 10:
         additional_posts_needed = 10 - len(existing_titles)
-        additional_posts = requests.get(
-            f"{get_api_base_url()}/api/posts?subdeaddit={subdeaddit['name']}&limit={additional_posts_needed}",
-            headers=get_api_headers(),
-        ).json()["posts"]
+        additional_posts = (
+            db.session.query(Post)
+            .filter(Post.subdeaddit_name == subdeaddit["name"])
+            .order_by(Post.created_at.desc())
+            .limit(additional_posts_needed)
+            .all()
+        )
 
         # Add titles from additional posts, avoiding duplicates
         for post in additional_posts:
-            if post["title"] not in existing_titles:
-                existing_titles.append(post["title"])
+            if post.title not in existing_titles:
+                existing_titles.append(post.title)
                 if len(existing_titles) == 10:
                     break
 
@@ -1460,18 +1375,22 @@ def create_post(subdeaddit_name: str = "") -> dict:
             got_successful_response = True
         else:
             logger.warning("Failed to parse data from the API response. Retrying...")
-    ingest_response = ingest(post_data, type="post")
-    if ingest_response.status_code == 201:
-        created_post = ingest_response.json().get("added", [])
-        if created_post:
-            logger.info(f"Successfully created post: {created_post[0]}")
-            # Fetch the newly created post to get its ID
-            new_post = get_post_by_title(created_post[0])
-            if new_post:
-                return new_post["id"]
+    try:
+        post = content.create_post(
+            title=post_data["title"],
+            content=post_data["content"],
+            user=post_data["user"],
+            subdeaddit=subdeaddit["name"],
+            upvote_count=int(post_data["upvote_count"]),
+            model=post_data["model"],
+            post_type=selected_post_type,
+        )
+    except (ContentValidationError, KeyError, ValueError) as e:
+        logger.error(f"Failed to create post: {e}")
+        return None
 
-    logger.error("Failed to create post or retrieve its ID")
-    return None
+    logger.info(f"Successfully created post: {post.title}")
+    return post.id
 
 
 def generate_comments_for_post(post_id, min_comments, max_comments, wait):
@@ -1530,7 +1449,18 @@ def create_subdeaddit() -> dict:
     subdeaddit_data = parse_data(api_response, "subdeaddit")
     subdeaddit_data["model"] = model
 
-    ingest(subdeaddit_data, type="subdeaddit")
+    try:
+        post_types = subdeaddit_data.get("post_types") or []
+        if isinstance(post_types, str):
+            post_types = json.loads(post_types)
+        content.create_subdeaddit(
+            name=subdeaddit_data["name"],
+            description=subdeaddit_data["description"],
+            post_types=post_types,
+            update_if_exists=True,
+        )
+    except (ContentValidationError, KeyError, json.JSONDecodeError) as e:
+        logger.error(f"Failed to create subdeaddit: {e}")
     return subdeaddit_data
 
 
@@ -2629,60 +2559,61 @@ def create_comment(post_id: str = "") -> dict:
         return None
 
     if post_id == "":
-        # Query the API to get a random post ID
-        response = requests.get(
-            f"{get_api_base_url()}/api/posts?limit=50", headers=get_api_headers()
-        )
-        if response.status_code != 200:
-            logger.error("Failed to retrieve posts.")
-            return None
-
-        posts = response.json()["posts"]
-        logger.info(f"Retrieved {len(posts)} posts from the API.")
+        # Query the database to get a random post ID
+        posts = Post.query.order_by(Post.created_at.desc()).limit(50).all()
+        logger.info(f"Retrieved {len(posts)} posts from the database.")
 
         if len(posts) == 0:
             logger.warning("No posts found. Creating a new post.")
             create_post()
-            response = requests.get(
-                f"{get_api_base_url()}/api/posts?limit=50", headers=get_api_headers()
-            )
-            posts = response.json()["posts"]
+            posts = Post.query.order_by(Post.created_at.desc()).limit(50).all()
 
-        post_id = random.choice(posts)["id"]
-        post_data = next((post for post in posts if post["id"] == post_id), None)
+        if not posts:
+            logger.error("Failed to retrieve posts.")
+            return None
+
+        selected_post = random.choice(posts)
+        post_id = selected_post.id
         logger.info(
-            f"Randomly selected post ID: {post_id}: ({post_data['subdeaddit']}) {post_data['title']}"
+            f"Randomly selected post ID: {post_id}: ({selected_post.subdeaddit_name}) {selected_post.title}"
         )
 
-    # Query localhost:5000/api/post with the post ID to get the post information
-    response = requests.get(
-        f"{get_api_base_url()}/api/post/{post_id}", headers=get_api_headers()
-    )
+    # Load the post directly from the database (same dict shape as /api/post/<id>)
+    try:
+        post = db.session.get(Post, int(post_id))
+    except (TypeError, ValueError):
+        post = None
 
-    if response.status_code != 200:
+    if not post:
         logger.error(f"Failed to retrieve post with ID {post_id}")
         return None
 
-    post_data = response.json()
+    comments = Comment.query.filter_by(post_id=post.id).all()
+
+    post_data = {
+        "id": post.id,
+        "subdeaddit": post.subdeaddit.name,
+        "title": post.title,
+        "upvote_count": post.upvote_count,
+        "user": post.user,
+        "content": post.content.replace("reddit", "deaddit"),
+        "comment_count": len(comments),
+        "comments": build_comment_tree(comments),
+    }
 
     # Fetch the subdeaddit information
-    subdeaddit_response = requests.get(
-        f"{get_api_base_url()}/api/subdeaddits", headers=get_api_headers()
-    )
-    if subdeaddit_response.status_code != 200:
-        logger.error("Failed to retrieve subdeaddits.")
-        return None
-
-    subdeaddits = subdeaddit_response.json()["subdeaddits"]
-    subdeaddit_info = next(
-        (sub for sub in subdeaddits if sub["name"] == post_data["subdeaddit"]), None
-    )
-
-    if not subdeaddit_info:
+    subdeaddit_obj = Subdeaddit.query.filter_by(name=post_data["subdeaddit"]).first()
+    if not subdeaddit_obj:
         logger.error(
             f"Failed to retrieve subdeaddit information for {post_data['subdeaddit']}"
         )
         return None
+
+    subdeaddit_info = {
+        "name": subdeaddit_obj.name,
+        "description": subdeaddit_obj.description,
+        "post_types": subdeaddit_obj.get_post_types(),
+    }
 
     subdeaddit_description = subdeaddit_info["description"]
 
@@ -2765,14 +2696,24 @@ def create_comment(post_id: str = "") -> dict:
         comment_data["upvote_count"] = realistic_upvotes
     else:
         comment_data["upvote_count"] = round(float(comment_data["upvote_count"]))
-    ingest(comment_data, type="comment")
+    try:
+        content.create_comment(
+            post_id=int(comment_data["post_id"]),
+            content=comment_data["content"],
+            user=comment_data["user"],
+            parent_id=comment_data["parent_id"],
+            upvote_count=int(comment_data["upvote_count"]),
+            model=comment_data["model"],
+        )
+    except (ContentValidationError, KeyError, ValueError) as e:
+        logger.error(f"Failed to create comment: {e}")
 
     return comment_data
 
 
 def get_existing_users(limit=10):
     """
-    Retrieve existing users from the API.
+    Retrieve existing users from the database.
 
     Args:
         limit (int): Maximum number of users to retrieve.
@@ -2780,14 +2721,7 @@ def get_existing_users(limit=10):
     Returns:
         list: List of dictionaries containing user information.
     """
-    response = requests.get(
-        f"{get_api_base_url()}/api/users", headers=get_api_headers()
-    )
-    if response.status_code != 200:
-        logger.error("Failed to retrieve users.")
-        return []
-
-    users = response.json()["users"]
+    users = [_serialize_user(u) for u in User.query.all()]
     return random.sample(users, min(limit, len(users)))
 
 
@@ -2905,17 +2839,13 @@ def get_random_post_from_subdeaddit(subdeaddit_name: str) -> str:
     Returns:
         str: A random post ID from the specified subdeaddit, or None if no posts are found.
     """
-    # Query the API to get posts from the specified subdeaddit
-    response = requests.get(
-        f"{get_api_base_url()}/api/posts?subdeaddit={subdeaddit_name}&limit=50",
-        headers=get_api_headers(),
+    # Query the database for posts from the specified subdeaddit
+    posts = (
+        Post.query.filter(Post.subdeaddit_name == subdeaddit_name)
+        .order_by(Post.created_at.desc())
+        .limit(50)
+        .all()
     )
-
-    if response.status_code != 200:
-        logger.error(f"Failed to retrieve posts from subdeaddit '{subdeaddit_name}'.")
-        return None
-
-    posts = response.json()["posts"]
     logger.info(f"Retrieved {len(posts)} posts from subdeaddit '{subdeaddit_name}'.")
 
     if not posts:
@@ -2924,26 +2854,36 @@ def get_random_post_from_subdeaddit(subdeaddit_name: str) -> str:
 
     # Select a random post
     random_post = random.choice(posts)
-    return random_post["id"]
+    return random_post.id
 
 
 def ingest_user(user_data: dict):
     """
-    Ingest the generated user data into the API.
+    Persist the generated user data via the content service.
 
     Args:
         user_data (dict): The user data to ingest.
     """
-    ingest_url = f"{get_api_base_url()}/api/ingest/user"
-    response = requests.post(ingest_url, json=user_data, headers=get_api_headers())
-
-    if response.status_code == 201:
-        logger.info(f"User {user_data['username']} ingested successfully")
-    else:
-        logger.error(
-            f"Failed to ingest user {user_data.get('username', 'no username')}. Status code: {response.status_code}"
+    try:
+        content.create_user(
+            username=user_data["username"],
+            age=int(user_data["age"]),
+            gender=user_data["gender"],
+            bio=user_data["bio"],
+            interests=user_data["interests"],
+            occupation=user_data["occupation"],
+            education=user_data["education"],
+            writing_style=user_data["writing_style"],
+            personality_traits=user_data["personality_traits"],
+            model=user_data.get("model", "unknown"),
         )
-        logger.error(f"Response content: {response.content}")
+    except Exception as e:
+        logger.error(
+            f"Failed to ingest user {user_data.get('username', 'no username')}: {e}"
+        )
+        return
+
+    logger.info(f"User {user_data['username']} ingested successfully")
 
 
 @click.group()
@@ -2952,13 +2892,18 @@ def ingest_user(user_data: dict):
     multiple=True,
     help="Model(s) to use for requests. Can be specified multiple times.",
 )
-@click.pass_context
 def cli(ctx, model):
     global MODELS
     MODELS = list(model) if model else [Config.get("OPENAI_MODEL", "llama3")]
     logger.info(f"Using model(s): {', '.join(MODELS)}")
     ctx.ensure_object(dict)
     ctx.obj["models"] = MODELS
+
+    # Standalone loader runs need an app context for the content service and
+    # direct DB queries; nested contexts from job execution are harmless.
+    from deaddit import create_app
+
+    create_app().app_context().push()
 
 
 @cli.command()

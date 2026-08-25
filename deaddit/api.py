@@ -1,13 +1,18 @@
 import json
 import os
 from datetime import datetime, timedelta
-from functools import cache as functools_cache
 
 from flask import Blueprint, jsonify, request
 from sqlalchemy import func
 
-from deaddit.extensions import cache as flask_cache
-from deaddit.extensions import db
+from deaddit.services.content import (
+    ContentValidationError,
+    create_comment,
+    create_post,
+    create_subdeaddit,
+    create_user,
+    get_available_models,
+)
 from deaddit.utils import production_disabled
 
 from .models import Comment, Post, Subdeaddit, User
@@ -36,21 +41,16 @@ def authenticate_ingest():
 bp.before_request(authenticate_ingest)
 
 
-@functools_cache
-def get_available_models():
-    # Query unique models from both Post and Comment tables
-    post_models = db.session.query(Post.model).distinct().all()
-    comment_models = db.session.query(Comment.model).distinct().all()
-
-    # Combine and deduplicate the models
-    all_models = {model[0] for model in post_models + comment_models if model[0]}
-
-    return list(all_models)
-
-
 @bp.route("/api/ingest", methods=["POST"])
 @production_disabled
 def ingest():
+    """Ingest posts, comments and subdeaddits.
+
+    THIN WRAPPER over :mod:`deaddit.services.content` (Resolution 1), kept
+    only for external tooling compatibility and scheduled for deletion at
+    Wave 6 (owner decision 8). Internal callers must use the service
+    (``create_post`` / ``create_comment`` / ``create_subdeaddit``) directly.
+    """
     data = request.get_json()
 
     if not data:
@@ -59,127 +59,121 @@ def ingest():
     posts = data.get("posts", [])
     comments = data.get("comments", [])
     subdeaddits = data.get("subdeaddits", [])
-    added = []
-    created_posts = []
 
-    # Validate and create posts
+    # Read-only validation pass replicating the legacy all-or-nothing checks
+    # with exact precedence (posts, then comments, then subdeaddits). The
+    # service commits per item, so every item must validate BEFORE any
+    # create_* call; ContentValidationError below is only a backstop.
     for post_data in posts:
         user = post_data.get("user")
         if not User.query.filter_by(username=user).first():
             return jsonify({"error": f"User '{user}' does not exist"}), 400
 
-        title = post_data.get("title")
-        content = post_data.get("content")
-        upvote_count = post_data.get("upvote_count")
-        subdeaddit_name = post_data.get("subdeaddit")
-        model = post_data.get("model", "unknown")
-
-        if not all([title, content, upvote_count, user, subdeaddit_name]):
+        if not all(
+            [
+                post_data.get("title"),
+                post_data.get("content"),
+                post_data.get("upvote_count"),
+                user,
+                post_data.get("subdeaddit"),
+            ]
+        ):
             return jsonify({"error": "Invalid post data"}), 400
 
-        subdeaddit = Subdeaddit.query.filter_by(name=subdeaddit_name).first()
-        if not subdeaddit:
+        subdeaddit_name = post_data.get("subdeaddit")
+        if not Subdeaddit.query.filter_by(name=subdeaddit_name).first():
             return (
-                jsonify({"error": f"Subdeaddit '{subdeaddit_name}' does not exist"}),
+                jsonify(
+                    {"error": f"Subdeaddit '{subdeaddit_name}' does not exist"}
+                ),
                 400,
             )
 
-        post = Post(
-            title=title,
-            content=content,
-            upvote_count=upvote_count,
-            user=user,
-            subdeaddit=subdeaddit,
-            model=model,
-        )
-        added.append(title)
-        db.session.add(post)
-        # We'll get the ID after commit, so store the post object for now
-        created_posts.append(post)
-
-    # Validate and create comments
-    created_comments = []
     for comment_data in comments:
         user = comment_data.get("user")
         if not User.query.filter_by(username=user).first():
             return jsonify({"error": f"User '{user}' does not exist"}), 400
 
-        post_id = comment_data.get("post_id")
-        parent_id = comment_data.get("parent_id")
-        content = comment_data.get("content")
-        upvote_count = comment_data.get("upvote_count", 0)
-        model = comment_data.get("model", "unknown")
-
-        if not all([post_id, content, user]):
-            missing_fields = []
-            if not post_id:
-                missing_fields.append("post_id")
-            if not content:
-                missing_fields.append("content")
-            if not user:
-                missing_fields.append("user")
+        missing_fields = [
+            field
+            for field in ("post_id", "content", "user")
+            if not comment_data.get(field)
+        ]
+        if missing_fields:
             return (
                 jsonify(
                     {
-                        "error": f"Comment missing required fields: {', '.join(missing_fields)}"
+                        "error": (
+                            "Comment missing required fields: "
+                            f"{', '.join(missing_fields)}"
+                        )
                     }
                 ),
                 400,
             )
 
-        comment = Comment(
-            post_id=post_id,
-            parent_id=parent_id,
-            content=content,
-            upvote_count=upvote_count,
-            user=user,
-            model=model,
-        )
-        added.append(content)
-        db.session.add(comment)
-        # Store comment object to get ID after commit
-        created_comments.append(comment)
-
-    # Validate and create subdeaddits
     for subdeaddit_data in subdeaddits:
-        name = subdeaddit_data.get("name")
-        description = subdeaddit_data.get("description")
-        post_types = subdeaddit_data.get("post_types", [])
-
-        if not all([name, description]):
-            missing_fields = []
-            if not name:
-                missing_fields.append("name")
-            if not description:
-                missing_fields.append("description")
+        missing_fields = [
+            field
+            for field in ("name", "description")
+            if not subdeaddit_data.get(field)
+        ]
+        if missing_fields:
             return (
                 jsonify(
                     {
-                        "error": f"Subdeaddit missing required fields: {', '.join(missing_fields)}"
+                        "error": (
+                            "Subdeaddit missing required fields: "
+                            f"{', '.join(missing_fields)}"
+                        )
                     }
                 ),
                 400,
             )
 
-        # Check if subdeaddit already exists
-        existing_subdeaddit = Subdeaddit.query.get(name)
-        if existing_subdeaddit:
-            # Update existing subdeaddit
-            existing_subdeaddit.description = description
-            existing_subdeaddit.set_post_types(post_types)
-            added.append(f"Updated subdeaddit: {name}")
-        else:
-            # Create new subdeaddit
-            subdeaddit = Subdeaddit(name=name, description=description)
-            subdeaddit.set_post_types(post_types)
-            db.session.add(subdeaddit)
-            added.append(f"Created subdeaddit: {name}")
+    added = []
+    created_posts = []
+    created_comments = []
 
-    db.session.commit()
+    try:
+        for post_data in posts:
+            post = create_post(
+                title=post_data.get("title"),
+                content=post_data.get("content"),
+                user=post_data.get("user"),
+                subdeaddit=post_data.get("subdeaddit"),
+                upvote_count=post_data.get("upvote_count"),
+                model=post_data.get("model", "unknown"),
+            )
+            added.append(post.title)
+            created_posts.append(post)
 
-    # Clear caches when new content is added
-    get_available_models.cache_clear()
-    flask_cache.clear()  # Clear comment count caches
+        for comment_data in comments:
+            comment = create_comment(
+                post_id=comment_data.get("post_id"),
+                content=comment_data.get("content"),
+                user=comment_data.get("user"),
+                parent_id=comment_data.get("parent_id"),
+                upvote_count=comment_data.get("upvote_count", 0),
+                model=comment_data.get("model", "unknown"),
+            )
+            added.append(comment.content)
+            created_comments.append(comment)
+
+        for subdeaddit_data in subdeaddits:
+            name = subdeaddit_data.get("name")
+            existed = Subdeaddit.query.get(name) is not None
+            create_subdeaddit(
+                name=name,
+                description=subdeaddit_data.get("description"),
+                post_types=subdeaddit_data.get("post_types", []),
+                update_if_exists=True,
+            )
+            added.append(
+                f"{'Updated' if existed else 'Created'} subdeaddit: {name}"
+            )
+    except ContentValidationError as exc:  # backstop, see validation above
+        return jsonify({"error": str(exc)}), 400
 
     # Prepare response with created post IDs
     response_data = {
@@ -350,6 +344,13 @@ def format_comment(comment, comment_map):
 @bp.route("/api/ingest/user", methods=["POST"])
 @production_disabled
 def ingest_user():
+    """Ingest a single user.
+
+    THIN WRAPPER over :func:`deaddit.services.content.create_user`
+    (Resolution 1), kept only for external tooling compatibility and
+    scheduled for deletion at Wave 6 (owner decision 8). Internal callers
+    must use the service directly.
+    """
     data = request.get_json()
 
     if not data:
@@ -371,25 +372,21 @@ def ingest_user():
         if field not in data:
             return jsonify({"error": f"Missing required field: {field}"}), 400
 
-    user = User(
-        username=data["username"],
-        age=data["age"],
-        gender=data["gender"] if data["gender"] in ["Male", "Female"] else "Male",
-        bio=data["bio"],
-        interests=json.dumps(data["interests"]),
-        occupation=data["occupation"],
-        education=data["education"],
-        writing_style=data["writing_style"],
-        personality_traits=json.dumps(data["personality_traits"]),
-        model=data.get("model", "unknown"),
-    )
-
-    db.session.add(user)
-    db.session.commit()
-
-    # Clear caches when new content is added
-    get_available_models.cache_clear()
-    flask_cache.clear()  # Clear comment count caches
+    try:
+        user = create_user(
+            username=data["username"],
+            age=data["age"],
+            gender=data["gender"],
+            bio=data["bio"],
+            interests=data["interests"],
+            occupation=data["occupation"],
+            education=data["education"],
+            writing_style=data["writing_style"],
+            personality_traits=data["personality_traits"],
+            model=data.get("model", "unknown"),
+        )
+    except ContentValidationError as exc:  # backstop; service-side validation
+        return jsonify({"error": str(exc)}), 400
 
     return (
         jsonify({"message": "User created successfully", "username": user.username}),

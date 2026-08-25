@@ -4,14 +4,12 @@ Handles background job processing using APScheduler (no Redis required).
 """
 
 import logging
-import os
 import threading
 import time
 import uuid
 from datetime import datetime
 from typing import Any
 
-import requests
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -20,6 +18,7 @@ from deaddit.config import Config
 from deaddit.extensions import db
 from deaddit.llm.client import STOP_VALUES, ChatRequest, LLMClient, Sampling
 from deaddit.models import Job, JobStatus, JobType
+from deaddit.services import content
 
 logger = logging.getLogger(__name__)
 
@@ -40,29 +39,6 @@ job_defaults = {
 scheduler = BackgroundScheduler(
     jobstores=jobstores, executors=executors, job_defaults=job_defaults
 )
-
-
-# API configuration
-def get_api_base_url():
-    """Get API_BASE_URL dynamically from config."""
-    return Config.get("API_BASE_URL", "http://localhost:5000")
-
-
-def get_api_headers():
-    """Get API headers with current API token."""
-    # Use Config to get API_TOKEN (database first, then environment)
-    api_token = None
-    try:
-        api_token = Config.get("API_TOKEN")
-    except Exception:
-        # Fallback to environment if Config isn't available yet
-        api_token = os.environ.get("API_TOKEN")
-
-    headers = {}
-    if api_token:
-        headers["Authorization"] = f"Bearer {api_token}"
-        headers["Content-Type"] = "application/json"
-    return headers
 
 
 # Thread-local storage for job progress updates
@@ -341,25 +317,18 @@ def _execute_create_subdeaddit(job: Job) -> dict[str, Any]:
                     k: v for k, v in subdeaddit_data.items() if not k.startswith("_")
                 }
 
-                # Ingest the subdeaddit via API (format: {"subdeaddits": [data]})
-                ingest_payload = {"subdeaddits": [clean_subdeaddit_data]}
-                response = requests.post(
-                    f"{get_api_base_url()}/api/ingest",
-                    json=ingest_payload,
-                    headers=get_api_headers(),
-                    timeout=60,
+                # Create the subdeaddit via the content service (the legacy
+                # ingest endpoint silently upserted, so preserve that).
+                content.create_subdeaddit(
+                    name=clean_subdeaddit_data["name"],
+                    description=clean_subdeaddit_data["description"],
+                    post_types=clean_subdeaddit_data.get("post_types") or [],
+                    update_if_exists=True,
                 )
-
-                if response.status_code in [200, 201]:
-                    response.json()
-                    subdeaddit_name = clean_subdeaddit_data.get("name", "unknown")
-                    results.append(subdeaddit_name)
-                    logger.info(f"Created subdeaddit: {subdeaddit_name}")
-                    success = True
-                else:
-                    error_msg = f"Failed to ingest subdeaddit (HTTP {response.status_code}): {response.text}"
-                    logger.error(error_msg)
-                    raise Exception(error_msg)
+                subdeaddit_name = clean_subdeaddit_data.get("name", "unknown")
+                results.append(subdeaddit_name)
+                logger.info(f"Created subdeaddit: {subdeaddit_name}")
+                success = True
 
             except Exception as e:
                 retry_count += 1
@@ -450,23 +419,13 @@ def _execute_create_user(job: Job) -> dict[str, Any]:
                     k: v for k, v in user_data.items() if not k.startswith("_")
                 }
 
-                # Ingest the user via API
-                response = requests.post(
-                    f"{get_api_base_url()}/api/ingest/user",
-                    json=clean_user_data,
-                    headers=get_api_headers(),
-                    timeout=60,
-                )
-
-                if response.status_code in [200, 201]:
-                    result = response.json()
-                    results.append(result.get("username"))
-                    logger.info(f"Created user: {result.get('username', 'unknown')}")
-                    success = True
-                else:
-                    error_msg = f"Failed to ingest user (HTTP {response.status_code}): {response.text}"
-                    logger.error(error_msg)
-                    raise Exception(error_msg)
+                # Create the user via the content service (interests /
+                # personality_traits may arrive as lists — handled there).
+                content.create_user(**clean_user_data)
+                username = clean_user_data.get("username")
+                results.append(username)
+                logger.info(f"Created user: {username or 'unknown'}")
+                success = True
 
             except Exception as e:
                 retry_count += 1
@@ -901,7 +860,7 @@ def _generate_comment_data(
     """Generate comment data using OpenAI API."""
     import random
 
-    from deaddit.models import Post, Subdeaddit, User
+    from deaddit.models import Comment, Post, Subdeaddit, User
 
     # Get users for weighted selection
     users = User.query.all()  # Get all users instead of limiting to 10
@@ -962,41 +921,15 @@ def _generate_comment_data(
         post = random.choice(posts)
 
     # Determine if this should be a reply (30% chance, same as CLI loader)
-    # Use API to get existing comments to ensure proper context
-    import requests
-
-    try:
-        response = requests.get(
-            f"{get_api_base_url()}/api/post/{post.id}",
-            headers=get_api_headers(),
-            timeout=30,
-        )
-        if response.status_code == 200:
-            post_data = response.json()
-
-            # Flatten comment tree to get all comments
-            def flatten_comments(comments):
-                all_comments = []
-                for comment in comments:
-                    all_comments.append(comment)
-                    if comment.get("replies"):
-                        all_comments.extend(flatten_comments(comment["replies"]))
-                return all_comments
-
-            existing_comments = flatten_comments(post_data.get("comments", []))
-            logger.info(
-                f"Checking for replies: Found {len(existing_comments)} existing comments for post {post.id}"
-            )
-        else:
-            logger.warning(
-                f"Failed to fetch comments for post {post.id}, creating top-level comment"
-            )
-            existing_comments = []
-    except Exception as e:
-        logger.warning(
-            f"Error fetching comments for post {post.id}: {e}, creating top-level comment"
-        )
-        existing_comments = []
+    # Query existing comments directly to ensure proper context
+    comments = Comment.query.filter_by(post_id=post.id).all()
+    existing_comments = [
+        {"id": c.id, "user": c.user, "content": c.content, "parent_id": c.parent_id}
+        for c in comments
+    ]
+    logger.info(
+        f"Checking for replies: Found {len(existing_comments)} existing comments for post {post.id}"
+    )
 
     parent_id = None
 
@@ -1122,7 +1055,7 @@ Write your comment now."""
 
 
 def _queue_comment_jobs_for_post(
-    post_result: dict[str, Any],
+    post_id: int,
     replies: str,
     model: str = None,
     priority: int = 5,
@@ -1143,22 +1076,8 @@ def _queue_comment_jobs_for_post(
         # Generate random number of comments within range
         num_comments = random.randint(min_replies, max_replies)
 
-        # Extract post ID from the API response
-        # The API response should contain the created post ID in posts array
-        post_id = None
-        if "posts" in post_result and post_result["posts"]:
-            # Posts is a list of objects with id and title
-            first_post = post_result["posts"][0]
-            if isinstance(first_post, dict) and "id" in first_post:
-                post_id = first_post["id"]
-                logger.debug(f"Extracted post ID {post_id} from API response")
-            else:
-                logger.warning(f"Post object missing ID field: {first_post}")
-        else:
-            logger.warning(f"No posts array in API response: {post_result}")
-
         if not post_id:
-            logger.warning(f"Could not extract post ID from result: {post_result}")
+            logger.warning("No post ID available; skipping comment job creation")
             return
 
         # Create a single job to generate all comments for this post
@@ -1227,40 +1146,27 @@ def _execute_create_post(job: Job) -> dict[str, Any]:
                     k: v for k, v in post_data.items() if not k.startswith("_")
                 }
 
-                # Ingest the post via API (format: {"posts": [data]})
-                ingest_payload = {"posts": [clean_post_data]}
-                response = requests.post(
-                    f"{get_api_base_url()}/api/ingest",
-                    json=ingest_payload,
-                    headers=get_api_headers(),
-                    timeout=60,
+                # Create the post via the content service
+                post = content.create_post(
+                    title=clean_post_data["title"],
+                    content=clean_post_data["content"],
+                    user=clean_post_data["user"],
+                    subdeaddit=clean_post_data["subdeaddit"],
+                    upvote_count=int(clean_post_data.get("upvote_count") or 0),
+                    model=clean_post_data.get("model", "unknown"),
+                    post_type=clean_post_data.get("post_type"),
                 )
 
-                if response.status_code in [200, 201]:
-                    result = response.json()
-                    # Extract post ID from API response
-                    if "posts" in result and result["posts"]:
-                        post_id = result["posts"][0]["id"]
-                        results.append(post_id)
-                        post_title = clean_post_data.get("title", "unknown")
-                        logger.info(f"Created post {post_id}: {post_title}")
-                    else:
-                        # Fallback - store title if no ID available
-                        post_title = clean_post_data.get("title", "unknown")
-                        results.append(post_title)
-                        logger.info(f"Created post: {post_title}")
+                results.append(int(post.id))
+                logger.info(f"Created post {post.id}: {clean_post_data.get('title', 'unknown')}")
 
-                    # Queue comment generation jobs if replies are specified
-                    if replies and replies.strip():
-                        _queue_comment_jobs_for_post(
-                            result, replies, model, job.priority, wait
-                        )
+                # Queue comment generation jobs if replies are specified
+                if replies and replies.strip():
+                    _queue_comment_jobs_for_post(
+                        int(post.id), replies, model, job.priority, wait
+                    )
 
-                    success = True
-                else:
-                    error_msg = f"Failed to ingest post (HTTP {response.status_code}): {response.text}"
-                    logger.error(error_msg)
-                    raise Exception(error_msg)
+                success = True
 
             except Exception as e:
                 retry_count += 1
@@ -1345,41 +1251,22 @@ def _execute_create_comment(job: Job) -> dict[str, Any]:
                     k: v for k, v in comment_data.items() if not k.startswith("_")
                 }
 
-                # Ingest the comment via API (format: {"comments": [data]})
-                ingest_payload = {"comments": [clean_comment_data]}
-                response = requests.post(
-                    f"{get_api_base_url()}/api/ingest",
-                    json=ingest_payload,
-                    headers=get_api_headers(),
-                    timeout=60,
+                # Create the comment via the content service
+                comment = content.create_comment(
+                    post_id=int(clean_comment_data["post_id"]),
+                    content=clean_comment_data["content"],
+                    user=clean_comment_data["user"],
+                    parent_id=clean_comment_data.get("parent_id"),
+                    upvote_count=int(clean_comment_data.get("upvote_count") or 0),
+                    model=clean_comment_data.get("model", "unknown"),
                 )
 
-                if response.status_code in [200, 201]:
-                    result = response.json()
-                    # Extract comment ID from API response
-                    if "comments" in result and result["comments"]:
-                        comment_id = result["comments"][0]["id"]
-                        results.append(comment_id)
-                        comment_content = clean_comment_data.get("content", "unknown")[
-                            :50
-                        ]
-                        logger.info(
-                            f"Created comment {comment_id} for post {post_id}: {comment_content}"
-                        )
-                    else:
-                        # Fallback - store content snippet if no ID available
-                        comment_content = clean_comment_data.get("content", "unknown")[
-                            :50
-                        ]
-                        results.append(comment_content)
-                        logger.info(
-                            f"Created comment for post {post_id}: {comment_content}"
-                        )
-                    success = True
-                else:
-                    error_msg = f"Failed to ingest comment (HTTP {response.status_code}): {response.text}"
-                    logger.error(error_msg)
-                    raise Exception(error_msg)
+                results.append(int(comment.id))
+                comment_content = clean_comment_data.get("content", "unknown")[:50]
+                logger.info(
+                    f"Created comment {comment.id} for post {post_id}: {comment_content}"
+                )
+                success = True
 
             except Exception as e:
                 retry_count += 1

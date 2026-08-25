@@ -19,6 +19,7 @@ from flask import (
     url_for,
 )
 from sqlalchemy import desc
+from sqlalchemy.exc import SQLAlchemyError
 
 from deaddit import db
 from deaddit.config import Config
@@ -36,6 +37,11 @@ from deaddit.models import (
     Post,
     Subdeaddit,
     User,
+)
+from deaddit.services.content import (
+    ContentValidationError,
+    create_subdeaddit,
+    create_user,
 )
 from deaddit.utils import production_disabled
 
@@ -1925,19 +1931,26 @@ def load_default_data_api():
                 subdeaddits_data = json.load(f)
 
             for subdeaddit_data in subdeaddits_data.get("subdeaddits", []):
-                # Check if subdeaddit already exists
+                # Skip entries that already exist
                 existing = Subdeaddit.query.filter_by(
                     name=subdeaddit_data["name"]
                 ).first()
-                if not existing:
-                    subdeaddit = Subdeaddit(
+                if existing:
+                    continue
+                try:
+                    create_subdeaddit(
                         name=subdeaddit_data["name"],
                         description=subdeaddit_data["description"],
+                        post_types=subdeaddit_data.get("post_types", []),
+                        update_if_exists=False,
                     )
-                    # Use the helper method to properly set post_types as JSON
-                    subdeaddit.set_post_types(subdeaddit_data.get("post_types", []))
-                    db.session.add(subdeaddit)
                     subdeaddits_loaded += 1
+                except (ContentValidationError, SQLAlchemyError) as exc:
+                    logger.warning(
+                        "Skipping subdeaddit %r during default data load: %s",
+                        subdeaddit_data["name"],
+                        exc,
+                    )
 
             logger.info(f"Loaded {subdeaddits_loaded} new subdeaddits")
 
@@ -1946,35 +1959,35 @@ def load_default_data_api():
             with open(users_file) as f:
                 users_data = json.load(f)
 
-            for user_data in users_data.get("users", [])[
-                :50
-            ]:  # Limit to first 50 users
-                # Check if user already exists
-                existing = User.query.filter_by(username=user_data["username"]).first()
-                if not existing:
-                    user = User(
+            for user_data in users_data.get("users", [])[:50]:
+                # Skip entries that already exist
+                existing = User.query.filter_by(
+                    username=user_data["username"]
+                ).first()
+                if existing:
+                    continue
+                try:
+                    create_user(
                         username=user_data["username"],
-                        bio=user_data["bio"],
-                        age=user_data["age"],
-                        gender=user_data["gender"],
-                        education=user_data["education"],
-                        occupation=user_data["occupation"],
-                        interests=json.dumps(
-                            user_data["interests"]
-                        ),  # Convert list to JSON string
-                        personality_traits=json.dumps(
-                            user_data["personality_traits"]
-                        ),  # Convert list to JSON string
-                        writing_style=user_data["writing_style"],
+                        bio=user_data.get("bio", ""),
+                        age=user_data.get("age"),
+                        gender=user_data.get("gender", "Male"),
+                        education=user_data.get("education", ""),
+                        occupation=user_data.get("occupation", ""),
+                        interests=user_data.get("interests", []),
+                        personality_traits=user_data.get("personality_traits", []),
+                        writing_style=user_data.get("writing_style", ""),
                         model=user_data.get("model", "default"),
                     )
-                    db.session.add(user)
                     users_loaded += 1
+                except SQLAlchemyError as exc:
+                    logger.warning(
+                        "Skipping user %r during default data load: %s",
+                        user_data["username"],
+                        exc,
+                    )
 
             logger.info(f"Loaded {users_loaded} new users")
-
-        # Commit all changes
-        db.session.commit()
 
         # Mark default data as loaded
         Config.set("DEFAULT_DATA_LOADED", "true")
