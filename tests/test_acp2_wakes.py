@@ -305,3 +305,30 @@ def test_zero_ceiling_means_unlimited(seeded_db, db_session, app, monkeypatch):
 
     assert calls == ["alice"]
     scheduler.stop(wait=False)
+
+
+# ---------------------------------------------------------------------------
+# Per-tick self-heal: a worker killed mid-run parks the agent in
+# status='running'; once the grace window passes, the poll tick itself must
+# interrupt the run and free the agent — no restart required.
+
+
+def test_poll_tick_self_heals_killed_run_after_grace(seeded_db, db_session, app):
+    _set_flag("true")
+    agent = _make_agent(db_session, "alice", config={"max_run_seconds": 300})
+    agent.status = "running"  # parked by the killed run
+    agent.next_run_at = None
+    run = AgentRun(
+        agent_id=agent.id,
+        trigger="schedule",
+        status="running",
+        started_at=datetime.utcnow() - timedelta(seconds=361),  # past 300+60 grace
+    )
+    db.session.add(run)
+    db.session.commit()
+
+    scheduler = WakeScheduler(app)
+    scheduler._poll_once()
+
+    assert run.status == "interrupted"
+    assert agent.status == "idle"

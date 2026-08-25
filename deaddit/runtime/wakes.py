@@ -101,7 +101,30 @@ class WakeScheduler:
         Returns ``(interrupted_runs, armed_agents)``.
         """
         now = datetime.utcnow()
+        interrupted = self._interrupt_stale_runs(now)
 
+        armed = 0
+        if is_runtime_enabled():
+            due = Agent.query.filter(
+                Agent.is_enabled.is_(True), Agent.next_run_at.is_(None)
+            ).all()
+            for agent in due:
+                agent.next_run_at = now
+                armed += 1
+            if armed:
+                db.session.commit()
+                logger.info("Armed %d enabled agent(s) with no scheduled wake", armed)
+
+        return interrupted, armed
+
+    def _interrupt_stale_runs(self, now: datetime) -> int:
+        """Interrupt runs past their wall-clock budget + grace; free their agents.
+
+        Runs after a hard kill leave ``AgentRun.status='running'`` and the
+        agent parked in ``status='running'``; without this sweep such an
+        agent would stall until a restart. Runs every poll tick, so a killed
+        run self-heals within one cycle of the grace window elapsing.
+        """
         rows = (
             db.session.query(AgentRun, Agent)
             .join(Agent, AgentRun.agent_id == Agent.id)
@@ -122,24 +145,14 @@ class WakeScheduler:
                 run.error_message = (
                     "Recovered: run exceeded wall-clock budget plus grace."
                 )
+                if agent.status == "running":
+                    agent.status = "idle"
                 interrupted += 1
         if interrupted:
             db.session.commit()
-            logger.info("Boot recovery interrupted %d stale agent run(s)", interrupted)
+            logger.info("Interrupted %d stale agent run(s)", interrupted)
+        return interrupted
 
-        armed = 0
-        if is_runtime_enabled():
-            due = Agent.query.filter(
-                Agent.is_enabled.is_(True), Agent.next_run_at.is_(None)
-            ).all()
-            for agent in due:
-                agent.next_run_at = now
-                armed += 1
-            if armed:
-                db.session.commit()
-                logger.info("Armed %d enabled agent(s) with no scheduled wake", armed)
-
-        return interrupted, armed
 
     # ------------------------------------------------------------------
     # Poller
@@ -158,6 +171,9 @@ class WakeScheduler:
 
     def _poll_once(self) -> None:
         with self.app.app_context():
+            # Crash hygiene runs regardless of the runtime flag.
+            self._interrupt_stale_runs(datetime.utcnow())
+
             if not is_runtime_enabled():
                 return
 
