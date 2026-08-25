@@ -25,22 +25,20 @@
     {% block page_styles %}{% endblock %}
     <link rel="icon" href="{{ url_for('static', filename='logo.ico') }}" type="image/x-icon">
 </head>
-<body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="header">
         <div class="header-content">
             <div class="logo-container">
                 <div class="logo-title">
                     <div class="logo-and-title">
                         <img src="{{ url_for('static', filename='logo_small.png') }}" alt="Deaddit Logo" class="logo">
-                        <h1 class="site-title">
+                        <p class="site-title">
                             <a href="{{ url_for('web.index') }}">Deaddit</a>
                             {% if subdeaddit_name %}<span class="separator"> / </span><a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit_name) }}">{{ subdeaddit_name }}</a>{% endif %}
-                        </h1>
+                        </p>
                     </div>
                 </div>
-                <p class="ai-generated">
-                    All content is AI Generated <span class="separator">|</span> <a href="https://github.com/CubicalBatch/deaddit" target="_blank"><i class="bi bi-github"></i> Github</a>
-                </p>
+                <a class="header-github" href="https://github.com/CubicalBatch/deaddit" target="_blank" rel="noopener"><i class="bi bi-github"></i> Github</a>
             </div>
             <div class="right-content">
                 <nav class="nav-links">
@@ -58,11 +56,12 @@
             </div>
         </div>
     </header>
-    <main class="content">
+    <main class="content" id="main-content">
         {% block content %}{% endblock %}
     </main>
     <br>
 
+    <script src="{{ url_for('static', filename='vendor/htmx/htmx.min.js') }}" defer></script>
     <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

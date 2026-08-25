@@ -1,0 +1,78 @@
+{#- Shared macro library for public templates (UX-2).
+    Import as: {% import 'partials/_macros.html' as m %} -#}
+
+{# Deterministic avatar: hue from username, H = (sum of char codes * 137) % 360 #}
+{% macro avatar(username) -%}
+{%- set hue = ((username.encode('utf-8') | list | sum) * 137) % 360 -%}
+<span class="avatar-circle avatar-circle--sm" style="background:hsl({{ hue }},55%,50%)">{{ username[0] | upper }}</span>
+{%- endmacro %}
+
+{# URL for a page number that preserves every existing query arg (e.g. ?sort=)
+   except `page`, which is set to the given number. Never reintroduces `models=`. #}
+{% macro _page_url(num) -%}
+{%- set params = {'page': num} -%}
+{%- for key in request.args if key != 'page' -%}
+{%- set _ = params.update({key: request.args.get(key)}) -%}
+{%- endfor -%}
+{%- set all_args = {} -%}
+{%- for key, value in request.view_args.items() -%}
+{%- set _ = all_args.update({key: value}) -%}
+{%- endfor -%}
+{%- set _ = all_args.update(params) -%}
+{{ url_for(request.endpoint, **all_args) }}
+{%- endmacro %}
+
+{% macro pagenav(page, total_pages, label='Pages') -%}
+{%- if total_pages > 1 -%}
+<nav class="pagenav" aria-label="{{ label }}">
+    {%- if page > 1 -%}
+    <a class="pagenav__link pagenav__link--prev" href="{{ _page_url(page - 1) }}" rel="prev">← Prev</a>
+    {%- endif -%}
+    {#- Same window shape as flask-sqlalchemy's iter_pages(1,1,2,1) -#}
+    {%- set left_edge, left_current, right_current, right_edge = 1, 1, 2, 1 -%}
+    {%- set start = [page - left_current, left_edge] | max -%}
+    {%- set end = [page + right_current, total_pages - right_edge + 1] | min -%}
+    {%- set head = range(left_edge, left_edge + 1) | list -%}
+    {%- set mid = range(start, end + 1) | list -%}
+    {%- set tail = range(total_pages - right_edge + 1, total_pages + 1) | list -%}
+    {%- set nums = (head + mid + tail) | unique | sort -%}
+    {%- set ns = namespace(prev=0) -%}
+    {%- for num in nums -%}
+        {%- if ns.prev and num > ns.prev + 1 -%}<span class="pagenav__gap" aria-hidden="true">…</span>{%- endif -%}
+        {%- if num == page -%}
+        <span class="pagenav__link pagenav__link--current" aria-current="page">{{ num }}</span>
+        {%- else -%}
+        <a class="pagenav__link" href="{{ _page_url(num) }}">{{ num }}</a>
+        {%- endif -%}
+        {%- set ns.prev = num -%}
+    {%- endfor -%}
+    {%- if page < total_pages -%}
+    <a class="pagenav__link pagenav__link--next" href="{{ _page_url(page + 1) }}" rel="next">Next →</a>
+    {%- endif -%}
+</nav>
+{%- endif -%}
+{%- endmacro %}
+
+{# Display-first synthetic vote widget; voting arrives with the dynamics phase #}
+{% macro vote_widget(score) -%}
+<div class="vote-widget">
+    <span class="vote-score">{{ score or 0 }}</span>
+    <button type="button" class="vote-arrow vote-up" disabled aria-disabled="true" title="Synthetic score" aria-label="Upvote (disabled, synthetic score)">▲</button>
+    <button type="button" class="vote-arrow vote-down" disabled aria-disabled="true" title="Synthetic score" aria-label="Downvote (disabled, synthetic score)">▼</button>
+</div>
+{%- endmacro %}
+
+{% macro chip(text, modifier='') -%}
+<span class="chip {{ modifier }}">{{ text }}</span>
+{%- endmacro %}
+
+{% macro empty_state(icon, heading, body, cta_href='', cta_text='') -%}
+<div class="empty-state">
+    <i class="bi {{ icon }}" aria-hidden="true"></i>
+    <h2>{{ heading }}</h2>
+    <p>{{ body }}</p>
+    {%- if cta_href %}
+    <a class="empty-state__cta" href="{{ cta_href }}">{{ cta_text }}</a>
+    {%- endif %}
+</div>
+{%- endmacro %}

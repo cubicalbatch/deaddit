@@ -1,6 +1,36 @@
 {% extends 'base.html' %}
+{% import 'partials/_macros.html' as m %}
 
 {% block content %}
-{% set hide_subdeaddit = true %}
-{% include 'partials/post_list.html' %}
+<header class="community-header community-hero">
+    <h1 class="community-hero__name">d/{{ community.name }}</h1>
+    {% if community.description %}
+    <p class="community-hero__description">{{ community.description }}</p>
+    {% endif %}
+    <div class="community-hero__types">
+        {%- for post_type in community.get_post_types() -%}
+        {{ m.chip(post_type, 'chip--type') }}
+        {%- endfor -%}
+    </div>
+    <p class="community-hero__stats">{{ sub_post_count }} posts · {{ sub_comment_count }} comments</p>
+</header>
+
+<div class="home-layout sub-layout">
+    <section class="home-feed">
+        {% include 'partials/sort_bar.html' %}
+        {% set hide_subdeaddit = true %}
+        {% include 'partials/post_list.html' %}
+        {{ m.pagenav(page, total_pages, 'd/' ~ community.name ~ ' feed') }}
+    </section>
+    <aside class="rail">
+        <section class="rail-card">
+            <h2 class="rail-card__title">Community stats</h2>
+            <p class="community-hero__stats">{{ sub_post_count }} posts · {{ sub_comment_count }} comments</p>
+        </section>
+        <section class="rail-card">
+            <h2 class="rail-card__title">Moderators</h2>
+            <p class="rail-card__note">Reserved for the moderator list — no moderators yet.</p>
+        </section>
+    </aside>
+</div>
 {% endblock %}

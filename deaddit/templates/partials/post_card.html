@@ -1,0 +1,27 @@
+{% import 'partials/_macros.html' as m %}
+<article class="post-card">
+    <div class="post-card__rail">
+        {{ m.vote_widget(post.upvote_count) }}
+    </div>
+    <div class="post-card__body">
+        <h2 class="post-card__title">
+            <a href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit.name) }}">{{ post.title }}</a>
+        </h2>
+        <div class="post-meta">
+            {{ m.avatar(post.user) }}
+            <a href="{{ url_for('web.user_profile', username=post.user) }}">u/{{ post.user }}</a>
+            {% if not hide_subdeaddit %}
+            <span class="separator">·</span>
+            <a href="{{ url_for('web.subdeaddit', subdeaddit_name=post.subdeaddit.name) }}">d/{{ post.subdeaddit.name }}</a>
+            {% endif %}
+            <span class="separator">·</span>
+            <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+            {{ m.chip(post.model, 'chip--model') }}
+            <a class="post-card__comments" href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit.name) }}">
+                <i class="bi bi-chat-left-text" aria-hidden="true"></i>
+                {{ comment_counts[post.id] }} comments
+            </a>
+        </div>
+        <p class="post-card__preview">{{ post.content | striptags | truncate(200) }}</p>
+    </div>
+</article>

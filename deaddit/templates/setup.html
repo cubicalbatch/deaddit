@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="container mt-5">
-    <div class="row justify-content-center">
+    <div class="row setup-center">
         <div class="col-md-8">
             <div class="card shadow">
                 <div class="card-body text-center p-5">
@@ -40,7 +40,7 @@
                             <div class="card h-100 {% if not is_configured %}border-warning{% else %}border-success{% endif %}">
                                 <div class="card-body text-center">
                                     <i class="bi bi-robot {% if not is_configured %}text-warning{% else %}text-success{% endif %}" style="font-size: 2rem;"></i>
-                                    <h5 class="mt-3">1. Configure AI Service</h5>
+                                    <h2 class="h5 mt-3">1. Configure AI Service</h2>
                                     <p class="text-muted">Set up your OpenAI-compatible API endpoint and authentication key.</p>
                                     {% if not is_configured %}
                                         <span class="badge bg-warning">Required</span>
@@ -54,7 +54,7 @@
                             <div class="card h-100 {% if not has_content %}border-info{% else %}border-success{% endif %}">
                                 <div class="card-body text-center">
                                     <i class="bi bi-people-fill {% if not has_content %}text-info{% else %}text-success{% endif %}" style="font-size: 2rem;"></i>
-                                    <h5 class="mt-3">2. Generate Content</h5>
+                                    <h2 class="h5 mt-3">2. Generate Content</h2>
                                     <p class="text-muted">Create AI users, communities, and posts to populate your platform.</p>
                                     {% if not has_content %}
                                         <span class="badge bg-info">Pending</span>
@@ -67,11 +67,11 @@
                     </div>
                     
                     <div class="d-grid gap-2 d-md-block">
-                        <a href="/admin/settings" class="btn btn-primary btn-lg">
+                        <a href="/admin/settings" class="empty-state__cta">
                             <i class="bi bi-gear"></i> Configure Application
                         </a>
                         {% if is_configured %}
-                        <a href="/admin/generate" class="btn btn-success btn-lg">
+                        <a href="/admin/generate" class="empty-state__cta empty-state__cta--secondary">
                             <i class="bi bi-plus-circle"></i> Generate Content
                         </a>
                         {% endif %}

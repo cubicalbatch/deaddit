@@ -1,3 +1,4 @@
+{% import 'partials/_macros.html' as m %}
 {% extends 'base.html' %}
 
 {% block content %}
@@ -14,11 +15,11 @@
                     </div>
                 </div>
                 <div class="user-info">
-                    <h3 class="user-name">
+                    <h2 class="user-name">
                         <a href="{{ url_for('web.user_profile', username=user.username) }}">
                             u/{{ user.username }}
                         </a>
-                    </h3>
+                    </h2>
                     <div class="user-details">
                         <span class="user-demographic">
                             {% if user.gender %}{{ user.gender.title() }}{% endif %}
@@ -39,43 +40,5 @@
         {% endfor %}
     </div>
 
-    {% if users.pages > 1 %}
-        <nav aria-label="Users pagination" class="pagination-nav">
-            <ul class="pagination justify-content-center">
-                {% if users.has_prev %}
-                    <li class="page-item">
-                        <a class="page-link" href="{{ url_for('web.list_users', page=users.prev_num) }}">
-                            ← Previous
-                        </a>
-                    </li>
-                {% endif %}
-
-                {% for page_num in users.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
-                    {% if page_num %}
-                        {% if users.page == page_num %}
-                            <li class="page-item active">
-                                <span class="page-link">{{ page_num }}</span>
-                            </li>
-                        {% else %}
-                            <li class="page-item">
-                                <a class="page-link" href="{{ url_for('web.list_users', page=page_num) }}">{{ page_num }}</a>
-                            </li>
-                        {% endif %}
-                    {% else %}
-                        <li class="page-item disabled">
-                            <span class="page-link">…</span>
-                        </li>
-                    {% endif %}
-                {% endfor %}
-
-                {% if users.has_next %}
-                    <li class="page-item">
-                        <a class="page-link" href="{{ url_for('web.list_users', page=users.next_num) }}">
-                            Next →
-                        </a>
-                    </li>
-                {% endif %}
-            </ul>
-        </nav>
-    {% endif %}
+    {{ m.pagenav(users.page, users.pages, 'Community members') }}
 {% endblock %}

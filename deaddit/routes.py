@@ -55,14 +55,52 @@ def index():
 
     query = Post.query
 
-    total_posts = query.count()
+    sort = request.args.get("sort", "")
+    if sort not in ("new", "top"):
+        sort = ""
+
+    if sort == "top":
+        order_by = (Post.upvote_count.desc(), Post.id.desc())
+    else:
+        order_by = (Post.created_at.desc(), Post.id.desc())
+
     posts = (
-        query.order_by(Post.created_at.desc(), Post.id.desc())
+        query.order_by(*order_by)
         .offset((page - 1) * posts_per_page)
         .limit(posts_per_page)
         .all()
     )
     has_more = total_posts > page * posts_per_page
+    total_pages = (total_posts + posts_per_page - 1) // posts_per_page
+
+    # Right-rail data: top 6 communities by post count
+    post_count = func.count(Post.id).label("post_count")
+    rail_rows = (
+        db.session.query(Subdeaddit.name, Subdeaddit.description, post_count)
+        .outerjoin(Post, Subdeaddit.name == Post.subdeaddit_name)
+        .group_by(Subdeaddit.name, Subdeaddit.description)
+        .order_by(post_count.desc(), Subdeaddit.name)
+        .limit(6)
+        .all()
+    )
+    rail_subs = [
+        {"name": row.name, "description": row.description, "post_count": row.post_count}
+        for row in rail_rows
+    ]
+
+    # Right-rail data: top 6 users by post count
+    user_post_count = func.count(Post.id).label("post_count")
+    user_rows = (
+        db.session.query(User.username, user_post_count)
+        .outerjoin(Post, User.username == Post.user)
+        .group_by(User.username)
+        .order_by(user_post_count.desc(), User.username)
+        .limit(6)
+        .all()
+    )
+    rail_users = [
+        {"username": row.username, "post_count": row.post_count} for row in user_rows
+    ]
 
     # Process post titles
     for post in posts:
@@ -79,6 +117,10 @@ def index():
         page=page,
         has_more=has_more,
         title="Deaddit - The Reddit clone with AI users",
+        total_pages=total_pages,
+        sort=sort,
+        rail_subs=rail_subs,
+        rail_users=rail_users,
         description="Explore Deaddit, the AI-generated Reddit clone featuring diverse discussions and content created by artificial intelligence.",
     )
 
@@ -89,18 +131,28 @@ def subdeaddit(subdeaddit_name):
     posts_per_page = 10
 
     # Check if the subdeaddit exists
-    Subdeaddit.query.filter_by(name=subdeaddit_name).first_or_404()
+    community = Subdeaddit.query.filter_by(name=subdeaddit_name).first_or_404()
 
     query = Post.query.filter_by(subdeaddit_name=subdeaddit_name)
 
     total_posts = query.count()
+    sort = request.args.get("sort", "")
+    if sort not in ("new", "top"):
+        sort = ""
+
+    if sort == "top":
+        order_by = (Post.upvote_count.desc(), Post.id.desc())
+    else:
+        order_by = (Post.created_at.desc(), Post.id.desc())
+
     paginated_posts = (
-        query.order_by(Post.created_at.desc(), Post.id.desc())
+        query.order_by(*order_by)
         .offset((page - 1) * posts_per_page)
         .limit(posts_per_page)
         .all()
     )
     has_more = total_posts > page * posts_per_page
+    total_pages = (total_posts + posts_per_page - 1) // posts_per_page
 
     # Process post titles
     for post in paginated_posts:
@@ -109,15 +161,26 @@ def subdeaddit(subdeaddit_name):
     # Get comment counts efficiently
     post_ids = [post.id for post in paginated_posts]
     comment_counts = get_comment_counts_bulk(post_ids)
+    sub_comment_count = (
+        db.session.query(func.count(Comment.id))
+        .join(Post, Comment.post_id == Post.id)
+        .filter(Post.subdeaddit_name == subdeaddit_name)
+        .scalar()
+    ) or 0
 
     return render_template(
         "subdeaddit.html",
         posts=paginated_posts,
         comment_counts=comment_counts,
-        subdeaddit_name=subdeaddit_name,
         page=page,
+        subdeaddit_name=subdeaddit_name,
         has_more=has_more,
         title=f"Deaddit - d/{subdeaddit_name}",
+        community=community,
+        sub_post_count=total_posts,
+        sub_comment_count=sub_comment_count,
+        total_pages=total_pages,
+        sort=sort,
     )
 
 
@@ -252,6 +315,10 @@ def user_profile(username):
     return render_template(
         "user_profile.html",
         user=user,
+        # post_list.html expects feed paging vars; profile lists are uncapped
+        # single pages.
+        page=1,
+        has_more=False,
         posts=posts,
         comments=comments,
         total_posts=total_posts,

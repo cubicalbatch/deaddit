@@ -1,0 +1,25 @@
+<nav class="sort-bar" aria-label="Sort posts">
+    {%- set sort_options = [
+        ('', 'Hot', 'Ranked feeds arrive with the dynamics phase'),
+        ('new', 'New', ''),
+        ('top', 'Top', '')
+    ] -%}
+    {%- for value, label, hint in sort_options -%}
+    {#- Keep every query arg except page/sort; changing sort resets to page 1
+        (omitting `page` falls back to the route default). -#}
+    {%- set params = {} -%}
+    {%- if value -%}{%- set _ = params.update({'sort': value}) -%}{%- endif -%}
+    {%- for key in request.args if key != 'page' and key != 'sort' -%}
+    {%- set _ = params.update({key: request.args.get(key)}) -%}
+    {%- endfor -%}
+    {%- set all_args = {} -%}
+    {%- for key, val in request.view_args.items() -%}
+    {%- set _ = all_args.update({key: val}) -%}
+    {%- endfor -%}
+    {%- set _ = all_args.update(params) -%}
+    <a class="sort-bar__link{{ ' is-active' if (sort or '') == value }}"
+       href="{{ url_for(request.endpoint, **all_args) }}"
+       {% if (sort or '') == value %}aria-current="page"{% endif %}
+       {% if hint %}title="{{ hint }}"{% endif %}>{{ label }}</a>
+    {%- endfor -%}
+</nav>

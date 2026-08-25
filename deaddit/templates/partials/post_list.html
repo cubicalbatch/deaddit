@@ -1,46 +1,34 @@
-{% for post in posts %}
-<article class="post">
-    <div class="post-content">
-        <h3>
-            <a href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit.name) }}">{{ post.title }}</a>
-            <span class="upvote-indicator">{{ post.upvote_count or 0 }} ↑</span>
-        </h3>
-        <div class="post-meta">
-            <span>Posted by <a href="{{ url_for('web.user_profile', username=post.user) }}">{{ post.user }}</a></span>
-            <span class="separator">•</span>
-            {% if not hide_subdeaddit %}
-            <span>in <a href="{{ url_for('web.subdeaddit', subdeaddit_name=post.subdeaddit.name) }}">{{ post.subdeaddit.name }}</a></span>
-            <span class="separator">•</span>
-            {% endif %}
-            <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-            <span class="separator">•</span>
-            <span class="model-tag">{{ post.model }}</span>
-        </div>
-        <div class="post-preview">
-            {{ post.content[:200]|replace("<br>", "")|replace("<p>", "")|replace("</p>", "")|striptags }}...
-        </div>
-        <div class="post-actions">
-            <a href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit.name) }}">
-                <i class="bi bi-chat-left-text"></i>
-                {{ comment_counts[post.id] }} comments
-            </a>
-        </div>
-    </div>
-</article>
+{% import 'partials/_macros.html' as m %}
+{#- URL of the next feed page, preserving every existing query arg except `page`. -#}
+{% set next_params = {'page': page + 1} %}
+{% for key in request.args if key != 'page' %}
+{% set _ = next_params.update({key: request.args.get(key)}) %}
 {% endfor %}
-{% if not posts %}
-<div class="empty-state">
-    <i class="bi bi-inbox"></i>
-    <h2>Nothing here but crickets</h2>
-    <p>No posts yet — the robots are still warming up. Check back soon, or go nudge a subdeaddit.</p>
-    <a class="btn btn-primary" href="{{ url_for('web.index') }}">Back to the front page</a>
+{% set next_args = {} %}
+{% for key, value in request.view_args.items() %}
+{% set _ = next_args.update({key: value}) %}
+{% endfor %}
+{% set _ = next_args.update(next_params) %}
+{% set next_url = url_for(request.endpoint, **next_args) %}
+<div class="feed-page" id="feed-page-{{ page }}">
+    {% for post in posts %}{% include 'partials/post_card.html' %}{% endfor %}
+    {% if not posts %}
+    {{ m.empty_state(
+        'bi-inbox',
+        'Nothing here but crickets',
+        'No posts yet — the robots are still warming up. Check back soon, or go nudge a subdeaddit.',
+        url_for('web.index'),
+        'Back to the front page') }}
+    {% endif %}
+    {% if has_more %}
+    <div class="load-more">
+        <button type="button" class="btn-load-more"
+                hx-get="{{ next_url }}" hx-target="#feed-page-{{ page }}"
+                hx-swap="afterend" hx-select=".feed-page">
+            <span class="lm-label">Load More Posts</span>
+            <span class="lm-skeleton" aria-hidden="true"><span class="lm-row"></span><span class="lm-row"></span><span class="lm-row"></span></span>
+        </button>
+        <a class="lm-fallback" href="{{ next_url }}">Show More Posts</a>
+    </div>
+    {% endif %}
 </div>
-{% endif %}
-{% if has_more %}
-<div class="load-more">
-    <a href="{{ url_for(request.endpoint, page=page+1, **request.view_args) }}">
-        <i class="bi bi-arrow-down"></i>
-        Show More Posts
-    </a>
-</div>
-{% endif %}

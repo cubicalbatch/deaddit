@@ -100,11 +100,17 @@
     --accent-soft: var(--accent-ramp-100);   /* #ffe3d5 tint fill */
     --on-accent: var(--white);
     --accent-hover: var(--accent-ramp-600);  /* #e63a00 - darker step for hovers */
+    --accent-strong: var(--accent-ramp-700);        /* #bf3000 - selected/accent-solid fill; AA 5.77:1 with --on-accent (#ffffff) */
+    --accent-strong-hover: var(--accent-ramp-800);  /* #992600 - AA 7.98:1 with --on-accent */
     --link: var(--blue-500);                 /* #0070c8 - AA 4.56:1 on canvas, 4.89:1 on surface */
     --up: var(--green-500);                  /* #0a7d33 - UI 4.74:1 on canvas, 5.08:1 on surface */
     --up-hover: #075c25;                     /* UI 7.37:1 on canvas, 7.91:1 on surface */
     --down: var(--blue-500);                 /* #0070c8 - UI 4.56:1 on canvas, 4.89:1 on surface */
     --down-hover: var(--blue-600);           /* #005ba3 - UI 6.25:1 on canvas, 6.71:1 on surface */
+
+    /* Rails & highlights */
+    --rail: var(--gray-300);                 /* nesting guide line - decorative, non-text (1.45:1 vs canvas) */
+    --highlight-bg: var(--accent-ramp-100);  /* soft permalink flash - 14.14:1 with text-1, 5.18:1 with text-2 */
 
     /* Status */
     --status-success: var(--green-500);      /* #0a7d33 */
@@ -182,6 +188,8 @@ html[data-theme="dark"] {
        mid-tones glow on dark surfaces) */
     --accent: #ff5c1f;                       /* UI 6.17:1 on canvas, 5.76:1 on surface */
     --accent-soft: #2b150a;                  /* dark-tinted orange wash */
+    --accent-strong: var(--accent-ramp-700);        /* #bf3000 - selected/accent-solid fill; AA 5.77:1 with --on-accent (#ffffff), 3.30:1 vs canvas */
+    --accent-strong-hover: #c23a00;                 /* lighter step for dark hover; AA 5.39:1 with --on-accent, 3.53:1 vs canvas */
     --accent-hover: var(--accent-ramp-400);  /* #ff7038 - lighter step for hovers on dark */
     --on-accent: var(--white);
     --link: #6cb6f2;                         /* AA 8.71:1 on canvas, 8.14:1 on surface */
@@ -189,6 +197,10 @@ html[data-theme="dark"] {
     --up-hover: #5cc472;                     /* UI 8.70:1 on canvas, 8.13:1 on surface */
     --down: #5aa2f0;                         /* UI 7.13:1 on canvas, 6.66:1 on surface */
     --down-hover: #7193ff;                   /* UI 6.64:1 on canvas, 6.20:1 on surface */
+
+    /* Rails & highlights */
+    --rail: #2a2d31;                         /* nesting guide line - decorative, non-text, same family as dark border */
+    --highlight-bg: var(--accent-soft);      /* dark-orange wash (#2b150a) - 13.83:1 with text-1 */
 
     /* Status (dark-tuned) */
     --status-success: var(--green-400);      /* #46b45e */
@@ -207,22 +219,4 @@ html[data-theme="dark"] {
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.45);
     --shadow-3: 0 4px 16px rgba(0, 0, 0, 0.5);
-}
-
-/* ------------------------------------------------------------
-   Legacy aliases - consumed by style.css until UX-2 rename.
-   Referenced from semantic vars, so they re-resolve in dark
-   automatically. Do not use these names in new code.
-   ------------------------------------------------------------ */
-:root {
-    --primary-color: var(--accent);
-    --secondary-color: var(--link);
-    --background-color: var(--bg-canvas);
-    --surface-color: var(--bg-surface);
-    --text-primary: var(--text-1);
-    --text-secondary: var(--text-2);
-    --border-color: var(--border);
-    --shadow-light: var(--shadow-1);
-    --shadow-medium: var(--shadow-2);
-    --shadow-strong: var(--shadow-3);
 }
