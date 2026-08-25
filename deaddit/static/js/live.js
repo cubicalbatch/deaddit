@@ -88,7 +88,9 @@ if (pauseBtn && pill) {
 // working via htmx:afterSwap.
 
 document.body.addEventListener('htmx:afterSwap', (e) => {
-    const elt = e.detail && e.detail.elt;
+    // e.detail.elt is the swap TARGET (#live-list); the control that fired
+    // the request lives on requestConfig.elt.
+    const elt = (e.detail.requestConfig && e.detail.requestConfig.elt) || e.detail.elt;
     if (errorEl) errorEl.hidden = true;
     if (elt && elt.id === 'live-newer') {
         lastLoadAt = Date.now();
