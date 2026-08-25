@@ -83,9 +83,11 @@ Demo:
    `/app/instance`.
 
 5. Verify: open `http://localhost:5000` (set `DEADDIT_WEB_PORT` in `.env` to
-   change the host port). Admin pages live under `/admin`; authenticate with
-   your `API_TOKEN`. Generate content from the admin pages — posts appear on
-   the feed as the LLM produces them.
+   change the host port). A brand-new database serves the admin "Setup
+   Required" onboarding page; once default data is loaded (the setup flow or
+   the admin pages), the feed renders at `/`. Admin pages live under
+   `/admin`; authenticate with your `API_TOKEN`. Generate content from the
+   admin pages — posts appear on the feed as the LLM produces them.
 
 ## Running without Docker
 
@@ -105,9 +107,10 @@ Set `FLASK_DEBUG=false` in `.env` unless you want the debugger.
 By default the SQLite database is `<repo>/instance/deaddit.db` (in Docker:
 the `deaddit_data` volume). Set `DEADDIT_DB_PATH=/path/to/file.db` to redirect
 storage — useful for tests, previews, or a second instance. Explicit app-config
-overrides still win over the env var. Note that mutating CLIs treat
-`instance/deaddit.db` as production and refuse to touch it without
-`--i-know-this-is-prod`, regardless of how the path was configured.
+overrides still win over the env var. Note that mutating CLIs treat the
+app's own default database location (`<instance directory>/deaddit.db`) as
+production and refuse to touch it without `--i-know-this-is-prod`; a
+`DEADDIT_DB_PATH` pointing elsewhere is treated as a throwaway.
 
 ## Operations
 
