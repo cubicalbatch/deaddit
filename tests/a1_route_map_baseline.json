@@ -622,5 +622,54 @@
     "methods": [
       "GET"
     ]
+  },
+  {
+    "rule": "/admin/api/pins",
+    "endpoint": "pins_list_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/pins",
+    "endpoint": "pins_set_api",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/pins/<target_kind>/<target_key>",
+    "endpoint": "pins_clear_api",
+    "methods": [
+      "DELETE"
+    ]
+  },
+  {
+    "rule": "/admin/api/prompt-renders",
+    "endpoint": "prompt_renders_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/prompts",
+    "endpoint": "prompts_list_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/prompts/<name>",
+    "endpoint": "prompts_detail_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/prompts/<name>/versions",
+    "endpoint": "prompts_create_version_api",
+    "methods": [
+      "POST"
+    ]
   }
 ]

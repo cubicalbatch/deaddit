@@ -30,6 +30,7 @@ class Config:
         "SEED_DECAY_DAYS": "30",
         "SEED_ANCHOR_AT": None,
         "AGENT_RUNTIME_ENABLED": "false",
+        "PROMPT_VERSIONING_ENABLED": "false",
     }
 
     # Descriptions for each setting
@@ -50,6 +51,7 @@ class Config:
         "SEED_DECAY_DAYS": "Days over which seed vote probability decays linearly to zero from the anchor",
         "SEED_ANCHOR_AT": "ISO timestamp anchor for seed decay; written on first non-dry-run history seed",
         "AGENT_RUNTIME_ENABLED": "Whether the autonomous agent runtime is enabled (true/false); manual run-once is always allowed",
+        "PROMPT_VERSIONING_ENABLED": "Whether pinned prompt-template versions drive agent system prompts (true/false); LLM-5 parity freeze - keep false until the AC-P3 window closes",
     }
 
     @classmethod

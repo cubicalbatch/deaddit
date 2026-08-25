@@ -65,6 +65,10 @@ class ChatRequest:
     request_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     action: str | None = None
     agent: str | None = None
+    # LLM-5 prompt versioning: identity of the pinned template version the
+    # system prompt was rendered from; echoed onto ChatResult for audit.
+    template_name: str | None = None
+    template_version: int | None = None
 
 
 @dataclass
@@ -76,6 +80,7 @@ class ChatResult:
     attempts: int
     request_id: str
     tool_calls: list[dict] | None = None
+    template_version: int | None = None  # LLM-5: echoed from ChatRequest
 
 
 @dataclass
@@ -239,6 +244,7 @@ class LLMClient:
             attempts=attempts,
             request_id=req.request_id,
             tool_calls=tool_calls,
+            template_version=req.template_version,
         )
 
     def _resolve_stream_support(self, req: ChatRequest) -> bool:
@@ -377,6 +383,7 @@ class LLMClient:
             attempts=last_attempts(),
             request_id=req.request_id,
             tool_calls=tool_calls or None,
+            template_version=req.template_version,
         )
         logger.info(
             "LLM stream complete: request_id=%s model=%s endpoint=%s "

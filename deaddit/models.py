@@ -610,6 +610,8 @@ class Ban(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     expires_at = db.Column(db.DateTime, nullable=True)
     lifted_at = db.Column(db.DateTime, nullable=True, index=True)
+
+
 # --- UX-5: streamed job logs ---
 class JobLog(db.Model):
     """One captured log line emitted while a job executed (Phase UX-5).
@@ -637,3 +639,86 @@ class JobLog(db.Model):
             "message": self.message,
         }
 
+
+# --- LLM-5: prompt versioning ---
+class PromptTemplate(db.Model):
+    """A named prompt template; content lives only in immutable versions."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    description = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    versions = db.relationship(
+        "PromptTemplateVersion", backref="template", lazy="dynamic"
+    )
+
+
+class PromptTemplateVersion(db.Model):
+    """One immutable revision of a prompt template body.
+
+    Immutability is enforced by deaddit.llm.prompts's before_update guard:
+    edits create version n+1; v(n) stays queryable forever.
+    """
+
+    id = db.Column(db.Integer, primary_key=True)
+    template_id = db.Column(
+        db.Integer, db.ForeignKey("prompt_template.id"), nullable=False, index=True
+    )
+    version = db.Column(db.Integer, nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    created_by = db.Column(db.String(120))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("template_id", "version", name="uq_prompt_version"),
+    )
+
+
+class PromptPin(db.Model):
+    """Pins one agent or cohort to an exact prompt template version.
+
+    ``target_kind`` is 'agent' (target_key = agent username) or 'cohort'
+    (target_key = cohort name). One row per target; re-pinning updates
+    the row in place — render history keeps the audit trail.
+    """
+
+    id = db.Column(db.Integer, primary_key=True)
+    target_kind = db.Column(db.String(20), nullable=False)
+    target_key = db.Column(db.String(120), nullable=False)
+    template_id = db.Column(
+        db.Integer, db.ForeignKey("prompt_template.id"), nullable=False
+    )
+    version_number = db.Column(db.Integer, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint("target_kind", "target_key", name="uq_prompt_pin_target"),
+    )
+
+
+class PromptRenderAudit(db.Model):
+    """Audit trail: which prompt version rendered for which subject, when.
+
+    Written by deaddit.llm.prompts on every registry-mediated render.
+    ``variables_json`` plus the stored version body reproduce the exact
+    bytes (rendered_sha256 proves it) without duplicating full text.
+    """
+
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    template_id = db.Column(
+        db.Integer, db.ForeignKey("prompt_template.id"), nullable=False
+    )
+    template_version_id = db.Column(
+        db.Integer,
+        db.ForeignKey("prompt_template_version.id"),
+        nullable=False,
+        index=True,
+    )
+    subject_kind = db.Column(db.String(20), nullable=False)
+    subject_key = db.Column(db.String(120))
+    rendered_sha256 = db.Column(db.String(64), nullable=False)
+    variables_json = db.Column(db.Text)

@@ -38,6 +38,10 @@ from deaddit.models import (
     LLMUsage,
     ModelRoute,
     Post,
+    PromptPin,
+    PromptRenderAudit,
+    PromptTemplate,
+    PromptTemplateVersion,
     Report,
     Subdeaddit,
     User,
@@ -2862,3 +2866,189 @@ def job_log_api(job_id):
     )
 
 
+# --- LLM-5: prompt versioning (read-only visibility + version creation) ---
+# JSON contract for the UX lane: page/template work is UX-owned; these
+# endpoints are the data surface. All routes are @production_disabled +
+# @admin_required like the other admin APIs.
+
+
+def _version_dict(row):
+    return {
+        "id": row.id,
+        "template_id": row.template_id,
+        "version": row.version,
+        "body": row.body,
+        "created_by": row.created_by,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+@admin_bp.route("/api/prompts")
+@production_disabled
+@admin_required
+def prompts_list_api():
+    """List prompt templates with version summaries and active pins."""
+    templates = PromptTemplate.query.order_by(PromptTemplate.name.asc()).all()
+    return jsonify(
+        [
+            {
+                "id": t.id,
+                "name": t.name,
+                "description": t.description,
+                "versions": [
+                    v.version
+                    for v in t.versions.order_by(
+                        PromptTemplateVersion.version.asc()
+                    )
+                ],
+                "latest_version": (
+                    t.versions.order_by(PromptTemplateVersion.version.desc())
+                    .first()
+                    .version
+                    if t.versions.count()
+                    else None
+                ),
+                "pinned_by": sorted(
+                    f"{pin.target_kind}:{pin.target_key}"
+                    for pin in PromptPin.query.filter_by(template_id=t.id)
+                ),
+            }
+            for t in templates
+        ]
+    )
+
+
+@admin_bp.route("/api/prompts/<name>")
+@production_disabled
+@admin_required
+def prompts_detail_api(name):
+    """Full template detail: every immutable version plus its pins."""
+    template = PromptTemplate.query.filter_by(name=name).first()
+    if template is None:
+        return jsonify({"error": f"Unknown prompt template {name!r}"}), 404
+    versions = (
+        template.versions.order_by(PromptTemplateVersion.version.asc()).all()
+    )
+    return jsonify(
+        {
+            "id": template.id,
+            "name": template.name,
+            "description": template.description,
+            "versions": [_version_dict(v) for v in versions],
+            "pins": [
+                {
+                    "target_kind": p.target_kind,
+                    "target_key": p.target_key,
+                    "version_number": p.version_number,
+                }
+                for p in PromptPin.query.filter_by(template_id=template.id)
+            ],
+        }
+    )
+
+
+@admin_bp.route("/api/prompts/<name>/versions", methods=["POST"])
+@production_disabled
+@admin_required
+def prompts_create_version_api(name):
+    """Create version n+1; existing versions are immutable and queryable."""
+    from deaddit.llm.prompts import PromptError, create_version
+
+    data = request.get_json(silent=True) or {}
+    body = data.get("body")
+    if not body or not isinstance(body, str):
+        return jsonify({"error": "Field 'body' (non-empty string) is required"}), 400
+    try:
+        row = create_version(name, body, created_by=data.get("created_by"))
+    except PromptError as exc:
+        return jsonify({"error": str(exc)}), 404
+    return jsonify(_version_dict(row)), 201
+
+
+@admin_bp.route("/api/pins")
+@production_disabled
+@admin_required
+def pins_list_api():
+    """List agent/cohort -> prompt-version pins."""
+    return jsonify(
+        [
+            {
+                "target_kind": p.target_kind,
+                "target_key": p.target_key,
+                "template_id": p.template_id,
+                "template_name": (
+                    db.session.get(PromptTemplate, p.template_id).name
+                    if db.session.get(PromptTemplate, p.template_id)
+                    else None
+                ),
+                "version_number": p.version_number,
+                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+            }
+            for p in PromptPin.query.order_by(
+                PromptPin.target_kind.asc(), PromptPin.target_key.asc()
+            )
+        ]
+    )
+
+
+@admin_bp.route("/api/pins", methods=["POST"])
+@production_disabled
+@admin_required
+def pins_set_api():
+    """Upsert one pin: {target_kind, target_key, template, version}."""
+    from deaddit.llm.prompts import PromptError, set_pin
+
+    data = request.get_json(silent=True) or {}
+    try:
+        set_pin(
+            data.get("target_kind", ""),
+            data.get("target_key", ""),
+            data.get("template", ""),
+            int(data.get("version", 0)),
+        )
+    except (PromptError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    return pins_list_api()
+
+
+@admin_bp.route("/api/pins/<target_kind>/<target_key>", methods=["DELETE"])
+@production_disabled
+@admin_required
+def pins_clear_api(target_kind, target_key):
+    from deaddit.llm.prompts import clear_pin
+
+    if clear_pin(target_kind, target_key):
+        return jsonify({"cleared": True})
+    return jsonify({"cleared": False, "error": "No such pin"}), 404
+
+
+@admin_bp.route("/api/prompt-renders")
+@production_disabled
+@admin_required
+def prompt_renders_api():
+    """Recent render-audit rows: which prompt version produced which run.
+
+    ``?limit=<n>`` (default 50, max 500). Joins agent_run via
+    subject_key == Agent.user_username and overlapping run timestamps.
+    """
+    limit = min(request.args.get("limit", 50, type=int) or 50, 500)
+    rows = (
+        PromptRenderAudit.query.order_by(PromptRenderAudit.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return jsonify(
+        [
+            {
+                "id": r.id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "template_id": r.template_id,
+                "template_version_id": r.template_version_id,
+                "subject_kind": r.subject_kind,
+                "subject_key": r.subject_key,
+                "rendered_sha256": r.rendered_sha256,
+                "variables_json": r.variables_json,
+            }
+            for r in rows
+        ]
+    )
