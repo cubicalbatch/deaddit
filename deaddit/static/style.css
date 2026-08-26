@@ -24,7 +24,10 @@ body {
     background-color: var(--bg-surface);
     border-bottom: 1px solid var(--border);
     box-shadow: var(--shadow-1);
-    transition: all 0.2s ease;
+    /* Scoped: `all` animated background-color on theme flips, producing a
+       200ms window where axe sampled dark surface under light text (and
+       vice versa). Theme changes must be instant; only chrome edges ease. */
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 
