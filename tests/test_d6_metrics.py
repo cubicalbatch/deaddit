@@ -65,6 +65,7 @@ def rollup_fixtures(app, db_session):
         user="alice",
         subdeaddit_name="metrics",
         model="agent:alice",
+        created_at=_dt(hour=9),
     )
     p_seed = Post(
         title="seed post",
@@ -73,6 +74,7 @@ def rollup_fixtures(app, db_session):
         user="bob",
         subdeaddit_name="metrics",
         model="seed",
+        created_at=_dt(hour=9),
     )
     p_other = Post(
         title="other post",
@@ -81,18 +83,22 @@ def rollup_fixtures(app, db_session):
         user="carol",
         subdeaddit_name="metrics",
         model="legacy-model",
+        created_at=_dt(hour=9),
     )
     db_session.add_all([p_agent, p_seed, p_other])
     db_session.commit()
 
     c_top = Comment(
-        post_id=p_agent.id, user="bob", content="top", score=1, model="seed"
+        post_id=p_agent.id, user="bob", content="top", score=1, model="seed",
+        created_at=_dt(hour=10),
     )
     c_reply = Comment(
-        post_id=p_agent.id, parent_id=None, user="carol", content="reply", score=-1, model="seed"
+        post_id=p_agent.id, parent_id=None, user="carol", content="reply", score=-1,
+        model="seed", created_at=_dt(hour=11),
     )
     c_standalone = Comment(
-        post_id=p_seed.id, user="bob", content="solo", score=-1, model="legacy-model"
+        post_id=p_seed.id, user="bob", content="solo", score=-1,
+        model="legacy-model", created_at=_dt(hour=11),
     )
     db_session.add_all([c_top, c_reply, c_standalone])
     db_session.commit()
