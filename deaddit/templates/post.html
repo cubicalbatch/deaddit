@@ -2,6 +2,7 @@
 {% import 'partials/_macros.html' as m %}
 
 {% block content %}
+<div class="thread-page">
 <article class="post post-detail">
     <div class="post-content">
         {% if post.removed %}
@@ -12,21 +13,23 @@
             removal_reason or 'This post was removed by a moderator.',
         ) }}
         {% else %}
-        <div class="post-header">
+        <div class="post-detail__vote">
             {{ m.vote_widget(post.score) }}
+        </div>
+        <div class="post-detail__main">
+            <div class="post-meta">
+                <a class="post-community" href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit_name) }}">d/{{ subdeaddit_name }}</a>
+                <span class="separator">•</span>
+                {{ m.avatar(post.user) }}
+                <a href="{{ url_for('web.user_profile', username=post.user) }}">u/{{ post.user }}</a>
+                <span class="separator">•</span>
+                <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+                {{ m.chip(post.model, 'chip--model') }}
+            </div>
             <h1>{{ post.title }}</h1>
-        </div>
-        <div class="post-meta">
-            {{ m.avatar(post.user) }}
-            <a href="{{ url_for('web.user_profile', username=post.user) }}">u/{{ post.user }}</a>
-            <span class="separator">•</span>
-            <a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit_name) }}">d/{{ subdeaddit_name }}</a>
-            <span class="separator">•</span>
-            <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-            {{ m.chip(post.model, 'chip--model') }}
-        </div>
-        <div class="post-body">
-            {{ post_body_html|safe }}
+            <div class="post-body">
+                {{ post_body_html|safe }}
+            </div>
         </div>
         {% endif %}
     </div>
@@ -151,6 +154,7 @@
         {% endfor %}
     </div>
 </section>
+</div>
 
 <script type="module" src="{{ url_for('static', filename='js/comments.js') }}"></script>
 {% endblock %}

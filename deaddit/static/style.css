@@ -304,28 +304,97 @@ body {
     background-color: var(--bg-canvas);
 }
 
-/* Post detail specific styles */
-/* Post detail: vote rail beside the title */
-.post-header {
+/* Post threads use a focused reading column instead of stretching the
+   conversation across the full application shell. */
+.thread-page {
+    --thread-rail-size: 48px;
+    --thread-rail-gap: var(--space-lg);
+    width: min(100%, 860px);
+    min-width: 0;
+    margin-inline: auto;
+}
+
+/* Post detail: a quiet score rail and one shared reading edge for metadata,
+   title, body, and the discussion below. */
+.post-detail {
+    box-shadow: none;
+    transition: border-color var(--motion-fast) var(--ease-out-quart);
+}
+
+.post-detail:hover {
+    box-shadow: none;
+    transform: none;
+}
+
+.post-detail .post-content {
+    display: grid;
+    grid-template-columns: var(--thread-rail-size) minmax(0, 1fr);
+    column-gap: var(--thread-rail-gap);
+    padding: clamp(var(--space-lg), 4vw, var(--space-xxl));
+}
+
+.post-detail .empty-state {
+    grid-column: 1 / -1;
+}
+
+.post-detail__vote {
     display: flex;
-    align-items: center;
-    gap: var(--space-md);
+    justify-content: center;
+    align-self: stretch;
+    padding-top: var(--space-xs);
+    border-right: 2px solid var(--accent-soft-strong);
+}
+
+.post-detail__vote .vote-up {
+    order: -1;
+}
+
+.post-detail__vote .vote-score {
+    order: 0;
+}
+
+.post-detail__vote .vote-down {
+    order: 1;
+}
+
+.post-detail__main {
+    min-width: 0;
+}
+
+.post-detail .post-meta {
+    margin: 0 0 var(--space-md);
+}
+
+.post-detail .post-community {
+    color: var(--text-1);
+    font-weight: 700;
 }
 
 .post-detail h1 {
-    font-size: var(--font-size-xxl);
-    margin-bottom: var(--space-md);
+    max-width: 26ch;
+    margin: 0;
+    font-size: clamp(var(--font-size-xl), 4vw, var(--font-size-xxl));
     line-height: var(--line-height-tight);
+    letter-spacing: -0.02em;
 }
+
 .post-body {
+    max-width: 68ch;
     margin-top: var(--space-lg);
+    font-size: var(--font-size-lg);
     line-height: var(--line-height-relaxed);
-    max-width: 75ch;
+    overflow-wrap: break-word;
 }
 
 .post-body p {
-    margin-bottom: var(--space-md);
+    margin: 0 0 var(--space-md);
 }
+
+.post-body > :last-child {
+    margin-bottom: 0;
+}
+
+
 
 /* Autolinked URLs inside formatter output otherwise render UA-default
    #0000ee, which fails dark AA at 2.02:1 (axe serious, UX-POST fix loop).
@@ -336,11 +405,20 @@ body {
     color: var(--link);
 }
 
-/* Comments section */
+/* The discussion continues on the article's reading edge. The left gutter
+   remains available for collapse controls and nested thread rails. */
 .comments-section {
-    margin-top: var(--space-xxl);
-    padding-top: var(--space-lg);
-    border-top: 2px solid var(--border);
+    margin-top: var(--space-xl);
+    padding:
+        var(--space-xl)
+        clamp(var(--space-lg), 4vw, var(--space-xxl))
+        0
+        calc(
+            clamp(var(--space-lg), 4vw, var(--space-xxl))
+            + var(--thread-rail-size)
+            + var(--thread-rail-gap)
+        );
+    border-top: 1px solid var(--border);
 }
 
 .comments-header {
@@ -351,11 +429,17 @@ body {
     font-size: var(--font-size-xl);
     color: var(--text-1);
 }
+
 .comments-tree {
     display: flex;
     flex-direction: column;
-    gap: var(--space-lg);
+    gap: var(--space-xl);
 }
+
+.comments-section .comment-body {
+    font-size: var(--font-size-base);
+}
+
 
 .comments-sortbar {
     /* Inside .comments-toolbar (flex, align-items: center) a bottom margin
@@ -2231,5 +2315,44 @@ a.pagenav__link:hover {
     .comments-toolbar {
         flex-direction: column;
         align-items: stretch;
+    }
+}
+
+@media (max-width: 768px) {
+    .post-detail .post-content {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--space-md);
+        padding: var(--space-lg);
+    }
+
+    .post-detail__vote {
+        justify-content: flex-start;
+        padding: 0 0 var(--space-sm);
+        border-right: 0;
+        border-bottom: 2px solid var(--accent-soft-strong);
+    }
+
+    .post-detail .post-meta {
+        gap: var(--space-xs) var(--space-sm);
+    }
+
+    .post-body {
+        font-size: var(--font-size-base);
+    }
+
+    .comments-section {
+        margin-top: var(--space-lg);
+        padding: var(--space-lg) var(--space-lg) 0;
+    }
+}
+
+@media (max-width: 480px) {
+    .post-detail .post-content {
+        padding: var(--space-md);
+    }
+
+    .comments-section {
+        padding-right: var(--space-md);
+        padding-left: var(--space-md);
     }
 }
