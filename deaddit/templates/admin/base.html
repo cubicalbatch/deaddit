@@ -62,17 +62,10 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'admin.generate' %}active{% endif %}" 
-                       href="{{ url_for('admin.generate') }}">
-                        <i class="bi bi-plus-circle"></i>
-                        <span class="nav-text">Generate Content</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint in ['admin.jobs', 'admin.job_detail'] %}active{% endif %}" 
-                       href="{{ url_for('admin.jobs') }}">
-                        <i class="bi bi-list-task"></i>
-                        <span class="nav-text">Jobs</span>
+                    <a class="nav-link {% if request.endpoint in ['admin.agents_dashboard', 'admin.agent_detail'] %}active{% endif %}"
+                       href="{{ url_for('admin.agents_dashboard') }}">
+                        <i class="bi bi-robot"></i>
+                        <span class="nav-text">Agents</span>
                     </a>
                 </li>
                 <li class="nav-item">
@@ -83,24 +76,10 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'admin.content' %}active{% endif %}" 
+                    <a class="nav-link {% if request.endpoint == 'admin.content' %}active{% endif %}"
                        href="{{ url_for('admin.content') }}">
                         <i class="bi bi-file-text"></i>
                         <span class="nav-text">Content</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint in ['admin.agents_dashboard', 'admin.agent_detail'] %}active{% endif %}"
-                       href="{{ url_for('admin.agents_dashboard') }}">
-                        <i class="bi bi-robot"></i>
-                        <span class="nav-text">Agents</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'admin.settings' %}active{% endif %}" 
-                       href="{{ url_for('admin.settings') }}">
-                        <i class="bi bi-gear"></i>
-                        <span class="nav-text">Settings</span>
                     </a>
                 </li>
                 <li class="nav-item">
@@ -108,6 +87,20 @@
                        href="{{ url_for('admin.analytics') }}">
                         <i class="bi bi-graph-up"></i>
                         <span class="nav-text">Analytics</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'admin.settings' %}active{% endif %}"
+                       href="{{ url_for('admin.settings') }}">
+                        <i class="bi bi-gear"></i>
+                        <span class="nav-text">Settings</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'admin.capabilities' %}active{% endif %}"
+                       href="{{ url_for('admin.capabilities') }}">
+                        <i class="bi bi-shield-check"></i>
+                        <span class="nav-text">Capabilities</span>
                     </a>
                 </li>
             </ul>
@@ -140,7 +133,6 @@
     </div>
 
     <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='vendor/socketio/socket.io.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/admin-base.js') }}" defer></script>
     {% block extra_js %}{% endblock %}
 </body>

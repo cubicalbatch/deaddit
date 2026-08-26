@@ -11,8 +11,7 @@
 {%- import 'partials/_macros.html' as m -%}
 {%- set kind_icons = {'post': 'bi-file-earmark-text',
                       'comment': 'bi-chat-left-text',
-                      'vote': 'bi-hand-thumbs-up',
-                      'job': 'bi-gear'} -%}
+                      'vote': 'bi-hand-thumbs-up'} -%}
 {%- set _next = next_cursor | default('') -%}
 {%- if not _next and items -%}{%- set _next = items[-1].cursor -%}{%- endif -%}
 {%- set _more = has_more | default(false) or (_next != '' and items | length >= 30) -%}

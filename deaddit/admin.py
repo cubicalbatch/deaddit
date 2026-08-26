@@ -23,19 +23,17 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from deaddit import db
 from deaddit.config import Config
-from deaddit.jobs import cancel_job, create_job, get_job_status, get_queue_stats
 from deaddit.llm import routing
 from deaddit.llm.capabilities import probe_endpoint, set_manual_override
 from deaddit.models import (
+    Agent,
+    AgentRun,
     ApiEndpointConfig,
     ApiModel,
     Comment,
     DegeneracyFlag,
     EndpointCapability,
     Job,
-    JobLog,
-    JobStatus,
-    JobType,
     LLMUsage,
     ModelRoute,
     Post,
@@ -285,292 +283,102 @@ def logout():
 @production_disabled
 @admin_required
 def dashboard():
-    """Admin dashboard with overview statistics."""
+    """Agent-first admin dashboard: agents, platform pulse, LLM spend."""
 
-    # Get basic content statistics
-    stats = {
-        "total_posts": Post.query.count(),
-        "total_comments": Comment.query.count(),
-        "total_users": User.query.count(),
-        "total_subdeaddits": Subdeaddit.query.count(),
-    }
+    now = datetime.utcnow()
+    since = now - timedelta(days=1)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    # Get recent activity (last 24 hours)
-    since_yesterday = datetime.utcnow() - timedelta(days=1)
-
-    # Count recent completed user creation jobs as proxy for new users
-    recent_user_jobs = Job.query.filter(
-        Job.created_at >= since_yesterday,
-        Job.type == JobType.CREATE_USER,
-        Job.status == JobStatus.COMPLETED,
+    # --- Agents overview ---
+    # One grouped scan for run tallies (indexed on started_at); next wake is a
+    # single MIN over enabled agents.
+    run_rows = (
+        db.session.query(AgentRun.status, func.count(AgentRun.id))
+        .filter(AgentRun.started_at >= since)
+        .group_by(AgentRun.status)
+        .all()
+    )
+    runs_by_status = dict(run_rows)
+    enabled_count = Agent.query.filter_by(is_enabled=True).count()
+    failing_agents = Agent.query.filter(
+        Agent.is_enabled.is_(True), Agent.consecutive_failures > 0
     ).count()
-
-    recent_stats = {
-        "posts_24h": Post.query.filter(Post.created_at >= since_yesterday).count(),
-        "comments_24h": Comment.query.filter(
-            Comment.created_at >= since_yesterday
-        ).count(),
-        "users_24h": recent_user_jobs,
+    next_wake = (
+        Agent.query.filter(Agent.is_enabled.is_(True), Agent.next_run_at.isnot(None))
+        .order_by(Agent.next_run_at.asc())
+        .first()
+    )
+    agents_overview = {
+        "enabled": enabled_count,
+        "total": Agent.query.count(),
+        "runs_24h": sum(runs_by_status.values()),
+        "completed_24h": runs_by_status.get("completed", 0),
+        "failed_24h": runs_by_status.get("failed", 0),
+        "failing_agents": failing_agents,
+        "next_wake": next_wake.next_run_at if next_wake else None,
     }
 
-    # Get job statistics
-    job_stats = {
-        "total_jobs": Job.query.count(),
-        "pending_jobs": Job.query.filter_by(status=JobStatus.PENDING).count(),
-        "running_jobs": Job.query.filter_by(status=JobStatus.RUNNING).count(),
-        "completed_jobs": Job.query.filter_by(status=JobStatus.COMPLETED).count(),
-        "failed_jobs": Job.query.filter_by(status=JobStatus.FAILED).count(),
-    }
-
-    # Get recent jobs
-    recent_jobs = Job.query.order_by(desc(Job.created_at)).limit(10).all()
-
-    # Get queue statistics (handle Redis not available)
-    try:
-        queue_stats = get_queue_stats()
-    except Exception as e:
-        logger.warning(f"Could not get queue stats: {e}")
-        queue_stats = {
-            "high_priority": {"pending": 0, "failed": 0},
-            "normal": {"pending": 0, "failed": 0},
-            "low_priority": {"pending": 0, "failed": 0},
-        }
-
-    return render_template(
-        "admin/dashboard.html",
-        stats=stats,
-        recent_stats=recent_stats,
-        job_stats=job_stats,
-        recent_jobs=recent_jobs,
-        queue_stats=queue_stats,
+    # --- Platform pulse ---
+    # Provenance buckets follow Resolution 9: model marker 'agent:*' vs
+    # 'seed' vs anything else. Two indexed GROUP BYs + two tiny counters.
+    post_rows = (
+        db.session.query(Post.model, func.count(Post.id))
+        .filter(Post.created_at >= today_start)
+        .group_by(Post.model)
+        .all()
     )
-
-
-@admin_bp.route("/generate")
-@production_disabled
-@admin_required
-def generate():
-    """LLM playground page."""
-    # Check if default data has been loaded
-    default_data_loaded = Config.get("DEFAULT_DATA_LOADED", "false") == "true"
-
-    return render_template(
-        "admin/generate.html",
-        default_data_loaded=default_data_loaded,
-    )
-
-
-@admin_bp.route("/jobs")
-@production_disabled
-@admin_required
-def jobs():
-    """Job management page."""
-
-    # Get filter parameters
-    status_filter = request.args.get("status")
-    type_filter = request.args.get("type")
-    page = int(request.args.get("page", 1))
-    per_page = int(request.args.get("per_page", 20))
-
-    # Build query
-    query = Job.query
-
-    if status_filter:
-        query = query.filter(Job.status == JobStatus(status_filter))
-
-    if type_filter:
-        query = query.filter(Job.type == JobType(type_filter))
-    # Server-side sort: strict whitelist mapping -> order_by expression.
-    job_sort_columns = {
-        "created_at": Job.created_at,
-        "priority": Job.priority,
-        "status": Job.status,
-        "type": Job.type,
-        "progress": Job.progress,
-    }
-    sort_key = request.args.get("sort", "created_at")
-    if sort_key not in job_sort_columns:
-        sort_key = "created_at"
-    sort_dir = request.args.get("dir", "desc")
-    if sort_dir not in ("asc", "desc"):
-        sort_dir = "desc"
-
-    sort_column = job_sort_columns[sort_key]
-    query = query.order_by(
-        desc(sort_column) if sort_dir == "desc" else sort_column.asc()
-    )
-    # Stable tiebreaker so equal sort values paginate deterministically.
-    query = query.order_by(desc(Job.id))
-
-    # Paginate
-    jobs_pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-
-    # Get available filter options
-    job_types = [jt.value for jt in JobType]
-    job_statuses = [js.value for js in JobStatus]
-
-    # Get job status counts for quick stats
-    job_counts = {
-        "pending": Job.query.filter_by(status=JobStatus.PENDING).count(),
-        "running": Job.query.filter_by(status=JobStatus.RUNNING).count(),
-        "completed": Job.query.filter_by(status=JobStatus.COMPLETED).count(),
-        "failed": Job.query.filter_by(status=JobStatus.FAILED).count(),
-        "cancelled": Job.query.filter_by(status=JobStatus.CANCELLED).count(),
-    }
-
-    return render_template(
-        "admin/jobs.html",
-        jobs=jobs_pagination.items,
-        pagination=jobs_pagination,
-        job_types=job_types,
-        job_statuses=job_statuses,
-        current_status=status_filter,
-        current_type=type_filter,
-        job_counts=job_counts,
-        current_sort=sort_key,
-        current_dir=sort_dir,
-        current_per_page=per_page,
-    )
-
-
-@admin_bp.route("/jobs/<int:job_id>")
-@production_disabled
-@admin_required
-def job_detail(job_id):
-    """Job detail page."""
-    job = Job.query.get_or_404(job_id)
-
-    # Find related jobs (same type, created around the same time)
-    time_window = timedelta(hours=24)
-    related_jobs = (
-        Job.query.filter(
-            Job.id != job.id,
-            Job.type == job.type,
-            Job.created_at >= job.created_at - time_window,
-            Job.created_at <= job.created_at + time_window,
-        )
-        .order_by(desc(Job.created_at))
-        .limit(10)
+    comment_rows = (
+        db.session.query(Comment.model, func.count(Comment.id))
+        .filter(Comment.created_at >= today_start)
+        .group_by(Comment.model)
         .all()
     )
 
-    # Resolve generated-content references (usernames / ids / names)
-    # route-side so the template never touches the ORM.
-    result = job.result or {}
-    content_users = {
-        username: User.query.filter_by(username=username).first()
-        for username in (result.get("users") or [])[:10]
+    def _bucket(rows):
+        out = {"agent": 0, "seed": 0, "legacy": 0}
+        for marker, n in rows:
+            if marker and str(marker).startswith("agent:"):
+                out["agent"] += n
+            elif marker == "seed":
+                out["seed"] += n
+            else:
+                out["legacy"] += n
+        return out
+
+    degeneracy_active = (
+        DegeneracyFlag.query.filter(DegeneracyFlag.created_at >= since).count()
+    )
+    reports_pending = Report.query.filter(Report.status == "open").count()
+    pulse = {
+        "posts_today": _bucket(post_rows),
+        "comments_today": _bucket(comment_rows),
+        "degeneracy_flags_24h": degeneracy_active,
+        "reports_open": reports_pending,
     }
-    content_posts = {
-        post_id: db.session.get(Post, post_id)
-        for post_id in (result.get("posts") or [])[:10]
-    }
-    content_subdeaddits = {
-        name: Subdeaddit.query.filter_by(name=name).first()
-        for name in (result.get("subdeaddits") or [])[:10]
-    }
-    content_comments = {
-        comment_id: db.session.get(Comment, comment_id)
-        for comment_id in (result.get("comments") or [])[:10]
+
+    # --- LLM spend today ---
+    spend_row = (
+        db.session.query(
+            func.coalesce(func.sum(LLMUsage.total_tokens), 0),
+            func.sum(LLMUsage.estimated_cost),
+            func.count(LLMUsage.id),
+        )
+        .filter(LLMUsage.created_at >= today_start)
+        .one()
+    )
+    llm_spend = {
+        "tokens": spend_row[0],
+        # None stays None when nothing priced was spent today (never fake $0).
+        "cost": spend_row[1],
+        "calls": spend_row[2],
     }
 
     return render_template(
-        "admin/job_detail.html",
-        job=job,
-        related_jobs=related_jobs,
-        content_users=content_users,
-        content_posts=content_posts,
-        content_subdeaddits=content_subdeaddits,
-        content_comments=content_comments,
+        "admin/dashboard.html",
+        agents=agents_overview,
+        pulse=pulse,
+        llm_spend=llm_spend,
     )
-
-
-@admin_bp.route("/jobs/<int:job_id>/cancel", methods=["POST"])
-@production_disabled
-@admin_required
-def cancel_job_route(job_id):
-    """Cancel a job."""
-    if cancel_job(job_id):
-        flash(f"Job {job_id} cancelled successfully", "success")
-    else:
-        flash(f"Could not cancel job {job_id}", "error")
-
-    return redirect(url_for("admin.job_detail", job_id=job_id))
-
-
-@admin_bp.route("/jobs/<int:job_id>/retry", methods=["POST"])
-@production_disabled
-@admin_required
-def retry_job_route(job_id):
-    """Retry a failed job."""
-    original_job = Job.query.get_or_404(job_id)
-
-    if original_job.status not in [JobStatus.FAILED, JobStatus.CANCELLED]:
-        flash("Only failed or cancelled jobs can be retried", "error")
-        return redirect(url_for("admin.job_detail", job_id=job_id))
-
-    # Legacy generation executors are gone; only queue-internal job types
-    # may be retried.
-    retryable_types = {
-        JobType.BATCH_OPERATION,
-        JobType.SCHEDULED_TASK,
-        JobType.CONTENT_CLEANUP,
-    }
-    if original_job.type not in retryable_types:
-        flash(
-            f"Jobs of type '{original_job.type.value}' can no longer be retried: "
-            "legacy content generation has been removed",
-            "error",
-        )
-        return redirect(url_for("admin.job_detail", job_id=job_id))
-
-    # Create a new job with the same parameters
-    new_job = create_job(
-        job_type=original_job.type,
-        parameters=original_job.parameters,
-        priority=original_job.priority,
-        total_items=original_job.total_items,
-    )
-
-    flash(f"Job retried as new job #{new_job.id}", "success")
-    return redirect(url_for("admin.job_detail", job_id=new_job.id))
-
-
-@admin_bp.route("/api/jobs/<int:job_id>/status")
-@production_disabled
-@admin_required
-def job_status_api(job_id):
-    """API endpoint to get job status (for real-time updates)."""
-    status = get_job_status(job_id)
-    if status:
-        return jsonify(status)
-    else:
-        return jsonify({"error": "Job not found"}), 404
-
-
-@admin_bp.route("/api/jobs/stats")
-@production_disabled
-@admin_required
-def jobs_stats_api():
-    """API endpoint to get job statistics."""
-    try:
-        stats = get_queue_stats()
-    except Exception as e:
-        logger.warning(f"Could not get queue stats: {e}")
-        stats = {
-            "scheduler_running": False,
-            "total_jobs": 0,
-            "pending_jobs": 0,
-            "running_jobs": 0,
-        }
-
-    # Add database job counts
-    stats["database"] = {
-        "pending": Job.query.filter_by(status=JobStatus.PENDING).count(),
-        "running": Job.query.filter_by(status=JobStatus.RUNNING).count(),
-        "completed": Job.query.filter_by(status=JobStatus.COMPLETED).count(),
-        "failed": Job.query.filter_by(status=JobStatus.FAILED).count(),
-    }
 
 
 @admin_bp.route("/content")
@@ -1661,7 +1469,6 @@ def load_models_api():
                     }
                 )
 
-        # Use the comprehensive model fetching function
         models, fetch_message = fetch_all_models_from_api(api_url, api_key)
 
         if models:
@@ -2844,37 +2651,6 @@ def report_ban(report_id):
     duration_label = f" until {ban.expires_at:%Y-%m-%d}" if ban.expires_at else ""
     flash(f"Banned u/{username} ({scope_label}){duration_label}.", "success")
     return redirect(url_for("admin.reports"))
-
-
-@admin_bp.route("/api/jobs/<int:job_id>/log")
-@production_disabled
-@admin_required
-def job_log_api(job_id):
-    """HTTP fallback for the streamed admin job log (Phase UX-5).
-
-    Contract (consumed by the UX-6 log pane and its poll reconciler):
-    ``?after=<seq>&limit=<n>`` -> ``{job_id, lines: [{seq, ts, level,
-    message}], last_seq, status, progress}``. Lines are ordered by seq.
-    """
-    after = request.args.get("after", 0, type=int) or 0
-    limit = min(request.args.get("limit", 200, type=int) or 200, 1000)
-
-    job = Job.query.get_or_404(job_id)
-
-    query = JobLog.query.filter_by(job_id=job_id).order_by(JobLog.seq.asc())
-    if after:
-        query = query.filter(JobLog.seq > after)
-    rows = query.limit(limit).all()
-
-    return jsonify(
-        {
-            "job_id": job.id,
-            "lines": [row.to_dict() for row in rows],
-            "last_seq": rows[-1].seq if rows else after,
-            "status": job.status.value if job.status else None,
-            "progress": job.progress or 0,
-        }
-    )
 
 
 # --- LLM-5: prompt versioning (read-only visibility + version creation) ---

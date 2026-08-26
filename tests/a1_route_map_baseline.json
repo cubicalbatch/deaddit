@@ -161,27 +161,6 @@
     ]
   },
   {
-    "rule": "/admin/api/jobs/<int:job_id>/log",
-    "endpoint": "job_log_api",
-    "methods": [
-      "GET"
-    ]
-  },
-  {
-    "rule": "/admin/api/jobs/<int:job_id>/status",
-    "endpoint": "job_status_api",
-    "methods": [
-      "GET"
-    ]
-  },
-  {
-    "rule": "/admin/api/jobs/stats",
-    "endpoint": "jobs_stats_api",
-    "methods": [
-      "GET"
-    ]
-  },
-  {
     "rule": "/admin/api/load-default-data",
     "endpoint": "load_default_data_api",
     "methods": [
@@ -207,6 +186,27 @@
     "endpoint": "api_persona_candidates",
     "methods": [
       "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/pins",
+    "endpoint": "pins_list_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/pins",
+    "endpoint": "pins_set_api",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/pins/<target_kind>/<target_key>",
+    "endpoint": "pins_clear_api",
+    "methods": [
+      "DELETE"
     ]
   },
   {
@@ -240,6 +240,34 @@
   {
     "rule": "/admin/api/posts/bulk-delete",
     "endpoint": "api_bulk_delete_posts",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/prompt-renders",
+    "endpoint": "prompt_renders_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/prompts",
+    "endpoint": "prompts_list_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/prompts/<name>",
+    "endpoint": "prompts_detail_api",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/prompts/<name>/versions",
+    "endpoint": "prompts_create_version_api",
     "methods": [
       "POST"
     ]
@@ -406,48 +434,6 @@
     ]
   },
   {
-    "rule": "/admin/generate",
-    "endpoint": "generate",
-    "methods": [
-      "GET"
-    ]
-  },
-  {
-    "rule": "/admin/jobs",
-    "endpoint": "jobs",
-    "methods": [
-      "GET"
-    ]
-  },
-  {
-    "rule": "/admin/jobs/<int:job_id>",
-    "endpoint": "job_detail",
-    "methods": [
-      "GET"
-    ]
-  },
-  {
-    "rule": "/admin/jobs/<int:job_id>/cancel",
-    "endpoint": "cancel_job_route",
-    "methods": [
-      "POST"
-    ]
-  },
-  {
-    "rule": "/admin/jobs/<int:job_id>/retry",
-    "endpoint": "retry_job_route",
-    "methods": [
-      "POST"
-    ]
-  },
-  {
-    "rule": "/admin/llm/stream-token",
-    "endpoint": "llm_stream_admin.llm_stream_token",
-    "methods": [
-      "POST"
-    ]
-  },
-  {
     "rule": "/admin/login",
     "endpoint": "login",
     "methods": [
@@ -554,6 +540,13 @@
     ]
   },
   {
+    "rule": "/live",
+    "endpoint": "live.recent",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
     "rule": "/search",
     "endpoint": "search",
     "methods": [
@@ -577,62 +570,6 @@
   {
     "rule": "/users",
     "endpoint": "list_users",
-    "methods": [
-      "GET"
-    ]
-  },
-  {
-    "rule": "/admin/api/pins",
-    "endpoint": "pins_list_api",
-    "methods": [
-      "GET"
-    ]
-  },
-  {
-    "rule": "/admin/api/pins",
-    "endpoint": "pins_set_api",
-    "methods": [
-      "POST"
-    ]
-  },
-  {
-    "rule": "/admin/api/pins/<target_kind>/<target_key>",
-    "endpoint": "pins_clear_api",
-    "methods": [
-      "DELETE"
-    ]
-  },
-  {
-    "rule": "/admin/api/prompt-renders",
-    "endpoint": "prompt_renders_api",
-    "methods": [
-      "GET"
-    ]
-  },
-  {
-    "rule": "/admin/api/prompts",
-    "endpoint": "prompts_list_api",
-    "methods": [
-      "GET"
-    ]
-  },
-  {
-    "rule": "/admin/api/prompts/<name>",
-    "endpoint": "prompts_detail_api",
-    "methods": [
-      "GET"
-    ]
-  },
-  {
-    "rule": "/admin/api/prompts/<name>/versions",
-    "endpoint": "prompts_create_version_api",
-    "methods": [
-      "POST"
-    ]
-  },
-  {
-    "rule": "/live",
-    "endpoint": "live.recent",
     "methods": [
       "GET"
     ]

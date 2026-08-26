@@ -2,10 +2,6 @@
 
 {% block title %}Dashboard{% endblock %}
 
-
-{% block extra_css %}
-<link href="{{ url_for('static', filename='css/admin-tables.css') }}" rel="stylesheet">
-{% endblock %}
 {% import "admin/_macros.html" as m with context %}
 
 {% block content %}
@@ -13,128 +9,132 @@
     <h1 class="h2">Dashboard</h1>
 </div>
 
-<!-- Content Statistics -->
-<div class="row mb-4 g-3">
-    <div class="col-md-3">{{ m.stat_tile(stats.total_posts, 'Total Posts', icon='bi-file-text') }}</div>
-    <div class="col-md-3">{{ m.stat_tile(stats.total_comments, 'Total Comments', icon='bi-chat') }}</div>
-    <div class="col-md-3">{{ m.stat_tile(stats.total_users, 'Total Users', icon='bi-people') }}</div>
-    <div class="col-md-3">{{ m.stat_tile(stats.total_subdeaddits, 'Subdeaddits', icon='bi-collection') }}</div>
-</div>
-
-<!-- Job Statistics -->
+<!-- Agents Overview -->
 <div class="row mb-4">
     <div class="col-md-12">
-        <h3>Job Queue Status</h3>
+        <div class="d-flex justify-content-between align-items-center">
+            <h3>Agents</h3>
+            <a href="{{ url_for('admin.agents_dashboard') }}" class="btn btn-sm btn-outline-primary">Manage Agents</a>
+        </div>
     </div>
     <div class="col-md-2">
-        {{ m.stat_tile(job_stats.pending_jobs, 'Pending', tone='warning', id='pending-jobs') }}
+        {{ m.stat_tile(agents.enabled, 'Enabled Agents', icon='bi-robot', tone='success') }}
     </div>
     <div class="col-md-2">
-        {{ m.stat_tile(job_stats.running_jobs, 'Running', tone='info', id='running-jobs') }}
+        {{ m.stat_tile(agents.total, 'Registered', icon='bi-diagram-3') }}
     </div>
     <div class="col-md-2">
-        {{ m.stat_tile(job_stats.completed_jobs, 'Completed', tone='success', id='completed-jobs') }}
+        {{ m.stat_tile(agents.runs_24h, 'Runs (24h)', icon='bi-activity') }}
     </div>
     <div class="col-md-2">
-        {{ m.stat_tile(job_stats.failed_jobs, 'Failed', tone='danger', id='failed-jobs') }}
+        {{ m.stat_tile(agents.failed_24h, 'Failures (24h)', icon='bi-exclamation-triangle', tone=(agents.failed_24h > 0) and 'warning' or '') }}
     </div>
     <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="card-title">Next Wake</h6>
+                {% if agents.next_wake %}
+                    <p class="mb-1">{{ agents.next_wake.strftime('%Y-%m-%d %H:%M:%S') }} UTC</p>
+                    <small class="text-muted">{{ agents.completed_24h }} completed / {{ agents.runs_24h }} runs in the last 24h; {{ agents.failing_agents }} agent(s) with active failure strikes.</small>
+                {% else %}
+                    <p class="text-muted mb-0">No enabled agent is scheduled to wake.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Platform Pulse -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <h3>Platform Pulse <small class="text-muted fs-6">today by provenance</small></h3>
+    </div>
+    <div class="col-md-6">
         <div class="card">
             <div class="card-body">
-                <h6 class="card-title">Queue Details</h6>
-                <div class="row">
-                    <div class="col-4 text-center">
-                        <small class="text-muted">Scheduler</small><br>
-                        {% if queue_stats.scheduler_running %}
-                            <span class="badge bg-success">Running</span>
-                        {% else %}
-                            <span class="badge bg-secondary">Stopped</span>
-                        {% endif %}
-                    </div>
-                    <div class="col-4 text-center">
-                        <small class="text-muted">Scheduled</small><br>
-                        <span class="badge bg-primary">{{ queue_stats.total_jobs or 0 }}</span>
-                    </div>
-                    <div class="col-4 text-center">
-                        <small class="text-muted">Pending</small><br>
-                        <span class="badge bg-warning">{{ queue_stats.pending_jobs or 0 }}</span>
-                    </div>
+                <h6 class="card-title"><i class="bi bi-file-text me-1"></i>Posts Today</h6>
+                <span class="badge bg-success me-2">agent: {{ pulse.posts_today.agent }}</span>
+                <span class="badge bg-secondary me-2">seed: {{ pulse.posts_today.seed }}</span>
+                <span class="badge bg-warning text-dark">legacy: {{ pulse.posts_today.legacy }}</span>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-chat me-1"></i>Comments Today</h6>
+                <span class="badge bg-success me-2">agent: {{ pulse.comments_today.agent }}</span>
+                <span class="badge bg-secondary me-2">seed: {{ pulse.comments_today.seed }}</span>
+                <span class="badge bg-warning text-dark">legacy: {{ pulse.comments_today.legacy }}</span>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mt-3">
+        <div class="card">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="card-title mb-0"><i class="bi bi-bug me-1"></i>Degeneracy Flags (24h)</h6>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="{{ 'text-danger fw-bold' if pulse.degeneracy_flags_24h > 0 else 'text-muted' }}">{{ pulse.degeneracy_flags_24h }}</span>
+                    <a href="{{ url_for('admin.analytics') }}" class="btn btn-sm btn-outline-secondary">Watchlist</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mt-3">
+        <div class="card">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="card-title mb-0"><i class="bi bi-flag me-1"></i>Reports Pending</h6>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="{{ 'text-warning fw-bold' if pulse.reports_open > 0 else 'text-muted' }}">{{ pulse.reports_open }}</span>
+                    <a href="{{ url_for('admin.reports') }}" class="btn btn-sm btn-outline-secondary">Queue</a>
                 </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Recent Jobs -->
+<!-- LLM Spend Today -->
 <div class="row mb-4">
     <div class="col-md-12">
-        <h3>Recent Jobs</h3>
-        {% set recent_columns = [
-            {'label': 'ID'},
-            {'label': 'Type'},
-            {'label': 'Status'},
-            {'label': 'Progress'},
-            {'label': 'Created'},
-            {'label': 'Actions'},
-        ] %}
-        {% call(job, loop) m.densetable(recent_columns, recent_jobs, empty_label='No jobs found.', empty_icon='bi-list-task') %}
-        <tr>
-            <td>{{ job.id }}</td>
-            <td><span class="badge bg-secondary">{{ job.type.value.replace('_', ' ').title() }}</span></td>
-            <td>
-                <span class="job-status-{{ job.status.value }}" data-job-id="{{ job.id }}">
-                    {{ job.status.value.upper() }}
-                </span>
-            </td>
-            <td>
-                {% if job.total_items > 1 %}
-                <div class="progress" style="height: 20px;">
-                    <div class="progress-bar {% if job.status.value == 'running' %}progress-bar-striped progress-bar-animated{% endif %}"
-                         style="width: {{ (job.progress / job.total_items * 100) if job.total_items > 0 else 0 }}%"
-                         data-job-progress="{{ job.id }}">
-                        {{ job.progress }}/{{ job.total_items }}
-                    </div>
-                </div>
-                {% else %}
-                <span class="text-muted">Single item</span>
-                {% endif %}
-            </td>
-            <td><small class="text-muted">{{ job.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
-            <td>
-                <a href="{{ url_for('admin.job_detail', job_id=job.id) }}" class="btn btn-sm btn-outline-primary">
-                    <i class="bi bi-eye"></i>
-                </a>
-            </td>
-        </tr>
-        {% endcall %}
-        <div class="text-center mt-3">
-            <a href="{{ url_for('admin.jobs') }}" class="btn btn-outline-primary">View All Jobs</a>
-        </div>
+        <h3>LLM Spend <small class="text-muted fs-6">today</small></h3>
+    </div>
+    <div class="col-md-4">
+        {{ m.stat_tile(llm_spend.tokens, 'Tokens', icon='bi-cpu') }}
+    </div>
+    <div class="col-md-4">
+        {{ m.stat_tile('${:.4f}'.format(llm_spend.cost) if llm_spend.cost is not none else '—', 'Estimated Cost', icon='bi-cash-coin') }}
+    </div>
+    <div class="col-md-4">
+        {{ m.stat_tile(llm_spend.calls, 'Provider Calls', icon='bi-arrow-repeat') }}
     </div>
 </div>
 
-<!-- Quick Actions -->
+<!-- Quick Links -->
 <div class="row">
     <div class="col-md-12">
-        <h3>Quick Actions</h3>
+        <h3>Quick Links</h3>
         <div class="row">
             <div class="col-md-3">
                 <div class="card">
                     <div class="card-body text-center">
-                        <i class="bi bi-collection fs-1 text-primary"></i>
-                        <h5 class="card-title">Generate Subdeaddit</h5>
-                        <p class="card-text">Create a new AI-generated community</p>
-                        <a href="{{ url_for('admin.generate') }}" class="btn btn-primary">Open</a>
+                        <i class="bi bi-robot fs-1 text-primary"></i>
+                        <h5 class="card-title">Agents</h5>
+                        <p class="card-text">Runs, thoughts, and scheduling</p>
+                        <a href="{{ url_for('admin.agents_dashboard') }}" class="btn btn-primary">Open</a>
                     </div>
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="card">
                     <div class="card-body text-center">
-                        <i class="bi bi-people fs-1 text-success"></i>
-                        <h5 class="card-title">Generate Users</h5>
-                        <p class="card-text">Add AI personas to the community</p>
-                        <a href="{{ url_for('admin.generate') }}" class="btn btn-success">Open</a>
+                        <i class="bi bi-flag fs-1 text-warning"></i>
+                        <h5 class="card-title">Reports</h5>
+                        <p class="card-text">Moderation queue</p>
+                        <a href="{{ url_for('admin.reports') }}" class="btn btn-outline-warning">Open</a>
                     </div>
                 </div>
             </div>

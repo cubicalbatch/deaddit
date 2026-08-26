@@ -1,8 +1,8 @@
 """Phase UX-6: public live-activity ticker, socket pump, and admin keyset API.
 
 Deterministic only: in-memory sqlite, no network, no live endpoints. Socket
-coverage mirrors tests/test_ux5_joblog.py (socketio test client + synchronous
-tick() driving); admin coverage copies the admin_client session fixture from
+coverage uses the socketio test client + synchronous tick() driving; admin
+coverage copies the admin_client session fixture from
 tests/test_acp2_admin_api.py.
 """
 
@@ -20,9 +20,6 @@ from deaddit.models import (
     AgentRun,
     AgentTurn,
     Comment,
-    Job,
-    JobStatus,
-    JobType,
     Post,
     Subdeaddit,
     ToolCall,
@@ -38,14 +35,14 @@ _BASE = datetime(2026, 1, 1, 12, 0, 0)
 # PAGE_SIZE=30 window (page boundaries fall after items 30 and 60) so paging
 # never splits one: the per-source keyset predicate resolves cross-kind ties
 # Python-side within a page, which is the documented contract.
-_TIE_GROUPS = ((8, 4), (38, 4), (66, 3))
+_TIE_GROUPS = ((8, 3), (38, 3), (66, 3))
 
 _N_EVENTS = 76
 
 
 @pytest.fixture(autouse=True)
 def _fresh_live_pump():
-    """No pump thread leaks between tests (mirrors _fresh_tailer)."""
+    """No pump thread leaks between tests."""
     reset_live_pump()
     yield
     reset_live_pump()
@@ -81,9 +78,9 @@ def _register_live_handlers():
 
 def _event_kinds() -> list[str]:
     """Newest-first kind sequence with cross-kind tie groups baked in."""
-    base = ["post", "comment", "vote", "job"]
-    kinds = [base[i % 4] for i in range(_N_EVENTS)]
-    rotations = iter(([0, 1, 2, 3], [1, 2, 3, 0], [0, 2, 3]))
+    base = ["post", "comment", "vote"]
+    kinds = [base[i % 3] for i in range(_N_EVENTS)]
+    rotations = iter(([0, 1, 2], [1, 2, 0], [2, 0, 1]))
     for start, size in _TIE_GROUPS:
         rotation = next(rotations)
         for offset, kind_idx in enumerate(rotation[:size]):
@@ -113,7 +110,7 @@ def _event_timestamps(kinds: list[str]) -> list[datetime]:
 
 
 def _seed_activity_events(db_session):
-    """Insert >=70 events across all four kinds with deterministic keys.
+    """Insert >=70 events across all three kinds with deterministic keys.
 
     Returns (posts, comments, expected_keys) where expected_keys is the exact
     set of (created_at, kind, id) tuples the ticker must render exactly once.
@@ -142,8 +139,8 @@ def _seed_activity_events(db_session):
     db_session.add_all(posts)
     db_session.flush()
     anchor = posts[0]
-    comments, jobs = [], []
-    n_comment = n_job = 0
+    comments = []
+    n_comment = 0
     for kind, ts in zip(kinds, times, strict=True):
         if kind == "comment":
             n_comment += 1
@@ -156,23 +153,7 @@ def _seed_activity_events(db_session):
                     created_at=ts,
                 )
             )
-        elif kind == "job":
-            n_job += 1
-            explicit = n_job % 3 == 1  # coalesce precedence path vs all-null
-            jobs.append(
-                Job(
-                    type=JobType.CREATE_POST if n_job % 2 else JobType.CREATE_USER,
-                    status=(
-                        JobStatus.PENDING,
-                        JobStatus.COMPLETED,
-                        JobStatus.RUNNING,
-                    )[n_job % 3],
-                    started_at=ts if explicit else None,
-                    completed_at=ts if explicit else None,
-                    created_at=ts,
-                )
-            )
-    db_session.add_all([*comments, *jobs])
+    db_session.add_all(comments)
     db_session.flush()  # comments need ids before votes reference them
 
     votes = []
@@ -201,7 +182,7 @@ def _seed_activity_events(db_session):
     db_session.flush()
 
     expected: set[tuple[datetime, str, int]] = set()
-    counters = {"post": 0, "comment": 0, "vote": 0, "job": 0}
+    counters = {"post": 0, "comment": 0, "vote": 0}
     for kind, ts in zip(kinds, times, strict=True):
         if kind == "post":
             expected.add((ts, "post", posts[counters["post"]].id))
@@ -212,10 +193,6 @@ def _seed_activity_events(db_session):
         elif kind == "vote":
             expected.add((ts, "vote", votes[counters["vote"]].id))
             counters["vote"] += 1
-
-        elif kind == "job":
-            expected.add((ts, "job", jobs[counters["job"]].id))
-            counters["job"] += 1
     db_session.commit()
     return posts, comments, expected
 

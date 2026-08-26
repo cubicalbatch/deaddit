@@ -288,10 +288,7 @@ body {
     align-items: center;
     gap: var(--space-sm);
 }
-
-
 .nav-links {
-    font-size: var(--font-size-sm);
     display: flex;
     align-items: center;
     gap: var(--space-sm);
@@ -361,7 +358,10 @@ body {
 }
 
 .comments-sortbar {
-    margin-bottom: var(--space-md);
+    /* Inside .comments-toolbar (flex, align-items: center) a bottom margin
+       pushes the bar off the heading's baseline; spacing comes from the
+       toolbar's own margin-bottom. */
+    margin-bottom: 0;
 }
 .subdeaddit-header {
     text-align: center;
@@ -385,74 +385,16 @@ body {
     margin: 0;
 }
 
-/* Collapse control: invisible button whose visible part is the rail
-   segment; hit area spans the rail zone and stays >= 44px wide/tall. */
-.comment-collapse {
-    appearance: none;
-    background: none;
-    border: none;
-    padding: 0;
-    position: absolute;
-    top: 0;
-    left: -32px;
-    width: 44px;
-    height: 44px;
-    cursor: pointer;
-    border-radius: var(--radius-sm);
-}
-
-.collapse-rail {
-    display: block;
-    width: 4px;
-    height: 100%;
-    margin: 0 auto;
-    border-radius: 2px;
-    /* Always faintly visible so the collapse affordance can be discovered
-       without hovering (UX-POST comfort pass); hover/focus/chain states
-       strengthen it below. */
-    background-color: var(--rail);
-    transition: background-color var(--motion-fast) var(--ease-out-quart);
-}
-
-.comment:hover > .comment-collapse .collapse-rail,
-.comment.chain > .comment-collapse .collapse-rail,
-.comment:has(.comment:hover) > .comment-collapse .collapse-rail {
-    background-color: var(--text-3);
-}
-
-.comment.is-collapsed > .comment-collapse .collapse-rail {
-    background-color: var(--text-3);
-}
-
-.comment-collapse:hover .collapse-rail,
-.comment-collapse:focus-visible .collapse-rail {
-    background-color: var(--accent);
-}
-
-.comment-collapse:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
-}
-
-/* Rail-guided nesting: each level draws its own guide line. */
-.comment-children {
-    margin-top: var(--space-md);
-    border-left: 2px solid var(--rail);
-    padding-left: var(--comment-indent);
-}
-
-/* Hover-chain tinting on descendant rails (JS adds .chain; :has() below
-   mirrors it in pure CSS). */
-.comment.chain .comment-children,
-.comment:has(.comment:hover) .comment-children {
-    border-left-color: var(--accent-soft);
-}
-
 /* Collapsed state (server-flagged for deep threads, or user-toggled):
-   hide body, children and continue-thread link; reveal the replies pill. */
+   hide body, children, continue-thread link AND any flattened tail items
+   (tails render as direct .comment--flat children, not in .comment-children).
+   .flat-hidden is toggled by JS when a flat comment collapses its deeper
+   following siblings. */
 .comment.is-collapsed > .comment-main .comment-body,
 .comment.is-collapsed > .comment-children,
-.comment.is-collapsed > .continue-thread {
+.comment.is-collapsed > .continue-thread,
+.comment.is-collapsed > .comment--flat,
+.comment.flat-hidden {
     display: none;
 }
 
@@ -471,21 +413,6 @@ body {
    indent; depth badge in the meta line marks real nesting level. */
 .comment--flat {
     margin-left: var(--comment-indent);
-}
-/* "(show N replies)" pill: reuses .chip classes from the markup; only
-   visible while the comment is collapsed. */
-/* Scoped under .comment to out-rank .chip's display (declared later). */
-.comment .comment-replies-pill {
-    display: none;
-    appearance: none;
-    cursor: pointer;
-    min-height: 44px;
-}
-
-.comment.is-collapsed > .comment-main .comment-replies-pill {
-    display: inline-flex;
-    align-items: center;
-    min-height: 0;
 }
 
 /* Permalink deep-link flash: JS adds/removes the class; transition fades. */
@@ -1396,6 +1323,7 @@ a:focus {
 /* Sort bar: segmented links */
 .sort-bar {
     display: inline-flex;
+    flex-wrap: wrap; /* long labels (Controversial) must never overflow ~360px */
     gap: var(--space-xs);
     background-color: var(--bg-surface);
     border: 1px solid var(--border);
@@ -2027,5 +1955,281 @@ a.pagenav__link:hover {
 
     .users-grid {
         grid-template-columns: 1fr;
+    }
+}
+
+/* ============================================================
+   Comments (UX-3 redesign): thread lines + chevron collapse,
+   one-line quiet meta, OP badge, hidden-replies summaries.
+   Tokens only; both themes first-class.
+   ============================================================ */
+.comments-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-lg);
+}
+.comments-toolbar .comments-header {
+    /* Kill the UA h2 top margin too: with align-items:center it offsets the
+       heading from the sort bar by half its height. */
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+.comments-empty {
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+}
+
+/* Thread line: each nesting level draws its own guide rail. */
+.comment-children {
+    margin-top: var(--space-sm);
+    border-left: 2px solid var(--rail);
+    padding-left: var(--comment-indent);
+}
+
+.comment.chain .comment-children,
+.comment:has(.comment:hover) .comment-children {
+    border-left-color: var(--accent-soft-strong);
+}
+
+/* Chevron + threadline collapse control: the visible glyph sits at the
+   comment's left edge (the "thread line" head); the button hit area is
+   44px square for touch. */
+.comment-collapse {
+    appearance: none;
+    background: none;
+    border: none;
+    padding: 0;
+    position: absolute;
+    top: 0;
+    left: -36px;
+    width: 44px;
+    height: 44px;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.collapse-chevron {
+    width: 0;
+    height: 0;
+    border-left: 5px solid var(--text-3);
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    transition: transform var(--motion-fast) var(--ease-out-quart),
+        border-left-color var(--motion-fast) var(--ease-out-quart);
+}
+
+.comment.is-collapsed > .comment-collapse .collapse-chevron {
+    transform: rotate(180deg); /* points right when replies are hidden */
+    border-left-color: var(--accent);
+}
+
+.comment:hover > .comment-collapse .collapse-chevron,
+.comment.chain > .comment-collapse .collapse-chevron,
+.comment:focus-within > .comment-collapse .collapse-chevron {
+    border-left-color: var(--text-1);
+}
+
+.comment-collapse:hover .collapse-chevron,
+.comment-collapse:focus-visible .collapse-chevron {
+    border-left-color: var(--accent);
+    transform: scale(1.15);
+}
+
+.comment.is-collapsed > .comment-collapse:hover .collapse-chevron,
+.comment.is-collapsed > .comment-collapse:focus-visible .collapse-chevron {
+    transform: rotate(180deg) scale(1.15);
+}
+
+.comment-collapse:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+/* One quiet meta line: author · score · time (+ badges). */
+.comment-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-xs) var(--space-sm);
+    min-height: 32px;
+    font-size: var(--font-size-sm);
+    color: var(--text-2);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    padding: var(--space-xs) var(--space-sm);
+    /* Stretch into the button gutter so the hover field meets the chevron
+       without covering it; negative margin keeps content aligned. */
+    margin-left: calc(-1 * var(--space-sm));
+}
+
+.comment-header:hover,
+.comment-header:focus-visible {
+    background-color: var(--bg-hover-row);
+}
+
+/* Keyboard: the header row is focusable (tabindex=0) and toggles on
+   Enter/Space via comments.js; the chevron button next to it stays the
+   canonical control. */
+.comment-header:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+.comment-header a {
+    color: var(--text-2);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.comment-header a:hover {
+    color: var(--link);
+}
+
+.meta-dot {
+    color: var(--text-3);
+}
+
+/* Author of the post replying in-thread. --accent-strong carries AA with
+   white in both themes (5.77:1 light / 5.39:1 dark per tokens.css). */
+.op-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    background-color: var(--accent-strong);
+    color: var(--on-accent);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.4px;
+}
+
+/* Hidden-replies summary pill ("[+] N hidden — names"): only while collapsed. */
+.comment .comment-replies-pill {
+    display: none;
+    appearance: none;
+    cursor: pointer;
+    align-items: center;
+    max-width: 100%;
+    padding: 2px var(--space-sm);
+    border-radius: var(--radius-lg);
+    background-color: var(--bg-canvas);
+    border: 1px solid transparent;
+    color: var(--link);
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+    overflow: hidden;
+}
+
+.pill-count {
+    white-space: nowrap;
+    font-weight: 600;
+}
+
+.pill-names {
+    color: var(--text-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.comment-replies-pill:hover {
+    border-color: var(--border);
+}
+
+.comment-replies-pill:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.comment.is-collapsed > .comment-main .comment-replies-pill {
+    display: inline-flex;
+}
+
+/* Quiet action row under the body. */
+.comment-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    margin-top: var(--space-xs);
+    font-size: var(--font-size-xs);
+}
+
+.comment-actions button {
+    appearance: none;
+    background: none;
+    border: none;
+    padding: var(--space-xs) var(--space-sm);
+    margin: 0 calc(-1 * var(--space-sm));
+    border-radius: var(--radius-sm);
+    /* text-2 (5.70:1 light / 7.22:1 dark on canvas) keeps the row quiet but
+       AA-readable at font-size-xs; text-3 measured 3.35:1/3.82:1 and failed
+       AA for 12px text. */
+    color: var(--text-2);
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    transition: color var(--motion-fast) var(--ease-out-quart),
+        background-color var(--motion-fast) var(--ease-out-quart);
+}
+
+.comment-actions button:hover {
+    color: var(--link);
+    background-color: var(--bg-hover-row);
+}
+
+.comment-actions button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+}
+
+.comment-actions .comment-collapse-link[aria-expanded="false"] {
+    color: var(--link);
+}
+
+/* Depth chip on flattened tail items inherits chip colors; keep it quiet. */
+.depth-chip {
+    letter-spacing: 0.2px;
+}
+
+/* Continue-thread jump keeps its --link treatment from the base rules. */
+.continue-thread {
+    display: inline-block;
+    margin: var(--space-xs) 0 var(--space-sm);
+    padding: var(--space-xs) 0;
+}
+
+@media (max-width: 480px) {
+    .comments-section {
+        --comment-indent: 12px;
+    }
+
+    .comment-collapse {
+        left: -30px;
+        width: 40px;
+        height: 40px;
+    }
+
+    .comment-header {
+        min-height: 40px; /* touch target for the whole-header toggle */
+    }
+
+    .comment-actions button {
+        padding: var(--space-sm); /* >= 40px tall tap targets */
+        margin: 0;
+    }
+
+    .comments-toolbar {
+        flex-direction: column;
+        align-items: stretch;
     }
 }

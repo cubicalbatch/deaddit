@@ -1,6 +1,6 @@
 """Public live-activity ticker pump (Phase UX-6, Slice A).
 
-A single lazy daemon thread inside the WEB process polls the four activity
+A single lazy daemon thread inside the WEB process polls the three activity
 sources (via the shared predicates in :mod:`deaddit.live`) and pushes
 ``live_count {"count": N}`` to room ``activity`` on namespace ``/live``
 whenever rows exist past the room's watermark. The count is cumulative since
@@ -8,8 +8,8 @@ the last ``activity_loaded`` ack from the client; the watermark only advances
 on that ack (or is re-initialised on join). Item content NEVER travels over
 the socket.
 
-Structurally mirrors ``runtime/tailer.py``: singleton, lazy start on first
-room join, idle auto-exit after 2 empty cycles.
+Singleton pattern: lazy start on first room join, idle auto-exit after 2
+empty cycles.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ class ActivityPump:
         self._pending: dict[str, int] = {}
 
     # ------------------------------------------------------------------
-    # Lifecycle (mirrors JobLogTailer)
+    # Lifecycle
     # ------------------------------------------------------------------
 
     def ensure_started(self) -> None:

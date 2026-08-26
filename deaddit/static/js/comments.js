@@ -52,9 +52,29 @@ function pruneExpanded(ids) {
 
 // ------------------------------------------------------- collapse toggling --
 
+function collapseButton(comment) {
+    return comment.querySelector(':scope > .comment-collapse');
+}
+
 function setAria(comment, expanded) {
-    const btn = comment.querySelector(':scope > .comment-collapse');
-    if (btn) btn.setAttribute('aria-expanded', String(expanded));
+    const btn = collapseButton(comment);
+    if (!btn || btn.getAttribute('aria-expanded') === String(expanded)) return false;
+    btn.setAttribute('aria-expanded', String(expanded));
+    const link = comment.querySelector(':scope > .comment-main > .comment-actions > .comment-collapse-link');
+    if (link) {
+        link.setAttribute('aria-expanded', String(expanded));
+        const n = Number(comment.dataset.descendants || 0);
+        link.textContent = expanded
+            ? `Hide ${n} ${n === 1 ? 'reply' : 'replies'}`
+            : `Show ${n} ${n === 1 ? 'reply' : 'replies'}`;
+    }
+    // aria-label tracks the state so screen readers announce the action,
+    // not the state ("Collapse thread…" vs "Expand thread…").
+    const m = btn.getAttribute('aria-label');
+    if (m) {
+        btn.setAttribute('aria-label', m.replace(/^(Expand|Collapse)/, expanded ? 'Collapse' : 'Expand'));
+    }
+    return true;
 }
 
 // Nested mode: CSS hides .comment-body and .comment-children under .is-collapsed.
@@ -82,17 +102,15 @@ function toggleFlat(comment) {
     const collapsed = comment.classList.toggle('is-collapsed');
     setAria(comment, !collapsed);
 
-    // Each flat item renders as a single article, so the hidden-sibling count
-    // is exactly the number of newly hidden comments.
-    let hiddenCount = 0;
     for (const sib of flatHiddenSiblings(comment)) {
         sib.classList.toggle('flat-hidden', collapsed);
-        if (collapsed) hiddenCount += 1;
     }
-
-    const pill = comment.querySelector('.comment-replies-pill');
-    if (pill && collapsed && hiddenCount > 0) {
-        pill.textContent = `(show ${hiddenCount} ${hiddenCount === 1 ? 'reply' : 'replies'})`;
+    if (collapsed) {
+        // Recount from the DOM instead of trusting descendant_count: some
+        // siblings may have been individually hidden by an inner collapse.
+        const hidden = [...flatHiddenSiblings(comment)]
+            .filter((sib) => sib.classList.contains('flat-hidden')).length;
+        updatePill(comment, hidden);
     }
     return collapsed;
 }
@@ -105,14 +123,56 @@ function expandFlatChain(comment) {
     return [comment, ...hiddenSiblings];
 }
 
+// ------------------------------------------------- hidden-replies summaries --
+
+const NAME_LIMIT = 3;
+
+function directChildNames(comment) {
+    const kids = comment.querySelector(':scope > .comment-children');
+    if (!kids) return [];
+    // Removed children render a tombstone without a user link, so the
+    // selector naturally drops them; deeper generations are covered by count.
+    return [...kids.querySelectorAll(':scope > .comment > .comment-main > .comment-header > .comment-meta__user')]
+        .map((el) => el.textContent.trim())
+        .slice(0, NAME_LIMIT + 1);
+}
+
+function updatePill(comment, hiddenCount) {
+    const pill = comment.querySelector('.comment-replies-pill');
+    if (!pill) return;
+    const countEl = pill.querySelector('.pill-count');
+    const namesEl = pill.querySelector('.pill-names');
+    if (countEl && hiddenCount != null) {
+        countEl.textContent = `[+] ${hiddenCount} hidden`;
+    }
+    if (namesEl && hiddenCount != null && hiddenCount > 0) {
+        // Recompute from live DOM: children already expanded by the user drop
+        // out of the summary; deeper generations are covered by the count.
+        const all = directChildNames(comment);
+        const names = all.slice(0, NAME_LIMIT);
+        namesEl.textContent = names.length ? ` — ${names.join(', ')}${all.length > NAME_LIMIT ? '…' : ''}` : '';
+    }
+}
+
+// ------------------------------------------------------------- toggling ----
+
 function toggleComment(btn) {
     const comment = btn.closest('.comment');
     if (!comment) return;
-    if (comment.classList.contains('comment--flat')) {
-        if (comment.classList.contains('is-collapsed')) expandFlatChain(comment);
-        else toggleFlat(comment);
+    if (comment.classList.contains('is-collapsed')) {
+        if (comment.classList.contains('comment--flat')) expandFlatChain(comment);
+        else toggleNested(comment);
+        updatePill(comment, null);
     } else {
-        toggleNested(comment);
+        let hiddenCount = null;
+        if (comment.classList.contains('comment--flat')) {
+            toggleFlat(comment);
+            hiddenCount = [...flatHiddenSiblings(comment)].filter((sib) => sib.classList.contains('flat-hidden')).length;
+        } else {
+            toggleNested(comment);
+            hiddenCount = Number(comment.dataset.descendants || 0);
+        }
+        updatePill(comment, hiddenCount);
     }
     snapshotCollapsed();
 }
@@ -167,6 +227,18 @@ function handleHash() {
     const expanded = expandAncestors(target);
     const flatParent = target.parentElement ? target.parentElement.closest('.comment--flat') : null;
     if (flatParent) expanded.push(...expandFlatChain(flatParent));
+    // A flat target can also be hidden by an earlier COLLAPSED FLAT SIBLING
+    // (flat mode hides deeper following siblings, not descendants). Expand
+    // every sibling whose hidden span covers the target.
+    if (target.classList.contains('comment--flat')) {
+        let sib = target.previousElementSibling;
+        while (sib && sib.classList.contains('comment--flat')) {
+            if (sib.classList.contains('is-collapsed') && flatHiddenSiblings(sib).includes(target)) {
+                expanded.push(...expandFlatChain(sib));
+            }
+            sib = sib.previousElementSibling;
+        }
+    }
     if (target.classList.contains('comment--flat') && target.classList.contains('flat-hidden')) {
         target.classList.remove('flat-hidden');
         expanded.push(target);
@@ -190,7 +262,7 @@ function handleHash() {
 
 window.addEventListener('hashchange', handleHash);
 
-// -------------------------------------------------------------- copy link ---
+// ------------------------------------------------------------------ wiring --
 
 let liveRegion = null;
 function announce(message) {
@@ -204,7 +276,7 @@ function announce(message) {
 }
 
 function copyCommentLink(btn) {
-    const url = `${location.origin}${location.pathname}#comment-${btn.dataset.commentId}`;
+    const url = `${location.origin}${location.pathname}${location.search}#comment-${btn.dataset.commentId}`;
     const title = btn.getAttribute('title');
     const done = () => {
         announce('Comment link copied to clipboard');
@@ -232,23 +304,60 @@ function copyCommentLink(btn) {
     }
 }
 
-// ------------------------------------------------------------------ wiring --
-
 document.addEventListener('click', (event) => {
-    const collapseBtn = event.target.closest('.comment-collapse');
-    if (collapseBtn) {
-        toggleComment(collapseBtn);
+    // Chevron/thread-line button: the canonical collapse control (also the
+    // keyboard path — native Enter/Space on the focused button lands here).
+    const rail = event.target.closest('.comment-collapse');
+    if (rail) {
+        toggleComment(rail);
         return;
+    }
+
+    const permalink = event.target.closest('.comment-permalink');
+    if (permalink) {
+        copyCommentLink(permalink);
+        return;
+    }
+    // Whole-header toggle: any click on the header that is not an explicit
+    // control (user/profile links, chips, permalink, pill) collapses. Leaf
+    // comments collapse too — the action mirrors the chevron button exactly.
+    const header = event.target.closest('.comment-header');
+    if (header) {
+        const comment = header.closest('.comment');
+        const btn = comment && collapseButton(comment);
+        if (btn && !event.target.closest('a, button, input, textarea, select, label')) {
+            event.preventDefault();
+            toggleComment(btn);
+            return;
+        }
     }
     const pill = event.target.closest('.comment-replies-pill');
     if (pill) {
         const comment = pill.closest('.comment');
-        const rail = comment && comment.querySelector(':scope > .comment-collapse');
-        if (rail) toggleComment(rail);
+        const btn = comment && collapseButton(comment);
+        if (btn) toggleComment(btn);
         return;
     }
-    const permalink = event.target.closest('.comment-permalink');
-    if (permalink) copyCommentLink(permalink);
+    const collapseLink = event.target.closest('.comment-collapse-link');
+    if (collapseLink) {
+        const comment = collapseLink.closest('.comment');
+        const btn = comment && collapseButton(comment);
+        if (btn) toggleComment(btn);
+    }
+});
+
+// Keyboard operability: Enter/Space on the focused header row toggles, unless
+// an inner interactive element has focus. The rail button stays the canonical
+// accessible control; this only adds a shortcut for pointerless users.
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const header = event.target.closest?.('.comment-header');
+    if (!header || event.target !== header) return;
+    const comment = header.closest('.comment');
+    const btn = comment && collapseButton(comment);
+    if (!btn) return;
+    event.preventDefault();
+    toggleComment(btn);
 });
 
 // Restore session-collapsed state on load. When no session state exists yet,
@@ -266,6 +375,17 @@ document.addEventListener('click', (event) => {
             toggleNested(comment);
         }
     }
+
+    // Refresh every visible "[+] N hidden" summary against restored reality.
+    document.querySelectorAll('.comment.is-collapsed[data-descendants]').forEach((comment) => {
+        const n = Number(comment.dataset.descendants || 0);
+        if (comment.classList.contains('comment--flat')) {
+            const hidden = [...flatHiddenSiblings(comment)].filter((sib) => sib.classList.contains('flat-hidden')).length;
+            updatePill(comment, hidden);
+        } else {
+            updatePill(comment, n);
+        }
+    });
 })();
 
 handleHash();

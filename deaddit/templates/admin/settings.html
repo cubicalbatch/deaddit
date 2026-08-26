@@ -266,30 +266,6 @@
                     </div>
                 </div>
 
-                <div class="row mb-4">
-                    <div class="col-md-6">
-                        <h6>Job Scheduler</h6>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div id="scheduler-status">
-                                    <span class="badge bg-success">Running</span>
-                                    <small class="text-muted d-block">APScheduler</small>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                Active Jobs
-                                <div id="active-jobs-count">
-                                    <span class="h4">-</span>
-                                    <small class="text-muted d-block">Loading...</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <h6>Database</h6>
-                        <p><code>instance/deaddit.db</code> &middot; SQLite</p>
-                    </div>
-                </div>
 
                 <h6>System Information</h6>
                 <div class="row mb-4">
@@ -322,16 +298,6 @@
                         <button class="btn btn-outline-info w-100" id="refresh-stats-btn">
                             <i class="bi bi-arrow-clockwise"></i> Refresh Stats
                         </button>
-                    </div>
-                    <div class="col-md-3">
-                        <a href="{{ url_for('admin.jobs') }}" class="btn btn-outline-success w-100">
-                            <i class="bi bi-list-task"></i> View All Jobs
-                        </a>
-                    </div>
-                    <div class="col-md-3">
-                        <a href="{{ url_for('admin.generate') }}" class="btn btn-outline-warning w-100">
-                            <i class="bi bi-plus-circle"></i> Create New Job
-                        </a>
                     </div>
                 </div>
             </div>
@@ -379,7 +345,7 @@
         };
     }
 
-    // ---------- system info / scheduler ----------
+    // ---------- system info ----------
 
     function setText(id, text) {
         const el = document.getElementById(id);
@@ -401,32 +367,9 @@
             });
     }
 
-    function loadSchedulerStats() {
-        fetch('/admin/api/jobs/stats')
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById('scheduler-status').innerHTML =
-                    '<span class="badge ' + (data.scheduler_running ? 'bg-success' : 'bg-danger') + '">' +
-                    (data.scheduler_running ? 'Running' : 'Stopped') + '</span>' +
-                    '<small class="text-muted d-block">APScheduler</small>';
-                const activeJobs = data.database ? data.database.running : 0;
-                document.getElementById('active-jobs-count').innerHTML =
-                    '<span class="h4">' + activeJobs + '</span>' +
-                    '<small class="text-muted d-block">Running</small>';
-            })
-            .catch(() => {
-                document.getElementById('scheduler-status').innerHTML =
-                    '<span class="badge bg-secondary">Unknown</span>' +
-                    '<small class="text-muted d-block">Error loading</small>';
-                document.getElementById('active-jobs-count').innerHTML =
-                    '<span class="h4">-</span><small class="text-muted d-block">Error loading</small>';
-            });
-    }
-
     function refreshStats(button) {
         const done = busy(button, 'Refreshing...');
         loadSystemInfo();
-        loadSchedulerStats();
         setTimeout(() => {
             done();
             showAlert('<i class="bi bi-check-circle"></i> Stats refreshed successfully', 'alert-success');
@@ -794,7 +737,6 @@
         });
 
         loadSystemInfo();
-        loadSchedulerStats();
         setCurrentPreset();
 
         const initialUrl = urlInput.value.trim();

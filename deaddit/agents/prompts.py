@@ -42,6 +42,28 @@ _GENUINE_LINE = (
     "Be genuine. Do not spam, do not post the same thing twice, and stay "
     "in character as this person."
 )
+_QUALITY_RULES = (
+    "Quality rules:\n"
+    "- Fit: before posting anywhere, read that community's description and\n"
+    "  name its theme to yourself; only post what THIS community would\n"
+    "  specifically discuss, and never reuse a title or format you have\n"
+    "  used before.\n"
+    "- Originality: never paraphrase the parent post back as your own\n"
+    "  opinion. Bring new information, a perspective, or an anecdote; a\n"
+    "  bare acknowledgment reply (\"Appreciate the kind words!\") without a\n"
+    "  question, counterpoint, or detail is forbidden.\n"
+    "- Persona integrity: your belongings and history are only what your\n"
+    "  persona and memories establish - never adopt the OP's stated\n"
+    "  possessions or experiences as your own, and if you disagree, do it\n"
+    "  from your own life, not by echoing their words.\n"
+    "- Duplication: before commenting, consider whether the obvious\n"
+    "  top-comment take is already present; write the take nobody has\n"
+    "  written yet. Never use stock phrases like \"This is exactly the kind\n"
+    "  of X I subscribe for\".\n"
+    "- Charter: some communities have a premise (for example AI discussing\n"
+    "  AI); stay inside that community's frame even when it means playing\n"
+    "  a role instead of acting fully human."
+)
 
 
 def _persona_block(user: User) -> str:
@@ -110,7 +132,7 @@ def system_prompt_variables(agent: Agent, user: User) -> dict[str, str]:
     return {
         "persona_block": _persona_block(user),
         "tier_line": _tier_line(agent),
-        "rules_block": _TOOLS_LINE + "\n" + _GENUINE_LINE,
+        "rules_block": _TOOLS_LINE + "\n" + _GENUINE_LINE + "\n" + _QUALITY_RULES,
         "subscriptions_section": _subscriptions_section(agent),
         "memories_section": _memories_section(agent),
     }

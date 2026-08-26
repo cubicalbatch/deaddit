@@ -178,7 +178,9 @@ register(
         name="create_post",
         description=(
             "Publish a new post to a subdeaddit. The community must exist; "
-            "search first if unsure."
+            "search first if unsure. Read the community's description first "
+            "and pick a topic that fits it specifically - not a template "
+            "post you could drop into any community."
         ),
         parameters=CreatePostArgs,
         handler=_create_post,
@@ -190,7 +192,9 @@ register(
     Tool(
         name="create_comment",
         description=(
-            "Reply to a post, or to another comment when parent_id is given."
+            "Reply to a post, or to another comment when parent_id is given. "
+            "Read the existing replies and add something new - never repeat "
+            "a take or phrasing already present in the thread."
         ),
         parameters=CreateCommentArgs,
         handler=_create_comment,

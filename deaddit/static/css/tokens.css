@@ -56,6 +56,10 @@
     --blue-900: #00243e;
     --blue-950: #001424;
 
+    /* Interaction surfaces (hover fields, active thread lines) */
+    --bg-hover-row: var(--gray-100);              /* quiet hover fill on rows/headers */
+    --accent-soft-strong: var(--accent-ramp-200); /* hover-chain thread line */
+
     /* Status ramps - base + soft background each */
     --green-500:      #0a7d33;
     --green-soft-50:  #e2f4e7;
@@ -199,7 +203,7 @@ html[data-theme="dark"] {
     --down-hover: #7193ff;                   /* UI 6.64:1 on canvas, 6.20:1 on surface */
 
     /* Rails & highlights */
-    --rail: #2a2d31;                         /* nesting guide line - decorative, non-text, same family as dark border */
+    --rail: var(--gray-800);                 /* nesting guide line - decorative, non-text; lifted from #2a2d31 (1.26:1 vs surface) to read at a glance on dark */
     --highlight-bg: var(--accent-soft);      /* dark-orange wash (#2b150a) - 13.83:1 with text-1 */
 
     /* Status (dark-tuned) */
@@ -212,8 +216,9 @@ html[data-theme="dark"] {
     --status-info: var(--info-400);
     --status-info-soft: var(--info-soft-900);
 
-    /* Focus */
-    --focus-ring: 0 0 0 3px rgba(255, 92, 31, 0.4);
+    /* Interaction surfaces (dark-tuned) */
+    --bg-hover-row: #1d2024;        /* = bg-elevated: lifts without glow */
+    --accent-soft-strong: #4a2410;  /* visible warm thread line on dark */
 
     /* Elevation: shadows soften into border+tint on dark */
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);

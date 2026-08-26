@@ -241,37 +241,6 @@ def test_web_process_zero_scheduler_on_import():
     assert "OK" in proc.stdout
 
 
-# ---------------------------------------------------------------------------
-# Queue stats shape + liveness wiring
-# ---------------------------------------------------------------------------
-
-
-def test_get_queue_stats_shape_and_liveness(app, db_session):
-    from deaddit import jobs
-    from deaddit.runtime import claim
-
-    stats = jobs.get_queue_stats()
-    assert stats["scheduler_running"] is False
-    assert claim.liveness_is_fresh() is False
-
-    claim.write_worker_liveness("w1")
-
-    assert claim.liveness_is_fresh() is True
-    stats = jobs.get_queue_stats()
-    assert stats["scheduler_running"] is True
-
-    db_session.add_all(
-        [
-            _make_job(status=JobStatus.PENDING),
-            _make_job(status=JobStatus.RUNNING, worker_id="w1"),
-        ]
-    )
-    db_session.commit()
-
-    stats = jobs.get_queue_stats()
-    assert stats["pending_jobs"] == 1
-    assert stats["running_jobs"] == 1
-
 
 def test_nightly_registry_registers_into_scheduler(app, monkeypatch):
     from apscheduler.schedulers.background import BackgroundScheduler

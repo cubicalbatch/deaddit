@@ -1,6 +1,6 @@
 """Public live-activity ticker (Phase UX-6, Slice A).
 
-Read-only merge of the four activity sources (posts, comments, votes, jobs)
+Read-only merge of the three activity sources (posts, comments, votes)
 into a uniform newest-first list rendered by ``templates/live.html`` (full
 page) or ``partials/_live_items.html`` (fragment mode).
 
@@ -25,7 +25,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import aliased
 
 from deaddit.extensions import db
-from deaddit.models import Comment, Job, Post, Vote
+from deaddit.models import Comment, Post, Vote
 from deaddit.utils import process_post_title
 
 logger = logging.getLogger(__name__)
@@ -38,10 +38,7 @@ NEWER_LIMIT = 50
 
 _COMMENT_SNIPPET_LEN = 140
 
-KINDS = ("comment", "job", "post", "vote")
-
-# Job event timestamp: first non-null of completed/started/created.
-_JOB_TS = func.coalesce(Job.completed_at, Job.started_at, Job.created_at)
+KINDS = ("comment", "post", "vote")
 
 
 # ---------------------------------------------------------------------------
@@ -285,46 +282,18 @@ def _vote_events(newer: bool, cursor) -> list[_EventRow]:
     return events
 
 
-def _job_events(newer: bool, cursor) -> list[_EventRow]:
-    rows = _fetch_rows(
-        (Job.id, _JOB_TS.label("created_at"), Job.type, Job.status),
-        lambda s: s,
-        _JOB_TS,
-        Job.id,
-        (),
-        newer,
-        cursor,
-        "job",
-    )
-    return [
-        (
-            r.created_at,
-            "job",
-            r.id,
-            {
-                "actor": None,
-                "title": f"{r.type.value} job {r.status.value}",
-                "community": None,
-                "href": url_for("admin.job_detail", job_id=r.id),
-            },
-        )
-        for r in rows
-    ]
-
-
 # ---------------------------------------------------------------------------
 # Merge + route
 # ---------------------------------------------------------------------------
 
 
 def _collect_events(newer: bool, cursor) -> list[dict]:
-    """Merge all four sources into uniform template-context dicts."""
+    """Merge all three sources into uniform template-context dicts."""
     ts_c, kind_c, id_c = cursor if cursor is not None else (None, None, None)
     rows: list[_EventRow] = []
     rows.extend(_post_events(newer, cursor))
     rows.extend(_comment_events(newer, cursor))
     rows.extend(_vote_events(newer, cursor))
-    rows.extend(_job_events(newer, cursor))
     if not newer and cursor is not None:
         # The per-source SQL prefilter only sees each source's own (ts, id);
         # cross-kind ties at identical timestamps are decided by the global
@@ -405,7 +374,7 @@ def recent():
 
 
 def max_event_ts() -> datetime | None:
-    """Max event timestamp across the four sources (None on empty DB).
+    """Max event timestamp across the three sources (None on empty DB).
 
     Removed posts/comments are excluded to match the ticker's visible set.
     """
@@ -414,7 +383,6 @@ def max_event_ts() -> datetime | None:
         (Post.created_at, (Post.removed.isnot(True),)),
         (Comment.created_at, (Comment.removed.isnot(True),)),
         (Vote.created_at, ()),
-        (_JOB_TS, ()),
     ):
         stmt = select(func.max(expr))
         if filters:
@@ -426,7 +394,7 @@ def max_event_ts() -> datetime | None:
 
 
 def count_events_after(ts: datetime | None) -> int:
-    """COUNT of visible rows strictly past ``ts`` across the four sources.
+    """COUNT of visible rows strictly past ``ts`` across the three sources.
 
     Mirrors the per-source keyset "newer" predicate (ts-only form); votes on
     hard-deleted targets are rare enough that they still tick the counter.
@@ -459,5 +427,4 @@ def count_events_after(ts: datetime | None) -> int:
         (Comment.removed.isnot(True), Post.removed.isnot(True)),
     )
     total += _count(_vote_joins, Vote.created_at)
-    total += _count(lambda s: s, _JOB_TS)
     return total

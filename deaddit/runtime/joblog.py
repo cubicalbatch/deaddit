@@ -6,8 +6,8 @@ while the handler is live becomes a ``JobLog`` row, batched (>= 10 lines or
 >= 1 s since the last flush) through its OWN SQLAlchemy connection so log
 writes can never corrupt or roll back the job's session.
 
-The web process never runs this handler: it reads the same rows via the
-tailer (deaddit.runtime.tailer) and the HTTP fallback endpoint.
+The web process never runs this handler; rows persist as an audit trail for
+the nightly maintenance jobs.
 """
 
 from __future__ import annotations

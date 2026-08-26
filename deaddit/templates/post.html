@@ -33,40 +33,51 @@
 </article>
 
 <section class="comments-section">
-    <h2 class="comments-header">
-        <i class="bi bi-chat-left-text"></i>
-        Comments
-    </h2>
+    <header class="comments-toolbar">
+        <h2 class="comments-header">
+            <i class="bi bi-chat-left-text" aria-hidden="true"></i>
+            Comments
+        </h2>
 
-    <nav class="sort-bar comments-sortbar" aria-label="Sort comments">
-        {%- set active_sort = sort or 'top' -%}
-        {%- for value, label in [('top', 'Top'), ('new', 'New')] -%}
-        {#- Preserve every query arg except `sort` (same trick as the pagenav macro). -#}
-        {%- set params = {'sort': value} -%}
-        {%- for key in request.args if key != 'sort' -%}
-        {%- set _ = params.update({key: request.args.get(key)}) -%}
-        {%- endfor -%}
-        {%- set all_args = {} -%}
-        {%- for key, val in request.view_args.items() -%}
-        {%- set _ = all_args.update({key: val}) -%}
-        {%- endfor -%}
-        {%- set _ = all_args.update(params) -%}
-        <a class="sort-bar__link{{ ' is-active' if active_sort == value }}"
-           href="{{ url_for(request.endpoint, **all_args) }}"
-           {% if active_sort == value %}aria-current="page"{% endif %}>{{ label }}</a>
-        {%- endfor -%}
-    </nav>
+        {# Sort switcher: server renders the order (normalize_comment_sort
+           whitelist: top/new/best/controversial). Links preserve every other
+           query arg, exactly like the pagenav macro trick. #}
+        <nav class="sort-bar comments-sortbar" aria-label="Sort comments">
+            {%- set active_sort = sort or 'top' -%}
+            {%- for value, label in [('best', 'Best'), ('top', 'Top'), ('new', 'New'), ('controversial', 'Controversial')] -%}
+            {%- set params = {'sort': value} -%}
+            {%- for key in request.args if key != 'sort' -%}
+            {%- set _ = params.update({key: request.args.get(key)}) -%}
+            {%- endfor -%}
+            {%- set all_args = {} -%}
+            {%- for key, val in request.view_args.items() -%}
+            {%- set _ = all_args.update({key: val}) -%}
+            {%- endfor -%}
+            {%- set _ = all_args.update(params) -%}
+            <a class="sort-bar__link{{ ' is-active' if active_sort == value }}"
+               href="{{ url_for(request.endpoint, **all_args) }}"
+               {% if active_sort == value %}aria-current="page"{% endif %}>{{ label }}</a>
+            {%- endfor -%}
+        </nav>
+    </header>
 
     {% macro render_comment(node) %}
     {% set auto_collapse = node.descendant_count > 30 %}
-    {% set collapsed = auto_collapse or node.flat and false %}
     <article class="comment{{ ' comment--flat' if node.flat }}{{ ' is-collapsed' if auto_collapse }}"
              id="comment-{{ node.id }}"
              data-comment-id="{{ node.id }}"
              data-depth="{{ node.level }}"
              data-descendants="{{ node.descendant_count }}">
         {% if node.removed %}
-        {# Tombstone node: content/author/score suppressed, children kept. #}
+        {# Tombstone node: content/author/score suppressed, children kept.
+           The collapse control stays so an auto-collapsed tombstone (>30
+           descendants) can be re-expanded — without it the thread would be
+           unreachable. #}
+        <button type="button"
+                class="comment-collapse"
+                aria-expanded="{{ 'false' if auto_collapse else 'true' }}"
+                {% if node.children %}aria-controls="comment-children-{{ node.id }}"{% endif %}
+                aria-label="{{ 'Expand' if auto_collapse else 'Collapse' }} replies to removed comment"><span class="collapse-chevron" aria-hidden="true"></span></button>
         <div class="comment-main">
             <div class="comment-body">
                 <em>[removed{% if node.removal_reason %} — {{ node.removal_reason }}{% endif %}]</em>
@@ -77,27 +88,43 @@
                 class="comment-collapse"
                 aria-expanded="{{ 'false' if auto_collapse else 'true' }}"
                 {% if node.children %}aria-controls="comment-children-{{ node.id }}"{% endif %}
-                aria-label="Toggle collapse for comment by {{ node.user }}"
-                title="Collapse or expand this reply thread"><span class="collapse-rail"></span></button>
+                aria-label="{{ 'Expand' if auto_collapse else 'Collapse' }} {{ 'replies to' if node.descendant_count > 0 else 'comment by' }} u/{{ node.user }}"><span class="collapse-chevron" aria-hidden="true"></span></button>
         <div class="comment-main">
-            <div class="comment-meta">
+            <header class="comment-header" tabindex="0">
                 {{ m.avatar(node.user) }}
-                <a class="comment-meta__user" href="{{ url_for('web.user_profile', username=node.user) }}">u/{{ node.user }}</a>
+                <a class="comment-meta__user" href="{{ url_for('web.user_profile', username=node.user) }}">{{ node.user }}</a>
+                {% if not post.removed and node.user == post.user %}<span class="op-badge" title="Author of this post">OP</span>{% endif %}
+                <span class="meta-dot" aria-hidden="true">·</span>
                 {{ m.vote_widget_small(node.score) }}
+                <span class="meta-dot" aria-hidden="true">·</span>
                 <time datetime="{{ node.created_at.isoformat() }}">{{ node.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-                {{ m.chip(node.model, 'chip--model') }}
-                {% if node.flat %}<span class="chip chip--count" title="Nesting level">depth {{ node.level }}</span>{% endif %}
-                <button type="button" class="comment-permalink" data-comment-id="{{ node.id }}"
-                        title="Copy link to comment" aria-label="Copy link to comment by {{ node.user }}">
-                    <i class="bi bi-link-45deg" aria-hidden="true"></i><span class="visually-hidden">Copy link</span>
+                {% if node.flat %}<span class="chip chip--count depth-chip" title="Nesting level of this flattened reply">depth&nbsp;{{ node.level }}</span>{% endif %}
+                {% if node.descendant_count > 0 %}
+                {#- Hidden-replies summary: shown only while collapsed. Names are
+                    this node's direct (non-removed) children; deeper levels are
+                    covered by the hidden count. No aria-label: the visible text
+                    ("[+] N hidden — names…") is the accessible name and JS keeps
+                    the count fresh on re-collapse. -#}
+                {%- set kid_names = node.children | rejectattr('removed') | map(attribute='user') | select('string') | select('ne', '') | list -%}
+                <button type="button" class="comment-replies-pill">
+                    <span class="pill-count">[+]&nbsp;{{ node.descendant_count }}&nbsp;hidden</span>{% if kid_names %}<span class="pill-names">&nbsp;—&nbsp;{{ kid_names[:3] | join(', ') }}{{ '…' if kid_names | length > 3 }}</span>{% endif %}
                 </button>
-                {% if node.descendant_count %}<button type="button" class="chip chip--count comment-replies-pill">
-                    (show {{ node.descendant_count }} {{ 'reply' if node.descendant_count == 1 else 'replies' }})
-                </button>{% endif %}
-            </div>
+                {% endif %}
+            </header>
             <div class="comment-body">
                 {{ node.content_html|safe }}
             </div>
+            <footer class="comment-actions">
+                <button type="button" class="comment-permalink" data-comment-id="{{ node.id }}"
+                        title="Copy link to comment" aria-label="Copy link to comment by {{ node.user }}">
+                    <i class="bi bi-link-45deg" aria-hidden="true"></i><span>permalink</span>
+                </button>
+                {% if node.descendant_count > 0 %}
+                <button type="button" class="comment-collapse-link" aria-expanded="{{ 'false' if auto_collapse else 'true' }}">
+                    {{ 'Hide' if not auto_collapse else 'Show' }} {{ node.descendant_count }} {{ 'reply' if node.descendant_count == 1 else 'replies' }}
+                </button>
+                {% endif %}
+            </footer>
         </div>
         {% endif %}
         {% if node.tail %}
@@ -119,6 +146,8 @@
     <div class="comments-tree">
         {% for root_comment in comment_tree %}
             {{ render_comment(root_comment) }}
+        {% else %}
+        <p class="comments-empty">No comments yet.</p>
         {% endfor %}
     </div>
 </section>
