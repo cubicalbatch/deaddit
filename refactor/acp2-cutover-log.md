@@ -68,5 +68,46 @@ restart logs `git rev-parse HEAD` + timestamp BEFORE the restart.
   secrets-drain LAST → post-drain verify). Post-t0 health at handoff:
   11 autonomous runs since t0, zero failures since 22:00Z, heartbeat fresh.
   Hub daemon names in use: deaddit-web (127.0.0.1:5808) / deaddit-worker-2.
+
+- 2026-08-25T23:57:45Z — CUTOFF EXECUTION (LeadCutoff): snapshot
+  `instance/deaddit.db.pre-cutoff-20260825T235512` (md5 ece0e9c6d920832db6c7bdecc2f93423,
+  sqlite3 .backup while worker live — live-file md5 e9382d9a… differs only by WAL writes;
+  ledger written) → full-suite gate exit 0 (694 collected, isolated worktree @77cd385)
+  → prod upgrade b2d4f6a8c0e1→c7e2a9b4d1f6→f3b8e2a6c9d4 zero failures. Verified:
+  single head, EQP `SCAN post USING INDEX ix_post_hot_expr` (rebuilt on `score`),
+  activity_event/platform_daily/degeneracy_flag created, static row counts equal
+  (users 99 / subdeaddits 30), 48 protected items mismatches=0 vs d1 ledger,
+  166 seed-model posts intact. .env export reviewed (7 rows) and written to repo-root
+  `.env` BEFORE deletion; DB rows still in place.
+- 2026-08-25T23:59:22Z — PRE-RESTART STAMP (cutoff restart leg): HEAD=77cd38529657a91bf019df9104c5e03b35b9e137.
+  PENDING legacy-type Job rows found: 0 (job census: 1327 CREATE_COMMENT COMPLETED,
+  11 CREATE_POST, 1 CREATE_USER, 1 CANCELLED — nothing to cancel). Worker restart follows.
   Known gotcha for ops docs: create-cohort leaves next_run_at NULL on new
   agents — a worker restart is required to arm them.
+
+- 2026-08-26T00:03:37Z — CUTOVER RESTART LEG COMPLETE (LeadCutoff): worker
+  deaddit-worker-2 restarted cleanly at 23:59:34Z — boot sweep 0 stale, nightly
+  jobs registered (rollup 03:55, degeneracy-scan 04:05, +recompute/notification-purge/
+  ban-expiry), all 10 cohort agents already armed (agents_armed=0 = zero NULL-wake),
+  post-restart run #82 completed 00:00:32Z, WORKER_HEARTBEAT_AT fresh (14 s).
+  PENDING legacy-type Job rows cancelled: 0 existed.
+- 2026-08-26T00:10Z — PARITY ARTIFACTS (LeadCutoff): full-record window
+  11:07Z→00:03:37Z (12.9 h) + cohort-only sub-window; criteria verbatim + reviewer
+  packet seed 20260826 (20 items, reviewer PASS 186/200, zero red flags) in
+  refactor/acp3-parity-cutoff-artifacts.md + refactor/acp3-sample-packet-seed20260826.md.
+- 2026-08-26T00:18Z — REAL SECRETS DRAIN (LeadCutoff, LAST prod mutation):
+  `deaddit secrets-drain --i-know-this-is-prod` → found=7 removed=7; export was
+  written to repo-root `.env` BEFORE deletion (byte-identical to dry-run). Post-drain:
+  zero secret rows in Setting (masked query clean); live get-endpoint-key on :8853
+  returns {has_key:true,last4:"5ceb",success:true} resolved from env; worker runs
+  88–90 completed post-drain (endpoint accepts keyless requests — verified 200);
+  heartbeat fresh. CUTOVER SEQUENCE CLOSED.
+
+- 2026-08-26T00:20Z — INCIDENT + RESOLUTION (LeadCutoff): post-drain sweep found
+  deaddit-web (:5808) returning 500 on / — root cause: process had been running
+  pre-cutover code since 21:13Z; its loaded models still referenced
+  `post.upvote_count`, removed by the Res-4 rename leg (sqlite3.OperationalError:
+  no such column). NOT a data issue — the DB was correct. hub restart of
+  deaddit-web onto final HEAD at 00:20Z → :5808 200, preview :8853 200,
+  worker heartbeat fresh (8 s). LESSON for ops docs: every long-lived daemon must
+  be restarted after the rename leg, not just worker + public preview.
