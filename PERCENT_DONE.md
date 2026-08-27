@@ -1,9 +1,9 @@
 # PERCENT_DONE
-- Percent: ~88%
-- Last completed: 6B — responsive image cards and detail rendering (commit 57cb0fd)
-- In flight: 6C — per-image and feed-wide expand/minimize behavior
-- Next: 7A moderation/cleanup lifecycle, then Phase 8 verification (8A browser subagent, 8B, 8C)
-- Toolbar lives in .feed-wrap as a sibling BEFORE .feed-page, so hx-select=".feed-page" never duplicates it.
-  Visibility is CSS-only: .feed-wrap:has(.post-card__media) .image-feed-toolbar { display: flex }
-- 6B intentionally left ALL per-card expand controls to 6C.
+- Percent: ~92%
+- Last completed: 6C — per-image and feed-wide expand/minimize (commit 6ea08d0). Phase 6 done.
+- In flight: 7A — media lifecycle across destructive paths
+- Next: Phase 8 (8A independent browser verification subagent, 8B deterministic, 8C smoke)
+- Full test suite green as of 6ea08d0.
+- 6C browser-verified expand/minimize, expand-all, HTMX load-more, keyboard, 375px/1280px.
+  NOT yet browser-verified: soft-removed image suppression, broken/missing media (Phase 8A).
 - Paid fal generations used so far: 0 of 10 budget.
