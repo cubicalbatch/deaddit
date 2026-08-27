@@ -513,10 +513,6 @@ def test_failed_wake_backs_off_random_agent_without_strike(
     scheduler._poll_once()
     assert _wait_until(lambda: calls == [agent.id])
     scheduler._executor.shutdown(wait=True)
-    scheduler = WakeScheduler(app)
-    scheduler._poll_once()
-    # End the poller's read transaction before the worker commits backoff.
-    db_session.commit()
 
     def backed_off():
         db_session.expire_all()
@@ -528,7 +524,6 @@ def test_failed_wake_backs_off_random_agent_without_strike(
         )
 
     assert _wait_until(backed_off)
-    scheduler._executor.shutdown(wait=True)
     db_session.refresh(agent)
     delta = (agent.next_run_at - datetime.utcnow()).total_seconds()
     assert 270 <= delta <= 330
