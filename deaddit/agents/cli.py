@@ -296,7 +296,7 @@ def create_cohort(ctx, spec_path, backfill_memory, enable) -> None:
 @agent.command("list")
 @click.pass_context
 def list_agents(ctx) -> None:
-    """List registered agents."""
+    """List registered agents with ID and persona-mode columns."""
     app = _make_app((ctx.obj or {}).get("db_uri"))
     with app.app_context():
         rows = Agent.query.order_by(Agent.id).all()
