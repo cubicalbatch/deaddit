@@ -1,9 +1,9 @@
 # PERCENT_DONE
-- Percent: ~53%
-- Last completed: 4A — image-aware atomic post creation (commit 468746c)
-- In flight: 4B — register and authorize create_image_post
-- Next: 4C prompts, then Phase 5 (vision-aware reading)
-- 4A service API for 4B: preflight_image_post(user, subdeaddit, title) then
-  create_image_post(title, content, user, subdeaddit, image=PendingPostImage(...)).
-  Content service owns DB only; 4B owns filesystem rollback.
+- Percent: ~60%
+- Last completed: 4B — register and authorize create_image_post (commit ace5f13)
+- In flight: 4C — teach prompts when and how to use image posts
+- Next: Phase 5 (5A vision capability, 5B image description, 5C read summaries)
+- Gating: disabled -> create_post only; optional -> both; image_only -> create_image_post only.
+  Enforced in registry (offering) and executor (_check_image_policy, independent of offering).
+- Shared post budget: registry.POST_TOOL_NAMES drives per-run cap, hourly cap, duplicate checks.
 - Paid fal generations used so far: 0 of 10 budget.
