@@ -739,5 +739,19 @@
     "methods": [
       "POST"
     ]
+  },
+  {
+    "rule": "/media/images/original/<filename>",
+    "endpoint": "media.original",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/media/images/thumbnail/<filename>",
+    "endpoint": "media.thumbnail",
+    "methods": [
+      "GET"
+    ]
   }
 ]

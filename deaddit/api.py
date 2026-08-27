@@ -1,14 +1,29 @@
 import json
 from datetime import datetime, timedelta
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, url_for
 from sqlalchemy import func
 
 from deaddit.services.content import get_available_models
 
-from .models import Comment, Post, Subdeaddit, User
+from .models import Comment, Post, PostImage, Subdeaddit, User
 
 bp = Blueprint("api", __name__)
+
+
+def _public_image(image: PostImage | None, removed: bool) -> dict | None:
+    """Public URL/metadata payload for a post's image, or ``None``.
+
+    A removed post never exposes image URLs (moderation tombstone); the
+    private generation provenance (source_prompt, provider snapshots,
+    request IDs) never leaves ``PostImage.to_dict()`` in the first place.
+    """
+    if image is None or removed:
+        return None
+    data = image.to_dict()
+    data["original_url"] = url_for("media.original", filename=data["original_url"])
+    data["thumbnail_url"] = url_for("media.thumbnail", filename=data["thumbnail_url"])
+    return data
 
 
 @bp.route("/api/subdeaddits", methods=["GET"])
@@ -66,6 +81,15 @@ def api_posts():
     # Execute query and limit results
     posts = query.limit(limit).all()
 
+    # One bulk lookup for every post's image instead of a per-post query
+    # (PostImage.post_id is its primary key, so this is a single IN query).
+    images_by_post_id = {
+        image.post_id: image
+        for image in PostImage.query.filter(
+            PostImage.post_id.in_([post.id for post in posts])
+        ).all()
+    }
+
     # Build response data, filtering by comment count if required
     post_data = []
     for post in posts:
@@ -86,6 +110,7 @@ def api_posts():
             "user": post.user,
             "score": post.score,
             "model": post.model,
+            "image": _public_image(images_by_post_id.get(post.id), post.removed),
         }
         post_data.append(post_info)
 
@@ -112,12 +137,18 @@ def api_post(post_id):
         "title": post.title,
         "score": post.score,
         "user": post.user,
-        "content": post.content.replace("reddit", "deaddit"),
+        # Image posts may carry no body text (content is nullable).
+        "content": (
+            post.content.replace("reddit", "deaddit")
+            if post.content is not None
+            else None
+        ),
         # Soft-removed posts stay fetchable by direct ID; consumers must
         # honor the flag (the web surface renders a tombstone instead).
         "removed": bool(post.removed),
         "comment_count": comment_count,
         "comments": comment_tree,
+        "image": _public_image(post.image, post.removed),
     }
 
     return jsonify(post_data)

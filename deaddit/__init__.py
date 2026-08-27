@@ -67,6 +67,7 @@ def create_app(config: Any = None) -> Flask:
     from .admin import admin_bp
     from .api import bp as api_bp
     from .live import bp as live_bp
+    from .media import bp as media_bp
     from .routes import bp as web_bp
 
     # Register blueprints
@@ -74,6 +75,7 @@ def create_app(config: Any = None) -> Flask:
     app.register_blueprint(web_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(live_bp)
+    app.register_blueprint(media_bp)
 
     # Import websocket handlers so their @socketio.on decorators register
     from . import websocket  # noqa: F401
