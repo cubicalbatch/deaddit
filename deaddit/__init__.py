@@ -41,7 +41,10 @@ def create_app(config: Any = None) -> Flask:
     # The per-process settings cache must never leak values across instances
     # (tests create many apps against different databases).
     clear_settings_cache()
-
+    # Default generated images to durable instance storage; explicit config wins.
+    app.config.setdefault(
+        "GENERATED_IMAGES_ROOT", os.path.join(app.instance_path, "generated_images")
+    )
     if config is not None:
         if isinstance(config, dict):
             app.config.update(config)

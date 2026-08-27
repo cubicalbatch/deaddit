@@ -17,6 +17,7 @@ dependencies = [
     "flask-caching",
     "apscheduler",
     "click",
+    "pillow",
     "requests",
     "pydantic>=2",
     "gunicorn",
