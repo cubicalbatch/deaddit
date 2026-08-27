@@ -6,10 +6,12 @@ adapter is registered by default, so calling search_models/validate_model/
 generate against an unregistered provider_type fails closed rather than
 reaching for a real HTTP transport.
 
-Credentials are resolved from ``ImageProvider.credential_env`` at call time,
-never persisted or cached. A disabled provider, an unregistered provider
-type, or a missing credential all fail here, before any adapter method (and
-therefore before any network request) runs.
+Credentials resolve at call time and are never cached: an admin-entered
+``ImageProvider.api_key`` wins, with the ``credential_env`` environment
+variable as the fallback for providers configured before that column existed.
+A disabled provider, an unregistered provider type, or a missing credential
+all fail here, before any adapter method (and therefore before any network
+request) runs.
 """
 
 from __future__ import annotations
@@ -97,24 +99,37 @@ def get_adapter(provider_type: str) -> ImageAdapter:
         ) from None
 
 
+def stored_credential(provider: ImageProvider) -> str | None:
+    """The admin-entered API key on *provider*'s row, when one is stored."""
+    return (getattr(provider, "api_key", None) or "").strip() or None
+
+
+def credential_is_configured(provider: ImageProvider) -> bool:
+    """True when a stored key or the ``credential_env`` fallback resolves."""
+    if stored_credential(provider):
+        return True
+    return bool(provider.credential_env) and bool(
+        os.environ.get(provider.credential_env)
+    )
+
+
 def _resolve_credential(provider: ImageProvider) -> str:
     """Resolve the provider's credential, failing before any network request."""
     if not provider.is_enabled:
         raise ImageProviderDisabledError(
             f"image provider {provider.name!r} is disabled"
         )
+    credential = stored_credential(provider)
+    if credential:
+        return credential
     env_name = provider.credential_env
-    if not env_name:
-        raise ImageCredentialError(
-            f"image provider {provider.name!r} has no credential_env configured"
-        )
-    credential = os.environ.get(env_name)
-    if not credential:
-        raise ImageCredentialError(
-            f"environment variable {env_name!r} for image provider "
-            f"{provider.name!r} is not set"
-        )
-    return credential
+    if env_name and os.environ.get(env_name):
+        return os.environ.get(env_name)
+    raise ImageCredentialError(
+        f"image provider {provider.name!r} has no credential configured "
+        f"(save an API key in the admin UI or set {env_name or 'its credential'} "
+        "in the environment)"
+    )
 
 
 def search_models(
@@ -155,11 +170,13 @@ def generate(
 
 __all__ = [
     "ImageAdapter",
-    "get_adapter",
+    "credential_is_configured",
     "generate",
+    "get_adapter",
     "register_adapter",
     "reset_adapters",
     "search_models",
+    "stored_credential",
     "unregister_adapter",
     "validate_model",
 ]

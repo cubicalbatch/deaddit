@@ -2135,13 +2135,22 @@ _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 def _image_provider_payload(provider):
     """Serialize a provider for the admin API.
 
-    Never includes a secret value - ImageProvider has no credential column,
-    only the name of the environment variable that holds it - but callers
-    still need to know whether that variable is currently set, so a
-    computed boolean is added here rather than a secret.
+    Never returns the stored key itself - only masked ``has_key`` /
+    ``key_last4`` from ``to_dict`` plus a computed ``credential_set``
+    boolean and ``credential_source`` (``stored`` / ``environment`` / null)
+    so the UI can show where the working credential comes from.
     """
     data = provider.to_dict()
-    data["credential_set"] = bool(os.environ.get(provider.credential_env))
+    data["credential_set"] = image_client.credential_is_configured(provider)
+    data["credential_source"] = (
+        "stored"
+        if image_client.stored_credential(provider)
+        else (
+            "environment"
+            if provider.credential_env and os.environ.get(provider.credential_env)
+            else None
+        )
+    )
     data["cached_model_count"] = (
         ImageModel.query.filter_by(provider_id=provider.id, is_active=True).count()
         if provider.id is not None
@@ -2194,15 +2203,17 @@ def api_list_image_providers():
 def api_create_image_provider():
     """Create a new image provider.
 
-    Never accepts a secret value - only a provider_type (which adapter to
-    use), a credential_env name (where the real key lives, in the process
-    environment), and an optional default_model that must pass the
-    adapter's validate_model before it is ever accepted.
+    Accepts an optional write-only ``api_key`` (stored on the row, never
+    returned), a provider_type (which adapter to use), an optional
+    ``credential_env`` fallback name (still defaulted per type so existing
+    env-based deployments keep working), and an optional default_model that
+    must pass the adapter's validate_model before it is ever accepted.
     """
     payload = request.get_json(silent=True) or {}
     name = str(payload.get("name") or "").strip()
     provider_type = str(payload.get("provider_type") or "").strip()
     credential_env = str(payload.get("credential_env") or "").strip()
+    api_key = str(payload.get("api_key") or "").strip() or None
     is_enabled = bool(payload.get("is_enabled", True))
     default_model = str(payload.get("default_model") or "").strip()
 
@@ -2244,6 +2255,7 @@ def api_create_image_provider():
     provider = ImageProvider(
         name=name,
         provider_type=provider_type,
+        api_key=api_key,
         credential_env=credential_env,
         is_enabled=is_enabled,
     )
@@ -2277,15 +2289,18 @@ def api_create_image_provider():
 @production_disabled
 @admin_required
 def api_test_image_provider_connection():
-    """Authenticated catalog search only - never generation, never a secret in/out.
+    """Authenticated catalog search only - never generation.
 
     Accepts either {"provider_id": N} for a saved provider, or
     {"provider_type", "credential_env"} for an unsaved draft so the admin UI
-    can test before the first save.
+    can test before the first save. An optional ``api_key`` overrides the
+    credential for this probe only (in memory, never committed), letting the
+    UI test a freshly typed key before saving it. No secret is ever returned.
     """
     payload = request.get_json(silent=True) or {}
     provider_id = payload.get("provider_id")
     query = str(payload.get("query") or "")
+    typed_key = str(payload.get("api_key") or "").strip() or None
 
     if provider_id:
         try:
@@ -2296,6 +2311,9 @@ def api_test_image_provider_connection():
             return jsonify(
                 {"success": False, "message": "Image provider not found"}
             ), 404
+        if typed_key:
+            # Probe with the freshly typed key without persisting it.
+            provider.api_key = typed_key
     else:
         provider_type = str(payload.get("provider_type") or "").strip()
         credential_env = str(payload.get("credential_env") or "").strip()
@@ -2324,6 +2342,7 @@ def api_test_image_provider_connection():
         provider = ImageProvider(
             name="(unsaved)",
             provider_type=provider_type,
+            api_key=typed_key,
             credential_env=credential_env,
             is_enabled=True,
         )
@@ -2357,8 +2376,8 @@ def api_update_image_provider(provider_id):
 
     Field changes are applied to the in-session object first; if a
     requested default_model fails validate_model, every change from this
-    request (including provider_type/credential_env/is_enabled) is rolled
-    back so the update is all-or-nothing.
+    request (including provider_type/credential_env/api_key/is_enabled) is
+    rolled back so the update is all-or-nothing.
     """
     provider = db.session.get(ImageProvider, provider_id)
     if not provider:
@@ -2416,6 +2435,11 @@ def api_update_image_provider(provider_id):
                 400,
             )
         provider.credential_env = credential_env
+
+    # Write-only: absent keeps the stored key, "" clears it (falling back to
+    # the credential_env variable), any other value replaces it.
+    if "api_key" in payload:
+        provider.api_key = str(payload.get("api_key") or "").strip() or None
 
     if "is_enabled" in payload:
         provider.is_enabled = bool(payload.get("is_enabled"))
@@ -2895,14 +2919,15 @@ def _resolve_image_posts(raw, tier):
             ),
             400,
         )
-    if not os.environ.get(provider.credential_env):
+    if not image_client.credential_is_configured(provider):
         return None, (
             jsonify(
                 {
                     "success": False,
                     "error": (
                         f"Image provider {provider.name!r} has no credential "
-                        f"configured (set {provider.credential_env})"
+                        f"configured (save an API key in the admin UI or set "
+                        f"{provider.credential_env})"
                     ),
                 }
             ),

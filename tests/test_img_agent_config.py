@@ -16,7 +16,7 @@ from deaddit.extensions import db
 from deaddit.images.client import register_adapter as register_image_adapter
 from deaddit.images.client import reset_adapters
 from deaddit.images.types import ModelValidation
-from deaddit.models import Agent, ImageProvider
+from deaddit.models import Agent, ImageProvider, User
 from tests.fakes import FakeImageAdapter
 
 
@@ -183,6 +183,28 @@ def test_image_posts_config_round_trip_and_validation(
     monkeypatch.delenv("FALAI_API_KEY", raising=False)
     rejected_create({"enabled": True, "provider_id": provider.id}, "credential")
     monkeypatch.setenv("FALAI_API_KEY", "test-fal-secret-value")
+    keyed = _make_provider(db_session, name="Keyed Fal", api_key="stored-key-42")
+    db_session.add(User(username="carol"))
+    db_session.commit()
+    monkeypatch.delenv("FALAI_API_KEY", raising=False)
+    keyed_create = admin_client.post(
+        "/admin/api/agents",
+        json={
+            "username": "carol",
+            "backfill_memory": False,
+            "image_posts": {"enabled": True, "provider_id": keyed.id},
+        },
+    )
+    assert keyed_create.status_code == 201, keyed_create.get_data(as_text=True)
+    assert keyed_create.get_json()["agent"]["config"]["image_posts"] == {
+        "enabled": True,
+        "provider_id": keyed.id,
+        "model": None,
+        "policy": "optional",
+    }
+    monkeypatch.setenv("FALAI_API_KEY", "test-fal-secret-value")
+    Agent.query.filter_by(user_username="carol").delete()
+    db.session.commit()
 
     # Updates: enabling, preserving unrelated keys, and disabling.
     bob = _make_agent(db_session, "bob", config={"min_delay": 60, "max_delay": 900})

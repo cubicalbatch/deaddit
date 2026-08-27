@@ -828,11 +828,17 @@ class DegeneracyFlag(db.Model):
 
 # --- Image posts (Phase 1) ---
 class ImageProvider(db.Model):
-    """Configured image provider and its cached model listings."""
+    """Configured image provider and its cached model listings.
+
+    ``api_key`` holds an admin-entered credential (the LLMProvider
+    precedent): write-only through the admin UI, masked in ``to_dict``, and
+    taking precedence over the ``credential_env`` environment fallback.
+    """
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False, unique=True)
     provider_type = db.Column(db.String(20), nullable=False)
+    api_key = db.Column(db.String(255))
     credential_env = db.Column(db.String(100), nullable=False)
     default_model = db.Column(db.String(200))
     is_enabled = db.Column(db.Boolean, nullable=False, default=True)
@@ -846,10 +852,13 @@ class ImageProvider(db.Model):
     )
 
     def to_dict(self):
+        has_key = bool(self.api_key and self.api_key.strip())
         return {
             "id": self.id,
             "name": self.name,
             "provider_type": self.provider_type,
+            "has_key": has_key,
+            "key_last4": self.api_key.strip()[-4:] if has_key else None,
             "credential_env": self.credential_env,
             "default_model": self.default_model,
             "is_enabled": self.is_enabled,

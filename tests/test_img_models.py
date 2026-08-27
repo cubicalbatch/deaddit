@@ -54,6 +54,13 @@ def test_image_rows_are_unique_per_post_and_outlive_their_provider(app, db_sessi
     other = ImageProvider(
         name="Other Provider", provider_type="runware", credential_env="RUNWARE_KEY"
     )
+    # The stored API key is masked in serialization - never the value itself.
+    provider.api_key = "stored-secret-abcd"
+    masked = provider.to_dict()
+    assert masked["has_key"] is True and masked["key_last4"] == "abcd"
+    assert "api_key" not in masked and "stored-secret-abcd" not in str(masked)
+    assert (other.to_dict()["has_key"], other.to_dict()["key_last4"]) == (False, None)
+
     db_session.add_all(
         [
             provider,
@@ -141,6 +148,7 @@ def test_image_tables_migration_round_trip(tmp_path):
         "provider_id",
         "source_prompt",
     } <= {row[1] for row in query("PRAGMA table_info(post_image)")}
+    assert "api_key" in {row[1] for row in query("PRAGMA table_info(image_provider)")}
 
     post_image_fks = query("PRAGMA foreign_key_list(post_image)")
     assert any(

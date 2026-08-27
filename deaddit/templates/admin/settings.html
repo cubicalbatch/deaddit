@@ -227,13 +227,27 @@
 
                     <div class="row g-3 mb-3">
                         <div class="col-md-7">
-                            <label for="modal-image-provider-credential-env" class="form-label fw-bold small">Credential Environment Variable <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control font-monospace" id="modal-image-provider-credential-env" required placeholder="FALAI_API_KEY">
-                            <div class="form-text">
-                                The API key lives only in this environment variable - never entered or shown here.
-                                Use a different name to configure a second account of the same type.
+                            <label for="modal-image-provider-api-key" class="form-label fw-bold small">API Key</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control font-monospace" id="modal-image-provider-api-key" autocomplete="new-password" placeholder="Enter API key">
+                                <button type="button" class="btn btn-outline-danger" id="modal-image-clear-key-btn" style="display: none;" title="Remove the stored key">
+                                    <i class="bi bi-eraser"></i> Clear
+                                </button>
+                            </div>
+                            <div class="form-text" id="modal-image-api-key-help">
+                                Stored in the database - write-only here, never displayed again.
                             </div>
                         </div>
+                        <div class="col-md-5">
+                            <label for="modal-image-provider-credential-env" class="form-label fw-bold small">Credential Environment Variable <span class="text-muted fw-normal">(optional)</span></label>
+                            <input type="text" class="form-control font-monospace" id="modal-image-provider-credential-env" placeholder="FALAI_API_KEY">
+                            <div class="form-text">
+                                Fallback only: with no stored API key, the key is read from this environment variable.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
                         <div class="col-md-5 d-flex align-items-center pt-3">
                             <div class="form-check form-switch mt-2">
                                 <input class="form-check-input" type="checkbox" id="modal-image-provider-enabled" role="switch" checked>
@@ -937,10 +951,16 @@
                 tr.appendChild(tdType);
 
                 const tdCred = document.createElement('td');
-                const credBadge = p.credential_set
-                    ? '<span class="badge bg-success-subtle text-success border border-success-subtle"><i class="bi bi-key-fill me-1"></i>Set</span>'
-                    : '<span class="badge bg-secondary-subtle text-secondary border">Not set</span>';
-                tdCred.innerHTML = `<code class="small">${esc(p.credential_env)}</code> ${credBadge}`;
+                let credBadge;
+                if (p.credential_source === 'stored') {
+                    const last4 = p.key_last4 ? ` ...${esc(p.key_last4)}` : '';
+                    credBadge = `<span class="badge bg-success-subtle text-success border border-success-subtle"><i class="bi bi-key-fill me-1"></i>API key saved${last4}</span>`;
+                } else if (p.credential_source === 'environment') {
+                    credBadge = `<span class="badge bg-success-subtle text-success border border-success-subtle"><i class="bi bi-terminal me-1"></i>env var set</span>`;
+                } else {
+                    credBadge = '<span class="badge bg-secondary-subtle text-secondary border">Not set</span>';
+                }
+                tdCred.innerHTML = `${credBadge}<br><code class="small text-muted">${esc(p.credential_env)}</code>`;
                 tr.appendChild(tdCred);
 
                 const tdModel = document.createElement('td');
@@ -1040,7 +1060,7 @@
         document.getElementById('modal-image-model-info').textContent = '';
         document.getElementById('modal-image-model-results').style.display = 'none';
         document.getElementById('modal-image-model-results').innerHTML = '';
-        document.getElementById('modal-image-model-more-btn').style.display = 'none';
+        clearImageApiKey(false);
 
         const enabledSwitch = document.getElementById('modal-image-provider-enabled');
         const typeSelect = document.getElementById('modal-image-provider-type');
@@ -1053,9 +1073,18 @@
             document.getElementById('modal-image-provider-credential-env').value = provider.credential_env || '';
             document.getElementById('modal-image-provider-model').value = provider.default_model || '';
             enabledSwitch.checked = Boolean(provider.is_enabled);
+            document.getElementById('modal-image-clear-key-btn').style.display = provider.has_key ? 'inline-flex' : 'none';
+            setImageApiKeyHelp(provider.has_key
+                ? 'API key is stored' + (provider.key_last4 ? ' (ends ...' + esc(provider.key_last4) + ')' : '') + '. Leave blank to keep it, enter a new key to replace it.'
+                : 'No API key stored. Enter one, or rely on the environment variable fallback.');
+            document.getElementById('modal-image-provider-api-key').placeholder = provider.has_key
+                ? 'Stored - leave blank to keep, or enter new key'
+                : 'Enter API key';
             document.getElementById('modal-image-model-info').textContent = provider.credential_set
-                ? 'Credential is set.'
-                : 'Credential is NOT set - export ' + (provider.credential_env || 'the env var') + ' before generating.';
+                ? (provider.credential_source === 'stored'
+                    ? 'Credential: stored API key.'
+                    : 'Credential: environment variable ' + (provider.credential_env || '') + '.')
+                : 'Credential is NOT set - save an API key here or export ' + (provider.credential_env || 'the env var') + ' before generating.';
         } else {
             document.getElementById('imageProviderModalTitle').textContent = 'Add Image Provider';
             document.getElementById('modal-image-provider-id').value = '';
@@ -1064,6 +1093,9 @@
             document.getElementById('modal-image-provider-credential-env').value = IMAGE_DEFAULT_CREDENTIAL_ENV.fal;
             document.getElementById('modal-image-provider-model').value = '';
             enabledSwitch.checked = true;
+            document.getElementById('modal-image-clear-key-btn').style.display = 'none';
+            setImageApiKeyHelp('Stored in the database - write-only here, never displayed again.');
+            document.getElementById('modal-image-provider-api-key').placeholder = 'Enter API key';
         }
 
         if (!imageProviderModalInstance) {
@@ -1071,6 +1103,32 @@
         }
         imageProviderModalInstance.show();
     }
+
+    // "Clear stored key" intent: toggled off until saved; typing a new key
+    // cancels it. Blank input + no intent = keep the stored key unchanged.
+    let imageApiKeyClearRequested = false;
+
+    function setImageApiKeyHelp(text) {
+        const help = document.getElementById('modal-image-api-key-help');
+        help.textContent = text;
+    }
+
+    function clearImageApiKey(requested) {
+        imageApiKeyClearRequested = requested;
+        const btn = document.getElementById('modal-image-clear-key-btn');
+        btn.classList.toggle('active', requested);
+        btn.innerHTML = requested
+            ? '<i class="bi bi-arrow-counterclockwise"></i> Undo clear'
+            : '<i class="bi bi-eraser"></i> Clear';
+        if (requested) setImageApiKeyHelp('The stored API key will be removed when you save (the environment variable fallback, if set, takes over).');
+    }
+
+    document.getElementById('modal-image-clear-key-btn').addEventListener('click', function () {
+        clearImageApiKey(!imageApiKeyClearRequested);
+    });
+    document.getElementById('modal-image-provider-api-key').addEventListener('input', function () {
+        if (this.value && imageApiKeyClearRequested) clearImageApiKey(false);
+    });
 
     // Default the credential env when the type changes, but only if the field
     // still holds one of the known defaults (so an intentionally-custom name
@@ -1185,15 +1243,19 @@
         const providerId = document.getElementById('modal-image-provider-id').value;
         const providerType = document.getElementById('modal-image-provider-type').value;
         const credentialEnv = document.getElementById('modal-image-provider-credential-env').value.trim();
+        const typedKey = document.getElementById('modal-image-provider-api-key').value.trim();
         const resultDiv = document.getElementById('modal-image-test-result');
 
         const done = busy(this, 'Testing...');
         resultDiv.style.display = 'none';
 
         try {
+            // A typed key is probed as-is (before saving); otherwise a saved
+            // provider uses its stored key, a draft falls back to the env var.
             const payload = providerId
                 ? { provider_id: Number(providerId) }
                 : { provider_type: providerType, credential_env: credentialEnv };
+            if (typedKey) payload.api_key = typedKey;
             const res = await postJson('/admin/api/image-providers/test-connection', payload);
             resultDiv.className = 'alert ' + (res.success ? 'alert-success' : 'alert-danger') + ' mt-2 mb-0 py-2';
             resultDiv.innerHTML = `<i class="bi bi-${res.success ? 'check-circle' : 'x-circle'} me-1"></i> ${esc(res.message || 'Test finished')}`;
@@ -1216,12 +1278,13 @@
         const credentialEnv = document.getElementById('modal-image-provider-credential-env').value.trim();
         const model = document.getElementById('modal-image-provider-model').value.trim();
         const isEnabled = document.getElementById('modal-image-provider-enabled').checked;
+        const apiKey = document.getElementById('modal-image-provider-api-key').value.trim();
         const alertBox = document.getElementById('image-provider-modal-alert');
         const saveBtn = document.getElementById('modal-image-save-btn');
 
-        if (!name || !credentialEnv) {
+        if (!name) {
             alertBox.className = 'alert alert-danger mb-3';
-            alertBox.textContent = 'Provider Name and Credential Environment Variable are required.';
+            alertBox.textContent = 'Provider Name is required.';
             alertBox.style.display = 'block';
             return;
         }
@@ -1233,6 +1296,10 @@
             is_enabled: isEnabled,
             default_model: model
         };
+        // Absent = keep the stored key; a typed key replaces it; the clear
+        // intent (blank input) sends "" so the server drops the stored key.
+        if (apiKey) payload.api_key = apiKey;
+        else if (imageApiKeyClearRequested) payload.api_key = '';
 
         const done = busy(saveBtn, 'Saving...');
         alertBox.style.display = 'none';

@@ -12,6 +12,7 @@ import time
 import pytest
 
 from deaddit.images.client import (
+    credential_is_configured,
     generate,
     get_adapter,
     register_adapter,
@@ -64,6 +65,35 @@ def _result(request_id="req-1", url="https://provider.example/image.png"):
         width=512,
         height=512,
     )
+
+
+def test_stored_api_key_wins_and_blank_falls_back_to_env(monkeypatch):
+    monkeypatch.setenv("FALAI_API_KEY", "env-secret")
+    adapter = FakeImageAdapter()
+    register_adapter("fal", adapter)
+
+    def search(provider):
+        adapter.enqueue_search(ModelSearchResult(options=[], next_cursor=None))
+        return search_models(provider, query="cats")
+
+    # A stored key (even whitespace-padded) beats the environment variable.
+    stored = _provider(api_key="  stored-secret  ")
+    assert credential_is_configured(stored) is True
+    search(stored)
+    assert adapter.search_calls[-1]["credential"] == "stored-secret"
+
+    # A blank stored key falls back to the environment variable.
+    blank = _provider(api_key="   ")
+    assert credential_is_configured(blank) is True
+    search(blank)
+    assert adapter.search_calls[-1]["credential"] == "env-secret"
+
+    # Neither source available: fail closed before any adapter dispatch.
+    neither = _provider(api_key=None)
+    monkeypatch.delenv("FALAI_API_KEY", raising=False)
+    assert credential_is_configured(neither) is False
+    with pytest.raises(ImageCredentialError, match="admin UI"):
+        search_models(neither, query="cats")
 
 
 def test_dispatch_routes_to_each_adapter_and_otherwise_fails_closed(monkeypatch):

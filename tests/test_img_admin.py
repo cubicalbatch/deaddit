@@ -131,6 +131,93 @@ def test_provider_crud_round_trip_never_exposes_the_credential(
             )
 
 
+def test_provider_api_key_lifecycle_never_returns_the_secret(
+    admin_client, app, fake_fal, monkeypatch
+):
+    """Admin-entered keys: stored on create, replaceable, clearable, masked."""
+    monkeypatch.delenv("FALAI_API_KEY", raising=False)
+
+    with app.app_context():
+        created = admin_client.post(
+            PROVIDERS,
+            json={
+                "name": "Keyed Fal",
+                "provider_type": "fal",
+                "api_key": "fal-live-key-1234",
+            },
+        )
+        assert created.status_code == 201, created.get_data(as_text=True)
+        provider = created.get_json()["provider"]
+        assert provider["credential_set"] is True
+        assert provider["credential_source"] == "stored"
+        assert provider["has_key"] is True
+        assert provider["key_last4"] == "1234"
+        assert "fal-live-key-1234" not in created.get_data(as_text=True)
+        assert "api_key" not in provider
+        provider_id = provider["id"]
+
+        # Absent api_key keeps the stored one; "" clears it.
+        kept = admin_client.put(
+            f"{PROVIDERS}/{provider_id}", json={"name": "Keyed Fal"}
+        )
+        assert kept.status_code == 200
+        assert kept.get_json()["provider"]["has_key"] is True
+
+        replaced = admin_client.put(
+            f"{PROVIDERS}/{provider_id}", json={"api_key": "fal-rotated-9999"}
+        )
+        assert replaced.status_code == 200
+        body = replaced.get_json()["provider"]
+        assert body["key_last4"] == "9999"
+        assert "fal-rotated-9999" not in replaced.get_data(as_text=True)
+
+        cleared = admin_client.put(f"{PROVIDERS}/{provider_id}", json={"api_key": ""})
+        assert cleared.status_code == 200
+        body = cleared.get_json()["provider"]
+        assert body["has_key"] is False
+        assert body["credential_set"] is False
+        assert body["credential_source"] is None
+
+        # With no stored key, the env fallback restores credential_set.
+        monkeypatch.setenv("FALAI_API_KEY", "env-fallback-secret")
+        listed = admin_client.get(PROVIDERS).get_json()["providers"]
+        row = next(p for p in listed if p["id"] == provider_id)
+        assert (row["credential_set"], row["credential_source"]) == (
+            True,
+            "environment",
+        )
+        monkeypatch.delenv("FALAI_API_KEY", raising=False)
+
+        # Test connection probes a typed key before any save, and never
+        # echoes it back: draft first, then saved-provider override.
+        fake_fal.enqueue_search(ModelSearchResult(options=[], next_cursor=None))
+        draft = admin_client.post(
+            f"{PROVIDERS}/test-connection",
+            json={"provider_type": "fal", "api_key": "typed-draft-key"},
+        )
+        assert draft.status_code == 200
+        assert draft.get_json()["success"] is True
+        assert "typed-draft-key" not in draft.get_data(as_text=True)
+        assert fake_fal.search_calls[-1]["credential"] == "typed-draft-key"
+
+        saved = admin_client.put(
+            f"{PROVIDERS}/{provider_id}", json={"api_key": "stored-for-override"}
+        )
+        assert saved.status_code == 200
+        fake_fal.enqueue_search(ModelSearchResult(options=[], next_cursor=None))
+        override = admin_client.post(
+            f"{PROVIDERS}/test-connection",
+            json={"provider_id": provider_id, "api_key": "typed-override-key"},
+        )
+        assert override.status_code == 200
+        assert fake_fal.search_calls[-1]["credential"] == "typed-override-key"
+        # The probe must not have persisted the override key.
+        db.session.expire_all()
+        assert (
+            db.session.get(ImageProvider, provider_id).api_key == "stored-for-override"
+        )
+
+
 def test_provider_writes_fail_closed_and_never_persist_partial_state(
     admin_client, app, fake_fal
 ):

@@ -58,33 +58,40 @@ def images() -> None:
 @click.option(
     "--credential-env",
     default=None,
-    help="Environment variable holding the API key. "
-    "Defaults to FALAI_API_KEY/RUNWARE_API_KEY per provider type.",
+    help="Environment variable holding the API key (fallback when --api-key "
+    "is not given). Defaults to FALAI_API_KEY/RUNWARE_API_KEY per provider type.",
+)
+@click.option(
+    "--api-key",
+    default=None,
+    help="API key to use directly (equivalent to a key saved in the admin UI).",
 )
 @click.option("--query", default="", show_default=True, help="Catalog search text.")
 def check_connection_cmd(
-    provider_type: str, credential_env: str | None, query: str
+    provider_type: str, credential_env: str | None, api_key: str | None, query: str
 ) -> None:
     """Authenticated catalog search only - free, safe to run repeatedly.
 
     Confirms PROVIDER_TYPE's credential is set and accepted by resolving it
-    from the environment and running one search_models() call. Never
-    generates an image.
+    from --api-key or the environment and running one search_models() call.
+    Never generates an image.
     """
     env_name = credential_env or _DEFAULT_CREDENTIAL_ENV[provider_type]
-    if not os.environ.get(env_name):
+    if not api_key and not os.environ.get(env_name):
         raise click.ClickException(
-            f"{env_name} is not set in the environment. Export it "
-            "(e.g. from .env) before running this command."
+            f"Neither --api-key nor the {env_name} environment variable is "
+            "set. Provide one before running this command."
         )
 
     register_default_adapters()
     provider = ImageProvider(
         name=f"{provider_type}-check-connection",
         provider_type=provider_type,
+        api_key=api_key,
         credential_env=env_name,
         is_enabled=True,
     )
+
     result = test_connection(provider, query=query)
     click.echo(result.message)
     if result.sample_model_ids:
@@ -102,7 +109,13 @@ def check_connection_cmd(
     "--credential-env",
     default=_SMOKE_CREDENTIAL_ENV,
     show_default=True,
-    help="Environment variable holding the fal.ai API key.",
+    help="Environment variable holding the fal.ai API key (fallback when "
+    "--api-key is not given).",
+)
+@click.option(
+    "--api-key",
+    default=None,
+    help="API key to use directly (equivalent to a key saved in the admin UI).",
 )
 @click.option(
     "--deadline-seconds",
@@ -121,6 +134,7 @@ def smoke_fal_cmd(
     model: str,
     prompt: str,
     credential_env: str,
+    api_key: str | None,
     deadline_seconds: float,
     confirmed: bool,
 ) -> None:
@@ -138,16 +152,17 @@ def smoke_fal_cmd(
             f"This requests exactly one real, billed image from fal.ai "
             f"model {model!r}."
         )
-    if not os.environ.get(credential_env):
+    if not api_key and not os.environ.get(credential_env):
         raise click.ClickException(
-            f"{credential_env} is not set in the environment. Export it "
-            "(e.g. from .env) before running this command."
+            f"Neither --api-key nor the {credential_env} environment variable "
+            "is set. Provide one before running this command."
         )
 
     register_default_adapters()
     provider = ImageProvider(
         name="fal-smoke",
         provider_type=_SMOKE_PROVIDER_TYPE,
+        api_key=api_key,
         credential_env=credential_env,
         default_model=model,
         is_enabled=True,

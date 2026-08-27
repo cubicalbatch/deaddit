@@ -246,7 +246,7 @@ def run_once(
                     model=model,
                     api_url=api_url,
                     api_key=api_key,
-                    sampling=Sampling(max_tokens=2048),
+                    sampling=Sampling(max_tokens=4096),
                     extra_payload={"messages": messages},
                     tools=specs,
                 )

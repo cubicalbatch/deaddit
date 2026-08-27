@@ -22,7 +22,7 @@ class ImageProviderDisabledError(ImageProviderError):
 
 
 class ImageCredentialError(ImageProviderError):
-    """The provider's credential environment variable is unset or blank."""
+    """Neither a stored API key nor the credential env variable is usable."""
 
 
 class UnknownImageProviderTypeError(ImageProviderError):
