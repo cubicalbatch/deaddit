@@ -48,7 +48,12 @@ def agent(ctx, db_uri) -> None:
 
 
 @agent.command("create")
-@click.option("--username", required=True, help="Existing user persona to embody")
+@click.option("--username", default=None, help="Existing user persona to embody")
+@click.option(
+    "--random-persona",
+    is_flag=True,
+    help="Create a new agent that selects a persona at run time.",
+)
 @click.option(
     "--tier",
     type=click.Choice([t.value for t in AutonomyTier]),
@@ -59,13 +64,93 @@ def agent(ctx, db_uri) -> None:
 @click.option("--model", default="qwen3.8-27b", show_default=True)
 @click.option("--min-delay", type=int, default=60, show_default=True)
 @click.option("--max-delay", type=int, default=900, show_default=True)
+@click.option(
+    "--backfill-memory/--no-backfill-memory",
+    default=True,
+    show_default=True,
+    help="Lazily backfill a random persona's pre-agent history on first selection.",
+)
 @click.option("--enable/--no-enable", default=False, show_default=True)
 @click.pass_context
-def create(ctx, username, tier, api_url, model, min_delay, max_delay, enable) -> None:
-    """Register or update an agent for an existing user persona."""
+def create(
+    ctx,
+    username,
+    random_persona,
+    tier,
+    api_url,
+    model,
+    min_delay,
+    max_delay,
+    backfill_memory,
+    enable,
+) -> None:
+    """Register or update a fixed agent, or create a random agent."""
+    if (username is None) == (not random_persona):
+        raise click.UsageError(
+            "Exactly one of --username or --random-persona is required."
+        )
+
     app = _make_app((ctx.obj or {}).get("db_uri"))
     with app.app_context():
-        _upsert_agent(username, tier, api_url, model, min_delay, max_delay, enable)
+        if not random_persona:
+            _upsert_agent(
+                username, tier, api_url, model, min_delay, max_delay, enable
+            )
+            return
+
+        api_url, config = _agent_config(
+            api_url,
+            model,
+            min_delay,
+            max_delay,
+            extra_config={"backfill_memory": True} if backfill_memory else None,
+        )
+
+        agent_row = Agent(
+            persona_mode="random",
+            user_username=None,
+            autonomy_tier=tier,
+            is_enabled=enable,
+            status="idle",
+            config=config,
+            state={},
+            consecutive_failures=0,
+        )
+        db.session.add(agent_row)
+        db.session.commit()
+        click.echo(
+            f"Random agent #{agent_row.id} saved: tier={tier} enabled={enable} "
+            f"model={model} api_url={api_url} backfill_memory={backfill_memory}"
+        )
+
+
+def _agent_config(
+    api_url,
+    model,
+    min_delay,
+    max_delay,
+    extra_config=None,
+):
+    """Probe the endpoint and build the normal static agent configuration."""
+    api_url = api_url or Config.get("OPENAI_API_URL") or ""
+    try:
+        ensure_tools_allowed(api_url, model, auto_probe=True)
+    except CapabilityError as exc:
+        raise click.ClickException(
+            f"Endpoint {api_url} / model {model} does not support tools: {exc}"
+        ) from exc
+
+    config = {
+        "api_url": api_url,
+        "model": model,
+        "min_delay": min_delay,
+        "max_delay": max_delay,
+        "max_actions_per_run": DEFAULT_CONFIG["max_actions_per_run"],
+        "max_run_seconds": DEFAULT_CONFIG["max_run_seconds"],
+    }
+    if extra_config:
+        config.update(extra_config)
+    return api_url, config
 
 
 def _upsert_agent(
@@ -85,33 +170,20 @@ def _upsert_agent(
             f"User persona '{username}' does not exist. Create it first."
         )
 
-    api_url = api_url or Config.get("OPENAI_API_URL") or ""
-    try:
-        ensure_tools_allowed(api_url, model, auto_probe=True)
-    except CapabilityError as exc:
-        raise click.ClickException(
-            f"Endpoint {api_url} / model {model} does not support tools: {exc}"
-        ) from exc
-
-    config = {
-        "api_url": api_url,
-        "model": model,
-        "min_delay": min_delay,
-        "max_delay": max_delay,
-        "max_actions_per_run": DEFAULT_CONFIG["max_actions_per_run"],
-        "max_run_seconds": DEFAULT_CONFIG["max_run_seconds"],
-    }
-    if extra_config:
-        config.update(extra_config)
+    api_url, config = _agent_config(
+        api_url, model, min_delay, max_delay, extra_config=extra_config
+    )
 
     existing = Agent.query.filter_by(user_username=username).first()
     if existing is not None:
+        existing.persona_mode = "fixed"
         existing.autonomy_tier = tier
         existing.config = config
         existing.is_enabled = enable
         agent_row = existing
     else:
         agent_row = Agent(
+            persona_mode="fixed",
             user_username=username,
             autonomy_tier=tier,
             is_enabled=enable,
@@ -229,30 +301,36 @@ def list_agents(ctx) -> None:
     """List registered agents."""
     app = _make_app((ctx.obj or {}).get("db_uri"))
     with app.app_context():
-        rows = Agent.query.order_by(Agent.user_username).all()
+        rows = Agent.query.order_by(Agent.id).all()
         if not rows:
             click.echo("No agents registered.")
             return
         header = (
-            f"{'username':<20} {'tier':<12} {'enabled':<8} {'status':<10} "
-            f"{'last_run_at':<20} {'next_run_at':<20} {'fails':>5}"
+            f"{'id':>4} {'mode':<8} {'username':<20} {'tier':<12} "
+            f"{'enabled':<8} {'status':<10} {'last_run_at':<20} "
+            f"{'next_run_at':<20} {'fails':>5}"
         )
+        click.echo(header)
         click.echo("-" * len(header))
         for row in rows:
-            click.echo(
-                f"{row.user_username:<20} {row.autonomy_tier:<12} "
-                f"{str(bool(row.is_enabled)):<8} {row.status:<10} "
-                f"{_fmt_dt(row.last_run_at):<20} {_fmt_dt(row.next_run_at):<20} "
-                f"{row.consecutive_failures or 0:>5}"
+            username = (
+                row.user_username
+                if row.user_username is not None
+                else f"Random #{row.id}"
             )
-
+            click.echo(
+                f"{row.id:>4} {row.persona_mode:<8} {username:<20} "
+                f"{row.autonomy_tier:<12} {str(bool(row.is_enabled)):<8} "
+                f"{row.status:<10} {_fmt_dt(row.last_run_at):<20} "
+                f"{_fmt_dt(row.next_run_at):<20} {row.consecutive_failures or 0:>5}"
+            )
 
 def _fmt_dt(value) -> str:
     return value.strftime("%Y-%m-%d %H:%M:%S") if value else "-"
 
 
 @agent.command("run-once")
-@click.argument("username")
+@click.argument("agent_id", type=int)
 @click.option(
     "--intent",
     type=click.Choice(["post", "browse"]),
@@ -260,20 +338,24 @@ def _fmt_dt(value) -> str:
     help="Force a specific intent (post or browse).",
 )
 @click.pass_context
-def run_once_command(ctx, username, intent) -> None:
-    """Run one synchronous visit for USERNAME and print the trace."""
+def run_once_command(ctx, agent_id, intent) -> None:
+    """Run one synchronous visit for scheduler agent AGENT_ID and print the trace."""
     app = _make_app((ctx.obj or {}).get("db_uri"))
     with app.app_context():
-        exists = Agent.query.filter_by(user_username=username).first()
-        if exists is None:
-            raise click.ClickException(f"No agent registered for user '{username}'")
+        agent_row = db.session.get(Agent, agent_id)
+        if agent_row is None:
+            raise click.ClickException(f"No agent registered for id '{agent_id}'")
 
         try:
-            run = run_once(exists.id, trigger="manual", force_intent=intent)
+            run = run_once(agent_row.id, trigger="manual", force_intent=intent)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
 
-        click.echo(f"run {run.id}: status={run.status} trigger={run.trigger}")
+        click.echo(
+            f"run {run.id}: agent_id={run.agent_id} "
+            f"persona={run.persona_username} status={run.status} "
+            f"trigger={run.trigger}"
+        )
         calls = ToolCall.query.filter_by(run_id=run.id).order_by(ToolCall.id).all()
         for index, call in enumerate(calls, start=1):
             outcome = "ok" if call.ok else f"error={call.error}"
