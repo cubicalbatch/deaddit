@@ -12,6 +12,7 @@ from functools import wraps
 
 from flask import (
     Blueprint,
+    current_app,
     flash,
     jsonify,
     redirect,
@@ -26,6 +27,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from deaddit import db
 from deaddit.config import Config
 from deaddit.images import client as image_client
+from deaddit.images import service as media_service
 from deaddit.images import verification as image_verification
 from deaddit.images.types import ImageProviderError
 from deaddit.llm import routing
@@ -50,6 +52,7 @@ from deaddit.models import (
     LLMUsage,
     ModelRoute,
     Post,
+    PostImage,
     PromptPin,
     PromptRenderAudit,
     PromptTemplate,
@@ -521,15 +524,27 @@ def api_delete_user(username):
     user = User.query.get_or_404(username)
 
     try:
-        posts_count = Post.query.filter_by(user=username).count()
+        post_ids = [
+            row.id for row in Post.query.filter_by(user=username).with_entities(Post.id)
+        ]
+        posts_count = len(post_ids)
         comments_count = Comment.query.filter_by(user=username).count()
+        media_paths = media_service.media_paths_for_posts(post_ids)
 
         # Delete associated content (cascade should handle this, but being explicit)
         Comment.query.filter_by(user=username).delete()
-        Post.query.filter_by(user=username).delete()
+        if post_ids:
+            # A bulk Query.delete() bypasses ORM cascades, so post_image rows
+            # (no DB-level ON DELETE CASCADE on post_id) must be dropped here
+            # explicitly or they would dangle once their post is gone.
+            PostImage.query.filter(PostImage.post_id.in_(post_ids)).delete(
+                synchronize_session=False
+            )
+            Post.query.filter(Post.id.in_(post_ids)).delete(synchronize_session=False)
 
         db.session.delete(user)
         db.session.commit()
+        media_service.delete_media_files(current_app, media_paths)
 
         return jsonify(
             {
@@ -560,22 +575,36 @@ def api_bulk_delete_users():
         deleted_count = 0
         total_posts = 0
         total_comments = 0
+        media_paths = []
 
         for username in usernames:
             user = User.query.get(username)
             if user:
-                posts_count = Post.query.filter_by(user=username).count()
+                post_ids = [
+                    row.id
+                    for row in Post.query.filter_by(user=username).with_entities(
+                        Post.id
+                    )
+                ]
                 comments_count = Comment.query.filter_by(user=username).count()
+                media_paths.extend(media_service.media_paths_for_posts(post_ids))
 
                 Comment.query.filter_by(user=username).delete()
-                Post.query.filter_by(user=username).delete()
+                if post_ids:
+                    PostImage.query.filter(PostImage.post_id.in_(post_ids)).delete(
+                        synchronize_session=False
+                    )
+                    Post.query.filter(Post.id.in_(post_ids)).delete(
+                        synchronize_session=False
+                    )
                 db.session.delete(user)
 
                 deleted_count += 1
-                total_posts += posts_count
+                total_posts += len(post_ids)
                 total_comments += comments_count
 
         db.session.commit()
+        media_service.delete_media_files(current_app, media_paths)
 
         return jsonify(
             {
@@ -684,10 +713,15 @@ def api_delete_subdeaddit(name):
 
     try:
         # Get impact stats before deletion
-        posts_count = Post.query.filter_by(subdeaddit_name=name).count()
+        post_ids = [
+            row.id
+            for row in Post.query.filter_by(subdeaddit_name=name).with_entities(Post.id)
+        ]
+        posts_count = len(post_ids)
         comments_count = (
             Comment.query.join(Post).filter(Post.subdeaddit_name == name).count()
         )
+        media_paths = media_service.media_paths_for_posts(post_ids)
 
         # Delete associated content
         # First get comment IDs to delete (can't use join().delete())
@@ -698,10 +732,17 @@ def api_delete_subdeaddit(name):
         for comment_id in comment_ids:
             Comment.query.filter_by(id=comment_id).delete()
 
-        Post.query.filter_by(subdeaddit_name=name).delete()
+        if post_ids:
+            # Bulk Query.delete() bypasses ORM cascades, so post_image rows
+            # must be dropped explicitly before their post rows disappear.
+            PostImage.query.filter(PostImage.post_id.in_(post_ids)).delete(
+                synchronize_session=False
+            )
+            Post.query.filter(Post.id.in_(post_ids)).delete(synchronize_session=False)
 
         db.session.delete(subdeaddit)
         db.session.commit()
+        media_service.delete_media_files(current_app, media_paths)
 
         return jsonify(
             {
@@ -732,16 +773,23 @@ def api_bulk_delete_subdeaddits():
         deleted_count = 0
         total_posts = 0
         total_comments = 0
+        media_paths = []
 
         for name in names:
             subdeaddit = Subdeaddit.query.get(name)
             if subdeaddit:
-                posts_count = Post.query.filter_by(subdeaddit_name=name).count()
+                post_ids = [
+                    row.id
+                    for row in Post.query.filter_by(subdeaddit_name=name).with_entities(
+                        Post.id
+                    )
+                ]
                 comments_count = (
                     Comment.query.join(Post)
                     .filter(Post.subdeaddit_name == name)
                     .count()
                 )
+                media_paths.extend(media_service.media_paths_for_posts(post_ids))
 
                 # First get comment IDs to delete (can't use join().delete())
                 comment_ids = [
@@ -753,14 +801,21 @@ def api_bulk_delete_subdeaddits():
                 for comment_id in comment_ids:
                     Comment.query.filter_by(id=comment_id).delete()
 
-                Post.query.filter_by(subdeaddit_name=name).delete()
+                if post_ids:
+                    PostImage.query.filter(PostImage.post_id.in_(post_ids)).delete(
+                        synchronize_session=False
+                    )
+                    Post.query.filter(Post.id.in_(post_ids)).delete(
+                        synchronize_session=False
+                    )
                 db.session.delete(subdeaddit)
 
                 deleted_count += 1
-                total_posts += posts_count
+                total_posts += len(post_ids)
                 total_comments += comments_count
 
         db.session.commit()
+        media_service.delete_media_files(current_app, media_paths)
 
         return jsonify(
             {
@@ -871,12 +926,14 @@ def api_delete_post(post_id):
 
     try:
         comments_count = Comment.query.filter_by(post_id=post_id).count()
+        media_paths = media_service.media_paths_for_posts([post_id])
 
         # Delete associated comments
         Comment.query.filter_by(post_id=post_id).delete()
 
         db.session.delete(post)
         db.session.commit()
+        media_service.delete_media_files(current_app, media_paths)
 
         return jsonify(
             {"success": True, "deleted": {"post": post_id, "comments": comments_count}}
@@ -899,6 +956,7 @@ def api_bulk_delete_posts():
     try:
         deleted_count = 0
         total_comments = 0
+        media_paths = media_service.media_paths_for_posts(post_ids)
 
         for post_id in post_ids:
             post = Post.query.get(post_id)
@@ -912,6 +970,7 @@ def api_bulk_delete_posts():
                 total_comments += comments_count
 
         db.session.commit()
+        media_service.delete_media_files(current_app, media_paths)
 
         return jsonify(
             {

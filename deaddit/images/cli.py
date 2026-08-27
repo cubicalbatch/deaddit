@@ -1,6 +1,6 @@
-"""Click commands for manually verifying image-provider wiring.
+"""Click commands for manually verifying image-provider wiring and cleanup.
 
-Two commands live here, and they are not equivalent:
+Three commands live here, and they are not equivalent:
 
 ``check-connection`` runs an authenticated catalog search only. It never
 generates an image, so it never costs money, and is safe to run as often as
@@ -11,7 +11,14 @@ so a developer can deliberately prove the full generation path works against
 the live API at an explicit integration milestone - never automatically, and
 never from a test. It refuses to run without --yes-i-know-this-costs-money.
 
-Neither command is imported by, or runs under, pytest.
+``reconcile-media`` is the operator-safe cleanup command (plan 7A): it
+reports generated-image files with no owning ``post_image`` row, and
+database rows whose files have gone missing. It is dry-run by default and
+only ever deletes files when passed --apply, at which point it applies the
+same production-database guard as ``deaddit dynamics seed-history``.
+
+``check-connection`` and ``smoke-fal`` are never imported by, or run under,
+pytest; ``reconcile-media`` is safe to and is covered by the test suite.
 """
 
 from __future__ import annotations
@@ -20,11 +27,15 @@ import os
 
 import click
 
+from deaddit import create_app
+from deaddit.dynamics import seeding
 from deaddit.images.client import generate
 from deaddit.images.providers import register_default_adapters
+from deaddit.images.service import preview_orphaned_media
+from deaddit.images.storage import media_root, reconcile_media
 from deaddit.images.types import Deadline, ImageProviderError
 from deaddit.images.verification import test_connection
-from deaddit.models import ImageProvider
+from deaddit.models import ImageProvider, PostImage
 
 _DEFAULT_CREDENTIAL_ENV = {
     "fal": "FALAI_API_KEY",
@@ -39,7 +50,7 @@ _SMOKE_DEADLINE_SECONDS = 120.0
 
 @click.group()
 def images() -> None:
-    """Manual image-provider verification (never invoked by the test suite)."""
+    """Manual image-provider verification plus operator media cleanup."""
 
 
 @images.command("check-connection")
@@ -151,6 +162,82 @@ def smoke_fal_cmd(
     click.echo(f"request_id={result.request_id}")
     click.echo(f"image_url={result.image_url}")
     click.echo(f"safety_verdict={result.safety_verdict}")
+
+
+@images.command("reconcile-media")
+@click.option(
+    "--apply",
+    "apply_changes",
+    is_flag=True,
+    default=False,
+    help="Actually delete orphaned files. Without this, only reports.",
+)
+@click.option(
+    "--i-know-this-is-prod",
+    "confirmed_prod",
+    is_flag=True,
+    default=False,
+    help="Required alongside --apply against the production database "
+    "(instance/deaddit.db).",
+)
+def reconcile_media_cmd(apply_changes: bool, confirmed_prod: bool) -> None:
+    """Report - and, with --apply, delete - orphaned generated-image files.
+
+    Dry-run by default: with no flags, this only reports files under the
+    generated-image root that no ``post_image`` row references, plus rows
+    whose files have gone missing from disk. It never touches the
+    filesystem in this mode, so it is always safe to run, including
+    against production.
+
+    Pass --apply to actually delete the orphaned files it finds. Applying
+    against the production database (instance/deaddit.db) additionally
+    requires --i-know-this-is-prod, the same guard
+    ``deaddit dynamics seed-history`` uses for its own production check.
+    """
+    app = create_app()
+    with app.app_context():
+        root = media_root(app)
+        rows = PostImage.query.all()
+
+        if not apply_changes:
+            report = preview_orphaned_media(root, rows)
+            click.echo(
+                f"[dry-run] {len(report.removed_files)} orphaned file(s) would "
+                "be removed:"
+            )
+            for path in report.removed_files:
+                click.echo(f"  {path}")
+            if report.incomplete_rows:
+                click.echo(
+                    f"{len(report.incomplete_rows)} post_image row(s) reference "
+                    "missing files:"
+                )
+                for entry in report.incomplete_rows:
+                    click.echo(
+                        f"  post_id={entry['post_id']} missing={entry['missing']}"
+                    )
+            click.echo("Dry run only - no files were deleted. Pass --apply to delete.")
+            return
+
+        if not confirmed_prod and seeding._resolves_to_production(
+            app.config.get("SQLALCHEMY_DATABASE_URI"), app.instance_path
+        ):
+            raise click.ClickException(
+                "Refusing to delete media against the production database "
+                "(instance/deaddit.db). Pass --i-know-this-is-prod to force."
+            )
+
+        report = reconcile_media(root, rows)
+        click.echo(f"Removed {len(report.removed_files)} orphaned file(s).")
+        for path in report.removed_files:
+            click.echo(f"  {path}")
+        if report.incomplete_rows:
+            click.echo(
+                f"{len(report.incomplete_rows)} post_image row(s) reference "
+                "missing files:"
+            )
+            for entry in report.incomplete_rows:
+                click.echo(f"  post_id={entry['post_id']} missing={entry['missing']}")
 
 
 __all__ = ["images"]
