@@ -283,7 +283,9 @@ class FalAdapter:
                 params={"logs": "0"},
                 deadline=deadline,
             )
-            if response.status_code != 200:
+            # The queue status endpoint answers 202 while work is still queued or
+            # running, and 200 once it has completed. Both carry a status body.
+            if response.status_code not in (200, 202):
                 self._raise_for_status_error(response)
             status_body = self._json(response)
             status = str(status_body.get("status", "")).upper()

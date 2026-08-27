@@ -57,8 +57,8 @@ def _submit_response(request_id: str = "req-1") -> FakeHTTPResponse:
     )
 
 
-def _status_response(status: str) -> FakeHTTPResponse:
-    return FakeHTTPResponse(200, {"status": status, "request_id": "req-1"})
+def _status_response(status: str, status_code: int = 200) -> FakeHTTPResponse:
+    return FakeHTTPResponse(status_code, {"status": status, "request_id": "req-1"})
 
 
 def _result_response(
@@ -82,6 +82,30 @@ def _result_response(
 
 
 # --- generation: queued -> running -> completed -----------------------------
+
+
+def test_generate_treats_http_202_status_poll_as_still_running():
+    # fal answers the queue status endpoint with 202 while the request is still
+    # queued or in progress, and only switches to 200 once it has completed.
+    transport = FakeHTTPTransport()
+    transport.enqueue(_submit_response())
+    transport.enqueue(_status_response("IN_QUEUE", status_code=202))
+    transport.enqueue(_status_response("IN_PROGRESS", status_code=202))
+    transport.enqueue(_status_response("COMPLETED"))
+    transport.enqueue(_result_response())
+    adapter = _adapter(transport)
+
+    result = adapter.generate(
+        _provider(),
+        "secret-key",
+        "fal-ai/flux/schnell",
+        "a cat in a hat",
+        Deadline.after(30),
+    )
+
+    assert result.request_id == "req-1"
+    assert result.image_url == "https://v3.fal.media/files/rabbit/abc123.png"
+    assert len(transport.calls) == 5
 
 
 def test_generate_polls_through_queue_states_to_completion():
