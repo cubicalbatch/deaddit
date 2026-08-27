@@ -81,11 +81,24 @@ def test_fresh_seed_window_causality_and_shape(app, pinned_now, db_session):
         hour_counts[post.created_at.hour] += 1
     assert sum(hour_counts[18:24]) > hour_counts[4]
 
+    # Vote attention shape:
+    # (a) >= 30% of posts carry a positive score.
+    assert sum(1 for p in seeded_posts if p.score > 0) >= 0.3 * len(seeded_posts)
+    # (b) at least one viral outlier.
+    assert max(p.score for p in seeded_posts) > 20
+    # (c) hot feed's top-ranked post has a positive score.
+    top = Post.query.order_by(*ranking.post_order_by("hot")).first()
+    assert top is not None and top.score > 0
+    # (d) no fabricated display score without vote rows.
+    for model in (Post, Comment):
+        fabricated = model.query.filter(model.vote_count == 0, model.score != 0).count()
+        assert fabricated == 0
 
-# 2. Exact-sum invariants ---------------------------------------------------
+
+# 2. Exact-sum invariants and karma consistency ------------------------------
 
 
-def test_exact_sum_invariants(app, pinned_now, db_session):
+def test_exact_sum_and_karma_invariants(app, pinned_now, db_session):
     report = seeding.seed_history(days=3, seed=42, now=NOW)
     assert report["votes_created"] > 0
 
@@ -98,32 +111,6 @@ def test_exact_sum_invariants(app, pinned_now, db_session):
             assert sum(v.value for v in votes) == item.score
             checked += 1
     assert checked > 0
-
-
-def test_vote_attention_shape_and_hot_feed(app, pinned_now):
-    """Seeded attention is long-tailed positive; hot feed reflects scores."""
-    seeding.seed_history(days=14, seed=42, now=NOW)
-
-    posts = Post.query.filter_by(model="seed").all()
-    assert len(posts) > 0
-    # (a) >= 30% of posts carry a positive score.
-    assert sum(1 for p in posts if p.score > 0) >= 0.3 * len(posts)
-    # (b) at least one viral outlier.
-    assert max(p.score for p in posts) > 20
-    # (c) hot feed's top-ranked post has a positive score.
-    top = Post.query.order_by(*ranking.post_order_by("hot")).first()
-    assert top is not None and top.score > 0
-    # (d) no fabricated display score without vote rows.
-    for model in (Post, Comment):
-        fabricated = model.query.filter(model.vote_count == 0, model.score != 0).count()
-        assert fabricated == 0
-
-
-# 3. Karma consistency -------------------------------------------------------
-
-
-def test_karma_matches_effective_scores(app, pinned_now, db_session):
-    seeding.seed_history(days=3, seed=42, now=NOW)
 
     def _effective_sums(model, owner_col):
         rows = (
@@ -142,6 +129,15 @@ def test_karma_matches_effective_scores(app, pinned_now, db_session):
     for user in User.query.all():
         assert user.post_karma == expected_post.get(user.username, 0)
         assert user.comment_karma == expected_comment.get(user.username, 0)
+
+    # Hot feed order sanity
+    posts = Post.query.order_by(*ranking.post_order_by("hot")).limit(20).all()
+    assert posts
+    keys = [
+        ranking.post_rank_key("hot", score=p.score, created_at=p.created_at, now=NOW)
+        for p in posts
+    ]
+    assert keys == sorted(keys, reverse=True)
 
 
 # 4. Determinism --------------------------------------------------------------
@@ -327,22 +323,6 @@ def test_single_head():
     assert script.get_revision(heads[0]).revision == heads[0]
     walked = {s.revision for s in script.walk_revisions()}
     assert D5_REV in walked
-
-
-# 9. Hot feed sanity -----------------------------------------------------------------
-
-
-def test_hot_feed_ordered_and_nonempty(app, pinned_now):
-    seeding.seed_history(days=3, seed=42, now=NOW)
-
-    posts = Post.query.order_by(*ranking.post_order_by("hot")).limit(20).all()
-    assert posts
-
-    keys = [
-        ranking.post_rank_key("hot", score=p.score, created_at=p.created_at, now=NOW)
-        for p in posts
-    ]
-    assert keys == sorted(keys, reverse=True)
 
 
 # Fixtures ----------------------------------------------------------------------

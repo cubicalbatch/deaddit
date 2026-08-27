@@ -2989,7 +2989,11 @@ def _resolve_image_posts(raw, tier):
 
 def _agent_display_label(agent):
     """Return the human-readable identity for an agent."""
-    return agent.user_username if agent.user_username is not None else f"Random #{agent.id}"
+    return (
+        agent.user_username
+        if agent.user_username is not None
+        else f"Random #{agent.id}"
+    )
 
 
 def _agent_json(agent, counts=None):
@@ -3121,9 +3125,7 @@ def api_agents_list():
     from deaddit.models import Agent, AgentRun
 
     agents = Agent.query.all()
-    agents.sort(
-        key=lambda a: (a.persona_mode or "fixed", a.user_username or "", a.id)
-    )
+    agents.sort(key=lambda a: (a.persona_mode or "fixed", a.user_username or "", a.id))
     tally_rows = (
         db.session.query(AgentRun.agent_id, AgentRun.status, func.count(AgentRun.id))
         .group_by(AgentRun.agent_id, AgentRun.status)
@@ -3156,9 +3158,11 @@ def api_persona_candidates():
         .group_by(Comment.user)
         .subquery()
     )
-    taken = db.session.query(Agent.user_username).filter(
-        Agent.persona_mode == "fixed", Agent.user_username.isnot(None)
-    ).all()
+    taken = (
+        db.session.query(Agent.user_username)
+        .filter(Agent.persona_mode == "fixed", Agent.user_username.isnot(None))
+        .all()
+    )
     taken = [username for (username,) in taken]
     activity = func.coalesce(posts_sq.c.n, 0) + func.coalesce(comments_sq.c.n, 0)
     rows = (
@@ -3234,12 +3238,16 @@ def api_create_agent():
             return jsonify({"success": False, "error": "username is required"}), 400
         if db.session.get(User, username) is None:
             return (
-                jsonify({"success": False, "error": f"User '{username}' does not exist"}),
+                jsonify(
+                    {"success": False, "error": f"User '{username}' does not exist"}
+                ),
                 400,
             )
         if Agent.query.filter_by(user_username=username).first() is not None:
             return (
-                jsonify({"success": False, "error": f"'{username}' already has an agent"}),
+                jsonify(
+                    {"success": False, "error": f"'{username}' already has an agent"}
+                ),
                 409,
             )
     elif username:

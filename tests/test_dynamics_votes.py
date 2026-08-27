@@ -88,17 +88,21 @@ def test_rejects_downvote_when_disabled(seeded_db, db_session):
     assert cast_vote("alice", "post", post.id, 1)["status"] == "ok"
 
 
-@pytest.mark.parametrize("setting_value", ["true", "1", "on", "yes"])
-def test_downvote_truthy_settings_allow_downvotes(seeded_db, setting_value):
-    Setting.set_value("allow_downvotes", setting_value)
-    assert _downvotes_allowed() is True
-
-
 @pytest.mark.parametrize(
     ("setting_value", "expected"),
-    [("false", False), ("no", False), ("0", False), ("off", False), ("True", True)],
+    [
+        ("true", True),
+        ("1", True),
+        ("on", True),
+        ("yes", True),
+        ("True", True),
+        ("false", False),
+        ("no", False),
+        ("0", False),
+        ("off", False),
+    ],
 )
-def test_downvotes_allowed_falsy_and_case_handling(seeded_db, setting_value, expected):
+def test_downvotes_allowed_setting_parsing(seeded_db, setting_value, expected):
     Setting.set_value("allow_downvotes", setting_value)
     assert _downvotes_allowed() is expected
 

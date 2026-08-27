@@ -30,3 +30,7 @@ def test_seeded_pages_and_api(app, client, seeded_db):
     body = resp.get_json()
     names = {s["name"] for s in body["subdeaddits"]}
     assert {"testsub", "askdeaddit"} <= names
+
+    resp = client.get("/live")
+    assert resp.status_code == 200
+    assert b"<h1>Live</h1>" in resp.data or b"Live" in resp.data

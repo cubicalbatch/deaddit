@@ -234,6 +234,7 @@ def test_candidates_exclude_fixed_but_not_random_agents(
     assert "alice" not in usernames
     assert "bob" in usernames
 
+
 def test_create_agent_validates_input(seeded_db, admin_client, db_session, monkeypatch):
     monkeypatch.setattr(capabilities, "ensure_tools_allowed", _noop_tools_allowed)
     _make_agent(db_session, "alice")

@@ -276,9 +276,7 @@ def test_image_posts_config_round_trip_and_validation(
         "image-policy-select",
     ):
         assert field in create_form
-    edit_form = admin_client.get(f"/admin/agents/{bob.id}").get_data(
-        as_text=True
-    )
+    edit_form = admin_client.get(f"/admin/agents/{bob.id}").get_data(as_text=True)
     for field in (
         "edit-image-enabled-switch",
         "edit-image-provider-select",
