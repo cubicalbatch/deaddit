@@ -1,8 +1,7 @@
 # PERCENT_DONE
-- Percent: ~70%
-- Last completed: 5A — vision capability declaration and probing (commit da53b94)
-- In flight: 5B — bounded image description through the reading agent's LLM
-- Next: 5C read summaries, then Phase 6 (public UI), 7 (moderation), 8 (verification)
-- 5B entry point: deaddit.llm.capabilities.is_vision_capable(api_url, model_name) -> bool
-  (returns False for unknown/no-row; never probes).
+- Percent: ~76%
+- Last completed: 5B — bounded image description for agent reads (commit 0f75f86)
+- In flight: 5C — has_image on browse/search/profile summaries
+- Next: Phase 6 (6A media serving/API, 6B templates, 6C expand JS), 7A moderation, Phase 8 verification
+- read_post image object: {"present":true,"description":...,"description_source":"vision"|"generation_prompt"}
 - Paid fal generations used so far: 0 of 10 budget.
