@@ -232,6 +232,7 @@ def post(subdeaddit_name, post_id):
                 "vote_count": 0 if comment.removed else comment.vote_count,
                 "user": None if comment.removed else comment.user,
                 "model": None if comment.removed else comment.model,
+                "llm_model": None if comment.removed else comment.llm_model,
                 "created_at": comment.created_at,
                 "children": [],
             }

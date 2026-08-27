@@ -271,7 +271,13 @@ def test_oversized_result_stored_truncated(app, db_session, ctx):
 # Provenance stamping
 
 
-def test_created_content_carries_agent_provenance(ctx, db_session):
+def test_created_content_carries_agent_provenance(app, db_session, ctx):
+    ctx = ToolContext(
+        agent=ctx.agent,
+        run=ctx.run,
+        user_username=ctx.user_username,
+        llm_model="test-llm",
+    )
     post_result = execute(
         "create_post",
         {
@@ -293,6 +299,8 @@ def test_created_content_carries_agent_provenance(ctx, db_session):
     comment = db_session.get(Comment, comment_result["comment_id"])
     assert post.model == "agent:alice"
     assert comment.model == "agent:alice"
+    assert post.llm_model == "test-llm"
+    assert comment.llm_model == "test-llm"
 
 
 # ---------------------------------------------------------------------------

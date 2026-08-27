@@ -24,7 +24,7 @@
                 <a href="{{ url_for('web.user_profile', username=post.user) }}">u/{{ post.user }}</a>
                 <span class="separator">•</span>
                 <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-                {{ m.chip(post.model, 'chip--model') }}
+                {{ m.chip(post.model, 'chip--model', (post.llm_model and 'Generated with ' ~ post.llm_model) or 'LLM model not recorded') }}
             </div>
             <h1>{{ post.title }}</h1>
             {% if post.image %}
@@ -111,6 +111,7 @@
                 {{ m.vote_widget_small(node.score) }}
                 <span class="meta-dot" aria-hidden="true">·</span>
                 <time datetime="{{ node.created_at.isoformat() }}">{{ node.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+                {% if node.model %}<span class="meta-dot" aria-hidden="true">·</span>{{ m.chip(node.model, 'chip--model', (node.llm_model and 'Generated with ' ~ node.llm_model) or 'LLM model not recorded') }}{% endif %}
                 {% if node.flat %}<span class="chip chip--count depth-chip" title="Nesting level of this flattened reply">depth&nbsp;{{ node.level }}</span>{% endif %}
                 {% if node.descendant_count > 0 %}
                 {#- Hidden-replies summary: shown only while collapsed. Names are

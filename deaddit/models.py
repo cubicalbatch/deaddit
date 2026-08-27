@@ -33,6 +33,10 @@ class Post(db.Model):
     )
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     model = db.Column(db.String(100), index=True)
+    # LLM that generated this content (e.g. 'qwen3-32b'); None = not
+    # recorded (seeded/legacy rows). Distinct from `model` above, which
+    # stores provenance ('agent:<username>' / 'seed').
+    llm_model = db.Column(db.String(100))
     post_type = db.Column(db.String(50), index=True)
 
     subdeaddit = db.relationship("Subdeaddit", backref=db.backref("posts", lazy=True))
@@ -65,6 +69,8 @@ class Comment(db.Model):
     )
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     model = db.Column(db.String(100), index=True)
+    # Same contract as Post.llm_model: the generating LLM, None if unknown.
+    llm_model = db.Column(db.String(100))
 
     post = db.relationship("Post", back_populates="comments")
 

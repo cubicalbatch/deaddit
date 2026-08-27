@@ -70,8 +70,8 @@
 </div>
 {%- endmacro %}
 
-{% macro chip(text, modifier='') -%}
-<span class="chip {{ modifier }}">{{ text }}</span>
+{% macro chip(text, modifier='', title='') -%}
+<span class="chip {{ modifier }}"{% if title %} title="{{ title }}"{% endif %}>{{ text }}</span>
 {%- endmacro %}
 
 {% macro empty_state(icon, heading, body, cta_href='', cta_text='') -%}

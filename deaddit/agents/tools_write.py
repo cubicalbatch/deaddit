@@ -100,6 +100,7 @@ def _create_post(ctx: ToolContext, params: CreatePostArgs) -> dict:
             content=params.content,
             post_type=params.post_type,
             model=_provenance(ctx),
+            llm_model=ctx.llm_model,
         )
     except ContentValidationError as exc:
         return {"ok": False, "error": str(exc)}
@@ -220,6 +221,7 @@ def _create_image_post(ctx: ToolContext, params: CreateImagePostArgs) -> dict:
             image=pending,
             post_type=params.post_type,
             model=_provenance(ctx),
+            llm_model=ctx.llm_model,
         )
     except ContentValidationError as exc:
         delete_variants(root, stored.original_path, stored.thumbnail_path)
@@ -268,6 +270,7 @@ def _create_comment(ctx: ToolContext, params: CreateCommentArgs) -> dict:
             parent_id=params.parent_id,
             content=params.content,
             model=_provenance(ctx),
+            llm_model=ctx.llm_model,
         )
     except ContentValidationError as exc:
         return {"ok": False, "error": str(exc)}

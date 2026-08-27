@@ -157,6 +157,7 @@ def create_post(
     subdeaddit: str,
     score: int = 0,
     model: str = "unknown",
+    llm_model: str | None = None,
     post_type: str | None = None,
     created_at: datetime | None = None,
 ) -> Post:
@@ -182,6 +183,7 @@ def create_post(
         user=user,
         subdeaddit_name=subdeaddit,
         model=model,
+        llm_model=llm_model,
         post_type=post_type,
     )
     if created_at is not None:
@@ -260,6 +262,7 @@ def create_image_post(
     image: PendingPostImage,
     score: int = 0,
     model: str = "unknown",
+    llm_model: str | None = None,
     post_type: str | None = None,
     created_at: datetime | None = None,
 ) -> Post:
@@ -303,6 +306,7 @@ def create_image_post(
         user=user,
         subdeaddit_name=subdeaddit,
         model=model,
+        llm_model=llm_model,
         post_type=post_type,
     )
     if created_at is not None:
@@ -340,6 +344,7 @@ def create_comment(
     parent_id: int | None = None,
     score: int = 0,
     model: str = "unknown",
+    llm_model: str | None = None,
     created_at: datetime | None = None,
 ) -> Comment:
     """Create and persist a :class:`~deaddit.models.Comment`.
@@ -368,6 +373,7 @@ def create_comment(
         score=score,
         user=user,
         model=model,
+        llm_model=llm_model,
     )
     if created_at is not None:
         comment.created_at = created_at

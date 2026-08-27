@@ -110,6 +110,7 @@ def api_posts():
             "user": post.user,
             "score": post.score,
             "model": post.model,
+            "llm_model": post.llm_model,
             "image": _public_image(images_by_post_id.get(post.id), post.removed),
         }
         post_data.append(post_info)
