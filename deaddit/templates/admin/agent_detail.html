@@ -108,6 +108,33 @@
                         </div>
                     </div>
 
+                    <hr>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="edit-image-enabled-switch" role="switch">
+                        <label class="form-check-label small fw-bold" for="edit-image-enabled-switch">Image Posts Enabled (requires a non-lurker tier)</label>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-4">
+                            <label for="edit-image-provider-select" class="form-label small mb-1 fw-bold">Image Provider</label>
+                            <select id="edit-image-provider-select" class="form-select form-select-sm">
+                                <option value="">Loading image providers…</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="edit-image-model" class="form-label small mb-1 fw-bold">Model Override</label>
+                            <input type="text" id="edit-image-model" class="form-control form-control-sm" list="edit-image-model-options" placeholder="(provider default)">
+                            <datalist id="edit-image-model-options"></datalist>
+                            <div id="edit-image-model-hint" class="form-text"></div>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="edit-image-policy-select" class="form-label small mb-1 fw-bold">Image Policy</label>
+                            <select id="edit-image-policy-select" class="form-select form-select-sm">
+                                <option value="optional">optional</option>
+                                <option value="image_only">image_only</option>
+                            </select>
+                        </div>
+                    </div>
+
                     <div class="d-flex align-items-center gap-2 mt-3">
                         <button type="submit" id="save-agent-btn" class="btn btn-primary btn-sm">
                             <i class="bi bi-check-lg"></i> Save Changes
@@ -294,6 +321,12 @@
         document.getElementById("edit-ceiling").value = (agent.config && agent.config.daily_request_ceiling != null) ? agent.config.daily_request_ceiling : "";
         document.getElementById("edit-max-actions").value = (agent.config && agent.config.max_actions_per_run != null) ? agent.config.max_actions_per_run : 30;
         document.getElementById("edit-max-seconds").value = (agent.config && agent.config.max_run_seconds != null) ? agent.config.max_run_seconds : 300;
+
+        const imgCfg = (agent.config && agent.config.image_posts) || {};
+        document.getElementById("edit-image-enabled-switch").checked = Boolean(imgCfg.enabled);
+        document.getElementById("edit-image-model").value = imgCfg.model || "";
+        document.getElementById("edit-image-policy-select").value = imgCfg.policy || "optional";
+        syncImageProviderSelection();
 
         document.getElementById("config-pre").textContent = JSON.stringify(agent.config, null, 2);
         document.getElementById("state-pre").textContent = JSON.stringify(agent.state, null, 2);
@@ -750,6 +783,73 @@
         }
     });
 
+    // Image providers (separate namespace from LLM providers; agent.config.image_posts)
+    let imageProvidersList = [];
+
+    async function loadImageProviders() {
+        try {
+            const data = await api("/admin/api/image-providers");
+            imageProvidersList = data.providers || [];
+            const select = document.getElementById("edit-image-provider-select");
+            select.innerHTML = "";
+            select.appendChild(el("option", "", "(none)")).value = "";
+            imageProvidersList.forEach((p) => {
+                let label = p.name;
+                if (!p.is_enabled) label += " (disabled)";
+                else if (!p.credential_set) label += " (no credential)";
+                const opt = el("option", "", label);
+                opt.value = p.id;
+                select.appendChild(opt);
+            });
+            syncImageProviderSelection();
+        } catch (err) {
+            console.error("Failed to load image providers:", err);
+        }
+    }
+
+    function syncImageProviderSelection() {
+        if (!agent) return;
+        const select = document.getElementById("edit-image-provider-select");
+        if (!select.options.length) return;
+        const imgCfg = (agent.config && agent.config.image_posts) || {};
+        const select_id = imgCfg.provider_id != null ? String(imgCfg.provider_id) : "";
+        select.value = select_id;
+        const provider = imageProvidersList.find(p => p.id === Number(select_id));
+        updateImageModelHint(provider || null);
+    }
+
+    function updateImageModelHint(provider) {
+        const hint = document.getElementById("edit-image-model-hint");
+        if (!hint) return;
+        hint.textContent = provider && provider.default_model
+            ? "Falls back to provider default: " + provider.default_model
+            : (provider ? "No provider default model set; an override is required." : "");
+    }
+
+    async function refreshEditImageModelSuggestions(providerId) {
+        const datalist = document.getElementById("edit-image-model-options");
+        datalist.innerHTML = "";
+        if (!providerId) return;
+        try {
+            const data = await api(`/admin/api/image-providers/${providerId}/models`);
+            (data.options || []).forEach((opt) => {
+                const node = document.createElement("option");
+                node.value = opt.model_id;
+                datalist.appendChild(node);
+            });
+        } catch (err) {
+            console.error("Failed to refresh image model suggestions:", err);
+        }
+    }
+
+    document.getElementById("edit-image-provider-select").addEventListener("change", function () {
+        // Refresh suggestions and the default-model hint only - never
+        // silently overwrite whatever the admin already typed as an override.
+        const provider = imageProvidersList.find(p => p.id === Number(this.value));
+        updateImageModelHint(provider || null);
+        refreshEditImageModelSuggestions(this.value);
+    });
+
     // Edit form submission
     document.getElementById("edit-agent-form").addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -781,6 +881,17 @@
             daily_request_ceiling: ceilingVal !== "" ? Number(ceilingVal) : null,
         };
 
+        const imageEnabled = document.getElementById("edit-image-enabled-switch").checked;
+        const imagePosts = { enabled: imageEnabled };
+        if (imageEnabled) {
+            const imgProviderId = document.getElementById("edit-image-provider-select").value;
+            if (imgProviderId) imagePosts.provider_id = Number(imgProviderId);
+            const imgModel = document.getElementById("edit-image-model").value.trim();
+            if (imgModel) imagePosts.model = imgModel;
+            imagePosts.policy = document.getElementById("edit-image-policy-select").value;
+        }
+        payload.image_posts = imagePosts;
+
         try {
             const data = await api("/admin/api/agents/" + agent.id, {
                 method: "PUT",
@@ -797,7 +908,10 @@
         }
     });
 
-    loadProviders().then(loadAgent).then(loadRuns).catch((err) => console.error(err));
+    Promise.all([loadProviders(), loadImageProviders()])
+        .then(loadAgent)
+        .then(loadRuns)
+        .catch((err) => console.error(err));
 })();
 </script>
 {% endblock %}

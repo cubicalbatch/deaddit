@@ -2710,6 +2710,148 @@ def routes_api():
 
 _AGENTIC_TIERS = ("lurker", "regular", "power_user")
 
+# --- Per-agent image-post configuration (Phase 3B) ---
+# Lives at Agent.config["image_posts"]; see refactor/image_post_plan.md 3B.
+# Canonical disabled shape: the "image_posts" key is absent entirely (missing
+# means disabled), so disabling an agent always pops the key rather than
+# storing some {"enabled": false, ...} variant.
+_IMAGE_POST_POLICIES = ("optional", "image_only")
+_UNSET = object()
+
+
+def _resolve_image_posts(raw, tier):
+    """Validate a requested ``image_posts`` payload into its stored shape.
+
+    ``raw`` is the value the caller supplied for the "image_posts" key, or
+    ``_UNSET`` if the caller did not touch it at all (existing config, if
+    any, is preserved by callers in that case). Returns
+    ``(value, error_response)``:
+
+    - ``(_UNSET, None)`` when the caller did not request a change.
+    - ``(None, None)`` when the caller asked to disable: callers must pop
+      the "image_posts" key from the stored config.
+    - ``(dict, None)`` with the fully-resolved config to store.
+    - ``(None, (response, 400))`` on any validation failure.
+    """
+    if raw is _UNSET:
+        return _UNSET, None
+    if not isinstance(raw, dict):
+        return None, (
+            jsonify({"success": False, "error": "image_posts must be an object"}),
+            400,
+        )
+
+    if not raw.get("enabled"):
+        return None, None
+
+    if tier == "lurker":
+        return None, (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "image posts cannot be enabled for a lurker agent",
+                }
+            ),
+            400,
+        )
+
+    provider_id = raw.get("provider_id")
+    try:
+        provider_id_int = int(provider_id)
+    except (TypeError, ValueError):
+        provider_id_int = None
+    if not provider_id_int:
+        return None, (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "image_posts.provider_id is required to enable image posts",
+                }
+            ),
+            400,
+        )
+    provider = db.session.get(ImageProvider, provider_id_int)
+    if provider is None:
+        return None, (
+            jsonify({"success": False, "error": "Image provider not found"}),
+            400,
+        )
+    if not provider.is_enabled:
+        return None, (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Image provider {provider.name!r} is disabled",
+                }
+            ),
+            400,
+        )
+    if not os.environ.get(provider.credential_env):
+        return None, (
+            jsonify(
+                {
+                    "success": False,
+                    "error": (
+                        f"Image provider {provider.name!r} has no credential "
+                        f"configured (set {provider.credential_env})"
+                    ),
+                }
+            ),
+            400,
+        )
+
+    model = str(raw.get("model") or "").strip()
+    if model:
+        try:
+            verdict = image_client.validate_model(provider, model)
+        except ImageProviderError as exc:
+            return None, (jsonify({"success": False, "error": str(exc)}), 400)
+        if not verdict.compatible:
+            return None, (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": verdict.reason
+                        or f"model {model!r} is not compatible with provider {provider.name!r}",
+                    }
+                ),
+                400,
+            )
+    else:
+        model = None
+        if not provider.default_model:
+            return None, (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": (
+                            f"Image provider {provider.name!r} has no default "
+                            "model configured; set a model override"
+                        ),
+                    }
+                ),
+                400,
+            )
+
+    policy = raw.get("policy") or "optional"
+    if policy not in _IMAGE_POST_POLICIES:
+        return None, (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"image_posts.policy must be one of {list(_IMAGE_POST_POLICIES)}",
+                }
+            ),
+            400,
+        )
+
+    return {
+        "enabled": True,
+        "provider_id": provider.id,
+        "model": model,
+        "policy": policy,
+    }, None
+
 
 def _agent_json(agent, counts=None):
     """Serialize an Agent row; ``counts`` maps run status -> count."""
@@ -3024,6 +3166,14 @@ def api_create_agent():
                 400,
             )
 
+    image_posts, image_posts_error = _resolve_image_posts(
+        payload.get("image_posts", _UNSET), tier
+    )
+    if image_posts_error:
+        return image_posts_error
+    if image_posts not in (_UNSET, None):
+        config["image_posts"] = image_posts
+
     # Owner decision 2: probe at cohort creation so a tool-less endpoint/model
     # is rejected before any agent exists.
     try:
@@ -3239,6 +3389,34 @@ def api_update_agent(agent_id):
     if "model" in payload or "model" in cfg_in:
         model_val = payload["model"] if "model" in payload else cfg_in.get("model")
         config["model"] = str(model_val or "").strip()
+
+    # image_posts (namespaced per-agent image configuration, Phase 3B)
+    image_posts_raw = payload.get("image_posts", cfg_in.get("image_posts", _UNSET))
+    image_posts, image_posts_error = _resolve_image_posts(
+        image_posts_raw, agent.autonomy_tier
+    )
+    if image_posts_error:
+        return image_posts_error
+    if image_posts is None and image_posts_raw is not _UNSET:
+        config.pop("image_posts", None)
+    elif image_posts is not _UNSET:
+        config["image_posts"] = image_posts
+
+    # A tier change to lurker must not leave an already-enabled image
+    # configuration in place, even when this request never touches
+    # "image_posts" itself.
+    if agent.autonomy_tier == "lurker" and (config.get("image_posts") or {}).get(
+        "enabled"
+    ):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "image posts cannot be enabled for a lurker agent",
+                }
+            ),
+            400,
+        )
 
     # Capability check if model or api_url or provider changed/provided
     if (

@@ -119,6 +119,33 @@
             </div>
 
             <div class="col-12">
+                <hr>
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="image-enabled-check" role="switch">
+                    <label class="form-check-label fw-bold" for="image-enabled-check">Enable image posts (requires a non-lurker tier)</label>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <label for="image-provider-select" class="form-label">Image Provider</label>
+                <select id="image-provider-select" class="form-select">
+                    <option value="">Loading image providers…</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label for="image-model-input" class="form-label">Model Override</label>
+                <input type="text" id="image-model-input" class="form-control" list="image-model-options" placeholder="(provider default)">
+                <datalist id="image-model-options"></datalist>
+                <div id="image-model-hint" class="form-text"></div>
+            </div>
+            <div class="col-md-4">
+                <label for="image-policy-select" class="form-label">Image Policy</label>
+                <select id="image-policy-select" class="form-select">
+                    <option value="optional" selected>optional</option>
+                    <option value="image_only">image_only</option>
+                </select>
+            </div>
+
+            <div class="col-12">
                 <button type="submit" id="create-submit" class="btn btn-primary btn-sm">
                     <i class="bi bi-plus-lg"></i> Create Agent
                 </button>
@@ -333,6 +360,63 @@
         }
     });
 
+    // Image providers (separate namespace from LLM providers; agent.config.image_posts)
+    let imageProvidersList = [];
+
+    async function loadImageProviders() {
+        const select = document.getElementById("image-provider-select");
+        try {
+            const data = await api("/admin/api/image-providers");
+            imageProvidersList = data.providers || [];
+            select.innerHTML = "";
+            select.appendChild(el("option", "", "(none)")).value = "";
+            imageProvidersList.forEach((p) => {
+                let label = p.name;
+                if (!p.is_enabled) label += " (disabled)";
+                else if (!p.credential_set) label += " (no credential)";
+                const opt = el("option", "", label);
+                opt.value = p.id;
+                select.appendChild(opt);
+            });
+            updateImageModelHint(null);
+        } catch (err) {
+            select.innerHTML = "<option>Error loading image providers</option>";
+            console.error("Failed to load image providers:", err);
+        }
+    }
+
+    function updateImageModelHint(provider) {
+        const hint = document.getElementById("image-model-hint");
+        if (!hint) return;
+        hint.textContent = provider && provider.default_model
+            ? "Falls back to provider default: " + provider.default_model
+            : (provider ? "No provider default model set; an override is required." : "");
+    }
+
+    async function refreshImageModelSuggestions(providerId) {
+        const datalist = document.getElementById("image-model-options");
+        datalist.innerHTML = "";
+        if (!providerId) return;
+        try {
+            const data = await api(`/admin/api/image-providers/${providerId}/models`);
+            (data.options || []).forEach((opt) => {
+                const node = document.createElement("option");
+                node.value = opt.model_id;
+                datalist.appendChild(node);
+            });
+        } catch (err) {
+            console.error("Failed to refresh image model suggestions:", err);
+        }
+    }
+
+    document.getElementById("image-provider-select").addEventListener("change", function () {
+        // Refresh suggestions and the default-model hint only - never
+        // silently overwrite whatever the admin already typed as an override.
+        const provider = imageProvidersList.find(p => p.id === Number(this.value));
+        updateImageModelHint(provider || null);
+        refreshImageModelSuggestions(this.value);
+    });
+
     function actionsCell(agent) {
         const cell = el("td");
         const toggleBtn = el("button", "btn btn-sm " + (agent.is_enabled ? "btn-outline-warning" : "btn-outline-success"),
@@ -450,6 +534,17 @@
         if (minDelay !== "") payload.min_delay = Number(minDelay);
         if (maxDelay !== "") payload.max_delay = Number(maxDelay);
         if (ceiling !== "") payload.daily_request_ceiling = Number(ceiling);
+
+        const imageEnabled = document.getElementById("image-enabled-check").checked;
+        const imagePosts = { enabled: imageEnabled };
+        if (imageEnabled) {
+            const imgProviderId = document.getElementById("image-provider-select").value;
+            if (imgProviderId) imagePosts.provider_id = Number(imgProviderId);
+            const imgModel = document.getElementById("image-model-input").value.trim();
+            if (imgModel) imagePosts.model = imgModel;
+            imagePosts.policy = document.getElementById("image-policy-select").value;
+        }
+        payload.image_posts = imagePosts;
         try {
             const data = await api("{{ url_for('admin.api_create_agent') }}", {method: "POST", body: JSON.stringify(payload)});
             let message = "Created agent for '" + data.agent.user_username + "'";
@@ -577,6 +672,7 @@
 
     loadPresets();
     loadProviders();
+    loadImageProviders();
     loadCandidates();
     loadAgents();
 })();
