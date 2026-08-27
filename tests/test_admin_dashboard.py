@@ -71,6 +71,7 @@ def test_dashboard_renders_agent_runs_provenance_and_spend(
         db_session.add(
             AgentRun(
                 agent_id=agent.id,
+                persona_username=agent.user_username,
                 trigger="schedule",
                 status=status,
                 started_at=started,

@@ -322,6 +322,19 @@ def backfill_persona_history(
     return inserted
 
 
+def ensure_lazy_backfill(agent: Agent, user: User) -> None:
+    """Backfill a random persona's history once on first selection."""
+    if getattr(agent, "persona_mode", "fixed") != "random":
+        return
+    if not (agent.config or {}).get("backfill_memory"):
+        return
+    try:
+        backfill_persona_history(user.username)
+    except Exception:
+        logger.exception("Lazy persona-history backfill failed for %s", user.username)
+        db.session.rollback()
+
+
 def _persona_items(user_username: str) -> list[dict]:
     items: list[dict] = []
     posts = Post.query.filter_by(user=user_username).order_by(Post.created_at).all()

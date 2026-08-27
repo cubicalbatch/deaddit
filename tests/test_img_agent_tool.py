@@ -155,7 +155,12 @@ def _image_agent(db_session, provider, *, policy="optional", model=None):
 def _new_run(db_session, agent) -> AgentRun:
     for prev in AgentRun.query.filter_by(agent_id=agent.id, status="running").all():
         prev.status = "completed"
-    run = AgentRun(agent_id=agent.id, trigger="manual", status="running")
+    run = AgentRun(
+        agent_id=agent.id,
+        persona_username=agent.user_username,
+        trigger="manual",
+        status="running",
+    )
     db_session.add(run)
     db_session.commit()
     return run

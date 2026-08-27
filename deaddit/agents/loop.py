@@ -17,7 +17,11 @@ from sqlalchemy.exc import IntegrityError
 
 from deaddit import Config
 from deaddit.agents.executor import execute
-from deaddit.agents.memory import build_initial_messages, summarize_run
+from deaddit.agents.memory import (
+    build_initial_messages,
+    ensure_lazy_backfill,
+    summarize_run,
+)
 from deaddit.agents.registry import ToolContext, specs_for
 from deaddit.extensions import db
 from deaddit.images.types import Deadline
@@ -240,10 +244,7 @@ def run_once(
         raise ValueError(f"No agent with id {agent_id}")
 
     if _recover_stale_runs(agent):
-        raise ValueError(
-            f"Agent '{agent.user_username}' already has a run in progress "
-            f"(stale-running recovery lands in Phase 2)"
-        )
+        raise ValueError(f"Agent {agent.id} already has a run in progress")
 
     config = _effective_config(agent)
     provider_id = config.get("provider_id")
@@ -301,6 +302,7 @@ def run_once(
         raise
 
     user = db.session.get(User, run.persona_username)
+    ensure_lazy_backfill(agent, user)
     messages = build_initial_messages(agent, user, force_intent=force_intent)
     usage: dict[str, int] = dict.fromkeys(USAGE_KEYS, 0)
     turn_count = 0

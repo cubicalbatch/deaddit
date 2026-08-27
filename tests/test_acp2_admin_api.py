@@ -74,6 +74,7 @@ def test_agent_list_serializes_config_and_run_tallies(
         db.session.add(
             AgentRun(
                 agent_id=agent.id,
+                persona_username=agent.user_username,
                 trigger="schedule",
                 status=status,
                 started_at=now,
@@ -221,6 +222,7 @@ def test_force_run_conflict_while_already_running(seeded_db, admin_client, db_se
     db.session.add(
         AgentRun(
             agent_id=agent.id,
+            persona_username=agent.user_username,
             trigger="schedule",
             status="running",
             started_at=datetime.utcnow(),
@@ -265,6 +267,7 @@ def _seed_drilldown(db_session, agent):
     now = datetime.utcnow()
     older = AgentRun(
         agent_id=agent.id,
+        persona_username=agent.user_username,
         trigger="schedule",
         status="completed",
         started_at=now - timedelta(hours=2),
@@ -272,6 +275,7 @@ def _seed_drilldown(db_session, agent):
     )
     newer = AgentRun(
         agent_id=agent.id,
+        persona_username=agent.user_username,
         trigger="manual",
         status="failed",
         started_at=now - timedelta(minutes=5),
@@ -437,6 +441,7 @@ def test_summarize_run_counts_actions_errors_and_creations(seeded_db, db_session
     agent = _make_agent(db_session, "alice")
     run = AgentRun(
         agent_id=agent.id,
+        persona_username=agent.user_username,
         trigger="schedule",
         status="completed",
         started_at=datetime.utcnow(),
@@ -491,6 +496,7 @@ def test_summarize_run_without_actions_writes_idle_episode(seeded_db, db_session
     agent = _make_agent(db_session, "alice")
     run = AgentRun(
         agent_id=agent.id,
+        persona_username=agent.user_username,
         trigger="manual",
         status="completed",
         started_at=datetime.utcnow(),

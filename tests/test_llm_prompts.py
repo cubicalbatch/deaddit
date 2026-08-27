@@ -60,6 +60,7 @@ def _golden_agent(app, db_session):
         interests='["mycology","letterpress","trains"]',
         personality_traits='["curious","dry-witted"]',
         writing_style="precise, mildly sardonic",
+        agent_state={"subscriptions": ["r/mycology", "r/trains"]},
     )
     db_session.add(user)
     db_session.flush()
@@ -67,7 +68,7 @@ def _golden_agent(app, db_session):
         user_username="golden_lurker",
         autonomy_tier="regular",
         config={},
-        state={"subscriptions": ["r/mycology", "r/trains"]},
+        state={},
     )
     db_session.add(agent)
     db_session.flush()
@@ -166,14 +167,14 @@ class TestPinResolution:
         return agent
 
     def test_no_pin_resolves_to_none(self, app, db_session):
-        self._agent(db_session, "lonely")
-        assert resolve_pin("agent", "lonely") is None
+        agent = self._agent(db_session, "lonely")
+        assert resolve_pin("agent", str(agent.id)) is None
 
     def test_cohort_pin_used_when_agent_unpinned(self, app, db_session):
         create_template("ct", "cohort {v}")
         set_pin("cohort", "parity", "ct", 1)
-        self._agent(db_session, "member", cohort="parity")
-        pin = resolve_pin("agent", "member")
+        agent = self._agent(db_session, "member", cohort="parity")
+        pin = resolve_pin("agent", str(agent.id))
         assert pin.target_kind == "cohort"
         assert pin.version_number == 1
 
@@ -181,24 +182,26 @@ class TestPinResolution:
         create_template("pt", "template")
         create_version("pt", "template v2")
         set_pin("cohort", "parity", "pt", 1)
-        self._agent(db_session, "special", cohort="parity")
-        set_pin("agent", "special", "pt", 2)
-        pin = resolve_pin("agent", "special")
+        agent = self._agent(db_session, "special", cohort="parity")
+        key = str(agent.id)
+        set_pin("agent", key, "pt", 2)
+        pin = resolve_pin("agent", key)
         assert pin.target_kind == "agent"
         assert pin.version_number == 2
         text, version_row = render_pinned(
-            "agent", "special", {"unused": None} if False else {}
+            "agent", key, {"unused": None} if False else {}
         )
         assert text == "template v2"
 
     def test_clear_pin_falls_back_to_cohort(self, app, db_session):
         create_template("cpt", "b")
         set_pin("cohort", "wave5", "cpt", 1)
-        self._agent(db_session, "clearable", cohort="wave5")
-        set_pin("agent", "clearable", "cpt", 1)
-        assert clear_pin("agent", "clearable") is True
-        assert clear_pin("agent", "clearable") is False
-        assert resolve_pin("agent", "clearable").target_kind == "cohort"
+        agent = self._agent(db_session, "clearable", cohort="wave5")
+        key = str(agent.id)
+        set_pin("agent", key, "cpt", 1)
+        assert clear_pin("agent", key) is True
+        assert clear_pin("agent", key) is False
+        assert resolve_pin("agent", key).target_kind == "cohort"
 
     def test_set_pin_rejects_unknown_template(self, app, db_session):
         from deaddit.llm.prompts import PromptError
@@ -267,7 +270,7 @@ class TestParityFreezeByteStability:
         v1 = create_template(
             "agent.system_prompt", DEFAULT_BODY, description="LLM-5 default"
         )
-        set_pin("agent", "golden_lurker", "agent.system_prompt", 1)
+        set_pin("agent", str(agent.id), "agent.system_prompt", 1)
         from deaddit.models import Setting
 
         db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
@@ -348,7 +351,7 @@ class TestImagePostGuidance:
             {"enabled": True, "policy": "optional", "provider_id": 1, "model": None},
         )
         create_template("agent.system_prompt.imgtest", DEFAULT_BODY)
-        set_pin("agent", "pinned_optional", "agent.system_prompt.imgtest", 1)
+        set_pin("agent", str(agent.id), "agent.system_prompt.imgtest", 1)
         from deaddit.models import Setting
 
         db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))

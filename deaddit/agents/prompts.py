@@ -132,8 +132,8 @@ def _tier_line(agent: Agent) -> str:
     return TIER_DESCRIPTIONS.get(tier, TIER_DESCRIPTIONS[AutonomyTier.REGULAR])
 
 
-def _subscriptions_section(agent: Agent) -> str:
-    subscriptions = (agent.state or {}).get("subscriptions") or []
+def _subscriptions_section(user: User) -> str:
+    subscriptions = (user.agent_state or {}).get("subscriptions") or []
     if not subscriptions:
         return ""
     return "\n\nYou are currently subscribed to: " + ", ".join(subscriptions)
@@ -155,9 +155,9 @@ def _image_guidance_section(agent: Agent) -> str:
     return _IMAGE_GUIDANCE_OPTIONAL
 
 
-def _memories_section(agent: Agent) -> str:
+def _memories_section(user: User) -> str:
     memories = (
-        AgentMemory.query.filter_by(user_username=agent.user_username, kind="episode")
+        AgentMemory.query.filter_by(user_username=user.username, kind="episode")
         .order_by(AgentMemory.created_at.desc())
         .limit(MAX_MEMORIES_IN_PROMPT)
         .all()
@@ -186,19 +186,20 @@ def system_prompt_variables(agent: Agent, user: User) -> dict[str, str]:
         "tier_line": _tier_line(agent),
         "rules_block": _TOOLS_LINE + "\n" + _GENUINE_LINE + "\n" + _QUALITY_RULES,
         "image_guidance_section": _image_guidance_section(agent),
-        "subscriptions_section": _subscriptions_section(agent),
-        "memories_section": _memories_section(agent),
+        "subscriptions_section": _subscriptions_section(user),
+        "memories_section": _memories_section(user),
     }
 
 
 def build_system_prompt(agent: Agent, user: User) -> str:
     """Build the system prompt for one agent run."""
     if versioning_enabled():
+        pin_key = str(agent.id)
         pinned = render_pinned(
             "agent",
-            agent.user_username,
+            pin_key,
             variables=system_prompt_variables(agent, user),
-            subject_key=agent.user_username,
+            subject_key=pin_key,
         )
         if pinned is not None:
             return pinned[0]

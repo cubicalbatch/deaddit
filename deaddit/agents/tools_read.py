@@ -93,7 +93,10 @@ def _post_summary(post: Post, comment_count: int, has_image: bool) -> dict:
 
 
 def _browse_feed(ctx: ToolContext, params: BrowseFeedArgs) -> dict:
-    subscriptions = list((ctx.agent.state or {}).get("subscriptions") or [])
+    user = db.session.get(User, ctx.user_username)
+    subscriptions = (
+        list((user.agent_state or {}).get("subscriptions") or []) if user else []
+    )
     targets: list[str] = []
     if params.subdeaddit is not None:
         targets.append(params.subdeaddit)

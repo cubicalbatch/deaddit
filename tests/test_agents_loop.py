@@ -404,7 +404,12 @@ def test_browse_feed_empty_and_sparse_hints(seeded_db, db_session):
     from deaddit.agents.registry import ToolContext
 
     agent = _make_agent(db_session, "alice")
-    run = AgentRun(agent_id=agent.id, trigger="manual", status="running")
+    run = AgentRun(
+        agent_id=agent.id,
+        persona_username=agent.user_username,
+        trigger="manual",
+        status="running",
+    )
     db_session.add(run)
     db_session.commit()
     ctx = ToolContext(agent=agent, run=run, user_username="alice")

@@ -224,8 +224,9 @@ def get_pin(target_kind: str, target_key: str) -> PromptPin | None:
 def resolve_pin(target_kind: str, target_key: str) -> PromptPin | None:
     """Resolve the pin for a target: its own pin first, then its cohort's.
 
-    The cohort key is read from ``Agent.config["cohort"]`` when present;
-    targets without a cohort fall back to their own pin only.
+    Agent target keys are decimal agent ids. The cohort key is read from
+    ``Agent.config["cohort"]`` when present; targets without a cohort fall
+    back to their own pin only.
     """
     row = get_pin(target_kind, target_key)
     if row is not None:
@@ -233,7 +234,10 @@ def resolve_pin(target_kind: str, target_key: str) -> PromptPin | None:
     if target_kind == "agent":
         from deaddit.models import Agent
 
-        agent = Agent.query.filter_by(user_username=target_key).first()
+        try:
+            agent = db.session.get(Agent, int(target_key))
+        except (TypeError, ValueError):
+            return None
         cohort = (agent.config or {}).get("cohort") if agent else None
         if cohort:
             return get_pin("cohort", str(cohort))

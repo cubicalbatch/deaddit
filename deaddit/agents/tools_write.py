@@ -33,7 +33,7 @@ from deaddit.images.storage import (
     store_variants,
 )
 from deaddit.images.types import Deadline, ImageProviderError
-from deaddit.models import Comment, ImageProvider, Post, Subdeaddit, ToolCall
+from deaddit.models import Comment, ImageProvider, Post, Subdeaddit, ToolCall, User
 from deaddit.services.content import (
     ContentValidationError,
     PendingPostImage,
@@ -302,12 +302,15 @@ def _vote(ctx: ToolContext, params: VoteArgs) -> dict:
 
 
 def _set_subscription(ctx: ToolContext, subdeaddit: str, *, add: bool) -> dict:
+    user = db.session.get(User, ctx.user_username)
+    if user is None:
+        return {"ok": False, "error": f"no such user '{ctx.user_username}'"}
     if db.session.get(Subdeaddit, subdeaddit) is None:
         return {
             "ok": False,
             "error": f"subdeaddit '{subdeaddit}' does not exist",
         }
-    state = dict(ctx.agent.state or {})
+    state = dict(user.agent_state or {})
     subs = list(state.get("subscriptions") or [])
     if add:
         if subdeaddit not in subs:
@@ -315,8 +318,8 @@ def _set_subscription(ctx: ToolContext, subdeaddit: str, *, add: bool) -> dict:
     elif subdeaddit in subs:
         subs.remove(subdeaddit)
     state["subscriptions"] = sorted(set(subs))
-    ctx.agent.state = state
-    db.session.add(ctx.agent)
+    user.agent_state = state
+    db.session.add(user)
     db.session.commit()
     verb = "subscribed to" if add else "unsubscribed from"
     return {"ok": True, "subdeaddit": subdeaddit, "detail": verb}

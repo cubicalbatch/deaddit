@@ -58,6 +58,7 @@ def test_recover_interrupts_only_runs_past_budget_plus_grace(
     now = datetime.utcnow()
     stale = AgentRun(
         agent_id=agent.id,
+        persona_username=agent.user_username,
         trigger="schedule",
         status="running",
         started_at=now - timedelta(seconds=400),
@@ -65,6 +66,7 @@ def test_recover_interrupts_only_runs_past_budget_plus_grace(
     # Within the 300s budget + grace window: a live run, must be left alone.
     fresh = AgentRun(
         agent_id=agent2.id,
+        persona_username=agent2.user_username,
         trigger="schedule",
         status="running",
         started_at=now - timedelta(seconds=270),
@@ -87,6 +89,7 @@ def test_recover_uses_fallback_budget_when_config_garbage(seeded_db, db_session,
     agent = _make_agent(db_session, "alice", config={"max_run_seconds": "not-a-number"})
     run = AgentRun(
         agent_id=agent.id,
+        persona_username=agent.user_username,
         trigger="schedule",
         status="running",
         started_at=datetime.utcnow() - timedelta(seconds=421),
@@ -245,6 +248,7 @@ def test_global_semaphore_bounds_concurrent_wakes(
 def _seed_today_turns(db_session, agent, count):
     run = AgentRun(
         agent_id=agent.id,
+        persona_username=agent.user_username,
         trigger="schedule",
         status="completed",
         started_at=datetime.utcnow(),
@@ -339,6 +343,7 @@ def test_poll_tick_self_heals_killed_run_after_grace(seeded_db, db_session, app)
     agent.next_run_at = None
     run = AgentRun(
         agent_id=agent.id,
+        persona_username=agent.user_username,
         trigger="schedule",
         status="running",
         started_at=datetime.utcnow() - timedelta(seconds=361),  # past 300+60 grace

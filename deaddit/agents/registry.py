@@ -87,7 +87,7 @@ class ToolContext:
 
     agent: Any  # deaddit.models.Agent row
     run: Any  # deaddit.models.AgentRun row
-    user_username: str  # persona username (= agent.user_username)
+    user_username: str  # the run's selected persona (run.persona_username); not necessarily agent.user_username
     llm_api_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None

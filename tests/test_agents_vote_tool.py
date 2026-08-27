@@ -27,7 +27,12 @@ def ctx(db_session, seeded_db):
     )
     db_session.add(agent)
     db_session.flush()
-    run = AgentRun(agent_id=agent.id, trigger="manual", status="running")
+    run = AgentRun(
+        agent_id=agent.id,
+        persona_username="alice",
+        trigger="manual",
+        status="running",
+    )
     db_session.add(run)
     db_session.commit()
     return ToolContext(agent=agent, run=run, user_username="alice")

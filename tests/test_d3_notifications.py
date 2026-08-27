@@ -53,7 +53,12 @@ def _make_ctx(db_session, *, username="alice", tier="regular"):
     )
     db_session.add(agent)
     db_session.flush()
-    run = AgentRun(agent_id=agent.id, trigger="manual", status="running")
+    run = AgentRun(
+        agent_id=agent.id,
+        persona_username=username,
+        trigger="manual",
+        status="running",
+    )
     db_session.add(run)
     db_session.commit()
     return ToolContext(agent=agent, run=run, user_username=username)

@@ -630,6 +630,7 @@ def test_admin_runs_keyset_walk_exhausts_without_duplicates(
         runs.append(
             AgentRun(
                 agent_id=agent.id,
+                persona_username=agent.user_username,
                 trigger="schedule" if i % 2 else "manual",
                 status="completed" if i % 5 else "failed",
                 started_at=started,
@@ -681,7 +682,12 @@ def test_tool_call_content_cards_resolve_per_contract(
     seeded_db, admin_client, db_session
 ):
     agent = _make_agent(db_session, username="alice")
-    run = AgentRun(agent_id=agent.id, trigger="manual", status="completed")
+    run = AgentRun(
+        agent_id=agent.id,
+        persona_username=agent.user_username,
+        trigger="manual",
+        status="completed",
+    )
     db_session.add(run)
     db_session.flush()
     turn = AgentTurn(
