@@ -43,12 +43,9 @@ class Post(db.Model):
     )
     # --- Phase D4 moderation: soft removal ---
     removed = db.Column(db.Boolean, default=False, index=True)
-    removed_by = db.Column(
-        db.String(50), db.ForeignKey("user.username"), nullable=True
-    )
+    removed_by = db.Column(db.String(50), db.ForeignKey("user.username"), nullable=True)
     removal_reason = db.Column(db.Text, nullable=True)
     removed_at = db.Column(db.DateTime, nullable=True)
-
 
 
 class Comment(db.Model):
@@ -75,12 +72,9 @@ class Comment(db.Model):
     )
     # --- Phase D4 moderation: soft removal ---
     removed = db.Column(db.Boolean, default=False, index=True)
-    removed_by = db.Column(
-        db.String(50), db.ForeignKey("user.username"), nullable=True
-    )
+    removed_by = db.Column(db.String(50), db.ForeignKey("user.username"), nullable=True)
     removal_reason = db.Column(db.Text, nullable=True)
     removed_at = db.Column(db.DateTime, nullable=True)
-
 
 
 class User(db.Model):
@@ -253,6 +247,66 @@ class ApiModel(db.Model):
         }
 
 
+class LLMProvider(db.Model):
+    """Configured LLM Provider storing API endpoint, key, default model, and default flag."""
+
+    __tablename__ = "llm_provider"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    api_url = db.Column(db.String(255), nullable=False, index=True)
+    api_key = db.Column(db.String(255), nullable=True)
+    default_model = db.Column(db.String(100), nullable=True)
+    is_default = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def to_dict(self, include_key=False):
+        data = {
+            "id": self.id,
+            "name": self.name,
+            "api_url": self.api_url,
+            "default_model": self.default_model,
+            "is_default": self.is_default,
+            "has_key": bool(self.api_key and self.api_key.strip()),
+            "key_last4": self.api_key.strip()[-4:]
+            if (self.api_key and self.api_key.strip())
+            else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+        if include_key:
+            data["api_key"] = self.api_key
+        return data
+
+    @classmethod
+    def get_default(cls):
+        """Get the default provider, or the first provider if none marked default."""
+        provider = cls.query.filter_by(is_default=True).first()
+        if provider is None:
+            provider = cls.query.order_by(cls.id.asc()).first()
+            if provider is not None and not provider.is_default:
+                provider.is_default = True
+                db.session.commit()
+        return provider
+
+    @classmethod
+    def set_default(cls, provider_id: int):
+        """Mark provider_id as default and unmark all others."""
+        providers = cls.query.all()
+        target = None
+        for p in providers:
+            if p.id == provider_id:
+                p.is_default = True
+                target = p
+            else:
+                p.is_default = False
+        db.session.commit()
+        return target
+
+
 class ApiEndpointConfig(db.Model):
     """Store configuration settings per API endpoint."""
 
@@ -392,9 +446,7 @@ class ModelRoute(db.Model):
     tier = db.Column(
         db.String(40), index=True, nullable=False
     )  # 'default', 'creative', 'analytical'
-    api_url = db.Column(
-        db.String(255), nullable=True
-    )  # NULL -> Config OPENAI_API_URL
+    api_url = db.Column(db.String(255), nullable=True)  # NULL -> Config OPENAI_API_URL
     model_name = db.Column(db.String(120), nullable=False)
     priority = db.Column(db.Integer, default=0)
     is_active = db.Column(db.Boolean, default=True)
@@ -619,9 +671,7 @@ class JobLog(db.Model):
     """
 
     id = db.Column(db.Integer, primary_key=True)
-    job_id = db.Column(
-        db.Integer, db.ForeignKey("job.id"), nullable=False, index=True
-    )
+    job_id = db.Column(db.Integer, db.ForeignKey("job.id"), nullable=False, index=True)
     seq = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     level = db.Column(db.String(16), nullable=False, default="INFO")

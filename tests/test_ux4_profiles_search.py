@@ -274,9 +274,7 @@ class TestUsersDirectory:
         counts = {"alice": (10, 5), "bob": (8, 9), "carol": (3, 1)}
         posts: list[Post] = []
         for username, (n_posts, _) in counts.items():
-            posts.extend(
-                _mk_post(i, username, "s") for i in range(n_posts)
-            )
+            posts.extend(_mk_post(i, username, "s") for i in range(n_posts))
         db_session.add_all(posts)
         db_session.flush()
         for username, (_, n_comments) in counts.items():
@@ -321,7 +319,9 @@ class TestUsersDirectory:
             ):
                 assert hasattr(row, key) or (isinstance(row, dict) and key in row)
 
-    def test_unknown_sort_falls_back_to_username(self, app, client, db_session, ctx, directory_db):
+    def test_unknown_sort_falls_back_to_username(
+        self, app, client, db_session, ctx, directory_db
+    ):
         resp = client.get("/users?sort=bogus")
         assert resp.status_code == 200
         context = _ctx_of(ctx, "users_list.html")
@@ -333,7 +333,9 @@ class TestUsersDirectory:
             "dave",
         ]
 
-    def test_page_walk_covers_all_users_without_repeats(self, app, client, db_session, ctx):
+    def test_page_walk_covers_all_users_without_repeats(
+        self, app, client, db_session, ctx
+    ):
         db_session.add_all(_mk_user(f"u{i:03d}") for i in range(55))
         db_session.commit()
 
@@ -367,7 +369,11 @@ class TestSearchSections:
         posts = [
             _mk_post(0, "chef", "quantum-lab", title="Quantum breakthrough announced"),
             _mk_post(
-                1, "chef", "cooking", title="weekly thread", content="quantum entanglement chat"
+                1,
+                "chef",
+                "cooking",
+                title="weekly thread",
+                content="quantum entanglement chat",
             ),
             _mk_post(2, "qm_fan", "cooking", title="unrelated", content="bread"),
             _mk_post(3, "chef", "quantum-lab", title="another quantum note"),
@@ -376,7 +382,9 @@ class TestSearchSections:
         db_session.commit()
         return {"posts": posts}
 
-    def test_query_populates_posts_communities_people(self, app, client, db_session, ctx, search_db):
+    def test_query_populates_posts_communities_people(
+        self, app, client, db_session, ctx, search_db
+    ):
         resp = client.get("/search?q=quantum")
         assert resp.status_code == 200
         context = _ctx_of(ctx, "search.html")
@@ -399,9 +407,7 @@ class TestSearchSections:
         people_names = [_cell(u, "username") for u in context["people"]]
         assert "qm_fan" in people_names  # bio match
         assert "chef" not in people_names
-        person = next(
-            u for u in context["people"] if _cell(u, "username") == "qm_fan"
-        )
+        person = next(u for u in context["people"] if _cell(u, "username") == "qm_fan")
         for key in ("bio", "post_count", "comment_count"):
             assert hasattr(person, key) or (isinstance(person, dict) and key in person)
         assert _cell(person, "comment_count") == 0
@@ -458,7 +464,9 @@ class TestSearchInjectionProbes:
         )
         db_session.commit()
 
-    def test_script_tag_is_escaped_not_executed(self, app, client, db_session, ctx, tiny_db):
+    def test_script_tag_is_escaped_not_executed(
+        self, app, client, db_session, ctx, tiny_db
+    ):
         resp = client.get("/search", query_string={"q": "<script>alert(1)</script>"})
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
@@ -469,7 +477,9 @@ class TestSearchInjectionProbes:
         posts = _ctx_of(ctx, "search.html")["posts"]
         assert posts == []
 
-    def test_percent_and_underscore_treated_literally(self, app, client, db_session, ctx, tiny_db):
+    def test_percent_and_underscore_treated_literally(
+        self, app, client, db_session, ctx, tiny_db
+    ):
         resp = client.get("/search", query_string={"q": "%100% match"})
         assert resp.status_code == 200
         titles = [p.title for p in _ctx_of(ctx, "search.html")["posts"]]
@@ -482,7 +492,9 @@ class TestSearchInjectionProbes:
         # hit "max_power" ("aX_p" contains char+'x').
         assert titles == ["debian_x_tips"], "underscore matched as a LIKE wildcard"
 
-    def test_sql_quote_probe_returns_sane_empty_result(self, app, client, db_session, ctx, tiny_db):
+    def test_sql_quote_probe_returns_sane_empty_result(
+        self, app, client, db_session, ctx, tiny_db
+    ):
         resp = client.get("/search", query_string={"q": "' OR 1=1 --"})
         assert resp.status_code == 200
         context = _ctx_of(ctx, "search.html")
@@ -502,9 +514,7 @@ class TestSetupPage:
 
 
 class TestNewUserFlow:
-    def test_save_config_then_load_default_data_flips_index(
-        self, app, client, ctx
-    ):
+    def test_save_config_then_load_default_data_flips_index(self, app, client, ctx):
         with client.session_transaction() as sess:
             sess["admin_authenticated"] = True
 

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Budget defaults applied when absent from agent.config.
 DEFAULT_CONFIG: dict[str, Any] = {
-    "max_actions_per_run": 12,
+    "max_actions_per_run": 30,
     "max_run_seconds": 300,
     "min_delay": 60,
     "max_delay": 900,
@@ -70,7 +70,9 @@ def _recover_stale_runs(agent: Agent) -> bool:
     refused). Stale-running recovery proper lands in Phase 2.
     """
     now = datetime.utcnow()
-    grace = timedelta(seconds=_int_budget(_effective_config(agent), "max_run_seconds") + 60)
+    grace = timedelta(
+        seconds=_int_budget(_effective_config(agent), "max_run_seconds") + 60
+    )
     stuck = (
         AgentRun.query.filter_by(agent_id=agent.id, status="running")
         .filter(AgentRun.started_at < now - grace)
@@ -83,7 +85,8 @@ def _recover_stale_runs(agent: Agent) -> bool:
     if stuck:
         db.session.commit()
     return (
-        AgentRun.query.filter_by(agent_id=agent.id, status="running").first() is not None
+        AgentRun.query.filter_by(agent_id=agent.id, status="running").first()
+        is not None
     )
 
 
@@ -126,7 +129,12 @@ def _fail(
     return run
 
 
-def run_once(username: str, *, trigger: str = "manual") -> AgentRun:
+def run_once(
+    username: str,
+    *,
+    trigger: str = "manual",
+    force_intent: str | None = None,
+) -> AgentRun:
     """Run one full agent visit synchronously. Caller provides the app context."""
     agent = Agent.query.filter_by(user_username=username).first()
     if agent is None:
@@ -139,9 +147,51 @@ def run_once(username: str, *, trigger: str = "manual") -> AgentRun:
         )
 
     config = _effective_config(agent)
-    api_url = config.get("api_url") or Config.get("OPENAI_API_URL")
-    model = config.get("model") or Config.get("OPENAI_MODEL", "llama3")
-    api_key = Config.get_api_key_for_endpoint(api_url)
+    provider_id = config.get("provider_id")
+    provider = None
+    if provider_id:
+        try:
+            from deaddit.models import LLMProvider
+
+            provider = db.session.get(LLMProvider, int(provider_id))
+        except Exception:
+            provider = None
+
+    if provider is None and config.get("api_url"):
+        try:
+            from deaddit.models import LLMProvider
+
+            provider = LLMProvider.query.filter(
+                (LLMProvider.api_url == str(config["api_url"]).rstrip("/"))
+                | (LLMProvider.api_url == str(config["api_url"]))
+            ).first()
+        except Exception:
+            provider = None
+
+    if provider is None:
+        try:
+            from deaddit.models import LLMProvider
+
+            provider = LLMProvider.get_default()
+        except Exception:
+            provider = None
+
+    if provider:
+        api_url = config.get("api_url") or provider.api_url
+        api_key = (
+            provider.api_key.strip()
+            if (provider.api_key and provider.api_key.strip())
+            else Config.get_api_key_for_endpoint(api_url)
+        )
+        model = (
+            config.get("model")
+            or provider.default_model
+            or Config.get("OPENAI_MODEL", "llama3")
+        )
+    else:
+        api_url = config.get("api_url") or Config.get("OPENAI_API_URL")
+        model = config.get("model") or Config.get("OPENAI_MODEL", "llama3")
+        api_key = Config.get_api_key_for_endpoint(api_url)
     specs = specs_for(agent.autonomy_tier)
 
     now = datetime.utcnow()
@@ -158,7 +208,7 @@ def run_once(username: str, *, trigger: str = "manual") -> AgentRun:
     db.session.add(run)
     db.session.commit()
 
-    messages = build_initial_messages(agent)
+    messages = build_initial_messages(agent, force_intent=force_intent)
     usage: dict[str, int] = dict.fromkeys(USAGE_KEYS, 0)
     turn_count = 0
     action_count = 0
@@ -260,12 +310,16 @@ def run_once(username: str, *, trigger: str = "manual") -> AgentRun:
             if action_count >= _int_budget(config, "max_actions_per_run"):
                 break
     except PermanentLLMError as exc:
-        return _fail(
-            agent, run, turn_count, action_count, usage, str(exc), strike=True
-        )
+        return _fail(agent, run, turn_count, action_count, usage, str(exc), strike=True)
     except Exception as exc:
         return _fail(
-            agent, run, turn_count, action_count, usage, f"{type(exc).__name__}: {exc}", strike=False
+            agent,
+            run,
+            turn_count,
+            action_count,
+            usage,
+            f"{type(exc).__name__}: {exc}",
+            strike=False,
         )
 
     now = datetime.utcnow()
@@ -280,7 +334,9 @@ def run_once(username: str, *, trigger: str = "manual") -> AgentRun:
     if agent.is_enabled:
         min_delay = _int_budget(config, "min_delay")
         max_delay = max(min_delay, _int_budget(config, "max_delay"))
-        agent.next_run_at = now + timedelta(seconds=random.uniform(min_delay, max_delay))
+        agent.next_run_at = now + timedelta(
+            seconds=random.uniform(min_delay, max_delay)
+        )
     try:
         summarize_run(agent, run)
     except Exception:

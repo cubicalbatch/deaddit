@@ -26,9 +26,7 @@ def _iter_imports(tree: ast.AST):
             yield node
 
 
-@pytest.mark.skipif(
-    not _DOMAIN_DIR.is_dir(), reason="deaddit/domain not present yet"
-)
+@pytest.mark.skipif(not _DOMAIN_DIR.is_dir(), reason="deaddit/domain not present yet")
 @pytest.mark.parametrize("path", _python_files(), ids=lambda p: p.name)
 def test_domain_import_rules(path: Path) -> None:
     tree = ast.parse(path.read_text(), filename=str(path))
@@ -39,8 +37,7 @@ def test_domain_import_rules(path: Path) -> None:
             # from x import *  ->  alias list contains a single star alias.
             for alias in node.names:
                 assert alias.name != "*", (
-                    f"{path}: 'from {node.module} import *' is banned "
-                    "in deaddit/domain"
+                    f"{path}: 'from {node.module} import *' is banned in deaddit/domain"
                 )
             if node.module == "flask":
                 banned = [a.name for a in node.names if a.name in _BANNED_FLASK_IMPORTS]

@@ -221,11 +221,13 @@ def _health_trio(start: datetime, end: datetime) -> dict[str, float | None]:
         total, negative = (
             db.session.query(
                 func.count(Comment.id),
-                func.coalesce(
-                    func.sum(case((Comment.score <= 0, 1), else_=0)), 0
-                ),
+                func.coalesce(func.sum(case((Comment.score <= 0, 1), else_=0)), 0),
             )
-            .filter(Comment.post_id == post_id, Comment.created_at >= start, Comment.created_at < end)
+            .filter(
+                Comment.post_id == post_id,
+                Comment.created_at >= start,
+                Comment.created_at < end,
+            )
             .one()
         )
         if total:
@@ -234,12 +236,16 @@ def _health_trio(start: datetime, end: datetime) -> dict[str, float | None]:
 
     # Participation Gini per sub active today, averaged across subs.
     ginis: list[float] = []
-    sub_names = [
-        row[0]
-        for row in db.session.query(Post.subdeaddit_name).filter(
-            Post.id.in_(touched)
-        )
-    ] if touched else []
+    sub_names = (
+        [
+            row[0]
+            for row in db.session.query(Post.subdeaddit_name).filter(
+                Post.id.in_(touched)
+            )
+        ]
+        if touched
+        else []
+    )
     from deaddit.dynamics.degeneracy import _participation_by_user
 
     for sub in sorted(set(sub_names)):

@@ -241,7 +241,6 @@ def test_web_process_zero_scheduler_on_import():
     assert "OK" in proc.stdout
 
 
-
 def test_nightly_registry_registers_into_scheduler(app, monkeypatch):
     from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -267,5 +266,3 @@ def test_nightly_registry_registers_into_scheduler(app, monkeypatch):
     registered_ids = nightly_mod.register_nightly_jobs(scheduler)
     assert "temp_test_nightly" in registered_ids
     assert any(entry[0].id == "temp_test_nightly" for entry in scheduler._pending_jobs)
-
-

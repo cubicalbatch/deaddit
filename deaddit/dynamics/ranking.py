@@ -116,9 +116,10 @@ def post_rank_key(
     ts_created = _unix_seconds(created_at)
     if sort == "hot":
         sign = -1 if score < 0 else (1 if score > 0 else 0)
-        return math.log10(max(abs(score), 1)) * sign + (
-            ts_created - HOT_EPOCH
-        ) / HOT_GRAVITY
+        return (
+            math.log10(max(abs(score), 1)) * sign
+            + (ts_created - HOT_EPOCH) / HOT_GRAVITY
+        )
     if sort == "top":
         return float(score)
     if sort == "new":

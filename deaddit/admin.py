@@ -34,6 +34,7 @@ from deaddit.models import (
     DegeneracyFlag,
     EndpointCapability,
     Job,
+    LLMProvider,
     LLMUsage,
     ModelRoute,
     Post,
@@ -345,9 +346,9 @@ def dashboard():
                 out["legacy"] += n
         return out
 
-    degeneracy_active = (
-        DegeneracyFlag.query.filter(DegeneracyFlag.created_at >= since).count()
-    )
+    degeneracy_active = DegeneracyFlag.query.filter(
+        DegeneracyFlag.created_at >= since
+    ).count()
     reports_pending = Report.query.filter(Report.status == "open").count()
     pulse = {
         "posts_today": _bucket(post_rows),
@@ -402,8 +403,7 @@ def content():
     # Subdeaddit filter options rendered server-side in the template
     # (replaces the old per_page=1000 client-side fetch).
     subdeaddit_names = [
-        name
-        for (name,) in db.session.query(Subdeaddit.name).order_by(Subdeaddit.name)
+        name for (name,) in db.session.query(Subdeaddit.name).order_by(Subdeaddit.name)
     ]
 
     return render_template(
@@ -614,9 +614,7 @@ def api_subdeaddits():
 
     return jsonify(
         {
-            "subdeaddits": [
-                _subdeaddit_payload(sub) for sub in subdeaddits.items
-            ],
+            "subdeaddits": [_subdeaddit_payload(sub) for sub in subdeaddits.items],
             "total": subdeaddits.total,
             "pages": subdeaddits.pages,
             "current_page": page,
@@ -1083,6 +1081,8 @@ def api_bulk_delete_comments():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error bulk deleting comments: {e}")
+
+
 def _sparkline(values: list[float | None], width: int = 120, height: int = 28) -> str:
     """SVG polyline points for a series; None values are skipped, not faked."""
     present = [v for v in values if v is not None]
@@ -1116,9 +1116,7 @@ def analytics():
 
     series = daily_series(30)
     watchlist = (
-        DegeneracyFlag.query.order_by(DegeneracyFlag.created_at.desc())
-        .limit(50)
-        .all()
+        DegeneracyFlag.query.order_by(DegeneracyFlag.created_at.desc()).limit(50).all()
     )
 
     def _column(name: str) -> list[float | None]:
@@ -1145,6 +1143,10 @@ def settings():
 
     # Get current configuration from database
     all_settings = Config.get_all_settings()
+    providers = LLMProvider.query.order_by(
+        LLMProvider.is_default.desc(), LLMProvider.id.asc()
+    ).all()
+    default_provider = LLMProvider.get_default()
 
     config = {
         "openai_api_url": all_settings["OPENAI_API_URL"]["value"],
@@ -1154,9 +1156,10 @@ def settings():
         "api_token_set": all_settings["API_TOKEN"]["value"] == "***set***",
         "openai_key_set": all_settings["OPENAI_KEY"]["value"] != "***not set***",
         "all_settings": all_settings,
+        "default_provider": default_provider.to_dict() if default_provider else None,
     }
 
-    return render_template("admin/settings.html", config=config)
+    return render_template("admin/settings.html", config=config, providers=providers)
 
 
 @admin_bp.route("/capabilities")
@@ -1369,9 +1372,17 @@ def test_connection_api():
     import requests
 
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
+        provider_id = data.get("provider_id")
         api_url = data.get("api_url")
         api_key = data.get("api_key")
+
+        if provider_id:
+            provider = db.session.get(LLMProvider, int(provider_id))
+            if provider:
+                api_url = api_url or provider.api_url
+                if not api_key or api_key == "••••••••••••••••":
+                    api_key = provider.api_key
 
         if not api_url:
             return jsonify(
@@ -1385,17 +1396,12 @@ def test_connection_api():
         # If no API key provided or masked key, try to use saved key for this endpoint
         if not api_key or api_key == "••••••••••••••••":
             api_key = Config.get_api_key_for_endpoint(api_url)
-            if not api_key:
-                return jsonify(
-                    {
-                        "success": False,
-                        "message": "API key is required. Please enter a key or save one in settings first.",
-                        "status_code": None,
-                    }
-                )
 
         # Test connection to AI service
-        headers = {"Authorization": f"Bearer {api_key}"}
+        headers = {}
+        if api_key and api_key.strip():
+            headers["Authorization"] = f"Bearer {api_key.strip()}"
+
         response = requests.get(
             f"{api_url.rstrip('/')}/models", headers=headers, timeout=10
         )
@@ -1412,7 +1418,7 @@ def test_connection_api():
             return jsonify(
                 {
                     "success": False,
-                    "message": "AI service returned an error response",
+                    "message": f"AI service returned HTTP {response.status_code}",
                     "status_code": response.status_code,
                 }
             )
@@ -1451,9 +1457,17 @@ def load_models_api():
     import requests
 
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
+        provider_id = data.get("provider_id")
         api_url = data.get("api_url")
         api_key = data.get("api_key")
+
+        if provider_id:
+            provider = db.session.get(LLMProvider, int(provider_id))
+            if provider:
+                api_url = api_url or provider.api_url
+                if not api_key or api_key == "••••••••••••••••":
+                    api_key = provider.api_key
 
         if not api_url:
             return jsonify({"success": False, "message": "API URL is required"})
@@ -1461,15 +1475,8 @@ def load_models_api():
         # If no API key provided or masked key, try to use saved key for this endpoint
         if not api_key or api_key == "••••••••••••••••":
             api_key = Config.get_api_key_for_endpoint(api_url)
-            if not api_key:
-                return jsonify(
-                    {
-                        "success": False,
-                        "message": "API key is required. Please enter a key or save one in settings first.",
-                    }
-                )
 
-        models, fetch_message = fetch_all_models_from_api(api_url, api_key)
+        models, fetch_message = fetch_all_models_from_api(api_url, api_key or "")
 
         if models:
             # Save models to database
@@ -1702,6 +1709,313 @@ def get_endpoint_key_api():
         )
 
 
+# --- LLM Providers Management Endpoints ---
+
+
+@admin_bp.route("/api/providers", methods=["GET"])
+@production_disabled
+@admin_required
+def api_list_providers():
+    """List all saved LLM providers with cached model counts and details."""
+    providers = LLMProvider.query.order_by(
+        LLMProvider.is_default.desc(), LLMProvider.id.asc()
+    ).all()
+    result = []
+    for p in providers:
+        cached_models = ApiModel.get_models_for_api(p.api_url)
+        model_names = [m.model_name for m in cached_models]
+        last_fetched = (
+            max(m.last_fetched for m in cached_models) if cached_models else None
+        )
+        p_dict = p.to_dict()
+        p_dict["models"] = model_names
+        p_dict["model_count"] = len(model_names)
+        p_dict["last_fetched"] = (
+            last_fetched.isoformat() if last_fetched else None
+        )
+        result.append(p_dict)
+    return jsonify({"success": True, "providers": result})
+
+
+@admin_bp.route("/api/providers", methods=["POST"])
+@production_disabled
+@admin_required
+def api_create_provider():
+    """Create a new LLM provider."""
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name") or "").strip()
+    api_url = str(payload.get("api_url") or "").strip().rstrip("/")
+    api_key = str(payload.get("api_key") or "").strip()
+    default_model = str(payload.get("default_model") or "").strip() or None
+    is_default = bool(payload.get("is_default", False))
+
+    if not name:
+        return (
+            jsonify({"success": False, "error": "Provider name is required"}),
+            400,
+        )
+    if not api_url:
+        return (
+            jsonify({"success": False, "error": "API endpoint URL is required"}),
+            400,
+        )
+
+    count = LLMProvider.query.count()
+    if count == 0:
+        is_default = True
+    elif is_default:
+        LLMProvider.query.update({"is_default": False})
+
+    provider = LLMProvider(
+        name=name,
+        api_url=api_url,
+        api_key=api_key if api_key else None,
+        default_model=default_model,
+        is_default=is_default,
+    )
+    db.session.add(provider)
+    db.session.commit()
+
+    # Attempt initial model fetch
+    try:
+        models, _ = fetch_all_models_from_api(api_url, api_key or "")
+        if models:
+            ApiModel.update_models_for_api(api_url, models)
+            if not provider.default_model:
+                provider.default_model = models[0]
+                db.session.commit()
+    except Exception as exc:
+        logger.debug(f"Initial model fetch for provider {name} failed: {exc}")
+
+    p_dict = provider.to_dict()
+    cached_models = ApiModel.get_models_for_api(provider.api_url)
+    p_dict["models"] = [m.model_name for m in cached_models]
+    p_dict["model_count"] = len(p_dict["models"])
+    return jsonify({"success": True, "provider": p_dict}), 201
+
+
+@admin_bp.route("/api/providers/<int:provider_id>", methods=["GET"])
+@production_disabled
+@admin_required
+def api_get_provider(provider_id):
+    """Get single provider details including cached models."""
+    provider = db.session.get(LLMProvider, provider_id)
+    if not provider:
+        return jsonify({"success": False, "error": "Provider not found"}), 404
+
+    cached_models = ApiModel.get_models_for_api(provider.api_url)
+    p_dict = provider.to_dict()
+    p_dict["models"] = [m.model_name for m in cached_models]
+    p_dict["model_count"] = len(p_dict["models"])
+    return jsonify({"success": True, "provider": p_dict})
+
+
+@admin_bp.route("/api/providers/<int:provider_id>", methods=["PUT", "POST"])
+@admin_bp.route("/api/providers/<int:provider_id>/update", methods=["POST", "PUT"])
+@production_disabled
+@admin_required
+def api_update_provider(provider_id):
+    """Update an existing provider."""
+    provider = db.session.get(LLMProvider, provider_id)
+    if not provider:
+        return jsonify({"success": False, "error": "Provider not found"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    if "name" in payload:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            return (
+                jsonify({"success": False, "error": "Provider name cannot be empty"}),
+                400,
+            )
+        provider.name = name
+
+    if "api_url" in payload:
+        api_url = str(payload.get("api_url") or "").strip().rstrip("/")
+        if not api_url:
+            return (
+                jsonify({"success": False, "error": "API URL cannot be empty"}),
+                400,
+            )
+        provider.api_url = api_url
+
+    if "api_key" in payload:
+        key = str(payload.get("api_key") or "").strip()
+        if key != "" and key != "••••••••••••••••":
+            provider.api_key = key
+        elif payload.get("clear_api_key"):
+            provider.api_key = None
+
+    if "default_model" in payload:
+        model_val = str(payload.get("default_model") or "").strip()
+        provider.default_model = model_val or None
+
+    if "is_default" in payload:
+        new_default = bool(payload.get("is_default"))
+        if new_default:
+            for p in LLMProvider.query.all():
+                p.is_default = (p.id == provider.id)
+        else:
+            if LLMProvider.query.count() == 1:
+                provider.is_default = True
+            else:
+                provider.is_default = False
+                if not LLMProvider.query.filter(
+                    LLMProvider.id != provider.id, LLMProvider.is_default.is_(True)
+                ).first():
+                    other = LLMProvider.query.filter(
+                        LLMProvider.id != provider.id
+                    ).first()
+                    if other:
+                        other.is_default = True
+
+    provider.updated_at = datetime.utcnow()
+    db.session.commit()
+
+    cached_models = ApiModel.get_models_for_api(provider.api_url)
+    p_dict = provider.to_dict()
+    p_dict["models"] = [m.model_name for m in cached_models]
+    p_dict["model_count"] = len(p_dict["models"])
+    return jsonify({"success": True, "provider": p_dict})
+
+
+@admin_bp.route("/api/providers/<int:provider_id>", methods=["DELETE"])
+@admin_bp.route("/api/providers/<int:provider_id>/delete", methods=["POST", "DELETE"])
+@production_disabled
+@admin_required
+def api_delete_provider(provider_id):
+    """Delete a provider. If default, makes another provider default."""
+    provider = db.session.get(LLMProvider, provider_id)
+    if not provider:
+        return jsonify({"success": False, "error": "Provider not found"}), 404
+
+    was_default = provider.is_default
+    db.session.delete(provider)
+    db.session.commit()
+
+    if was_default:
+        remaining = LLMProvider.query.order_by(LLMProvider.id.asc()).first()
+        if remaining:
+            remaining.is_default = True
+            db.session.commit()
+
+    return jsonify({"success": True, "message": "Provider deleted successfully"})
+
+
+@admin_bp.route("/api/providers/<int:provider_id>/set-default", methods=["POST"])
+@production_disabled
+@admin_required
+def api_set_default_provider(provider_id):
+    """Set specified provider as default."""
+    provider = db.session.get(LLMProvider, provider_id)
+    if not provider:
+        return jsonify({"success": False, "error": "Provider not found"}), 404
+
+    LLMProvider.set_default(provider.id)
+    return jsonify({"success": True, "provider": provider.to_dict()})
+
+
+@admin_bp.route("/api/providers/<int:provider_id>/refresh-models", methods=["POST"])
+@production_disabled
+@admin_required
+def api_refresh_provider_models(provider_id):
+    """Fetch live models for a provider using its endpoint and stored API key."""
+    provider = db.session.get(LLMProvider, provider_id)
+    if not provider:
+        return jsonify({"success": False, "error": "Provider not found"}), 404
+
+    api_key = (
+        provider.api_key
+        or Config.get_api_key_for_endpoint(provider.api_url)
+        or ""
+    )
+    models, fetch_message = fetch_all_models_from_api(provider.api_url, api_key)
+
+    if models:
+        try:
+            ApiModel.update_models_for_api(provider.api_url, models)
+        except Exception as exc:
+            logger.warning("Failed to save models to database: %s", exc)
+
+        if not provider.default_model and models:
+            provider.default_model = models[0]
+            db.session.commit()
+
+        return jsonify(
+            {
+                "success": True,
+                "models": models,
+                "message": fetch_message,
+                "default_model": provider.default_model,
+                "count": len(models),
+            }
+        )
+    else:
+        cached_models = ApiModel.get_models_for_api(provider.api_url)
+        if cached_models:
+            model_names = [m.model_name for m in cached_models]
+            return jsonify(
+                {
+                    "success": True,
+                    "models": model_names,
+                    "message": f"API did not return models. Using {len(model_names)} cached models.",
+                    "cached": True,
+                    "default_model": provider.default_model,
+                    "count": len(model_names),
+                }
+            )
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Failed to fetch models from API: " + fetch_message,
+                }
+            ),
+            400,
+        )
+
+
+@admin_bp.route("/api/providers/<int:provider_id>/models", methods=["GET"])
+@production_disabled
+@admin_required
+def api_get_provider_models(provider_id):
+    """Get active models for a provider."""
+    provider = db.session.get(LLMProvider, provider_id)
+    if not provider:
+        return jsonify({"success": False, "error": "Provider not found"}), 404
+
+    cached_models = ApiModel.get_models_for_api(provider.api_url)
+    model_names = [m.model_name for m in cached_models]
+    last_fetched = (
+        max(m.last_fetched for m in cached_models) if cached_models else None
+    )
+
+    if not model_names and request.args.get("refresh") == "true":
+        api_key = (
+            provider.api_key
+            or Config.get_api_key_for_endpoint(provider.api_url)
+            or ""
+        )
+        models, _ = fetch_all_models_from_api(provider.api_url, api_key)
+        if models:
+            ApiModel.update_models_for_api(provider.api_url, models)
+            model_names = models
+            last_fetched = datetime.utcnow()
+            if not provider.default_model:
+                provider.default_model = models[0]
+                db.session.commit()
+
+    return jsonify(
+        {
+            "success": True,
+            "models": model_names,
+            "default_model": provider.default_model,
+            "last_fetched": last_fetched.isoformat() if last_fetched else None,
+            "count": len(model_names),
+        }
+    )
+
+
 @admin_bp.route("/api/clear-jobs", methods=["POST"])
 @production_disabled
 @admin_required
@@ -1785,9 +2099,7 @@ def load_default_data_api():
 
             for user_data in users_data.get("users", [])[:50]:
                 # Skip entries that already exist
-                existing = User.query.filter_by(
-                    username=user_data["username"]
-                ).first()
+                existing = User.query.filter_by(username=user_data["username"]).first()
                 if existing:
                     continue
                 try:
@@ -2095,9 +2407,7 @@ def api_agents_list():
 
     agents = Agent.query.order_by(Agent.user_username).all()
     tally_rows = (
-        db.session.query(
-            AgentRun.agent_id, AgentRun.status, func.count(AgentRun.id)
-        )
+        db.session.query(AgentRun.agent_id, AgentRun.status, func.count(AgentRun.id))
         .group_by(AgentRun.agent_id, AgentRun.status)
         .all()
     )
@@ -2105,11 +2415,7 @@ def api_agents_list():
     for agent_id, status, count in tally_rows:
         tallies.setdefault(agent_id, {})[status] = count
     return jsonify(
-        {
-            "agents": [
-                _agent_json(agent, tallies.get(agent.id, {})) for agent in agents
-            ]
-        }
+        {"agents": [_agent_json(agent, tallies.get(agent.id, {})) for agent in agents]}
     )
 
 
@@ -2152,7 +2458,8 @@ def api_persona_candidates():
             {
                 "username": user.username,
                 "personality_preview": (
-                    preview_source[:120] + "…" if len(preview_source) > 120
+                    preview_source[:120] + "…"
+                    if len(preview_source) > 120
                     else preview_source
                 ),
                 "post_count": int(post_count or 0),
@@ -2209,13 +2516,47 @@ def api_create_agent():
     if tier not in _AGENTIC_TIERS:
         return jsonify({"success": False, "error": f"Unknown tier '{tier}'"}), 400
 
-    api_url = payload.get("api_url") or Config.get("OPENAI_API_URL") or ""
-    model = payload.get("model") or Config.get("OPENAI_MODEL", "llama3")
+    provider_id = payload.get("provider_id")
+    provider = None
+    if provider_id:
+        try:
+            provider = db.session.get(LLMProvider, int(provider_id))
+        except Exception:
+            provider = None
+
+    default_p = LLMProvider.get_default()
+    if provider:
+        api_url = str(payload.get("api_url") or provider.api_url or "").strip()
+        model = str(payload.get("model") or provider.default_model or "llama3").strip()
+        api_key = provider.api_key or Config.get_api_key_for_endpoint(api_url)
+    elif payload.get("api_url"):
+        api_url = str(payload.get("api_url") or "").strip()
+        model = str(payload.get("model") or Config.get("OPENAI_MODEL", "llama3")).strip()
+        matching_p = LLMProvider.query.filter(
+            (LLMProvider.api_url == api_url.rstrip("/")) | (LLMProvider.api_url == api_url)
+        ).first()
+        if matching_p:
+            provider = matching_p
+            api_key = matching_p.api_key or Config.get_api_key_for_endpoint(api_url)
+        else:
+            api_key = Config.get_api_key_for_endpoint(api_url)
+    elif default_p:
+        provider = default_p
+        api_url = str(default_p.api_url or "").strip()
+        model = str(payload.get("model") or default_p.default_model or Config.get("OPENAI_MODEL", "llama3")).strip()
+        api_key = default_p.api_key or Config.get_api_key_for_endpoint(api_url)
+    else:
+        api_url = str(Config.get("OPENAI_API_URL") or "").strip()
+        model = str(payload.get("model") or Config.get("OPENAI_MODEL", "llama3")).strip()
+        api_key = Config.get_api_key_for_endpoint(api_url)
+
     try:
         min_delay = int(payload.get("min_delay", DEFAULT_CONFIG["min_delay"]))
         max_delay = int(payload.get("max_delay", DEFAULT_CONFIG["max_delay"]))
     except (TypeError, ValueError):
-        return jsonify({"success": False, "error": "min/max delay must be integers"}), 400
+        return jsonify(
+            {"success": False, "error": "min/max delay must be integers"}
+        ), 400
     if min_delay < 0 or max_delay < min_delay:
         return (
             jsonify({"success": False, "error": "max_delay must be >= min_delay >= 0"}),
@@ -2223,6 +2564,7 @@ def api_create_agent():
         )
 
     config = {
+        "provider_id": provider.id if provider else None,
         "api_url": api_url,
         "model": model,
         "min_delay": min_delay,
@@ -2245,7 +2587,7 @@ def api_create_agent():
     # Owner decision 2: probe at cohort creation so a tool-less endpoint/model
     # is rejected before any agent exists.
     try:
-        ensure_tools_allowed(api_url, model, auto_probe=True)
+        ensure_tools_allowed(api_url, model, api_key=api_key, auto_probe=True)
     except CapabilityError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
 
@@ -2284,6 +2626,208 @@ def api_create_agent():
     if warning:
         result["warning"] = warning
     return jsonify(result), 201
+
+
+@admin_bp.route("/api/agents/<int:agent_id>", methods=["PUT", "POST"])
+@admin_bp.route("/api/agents/<int:agent_id>/update", methods=["POST", "PUT"])
+@production_disabled
+@admin_required
+def api_update_agent(agent_id):
+    """Update an agent's tier, enabled status, cadence, limits, model, or status reset."""
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from deaddit.agents.loop import DEFAULT_CONFIG
+    from deaddit.llm.capabilities import CapabilityError, ensure_tools_allowed
+    from deaddit.models import Agent
+
+    agent = db.session.get(Agent, agent_id)
+    if agent is None:
+        return jsonify({"success": False, "error": "agent not found"}), 404
+
+    payload = request.get_json(silent=True) or {}
+
+    # 1. Autonomy Tier
+    if "autonomy_tier" in payload:
+        tier = payload.get("autonomy_tier")
+        if tier not in _AGENTIC_TIERS:
+            return jsonify({"success": False, "error": f"Unknown tier '{tier}'"}), 400
+        agent.autonomy_tier = tier
+
+    # 2. is_enabled toggle
+    if "is_enabled" in payload:
+        new_enabled = bool(payload["is_enabled"])
+        if new_enabled != agent.is_enabled:
+            agent.is_enabled = new_enabled
+            if new_enabled:
+                agent.consecutive_failures = 0
+                agent.next_run_at = datetime.utcnow()
+            else:
+                agent.next_run_at = None
+                if agent.status != "running":
+                    agent.status = "idle"
+
+    # 3. Config fields (support both flat keys and nested {"config": {...}})
+    cfg_in = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    config = dict(agent.config or {})
+
+    # min_delay & max_delay
+    min_delay_val = payload.get("min_delay", cfg_in.get("min_delay"))
+    max_delay_val = payload.get("max_delay", cfg_in.get("max_delay"))
+    if min_delay_val is not None or max_delay_val is not None:
+        curr_min = config.get("min_delay", DEFAULT_CONFIG["min_delay"])
+        curr_max = config.get("max_delay", DEFAULT_CONFIG["max_delay"])
+        val_min = min_delay_val if min_delay_val is not None else curr_min
+        val_max = max_delay_val if max_delay_val is not None else curr_max
+        try:
+            val_min = int(val_min)
+            val_max = int(val_max)
+        except (TypeError, ValueError):
+            return (
+                jsonify({"success": False, "error": "min/max delay must be integers"}),
+                400,
+            )
+        if val_min < 0 or val_max < val_min:
+            return (
+                jsonify(
+                    {"success": False, "error": "max_delay must be >= min_delay >= 0"}
+                ),
+                400,
+            )
+        config["min_delay"] = val_min
+        config["max_delay"] = val_max
+
+    # max_actions_per_run
+    actions_val = payload.get("max_actions_per_run", cfg_in.get("max_actions_per_run"))
+    if actions_val is not None:
+        try:
+            actions_val = int(actions_val)
+        except (TypeError, ValueError):
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "max_actions_per_run must be an integer",
+                    }
+                ),
+                400,
+            )
+        if actions_val <= 0:
+            return (
+                jsonify({"success": False, "error": "max_actions_per_run must be > 0"}),
+                400,
+            )
+        config["max_actions_per_run"] = actions_val
+
+    # max_run_seconds
+    run_sec_val = payload.get("max_run_seconds", cfg_in.get("max_run_seconds"))
+    if run_sec_val is not None:
+        try:
+            run_sec_val = int(run_sec_val)
+        except (TypeError, ValueError):
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "max_run_seconds must be an integer",
+                    }
+                ),
+                400,
+            )
+        if run_sec_val <= 0:
+            return (
+                jsonify({"success": False, "error": "max_run_seconds must be > 0"}),
+                400,
+            )
+        config["max_run_seconds"] = run_sec_val
+
+    # daily_request_ceiling
+    if "daily_request_ceiling" in payload or "daily_request_ceiling" in cfg_in:
+        ceiling_val = (
+            payload["daily_request_ceiling"]
+            if "daily_request_ceiling" in payload
+            else cfg_in.get("daily_request_ceiling")
+        )
+        if ceiling_val is None or ceiling_val == "" or ceiling_val is False:
+            config.pop("daily_request_ceiling", None)
+        else:
+            try:
+                ceiling_val = int(ceiling_val)
+            except (TypeError, ValueError):
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "daily_request_ceiling must be an int",
+                        }
+                    ),
+                    400,
+                )
+            if ceiling_val <= 0:
+                return (
+                    jsonify(
+                        {"success": False, "error": "daily_request_ceiling must be > 0"}
+                    ),
+                    400,
+                )
+            config["daily_request_ceiling"] = ceiling_val
+
+    # provider_id
+    if "provider_id" in payload or "provider_id" in cfg_in:
+        pid = payload["provider_id"] if "provider_id" in payload else cfg_in.get("provider_id")
+        if pid:
+            try:
+                provider = db.session.get(LLMProvider, int(pid))
+                if provider:
+                    config["provider_id"] = provider.id
+                    if not payload.get("api_url") and not cfg_in.get("api_url"):
+                        config["api_url"] = provider.api_url
+            except Exception:
+                pass
+        else:
+            config.pop("provider_id", None)
+
+    # api_url
+    if "api_url" in payload or "api_url" in cfg_in:
+        url_val = payload["api_url"] if "api_url" in payload else cfg_in.get("api_url")
+        config["api_url"] = str(url_val or "").strip()
+
+    # model
+    if "model" in payload or "model" in cfg_in:
+        model_val = payload["model"] if "model" in payload else cfg_in.get("model")
+        config["model"] = str(model_val or "").strip()
+
+    # Capability check if model or api_url or provider changed/provided
+    if (
+        "api_url" in payload
+        or "api_url" in cfg_in
+        or "model" in payload
+        or "model" in cfg_in
+        or "provider_id" in payload
+        or "provider_id" in cfg_in
+    ):
+        check_api_url = config.get("api_url") or Config.get("OPENAI_API_URL") or ""
+        check_model = config.get("model") or Config.get("OPENAI_MODEL", "llama3")
+        check_key = Config.get_api_key_for_endpoint(check_api_url)
+        try:
+            ensure_tools_allowed(
+                check_api_url, check_model, api_key=check_key, auto_probe=True
+            )
+        except CapabilityError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+
+    agent.config = config
+    flag_modified(agent, "config")
+
+    # 4. Status reset option
+    if payload.get("reset_status") or payload.get("reset_errors"):
+        agent.consecutive_failures = 0
+        if agent.status != "running":
+            agent.status = "idle"
+        if agent.is_enabled:
+            agent.next_run_at = datetime.utcnow()
+
+    db.session.commit()
+    return jsonify({"success": True, "agent": _agent_json(agent)})
 
 
 @admin_bp.route("/api/agents/<int:agent_id>/toggle", methods=["POST"])
@@ -2344,9 +2888,7 @@ def api_agent_runs(agent_id):
     if before_id is not None:
         query = query.filter(AgentRun.id < before_id)
     runs = (
-        query.order_by(desc(AgentRun.started_at), desc(AgentRun.id))
-        .limit(limit)
-        .all()
+        query.order_by(desc(AgentRun.started_at), desc(AgentRun.id)).limit(limit).all()
     )
     return jsonify(
         {
@@ -2446,6 +2988,84 @@ def api_agents_pause_all():
         agent.status = "idle"
     db.session.commit()
     return jsonify({"paused": len(enabled)})
+
+
+@admin_bp.route("/api/users/generate", methods=["POST"])
+@production_disabled
+@admin_required
+def api_generate_users():
+    """Generate human-like personas and optionally enroll them as autonomous agents."""
+    from deaddit.services.persona_generator import generate_personas
+
+    payload = request.get_json(silent=True) or {}
+    count_raw = payload.get("count", 1)
+    try:
+        count = int(count_raw)
+    except (TypeError, ValueError):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Count must be an integer between 1 and 500",
+                }
+            ),
+            400,
+        )
+
+    if count < 1 or count > 500:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Count must be between 1 and 500",
+                }
+            ),
+            400,
+        )
+
+    tier = payload.get("tier", "regular")
+    if tier not in _AGENTIC_TIERS:
+        return jsonify({"success": False, "error": f"Unknown tier '{tier}'"}), 400
+
+    auto_create_agent = payload.get("auto_create_agent", True)
+    if isinstance(auto_create_agent, str):
+        auto_create_agent = auto_create_agent.lower() in ("true", "1", "yes")
+    else:
+        auto_create_agent = bool(auto_create_agent)
+
+    topic_hint = payload.get("topic_hint")
+    if topic_hint is not None:
+        topic_hint = str(topic_hint).strip()
+        if not topic_hint:
+            topic_hint = None
+
+    api_url = payload.get("api_url")
+    model = payload.get("model")
+
+    try:
+        result = generate_personas(
+            count=count,
+            topic_hint=topic_hint,
+            auto_create_agent=auto_create_agent,
+            tier=tier,
+            api_url=api_url,
+            model=model,
+        )
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "users": result["users"],
+                    "agents": result["agents"],
+                }
+            ),
+            201,
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:
+        logger.exception("Persona generation failed: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @admin_bp.route("/agents")
@@ -2629,9 +3249,7 @@ def report_ban(report_id):
             return redirect(url_for("admin.reports"))
         expires_at = datetime.utcnow() + timedelta(days=days)
 
-    subdeaddit_name = (
-        _report_subdeaddit_name(report) if scope == "subdeaddit" else None
-    )
+    subdeaddit_name = _report_subdeaddit_name(report) if scope == "subdeaddit" else None
 
     from deaddit.dynamics import moderation
 
@@ -2684,9 +3302,7 @@ def prompts_list_api():
                 "description": t.description,
                 "versions": [
                     v.version
-                    for v in t.versions.order_by(
-                        PromptTemplateVersion.version.asc()
-                    )
+                    for v in t.versions.order_by(PromptTemplateVersion.version.asc())
                 ],
                 "latest_version": (
                     t.versions.order_by(PromptTemplateVersion.version.desc())
@@ -2713,9 +3329,7 @@ def prompts_detail_api(name):
     template = PromptTemplate.query.filter_by(name=name).first()
     if template is None:
         return jsonify({"error": f"Unknown prompt template {name!r}"}), 404
-    versions = (
-        template.versions.order_by(PromptTemplateVersion.version.asc()).all()
-    )
+    versions = template.versions.order_by(PromptTemplateVersion.version.asc()).all()
     return jsonify(
         {
             "id": template.id,

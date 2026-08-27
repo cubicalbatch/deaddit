@@ -165,7 +165,9 @@ class Config:
             source = cls._get_source(key)
             if is_secret_key(key):
                 value = (
-                    "***set***" if cls._has_value(cls._get_secret(key)) else "***not set***"
+                    "***set***"
+                    if cls._has_value(cls._get_secret(key))
+                    else "***not set***"
                 )
             else:
                 value = cls.get(key)
@@ -243,7 +245,25 @@ class Config:
 
     @classmethod
     def get_api_key_for_endpoint(cls, endpoint_url: str) -> str | None:
-        """Get API key for a specific endpoint URL."""
+        """Get API key for a specific endpoint URL, checking LLMProvider first."""
+        try:
+            from deaddit.models import LLMProvider
+
+            if endpoint_url:
+                norm_url = endpoint_url.rstrip("/")
+                provider = LLMProvider.query.filter(
+                    (LLMProvider.api_url == norm_url)
+                    | (LLMProvider.api_url == endpoint_url)
+                ).first()
+                if provider and provider.api_key and provider.api_key.strip():
+                    return provider.api_key.strip()
+            else:
+                default_p = LLMProvider.get_default()
+                if default_p and default_p.api_key and default_p.api_key.strip():
+                    return default_p.api_key.strip()
+        except Exception:
+            pass
+
         if not endpoint_url:
             return cls.get("OPENAI_KEY")
 
@@ -254,6 +274,16 @@ class Config:
         endpoint_key = cls.get(f"API_KEY_{key}")
         if endpoint_key:
             return endpoint_key
+
+        # Check default provider's key if available
+        try:
+            from deaddit.models import LLMProvider
+
+            default_p = LLMProvider.get_default()
+            if default_p and default_p.api_key and default_p.api_key.strip():
+                return default_p.api_key.strip()
+        except Exception:
+            pass
 
         # Fall back to default OPENAI_KEY
         return cls.get("OPENAI_KEY")

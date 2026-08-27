@@ -142,7 +142,8 @@ def format_comment(comment, comment_map):
         "removed": bool(comment.removed),
         "user": None if comment.removed else comment.user,
         "content": (
-            "[removed]" if comment.removed
+            "[removed]"
+            if comment.removed
             else comment.content.replace("reddit", "deaddit")
         ),
         "parent_id": comment.parent_id,

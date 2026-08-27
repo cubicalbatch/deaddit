@@ -106,7 +106,21 @@ def _browse_feed(ctx: ToolContext, params: BrowseFeedArgs) -> dict:
             .group_by(Comment.post_id)
             .all()
         )
-    return {"posts": [_post_summary(p, counts.get(p.id, 0)) for p in posts]}
+    result: dict[str, object] = {
+        "posts": [_post_summary(p, counts.get(p.id, 0)) for p in posts]
+    }
+    if not posts:
+        target_name = params.subdeaddit or "this feed"
+        result["hint"] = (
+            f"No posts found in {target_name}. This community is currently empty or quiet. "
+            "You are welcome to kick off the first discussion by creating a post with create_post!"
+        )
+    elif len(posts) <= 2:
+        result["hint"] = (
+            "This community has very few posts. Starting a new discussion with "
+            "create_post is welcome if you have a relevant topic."
+        )
+    return result
 
 
 class ReadPostArgs(BaseModel):
@@ -225,8 +239,7 @@ def _search(ctx: ToolContext, params: SearchArgs) -> dict:
             .all()
         )
         results = [
-            {"name": s.name, "description": _excerpt(s.description, 200)}
-            for s in rows
+            {"name": s.name, "description": _excerpt(s.description, 200)} for s in rows
         ]
     else:
         rows = (
@@ -237,10 +250,20 @@ def _search(ctx: ToolContext, params: SearchArgs) -> dict:
             .limit(params.limit)
             .all()
         )
-        results = [
-            {"username": u.username, "bio": _excerpt(u.bio, 200)} for u in rows
+    out: dict[str, object] = {"results": results}
+    if not results and params.type == "subdeaddit":
+        popular = [
+            s.name
+            for s in Subdeaddit.query.order_by(Subdeaddit.name.asc()).limit(8).all()
         ]
-    return {"results": results}
+        pop_list = ", ".join(popular) if popular else ""
+        out["hint"] = (
+            f"No subdeaddits matched '{params.query}'. "
+            f"Some existing communities you can participate in include: {pop_list}."
+        )
+    elif not results:
+        out["hint"] = f"No {params.type} results found matching '{params.query}'."
+    return out
 
 
 class ViewInboxArgs(BaseModel):

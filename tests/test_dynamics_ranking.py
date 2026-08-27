@@ -60,7 +60,10 @@ def test_hot_gravity_tie_exact():
         now=NOW,
     )
     key_fresh_low = post_rank_key(
-        "hot", score=10, created_at=EPOCH_DT + timedelta(seconds=2 * HOT_GRAVITY), now=NOW
+        "hot",
+        score=10,
+        created_at=EPOCH_DT + timedelta(seconds=2 * HOT_GRAVITY),
+        now=NOW,
     )
     assert key_older_high == key_fresh_low == 3.0
 
@@ -114,9 +117,9 @@ def test_rising_denominator_growth():
 def test_rising_negative_hours_clamped():
     """Future-dated posts (clock skew) clamp hours to 0 instead of boosting."""
     future = NOW + timedelta(hours=1)
-    assert post_rank_key("rising", score=8, created_at=future, now=NOW) == pytest.approx(
-        8 / math.pow(2, 1.8)
-    )
+    assert post_rank_key(
+        "rising", score=8, created_at=future, now=NOW
+    ) == pytest.approx(8 / math.pow(2, 1.8))
 
 
 def test_rising_boundary_exactly_window_is_included(app, db_session):
@@ -215,9 +218,13 @@ def test_hot_sql_matches_python_mirror(app, db_session):
     sql_ids = [
         p.id for p in db_session.query(Post).order_by(*post_order_by("hot")).all()
     ]
-    by_key = sorted(posts, key=lambda p: post_rank_key(
-        "hot", score=p.score, created_at=p.created_at, now=NOW
-    ), reverse=True)
+    by_key = sorted(
+        posts,
+        key=lambda p: post_rank_key(
+            "hot", score=p.score, created_at=p.created_at, now=NOW
+        ),
+        reverse=True,
+    )
     assert sql_ids == [p.id for p in by_key]
 
 
@@ -238,15 +245,30 @@ def test_hot_sql_real_division_regression(app, db_session):
     db_session.add_all([user, sub])
     db_session.commit()
     base = datetime(2026, 8, 20, 12, 0, 0)
-    post_a = Post(title="a", content="c", user="divreg", subdeaddit_name="divsub",
-                  model="m", score=10, created_at=base)
-    post_b = Post(title="b", content="c", user="divreg", subdeaddit_name="divsub",
-                  model="m", score=11, created_at=base - timedelta(seconds=20000))
+    post_a = Post(
+        title="a",
+        content="c",
+        user="divreg",
+        subdeaddit_name="divsub",
+        model="m",
+        score=10,
+        created_at=base,
+    )
+    post_b = Post(
+        title="b",
+        content="c",
+        user="divreg",
+        subdeaddit_name="divsub",
+        model="m",
+        score=11,
+        created_at=base - timedelta(seconds=20000),
+    )
     db_session.add_all([post_a, post_b])
     db_session.commit()
 
     ids = [p.id for p in db_session.query(Post).order_by(*post_order_by("hot")).all()]
     assert ids == [post_a.id, post_b.id]
+
 
 # --- top / new order-by shape -------------------------------------------------
 
@@ -264,10 +286,24 @@ def test_top_and_new_tiebreak_id_desc(app, db_session):
     sub = Subdeaddit(name="tiesub", description="d")
     db_session.add_all([user, sub])
     db_session.commit()
-    first = Post(title="first", content="c", user="tiebrk", subdeaddit_name="tiesub",
-                 model="m", score=7, created_at=NOW)
-    second = Post(title="second", content="c", user="tiebrk", subdeaddit_name="tiesub",
-                  model="m", score=7, created_at=NOW)
+    first = Post(
+        title="first",
+        content="c",
+        user="tiebrk",
+        subdeaddit_name="tiesub",
+        model="m",
+        score=7,
+        created_at=NOW,
+    )
+    second = Post(
+        title="second",
+        content="c",
+        user="tiebrk",
+        subdeaddit_name="tiesub",
+        model="m",
+        score=7,
+        created_at=NOW,
+    )
     db_session.add_all([first, second])
     db_session.commit()
 
@@ -340,7 +376,9 @@ def test_wilson_golden_cases():
 
 
 def test_wilson_monotonic_in_upvotes():
-    assert wilson_lower_bound(7, 3) > wilson_lower_bound(5, 5) > wilson_lower_bound(3, 7)
+    assert (
+        wilson_lower_bound(7, 3) > wilson_lower_bound(5, 5) > wilson_lower_bound(3, 7)
+    )
     # More evidence at the same ratio tightens toward phat.
     assert wilson_lower_bound(90, 10) > wilson_lower_bound(9, 1)
 

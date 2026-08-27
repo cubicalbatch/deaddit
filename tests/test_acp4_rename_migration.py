@@ -89,9 +89,7 @@ def _seed(db_path) -> None:
         conn.execute(
             "INSERT INTO user (username) VALUES ('u0'), ('u1'), ('u2'), ('u3')"
         )
-        conn.execute(
-            "INSERT INTO subdeaddit (name, description) VALUES ('s', 'd')"
-        )
+        conn.execute("INSERT INTO subdeaddit (name, description) VALUES ('s', 'd')")
         for _i, (marker, vote_count, score, upvote_count, _exp) in enumerate(
             _POST_ROWS
         ):
@@ -109,10 +107,7 @@ def _seed(db_path) -> None:
                 ),
             )
         post_ids = [
-            r[0]
-            for r in conn.execute(
-                "SELECT id FROM post ORDER BY id"
-            ).fetchall()
+            r[0] for r in conn.execute("SELECT id FROM post ORDER BY id").fetchall()
         ]
         for i, (marker, vote_count, score, upvote_count, _exp) in enumerate(
             _COMMENT_ROWS

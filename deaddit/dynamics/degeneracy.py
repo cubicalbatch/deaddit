@@ -226,7 +226,9 @@ def detect_repetition_for_post(post: Post) -> DegeneracyFlag | None:
         )
         best, best_against = 0.0, ""
         for other in rows:
-            score = trigram_jaccard(mine, (other.title or "") + "\n" + (other.content or ""))
+            score = trigram_jaccard(
+                mine, (other.title or "") + "\n" + (other.content or "")
+            )
             if score > best:
                 best, best_against = score, (other.title or "")[:200]
         if best <= REPETITION_THRESHOLD:
@@ -239,7 +241,9 @@ def detect_repetition_for_post(post: Post) -> DegeneracyFlag | None:
             post_id=post.id,
             comment_id=None,
             metric=best,
-            detail=json.dumps({"threshold": REPETITION_THRESHOLD, "matched": best_against}),
+            detail=json.dumps(
+                {"threshold": REPETITION_THRESHOLD, "matched": best_against}
+            ),
         )
         db.session.add(flag)
         db.session.commit()
@@ -309,7 +313,6 @@ def with_repetition_demotion(order_clauses: list) -> list:
     factor = case((Post.user.in_(authors), 0.5), else_=1.0)
     demoted_hot = (factor * literal_column(HOT_SQL_FRAGMENT)).desc()
     return [demoted_hot, *order_clauses[1:]]
-
 
 
 def hot_rank_key_demoted(

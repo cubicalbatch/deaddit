@@ -73,7 +73,9 @@ def sweep_stale_jobs(stale_minutes: int = HEARTBEAT_STALE_MINUTES) -> int:
             Job.status == JobStatus.RUNNING,
             or_(Job.heartbeat_at.is_(None), Job.heartbeat_at < cutoff),
         )
-        .values(status=JobStatus.PENDING, claimed_at=None, worker_id=None, heartbeat_at=None)
+        .values(
+            status=JobStatus.PENDING, claimed_at=None, worker_id=None, heartbeat_at=None
+        )
     )
     db.session.commit()
     count = result.rowcount or 0

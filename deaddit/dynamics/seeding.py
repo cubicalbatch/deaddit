@@ -245,19 +245,58 @@ _GAP_BASE = 0.5
 _GAP_U_MIN = 0.05
 
 _FIRST_NAMES = [
-    "Ava", "Bram", "Cleo", "Dmitri", "Esme", "Finn", "Greta", "Hugo",
-    "Ines", "Jonas", "Kira", "Lars", "Mira", "Nils", "Odette", "Pavel",
-    "Quinn", "Rosa", "Sven", "Talia", "Ulf", "Vera", "Wren", "Xavi",
+    "Ava",
+    "Bram",
+    "Cleo",
+    "Dmitri",
+    "Esme",
+    "Finn",
+    "Greta",
+    "Hugo",
+    "Ines",
+    "Jonas",
+    "Kira",
+    "Lars",
+    "Mira",
+    "Nils",
+    "Odette",
+    "Pavel",
+    "Quinn",
+    "Rosa",
+    "Sven",
+    "Talia",
+    "Ulf",
+    "Vera",
+    "Wren",
+    "Xavi",
 ]
 _OCCUPATIONS = [
-    "cartographer", "barista", "beekeeper", "archivist", "luthier",
-    "hydrologist", "actuary", "florist", "typesetter", "audiologist",
-    "brewer", "locksmith",
+    "cartographer",
+    "barista",
+    "beekeeper",
+    "archivist",
+    "luthier",
+    "hydrologist",
+    "actuary",
+    "florist",
+    "typesetter",
+    "audiologist",
+    "brewer",
+    "locksmith",
 ]
 _INTERESTS = [
-    "urban cycling", "mycology", "chess", "sourdough", "birdwatching",
-    "retro computing", "kayaking", "astronomy", "pottery", "board games",
-    "trail running", "fermentation",
+    "urban cycling",
+    "mycology",
+    "chess",
+    "sourdough",
+    "birdwatching",
+    "retro computing",
+    "kayaking",
+    "astronomy",
+    "pottery",
+    "board games",
+    "trail running",
+    "fermentation",
 ]
 _BIOS = [
     "{occupation} by day, mostly here for the {interest} threads.",
@@ -356,7 +395,13 @@ _CONTENT_PACKS: dict[str, dict] = {
     },
     "pettyrevenge": {
         "slots": {
-            "place": ["office", "apartment building", "gym", "coffee shop", "neighborhood"],
+            "place": [
+                "office",
+                "apartment building",
+                "gym",
+                "coffee shop",
+                "neighborhood",
+            ],
             "offense": [
                 "parking across two spots",
                 "stealing lunches from the shared fridge",
@@ -1578,8 +1623,7 @@ def _plan_subdeaddits(
             {
                 "name": name,
                 "description": description,
-                "created_at": window_start
-                + timedelta(seconds=span * rng.random()),
+                "created_at": window_start + timedelta(seconds=span * rng.random()),
             }
         )
     return planned, skipped
@@ -1606,7 +1650,7 @@ def _plan_timeline(
         # Power-law inter-arrival, tail-bounded so ~14 days lands in the
         # 100-400 post band for every seed (median gap ~0.5h).
         u = _GAP_U_MIN + (1 - _GAP_U_MIN) * master.random()
-        cursor = cursor + timedelta(hours=_GAP_BASE * u ** -1.2)
+        cursor = cursor + timedelta(hours=_GAP_BASE * u**-1.2)
         if cursor > now:
             break
         arrivals.append(cursor)
@@ -1821,16 +1865,14 @@ def seed_history(
         )
 
     fresh_install = (db.session.query(func.count(User.username)).scalar() or 0) == 0
-    existing_usernames = {
-        row[0] for row in db.session.query(User.username).all()
-    }
-    existing_subs = {
-        row[0] for row in db.session.query(Subdeaddit.name).all()
-    }
+    existing_usernames = {row[0] for row in db.session.query(User.username).all()}
+    existing_subs = {row[0] for row in db.session.query(Subdeaddit.name).all()}
 
-    planned_users, skipped_users = _plan_community(
-        seed, existing_usernames, window_start, now
-    ) if fresh_install else ([], 0)
+    planned_users, skipped_users = (
+        _plan_community(seed, existing_usernames, window_start, now)
+        if fresh_install
+        else ([], 0)
+    )
     planned_subs, skipped_subs = _plan_subdeaddits(
         seed, existing_subs, window_start, now
     )

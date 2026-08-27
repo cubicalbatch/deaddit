@@ -48,9 +48,9 @@ def test_no_requests_usage_in_migrated_files():
         assert "import requests" not in source, f"{name} still imports requests"
         assert "requests.get(" not in source, f"{name} still calls requests.get"
         assert "requests.post(" not in source, f"{name} still calls requests.post"
-        assert (
-            "get_api_base_url()" not in source
-        ), f"{name} still references get_api_base_url"
+        assert "get_api_base_url()" not in source, (
+            f"{name} still references get_api_base_url"
+        )
 
 
 def test_no_self_ingest_urls_anywhere():
@@ -75,7 +75,9 @@ def test_no_hardcoded_localhost_5000_calls():
         for lineno, line in enumerate(
             path.read_text(encoding="utf-8").splitlines(), start=1
         ):
-            if "requests." in line and ("localhost:5000" in line or "API_BASE_URL" in line):
+            if "requests." in line and (
+                "localhost:5000" in line or "API_BASE_URL" in line
+            ):
                 offenders.append(f"{path}:{lineno}")
     assert offenders == []
 

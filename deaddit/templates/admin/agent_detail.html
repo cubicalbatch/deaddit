@@ -32,12 +32,107 @@
     </div>
     <div class="col-lg-6">
         <div class="card h-100">
-            <div class="card-header"><strong>Config &amp; State</strong></div>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <strong>Edit Agent Configuration</strong>
+                <button type="button" id="reset-status-btn" class="btn btn-sm btn-outline-warning" style="display: none;" title="Clear failure strikes and re-arm agent">
+                    <i class="bi bi-arrow-counterclockwise"></i> Reset Errors / Re-arm
+                </button>
+            </div>
             <div class="card-body">
-                <h6>config</h6>
-                <pre id="config-pre" class="thought-pre p-2 rounded small mb-3">loading…</pre>
-                <h6>state</h6>
-                <pre id="state-pre" class="thought-pre p-2 rounded small mb-0">loading…</pre>
+                <form id="edit-agent-form">
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6">
+                            <label for="edit-tier-select" class="form-label small mb-1 fw-bold">Autonomy Tier</label>
+                            <select id="edit-tier-select" class="form-select form-select-sm">
+                                <option value="lurker">lurker</option>
+                                <option value="regular">regular</option>
+                                <option value="power_user">power_user</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <div class="form-check form-switch mb-1">
+                                <input class="form-check-input" type="checkbox" id="edit-enabled-switch" role="switch">
+                                <label class="form-check-label small fw-bold" for="edit-enabled-switch">Agent Enabled</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6">
+                            <label for="edit-provider-select" class="form-label small mb-1 fw-bold">LLM Provider</label>
+                            <select id="edit-provider-select" class="form-select form-select-sm">
+                                <option value="">Loading providers…</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="edit-model" class="form-label small mb-1 fw-bold">Model</label>
+                            <div class="input-group input-group-sm">
+                                <input type="text" id="edit-model" class="form-control form-control-sm" list="edit-model-options" placeholder="(default model)">
+                                <datalist id="edit-model-options"></datalist>
+                                <button type="button" id="edit-refresh-models-btn" class="btn btn-outline-secondary btn-sm" title="Refresh models from provider">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label small mb-1 d-block fw-bold">Cadence (Delay in seconds)</label>
+                        <div id="edit-cadence-presets" class="btn-group btn-group-sm mb-1 w-100" role="group">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-min="1800" data-max="7200">slow (1800/7200)</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-min="900" data-max="3600">normal (900/3600)</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-min="300" data-max="1500">active (300/1500)</button>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <div class="flex-fill">
+                                <input type="number" id="edit-min-delay" class="form-control form-control-sm" min="0" placeholder="Min delay (s)">
+                            </div>
+                            <div class="flex-fill">
+                                <input type="number" id="edit-max-delay" class="form-control form-control-sm" min="0" placeholder="Max delay (s)">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-4">
+                            <label for="edit-ceiling" class="form-label small mb-1 fw-bold">Daily Ceiling</label>
+                            <input type="number" id="edit-ceiling" class="form-control form-control-sm" min="1" placeholder="(unlimited)">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="edit-max-actions" class="form-label small mb-1 fw-bold">Max Actions / Run</label>
+                            <input type="number" id="edit-max-actions" class="form-control form-control-sm" min="1" placeholder="30">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="edit-max-seconds" class="form-label small mb-1 fw-bold">Max Run Secs</label>
+                            <input type="number" id="edit-max-seconds" class="form-control form-control-sm" min="1" placeholder="300">
+                        </div>
+                    </div>
+
+                    <div class="d-flex align-items-center gap-2 mt-3">
+                        <button type="submit" id="save-agent-btn" class="btn btn-primary btn-sm">
+                            <i class="bi bi-check-lg"></i> Save Changes
+                        </button>
+                        <span id="edit-feedback" class="small"></span>
+                    </div>
+                </form>
+
+                <div class="accordion accordion-flush mt-3" id="rawConfigAccordion">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingRaw">
+                            <button class="accordion-button collapsed py-1 px-0 small text-muted" type="button" data-bs-toggle="collapse" data-bs-target="#collapseRaw" aria-expanded="false" aria-controls="collapseRaw">
+                                View Raw State &amp; Config JSON
+                            </button>
+                        </h2>
+                        <div id="collapseRaw" class="accordion-collapse collapse" aria-labelledby="headingRaw">
+                            <div class="accordion-body px-0 pt-2 pb-0">
+                                <h6>config</h6>
+                                <pre id="config-pre" class="thought-pre p-2 rounded small mb-2">loading…</pre>
+                                <h6>state</h6>
+                                <pre id="state-pre" class="thought-pre p-2 rounded small mb-0">loading…</pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -114,10 +209,13 @@
         return null;
     }
 
-    async function api(path) {
-        const response = await fetch(path);
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || ("HTTP " + response.status));
+    async function api(path, options) {
+        const response = await fetch(path, Object.assign({headers: {"Content-Type": "application/json"}}, options || {}));
+        let data = {};
+        try { data = await response.json(); } catch (err) { /* non-JSON body */ }
+        if (!response.ok) {
+            throw new Error(data.error || data.message || ("HTTP " + response.status));
+        }
         return data;
     }
 
@@ -133,12 +231,17 @@
         const chip = document.getElementById("agent-status-chip");
         const toggleBtn = document.getElementById("toggle-btn");
         const runBtn = document.getElementById("force-run-btn");
+        const resetBtn = document.getElementById("reset-status-btn");
+        const saveBtn = document.getElementById("save-agent-btn");
+
         if (!agent) {
             chip.style.display = "";
             chip.className = "badge bg-dark ms-2";
             chip.textContent = "no agent registered";
             toggleBtn.disabled = true;
             runBtn.disabled = true;
+            if (saveBtn) saveBtn.disabled = true;
+            if (resetBtn) resetBtn.style.display = "none";
             document.getElementById("overview-dl").innerHTML = "";
             document.getElementById("overview-dl")
                 .appendChild(el("dt", "col-sm-5", "Error"));
@@ -154,6 +257,13 @@
         toggleBtn.className = "btn btn-sm me-2 " + (agent.is_enabled ? "btn-outline-warning" : "btn-outline-success");
         toggleBtn.textContent = agent.is_enabled ? "Disable" : "Enable";
         runBtn.disabled = agent.status === "running";
+        if (saveBtn) saveBtn.disabled = false;
+
+        if (agent.consecutive_failures > 0 || agent.status === "failed" || agent.status === "interrupted") {
+            resetBtn.style.display = "";
+        } else {
+            resetBtn.style.display = "none";
+        }
 
         const dl = document.getElementById("overview-dl");
         dl.innerHTML = "";
@@ -173,6 +283,18 @@
             dl.appendChild(el("dt", "col-sm-5", label));
             dl.appendChild(el("dd", "col-sm-7", value));
         });
+
+        // Pre-populate edit form fields
+        document.getElementById("edit-tier-select").value = agent.autonomy_tier || "regular";
+        document.getElementById("edit-enabled-switch").checked = Boolean(agent.is_enabled);
+        syncProviderSelection();
+        document.getElementById("edit-model").value = (agent.config && agent.config.model) || "";
+        document.getElementById("edit-min-delay").value = (agent.config && agent.config.min_delay != null) ? agent.config.min_delay : 60;
+        document.getElementById("edit-max-delay").value = (agent.config && agent.config.max_delay != null) ? agent.config.max_delay : 900;
+        document.getElementById("edit-ceiling").value = (agent.config && agent.config.daily_request_ceiling != null) ? agent.config.daily_request_ceiling : "";
+        document.getElementById("edit-max-actions").value = (agent.config && agent.config.max_actions_per_run != null) ? agent.config.max_actions_per_run : 30;
+        document.getElementById("edit-max-seconds").value = (agent.config && agent.config.max_run_seconds != null) ? agent.config.max_run_seconds : 300;
+
         document.getElementById("config-pre").textContent = JSON.stringify(agent.config, null, 2);
         document.getElementById("state-pre").textContent = JSON.stringify(agent.state, null, 2);
     }
@@ -491,7 +613,191 @@
         document.getElementById("turns-panel").style.display = "none";
     });
 
-    loadAgent().then(loadRuns).catch((err) => console.error(err));
+    // Cadence preset buttons
+    document.querySelectorAll("#edit-cadence-presets button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const minVal = btn.getAttribute("data-min");
+            const maxVal = btn.getAttribute("data-max");
+            if (minVal != null) document.getElementById("edit-min-delay").value = minVal;
+            if (maxVal != null) document.getElementById("edit-max-delay").value = maxVal;
+        });
+    });
+
+    // Reset status / re-arm button
+    document.getElementById("reset-status-btn").addEventListener("click", async () => {
+        if (!agent) return;
+        const btn = document.getElementById("reset-status-btn");
+        const feedback = document.getElementById("edit-feedback");
+        btn.disabled = true;
+        feedback.textContent = "Resetting status…";
+        feedback.className = "small text-muted ms-2";
+        try {
+            await api("/admin/api/agents/" + agent.id, {
+                method: "PUT",
+                body: JSON.stringify({ reset_status: true }),
+            });
+            feedback.textContent = "Status reset and agent re-armed.";
+            feedback.className = "small text-success ms-2";
+            await loadAgent();
+            await loadRuns();
+        } catch (err) {
+            feedback.textContent = "Reset failed: " + err.message;
+            feedback.className = "small text-danger ms-2";
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    // Providers and Models
+    let providersList = [];
+
+    async function loadProviders() {
+        try {
+            const data = await api("/admin/api/providers");
+            providersList = data.providers || [];
+            const select = document.getElementById("edit-provider-select");
+            select.innerHTML = "";
+            if (!providersList.length) {
+                select.appendChild(el("option", "", "No providers configured"));
+                return;
+            }
+
+            providersList.forEach((p) => {
+                const opt = el("option", "", p.name + (p.is_default ? " (Default)" : ""));
+                opt.value = p.id;
+                select.appendChild(opt);
+            });
+
+            syncProviderSelection();
+        } catch (err) {
+            console.error("Failed to load providers:", err);
+        }
+    }
+
+    function syncProviderSelection() {
+        if (!agent || !providersList.length) return;
+        const select = document.getElementById("edit-provider-select");
+        const cfg = agent.config || {};
+        let matched = null;
+
+        if (cfg.provider_id) {
+            matched = providersList.find(p => p.id === Number(cfg.provider_id));
+        }
+        if (!matched && cfg.api_url) {
+            matched = providersList.find(p => p.api_url === cfg.api_url || p.api_url === String(cfg.api_url).replace(/\/$/, ""));
+        }
+        if (!matched) {
+            matched = providersList.find(p => p.is_default) || providersList[0];
+        }
+
+        if (matched) {
+            select.value = matched.id;
+            updateEditModelOptions(matched, false);
+        }
+    }
+
+    function updateEditModelOptions(provider, setDefaultModel = true) {
+        const datalist = document.getElementById("edit-model-options");
+        const modelInput = document.getElementById("edit-model");
+        datalist.innerHTML = "";
+        if (!provider) return;
+
+        (provider.models || []).forEach((m) => {
+            const opt = document.createElement("option");
+            opt.value = m;
+            datalist.appendChild(opt);
+        });
+
+        if (setDefaultModel) {
+            if (provider.default_model) {
+                modelInput.value = provider.default_model;
+            } else if (provider.models && provider.models.length > 0) {
+                modelInput.value = provider.models[0];
+            }
+        }
+    }
+
+    document.getElementById("edit-provider-select").addEventListener("change", function () {
+        const selectedId = Number(this.value);
+        const provider = providersList.find(p => p.id === selectedId);
+        if (provider) {
+            updateEditModelOptions(provider, true);
+        }
+    });
+
+    document.getElementById("edit-refresh-models-btn").addEventListener("click", async function () {
+        const providerId = document.getElementById("edit-provider-select").value;
+        if (!providerId) return;
+        const icon = this.querySelector("i");
+        const origClass = icon ? icon.className : "";
+        if (icon) icon.className = "spinner-border spinner-border-sm";
+        this.disabled = true;
+        try {
+            const data = await api(`/admin/api/providers/${providerId}/refresh-models`, { method: "POST" });
+            if (data.models) {
+                const provider = providersList.find(p => p.id === Number(providerId));
+                if (provider) {
+                    provider.models = data.models;
+                    if (data.default_model) provider.default_model = data.default_model;
+                    updateEditModelOptions(provider, false);
+                }
+            }
+        } catch (err) {
+            alert("Failed to refresh models: " + err.message);
+        } finally {
+            if (icon) icon.className = origClass;
+            this.disabled = false;
+        }
+    });
+
+    // Edit form submission
+    document.getElementById("edit-agent-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!agent) return;
+        const saveBtn = document.getElementById("save-agent-btn");
+        const feedback = document.getElementById("edit-feedback");
+        saveBtn.disabled = true;
+        feedback.textContent = "Saving changes…";
+        feedback.className = "small text-muted ms-2";
+
+        const minDelay = document.getElementById("edit-min-delay").value;
+        const maxDelay = document.getElementById("edit-max-delay").value;
+        const maxActions = document.getElementById("edit-max-actions").value;
+        const maxSeconds = document.getElementById("edit-max-seconds").value;
+        const ceilingVal = document.getElementById("edit-ceiling").value.trim();
+        const providerId = document.getElementById("edit-provider-select").value;
+        const provider = providersList.find(p => p.id === Number(providerId));
+
+        const payload = {
+            autonomy_tier: document.getElementById("edit-tier-select").value,
+            is_enabled: document.getElementById("edit-enabled-switch").checked,
+            provider_id: providerId ? Number(providerId) : null,
+            api_url: provider ? provider.api_url : "",
+            model: document.getElementById("edit-model").value.trim(),
+            min_delay: minDelay !== "" ? Number(minDelay) : 60,
+            max_delay: maxDelay !== "" ? Number(maxDelay) : 900,
+            max_actions_per_run: maxActions !== "" ? Number(maxActions) : 30,
+            max_run_seconds: maxSeconds !== "" ? Number(maxSeconds) : 300,
+            daily_request_ceiling: ceilingVal !== "" ? Number(ceilingVal) : null,
+        };
+
+        try {
+            const data = await api("/admin/api/agents/" + agent.id, {
+                method: "PUT",
+                body: JSON.stringify(payload),
+            });
+            feedback.textContent = "Changes saved successfully.";
+            feedback.className = "small text-success ms-2";
+            await loadAgent();
+        } catch (err) {
+            feedback.textContent = err.message;
+            feedback.className = "small text-danger ms-2";
+        } finally {
+            saveBtn.disabled = false;
+        }
+    });
+
+    loadProviders().then(loadAgent).then(loadRuns).catch((err) => console.error(err));
 })();
 </script>
 {% endblock %}

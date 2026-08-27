@@ -5,6 +5,7 @@ Agents (Runs (24h) bucket counts, 24h window exclusions), Platform Pulse
 (provenance badges agent:/seed:/legacy:), and LLM Spend (SUM over
 estimated_cost with NULL-cost rows ignored, em-dash fallback on empty DB).
 """
+
 from datetime import datetime, timedelta
 
 import pytest
@@ -140,9 +141,7 @@ def test_dashboard_renders_agent_runs_provenance_and_spend(
                 estimated_cost=None,
                 status="ok",
             ),
-            LLMUsage(
-                created_at=now, total_tokens=200, estimated_cost=0.5, status="ok"
-            ),
+            LLMUsage(created_at=now, total_tokens=200, estimated_cost=0.5, status="ok"),
             LLMUsage(
                 created_at=now,
                 total_tokens=200,

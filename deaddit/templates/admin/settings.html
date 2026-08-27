@@ -7,94 +7,141 @@
     <h1 class="h2">Settings &amp; Configuration</h1>
 </div>
 
-<!-- Section 1: AI Endpoint & Models -->
+<!-- Section 1: Saved LLM Providers -->
 <div class="row mb-4">
     <div class="col-md-12">
         <div class="card">
-            <div class="card-header">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="card-title mb-0">
-                    <i class="bi bi-robot"></i> AI Endpoint &amp; Models
+                    <i class="bi bi-robot me-1"></i> LLM Providers
                 </h5>
+                <button type="button" class="btn btn-primary btn-sm" id="btn-open-add-provider">
+                    <i class="bi bi-plus-lg me-1"></i> Add Provider
+                </button>
             </div>
             <div class="card-body">
-                <form id="ai-endpoint-form">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="openai_api_url" class="form-label">
-                                    API Endpoint URL <span class="text-danger">*</span>
-                                </label>
-                                <select class="form-select mb-2" id="api_preset" aria-label="Endpoint preset">
-                                    <option value="">Select a preset...</option>
-                                    <option value="openai">OpenAI</option>
-                                    <option value="groq">Groq</option>
-                                    <option value="openrouter">OpenRouter</option>
-                                    <option value="custom">Custom</option>
-                                </select>
-                                <input type="url" class="form-control" id="openai_api_url" name="openai_api_url"
-                                       value="{{ config.openai_api_url if config.openai_api_url != 'Not set' else '' }}"
-                                       placeholder="http://localhost:11434/v1" required>
-                                <div class="form-text">The base URL for your OpenAI-compatible API. Typically ends with /v1</div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="openai_key" class="form-label">API Key</label>
-                                <div class="input-group">
-                                    <input type="password" class="form-control" id="openai_key" name="openai_key"
-                                           placeholder="{% if config.openai_key_set %}Stored - leave blank to keep{% else %}Enter API key{% endif %}"
-                                           autocomplete="new-password">
-                                    <button type="button" class="btn btn-outline-secondary" data-toggle-password="openai_key"
-                                            aria-label="Show or hide API key">
-                                        <i class="bi bi-eye"></i>
-                                    </button>
-                                </div>
-                                <div class="form-text">
-                                    Status: <span id="openai-key-status">
-                                        {%- if config.openai_key_set %}<span class="text-success">set</span>{% else %}<span class="text-danger">not set</span>{% endif -%}
-                                    </span>.
-                                    Leave blank to keep the stored key.
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="openai_model" class="form-label">Default Model</label>
-                                <div class="input-group">
-                                    <input type="text" class="form-control" id="openai_model" name="openai_model"
-                                           list="model-options" autocomplete="off"
-                                           value="{{ config.openai_model if config.openai_model != 'Not set' else '' }}"
-                                           placeholder="Pick a loaded model or type a name...">
-                                    <datalist id="model-options"></datalist>
-                                    <button type="button" class="btn btn-outline-secondary" id="refresh-models-btn"
-                                            aria-label="Refresh model list from endpoint">
-                                        <i class="bi bi-arrow-clockwise"></i>
-                                    </button>
-                                </div>
-                                <div class="form-text">
-                                    Default model name for content generation.
-                                    <span id="model-cache-info" class="text-muted"></span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6 d-flex align-items-end">
-                            <div class="d-flex gap-2 pb-3">
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="bi bi-check-circle"></i> Save Endpoint
-                                </button>
-                                <button type="button" class="btn btn-outline-info" id="test-connection-btn">
-                                    <i class="bi bi-wifi"></i> Test Connection
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </form>
-
-                <!-- Connection Test Results -->
-                <div id="connection-test-result" class="mt-3" style="display: none;"></div>
+                <p class="text-muted small mb-3">
+                    Configure your LLM API endpoints and API keys directly in the admin interface.
+                    You can set one provider as default, and select any provider when creating or configuring autonomous agents.
+                </p>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0" id="providers-table">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 130px;">Default</th>
+                                <th>Name</th>
+                                <th>API Endpoint</th>
+                                <th>API Key</th>
+                                <th>Default Model</th>
+                                <th>Models</th>
+                                <th class="text-end" style="min-width: 160px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="providers-tbody">
+                            <tr>
+                                <td colspan="7" class="text-center text-muted py-3">
+                                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                    Loading providers...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="no-providers-alert" class="alert alert-info mt-3" style="display: none;">
+                    <i class="bi bi-info-circle me-1"></i> No LLM providers saved yet. Click <strong>Add Provider</strong> to configure your first provider.
+                </div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Add / Edit Provider -->
+<div class="modal fade" id="providerModal" tabindex="-1" aria-labelledby="providerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="providerModalLabel">
+                    <i class="bi bi-robot me-1"></i> <span id="providerModalTitle">Add LLM Provider</span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="provider-form">
+                <input type="hidden" id="modal-provider-id" value="">
+                <div class="modal-body">
+                    <div id="provider-modal-alert" class="alert" style="display: none;"></div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label for="modal-provider-preset" class="form-label fw-bold small">Provider Preset</label>
+                            <select class="form-select" id="modal-provider-preset">
+                                <option value="">Select a preset (optional)...</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="groq">Groq</option>
+                                <option value="openrouter">OpenRouter</option>
+                                <option value="ollama">Ollama (Local)</option>
+                                <option value="custom">Custom Endpoint</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="modal-provider-name" class="form-label fw-bold small">Provider Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="modal-provider-name" required placeholder="e.g. OpenAI, Groq, Local Ollama">
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-7">
+                            <label for="modal-provider-url" class="form-label fw-bold small">API Endpoint URL <span class="text-danger">*</span></label>
+                            <input type="url" class="form-control" id="modal-provider-url" required placeholder="https://api.openai.com/v1">
+                            <div class="form-text">Base URL for OpenAI-compatible API (typically ends with /v1)</div>
+                        </div>
+                        <div class="col-md-5">
+                            <label for="modal-provider-key" class="form-label fw-bold small">API Key</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="modal-provider-key" placeholder="Enter API key" autocomplete="new-password">
+                                <button type="button" class="btn btn-outline-secondary" data-toggle-password="modal-provider-key" aria-label="Toggle password visibility">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
+                            <div class="form-text" id="modal-key-help">Leave blank if no key required (e.g. local Ollama).</div>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-7">
+                            <label for="modal-provider-model" class="form-label fw-bold small">Default Model</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="modal-provider-model" list="modal-model-options" placeholder="Pick a loaded model or type a name...">
+                                <datalist id="modal-model-options"></datalist>
+                                <button type="button" class="btn btn-outline-secondary" id="modal-refresh-models-btn" title="Refresh models from endpoint">
+                                    <i class="bi bi-arrow-clockwise"></i> Refresh Models
+                                </button>
+                            </div>
+                            <div class="form-text">
+                                <span id="modal-model-info" class="text-muted"></span>
+                            </div>
+                        </div>
+                        <div class="col-md-5 d-flex align-items-center pt-3">
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input" type="checkbox" id="modal-provider-default" role="switch">
+                                <label class="form-check-label fw-bold small" for="modal-provider-default">Set as default provider</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="modal-test-result" class="mt-2" style="display: none;"></div>
+                </div>
+                <div class="modal-footer d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-info" id="modal-test-btn">
+                        <i class="bi bi-wifi me-1"></i> Test Connection
+                    </button>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary" id="modal-save-btn">
+                            <i class="bi bi-check-lg me-1"></i> Save Provider
+                        </button>
+                    </div>
+                </div>
+            </form>
         </div>
     </div>
 </div>
@@ -174,40 +221,7 @@
     </div>
 </div>
 
-<!-- Section 3: Per-endpoint Defaults & Keys -->
-<div class="row mb-4">
-    <div class="col-md-12">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">
-                    <i class="bi bi-key"></i> Per-endpoint Keys
-                </h5>
-            </div>
-            <div class="card-body">
-                <p class="form-text">
-                    Each endpoint URL can carry its own API key. Saving a key in the
-                    <strong>AI Endpoint &amp; Models</strong> section stores it against the endpoint URL entered there.
-                    Check a stored key below &mdash; values are never displayed, only whether one exists.
-                </p>
-                <div class="row">
-                    <div class="col-md-8">
-                        <label for="endpoint-check-url" class="form-label visually-hidden">Endpoint URL to check</label>
-                        <input type="url" class="form-control" id="endpoint-check-url"
-                               placeholder="https://api.example.com/v1" aria-label="Endpoint URL to check">
-                    </div>
-                    <div class="col-md-4">
-                        <button type="button" class="btn btn-outline-secondary w-100" id="check-endpoint-key-btn">
-                            <i class="bi bi-search"></i> Check Stored Key
-                        </button>
-                    </div>
-                </div>
-                <div id="endpoint-key-status" class="mt-3" role="status" aria-live="polite"></div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Section 4: Advanced -->
+<!-- Section 3: Advanced & System Info -->
 <div class="row mb-4">
     <div class="col-md-12">
         <div class="card">
@@ -217,56 +231,6 @@
                 </h5>
             </div>
             <div class="card-body">
-                <!-- Current Configuration Status -->
-                <h6>Configuration Status</h6>
-                <div class="row mb-4">
-                    <div class="col-md-3">
-                        <div class="text-center">
-                            <div class="h4" id="api-url-status">
-                                {% if config.openai_api_url != "Not set" %}
-                                    <i class="bi bi-check-circle text-success"></i>
-                                {% else %}
-                                    <i class="bi bi-x-circle text-danger"></i>
-                                {% endif %}
-                            </div>
-                            <small class="text-muted">API URL</small>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="text-center">
-                            <div class="h4" id="api-key-status">
-                                {% if config.openai_key_set %}
-                                    <i class="bi bi-check-circle text-success"></i>
-                                {% else %}
-                                    <i class="bi bi-x-circle text-danger"></i>
-                                {% endif %}
-                            </div>
-                            <small class="text-muted">API Key</small>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="text-center">
-                            <div class="h4" id="model-status">
-                                {% if config.openai_model != "Not set" %}
-                                    <i class="bi bi-check-circle text-success"></i>
-                                {% else %}
-                                    <i class="bi bi-exclamation-triangle text-warning"></i>
-                                {% endif %}
-                            </div>
-                            <small class="text-muted">Default Model</small>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="text-center">
-                            <div class="h4" id="connection-status">
-                                <i class="bi bi-question-circle text-muted"></i>
-                            </div>
-                            <small class="text-muted">Connection</small>
-                        </div>
-                    </div>
-                </div>
-
-
                 <h6>System Information</h6>
                 <div class="row mb-4">
                     <div class="col-md-3">
@@ -290,11 +254,6 @@
                 <h6>Quick Actions</h6>
                 <div class="row">
                     <div class="col-md-3">
-                        <button class="btn btn-outline-primary w-100" id="quick-test-connection-btn">
-                            <i class="bi bi-wifi"></i> Test API Connection
-                        </button>
-                    </div>
-                    <div class="col-md-3">
                         <button class="btn btn-outline-info w-100" id="refresh-stats-btn">
                             <i class="bi bi-arrow-clockwise"></i> Refresh Stats
                         </button>
@@ -311,7 +270,24 @@
 (function () {
     'use strict';
 
-    // ---------- small helpers ----------
+    let providersData = [];
+    let providerModalInstance = null;
+
+    const PRESETS = {
+        openai: { name: 'OpenAI', url: 'https://api.openai.com/v1', defaultModel: 'gpt-4o' },
+        groq: { name: 'Groq', url: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile' },
+        openrouter: { name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', defaultModel: 'meta-llama/llama-3.3-70b-instruct' },
+        ollama: { name: 'Ollama Local', url: 'http://localhost:11434/v1', defaultModel: 'llama3' }
+    };
+
+    function esc(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
 
     function showAlert(message, alertClass) {
         const alertContainer = document.createElement('div');
@@ -327,9 +303,9 @@
         }, 5000);
     }
 
-    function postJson(url, payload) {
+    function postJson(url, payload, method = 'POST') {
         return fetch(url, {
-            method: 'POST',
+            method: method,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload || {})
         }).then(response => response.json());
@@ -337,7 +313,7 @@
 
     function busy(button, busyText) {
         const original = button.innerHTML;
-        button.innerHTML = '<i class="bi bi-hourglass-split"></i> ' + busyText;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> ' + (busyText || '');
         button.disabled = true;
         return function done() {
             button.innerHTML = original;
@@ -345,7 +321,7 @@
         };
     }
 
-    // ---------- system info ----------
+    // ---------- System Info ----------
 
     function setText(id, text) {
         const el = document.getElementById(id);
@@ -367,298 +343,428 @@
             });
     }
 
-    function refreshStats(button) {
-        const done = busy(button, 'Refreshing...');
-        loadSystemInfo();
-        setTimeout(() => {
-            done();
-            showAlert('<i class="bi bi-check-circle"></i> Stats refreshed successfully', 'alert-success');
-        }, 1000);
-    }
+    // ---------- Providers Table & Actions ----------
 
-    // ---------- status indicators ----------
+    async function loadProviders() {
+        const tbody = document.getElementById('providers-tbody');
+        const emptyAlert = document.getElementById('no-providers-alert');
+        try {
+            const data = await fetch('/admin/api/providers').then(r => r.json());
+            providersData = data.providers || [];
+            tbody.innerHTML = '';
 
-    function setStatusIcon(elementId, ok, warnWhenMissing) {
-        const element = document.getElementById(elementId);
-        if (!element) return;
-        if (ok) {
-            element.innerHTML = '<i class="bi bi-check-circle text-success"></i>';
-        } else {
-            element.innerHTML = warnWhenMissing
-                ? '<i class="bi bi-exclamation-triangle text-warning"></i>'
-                : '<i class="bi bi-x-circle text-danger"></i>';
+            if (providersData.length === 0) {
+                emptyAlert.style.display = 'block';
+                return;
+            }
+            emptyAlert.style.display = 'none';
+
+            providersData.forEach(p => {
+                const tr = document.createElement('tr');
+
+                // Default Column
+                const tdDefault = document.createElement('td');
+                if (p.is_default) {
+                    tdDefault.innerHTML = '<span class="badge bg-success"><i class="bi bi-star-fill me-1"></i>Default</span>';
+                } else {
+                    tdDefault.innerHTML = `<button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2 set-default-btn" data-id="${p.id}" title="Set as default provider"><i class="bi bi-star me-1"></i>Make Default</button>`;
+                }
+                tr.appendChild(tdDefault);
+
+                // Name Column
+                const tdName = document.createElement('td');
+                tdName.innerHTML = `<strong>${esc(p.name)}</strong>`;
+                tr.appendChild(tdName);
+
+                // URL Column
+                const tdUrl = document.createElement('td');
+                tdUrl.innerHTML = `<code class="small text-break">${esc(p.api_url)}</code>`;
+                tr.appendChild(tdUrl);
+
+                // API Key Column
+                const tdKey = document.createElement('td');
+                if (p.has_key) {
+                    const last4 = p.key_last4 ? ` (...${esc(p.key_last4)})` : '';
+                    tdKey.innerHTML = `<span class="badge bg-success-subtle text-success border border-success-subtle"><i class="bi bi-key-fill me-1"></i>Set${last4}</span>`;
+                } else {
+                    tdKey.innerHTML = `<span class="badge bg-secondary-subtle text-secondary border">Not set</span>`;
+                }
+                tr.appendChild(tdKey);
+
+                // Default Model Column
+                const tdModel = document.createElement('td');
+                tdModel.innerHTML = p.default_model
+                    ? `<span class="badge bg-info-subtle text-info-emphasis border border-info-subtle font-monospace">${esc(p.default_model)}</span>`
+                    : `<span class="text-muted small">None</span>`;
+                tr.appendChild(tdModel);
+
+                // Models Count Column
+                const tdModels = document.createElement('td');
+                const count = p.model_count || 0;
+                tdModels.innerHTML = `
+                    <div class="d-flex align-items-center gap-1">
+                        <span class="badge bg-light text-dark border">${count} models</span>
+                        <button type="button" class="btn btn-sm btn-outline-primary py-0 px-1 refresh-models-row-btn" data-id="${p.id}" title="Refresh model list from endpoint">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                `;
+                tr.appendChild(tdModels);
+
+                // Actions Column
+                const tdActions = document.createElement('td');
+                tdActions.className = 'text-end';
+                tdActions.innerHTML = `
+                    <button type="button" class="btn btn-sm btn-outline-info test-provider-btn" data-id="${p.id}" title="Test Connection">
+                        <i class="bi bi-wifi"></i> Test
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary ms-1 edit-provider-btn" data-id="${p.id}" title="Edit Provider">
+                        <i class="bi bi-pencil"></i> Edit
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger ms-1 delete-provider-btn" data-id="${p.id}" data-name="${esc(p.name)}" title="Delete Provider">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                `;
+                tr.appendChild(tdActions);
+
+                tbody.appendChild(tr);
+            });
+
+            wireTableButtons();
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="7" class="text-danger text-center py-3">Error loading providers: ${esc(err.message)}</td></tr>`;
         }
     }
 
-    function updateConfigurationStatus(configStatus) {
-        setStatusIcon('api-url-status',
-            configStatus.openai_api_url && configStatus.openai_api_url !== 'Not set');
-        setStatusIcon('api-key-status', !!configStatus.openai_key_set);
-        setStatusIcon('model-status',
-            configStatus.openai_model && configStatus.openai_model !== 'Not set', true);
-        setSecretStatus('openai-key-status', !!configStatus.openai_key_set);
-    }
+    function wireTableButtons() {
+        document.querySelectorAll('.set-default-btn').forEach(btn => {
+            btn.addEventListener('click', async function () {
+                const id = this.getAttribute('data-id');
+                const done = busy(this, '');
+                try {
+                    const res = await postJson(`/admin/api/providers/${id}/set-default`, {});
+                    if (res.success) {
+                        showAlert('<i class="bi bi-check-circle me-1"></i> Default provider updated', 'alert-success');
+                        await loadProviders();
+                    } else {
+                        showAlert('<i class="bi bi-x-circle me-1"></i> ' + (res.error || res.message), 'alert-danger');
+                    }
+                } catch (err) {
+                    showAlert('<i class="bi bi-x-circle me-1"></i> ' + err.message, 'alert-danger');
+                } finally {
+                    done();
+                }
+            });
+        });
 
-    function setSecretStatus(spanId, isSet) {
-        const el = document.getElementById(spanId);
-        if (!el) return;
-        el.innerHTML = isSet
-            ? '<span class="text-success">set</span>'
-            : '<span class="text-danger">not set</span>';
-    }
+        document.querySelectorAll('.refresh-models-row-btn').forEach(btn => {
+            btn.addEventListener('click', async function () {
+                const id = this.getAttribute('data-id');
+                const icon = this.querySelector('i');
+                const origClass = icon ? icon.className : '';
+                if (icon) icon.className = 'spinner-border spinner-border-sm';
+                this.disabled = true;
+                try {
+                    const res = await postJson(`/admin/api/providers/${id}/refresh-models`, {});
+                    if (res.success) {
+                        showAlert(`<i class="bi bi-check-circle me-1"></i> ${res.message || 'Models refreshed'} (${res.models ? res.models.length : 0} loaded)`, 'alert-success');
+                        await loadProviders();
+                    } else {
+                        showAlert('<i class="bi bi-x-circle me-1"></i> ' + (res.error || res.message), 'alert-danger');
+                    }
+                } catch (err) {
+                    showAlert('<i class="bi bi-x-circle me-1"></i> ' + err.message, 'alert-danger');
+                } finally {
+                    if (icon) icon.className = origClass;
+                    this.disabled = false;
+                }
+            });
+        });
 
-    function updateConnectionStatus(success) {
-        setStatusIcon('connection-status', success);
-    }
+        document.querySelectorAll('.test-provider-btn').forEach(btn => {
+            btn.addEventListener('click', async function () {
+                const id = this.getAttribute('data-id');
+                const done = busy(this, 'Testing');
+                try {
+                    const res = await postJson('/admin/api/test-connection', { provider_id: Number(id) });
+                    if (res.success) {
+                        showAlert('<i class="bi bi-check-circle me-1"></i> ' + res.message, 'alert-success');
+                    } else {
+                        showAlert('<i class="bi bi-x-circle me-1"></i> Connection failed: ' + (res.message || 'Error'), 'alert-danger');
+                    }
+                } catch (err) {
+                    showAlert('<i class="bi bi-x-circle me-1"></i> Connection test failed: ' + err.message, 'alert-danger');
+                } finally {
+                    done();
+                }
+            });
+        });
 
-    // ---------- presets ----------
+        document.querySelectorAll('.edit-provider-btn').forEach(btn => {
+            btn.addEventListener('click', function () {
+                const id = Number(this.getAttribute('data-id'));
+                const provider = providersData.find(p => p.id === id);
+                if (provider) openProviderModal(provider);
+            });
+        });
 
-    const PRESET_URLS = {
-        openai: 'https://api.openai.com/v1',
-        groq: 'https://api.groq.com/openai/v1',
-        openrouter: 'https://openrouter.ai/api/v1'
-    };
+        document.querySelectorAll('.delete-provider-btn').forEach(btn => {
+            btn.addEventListener('click', async function () {
+                const id = this.getAttribute('data-id');
+                const name = this.getAttribute('data-name');
+                if (!confirm(`Are you sure you want to delete the provider "${name}"?`)) return;
 
-    function setPresetUrl() {
-        const preset = document.getElementById('api_preset').value;
-        const urlInput = document.getElementById('openai_api_url');
-        if (!preset) return;
-        if (preset === 'custom') {
-            urlInput.focus();
-            return;
-        }
-        urlInput.value = PRESET_URLS[preset];
-        loadEndpointConfig(PRESET_URLS[preset]);
-    }
-
-    function setCurrentPreset() {
-        const currentUrl = document.getElementById('openai_api_url').value.trim();
-        const presetSelect = document.getElementById('api_preset');
-        let matched = 'custom';
-        for (const [name, url] of Object.entries(PRESET_URLS)) {
-            if (currentUrl === url) matched = name;
-        }
-        if (currentUrl) presetSelect.value = matched;
-    }
-
-    // ---------- models (native input + datalist, replaces Select2) ----------
-
-    function populateModelOptions(models) {
-        const datalist = document.getElementById('model-options');
-        const seen = new Set();
-        datalist.innerHTML = '';
-        (models || []).forEach(model => {
-            if (seen.has(model)) return;
-            seen.add(model);
-            const option = document.createElement('option');
-            option.value = model;
-            datalist.appendChild(option);
+                const done = busy(this, '');
+                try {
+                    const res = await postJson(`/admin/api/providers/${id}`, {}, 'DELETE');
+                    if (res.success) {
+                        showAlert('<i class="bi bi-check-circle me-1"></i> Provider deleted', 'alert-success');
+                        await loadProviders();
+                    } else {
+                        showAlert('<i class="bi bi-x-circle me-1"></i> ' + (res.error || res.message), 'alert-danger');
+                    }
+                } catch (err) {
+                    showAlert('<i class="bi bi-x-circle me-1"></i> ' + err.message, 'alert-danger');
+                } finally {
+                    done();
+                }
+            });
         });
     }
 
-    function updateModelCacheInfo(data) {
-        const info = document.getElementById('model-cache-info');
-        if (data.cached && data.last_fetched) {
-            info.textContent = '(Cached models from ' + new Date(data.last_fetched).toLocaleString() + ')';
-        } else if (data.models && data.models.length > 0) {
-            info.textContent = '(' + data.models.length + ' models loaded)';
-        } else {
-            info.textContent = '';
-        }
-    }
+    // ---------- Provider Modal (Add / Edit) ----------
 
-    async function loadEndpointConfig(apiUrl) {
-        if (!apiUrl) return;
-        try {
-            const encodedUrl = btoa(apiUrl);
-            const data = await postJson('/admin/api/endpoint-config/' + encodedUrl);
-            if (!data.success) return;
-            populateModelOptions(data.models || []);
-            updateModelCacheInfo(data.models && data.models.length ? data : {});
-            if (data.default_model) {
-                document.getElementById('openai_model').value = data.default_model;
+    function openProviderModal(provider = null) {
+        const form = document.getElementById('provider-form');
+        form.reset();
+        document.getElementById('modal-test-result').style.display = 'none';
+        document.getElementById('provider-modal-alert').style.display = 'none';
+        document.getElementById('modal-model-options').innerHTML = '';
+        document.getElementById('modal-model-info').textContent = '';
+
+        const defaultSwitch = document.getElementById('modal-provider-default');
+        const keyInput = document.getElementById('modal-provider-key');
+        const keyHelp = document.getElementById('modal-key-help');
+
+        if (provider) {
+            document.getElementById('providerModalTitle').textContent = 'Edit LLM Provider';
+            document.getElementById('modal-provider-id').value = provider.id;
+            document.getElementById('modal-provider-name').value = provider.name || '';
+            document.getElementById('modal-provider-url').value = provider.api_url || '';
+            keyInput.placeholder = provider.has_key ? 'Stored - leave blank to keep, or enter new key' : 'Enter API key';
+            keyInput.value = '';
+            keyHelp.textContent = provider.has_key ? 'API key is currently stored. Enter a new key to update it.' : 'Leave blank if no key required.';
+            document.getElementById('modal-provider-model').value = provider.default_model || '';
+            defaultSwitch.checked = Boolean(provider.is_default);
+
+            // Populate models datalist
+            if (provider.models && provider.models.length > 0) {
+                populateModalModelDatalist(provider.models);
+                document.getElementById('modal-model-info').textContent = `(${provider.models.length} models cached)`;
             }
-        } catch (error) {
-            console.warn('Could not load endpoint config:', error);
+
+            // Match preset if possible
+            let matched = 'custom';
+            for (const [key, p] of Object.entries(PRESETS)) {
+                if (provider.api_url === p.url) matched = key;
+            }
+            document.getElementById('modal-provider-preset').value = matched;
+        } else {
+            document.getElementById('providerModalTitle').textContent = 'Add LLM Provider';
+            document.getElementById('modal-provider-id').value = '';
+            document.getElementById('modal-provider-name').value = '';
+            document.getElementById('modal-provider-url').value = '';
+            keyInput.placeholder = 'Enter API key';
+            keyInput.value = '';
+            keyHelp.textContent = 'Leave blank if no key required (e.g. local Ollama).';
+            document.getElementById('modal-provider-model').value = '';
+            document.getElementById('modal-provider-preset').value = '';
+            defaultSwitch.checked = providersData.length === 0;
         }
+
+        if (!providerModalInstance) {
+            providerModalInstance = new bootstrap.Modal(document.getElementById('providerModal'));
+        }
+        providerModalInstance.show();
     }
 
-    async function saveEndpointDefaultModel(apiUrl, modelName) {
-        if (!apiUrl || !modelName) return;
-        try {
-            await postJson('/admin/api/endpoint-config', {
-                api_url: apiUrl,
-                default_model: modelName
-            });
-        } catch (error) {
-            console.warn('Error saving default model:', error);
-        }
+    function populateModalModelDatalist(models) {
+        const datalist = document.getElementById('modal-model-options');
+        datalist.innerHTML = '';
+        const seen = new Set();
+        (models || []).forEach(model => {
+            if (seen.has(model)) return;
+            seen.add(model);
+            const opt = document.createElement('option');
+            opt.value = model;
+            datalist.appendChild(opt);
+        });
     }
 
-    async function refreshModels() {
-        const apiUrl = document.getElementById('openai_api_url').value.trim();
-        const apiKey = document.getElementById('openai_key').value;
-        const button = document.getElementById('refresh-models-btn');
+    // Modal preset change
+    document.getElementById('modal-provider-preset').addEventListener('change', function () {
+        const presetKey = this.value;
+        if (!presetKey || presetKey === 'custom') return;
+        const preset = PRESETS[presetKey];
+        if (preset) {
+            const nameInput = document.getElementById('modal-provider-name');
+            if (!nameInput.value || Object.values(PRESETS).some(p => p.name === nameInput.value)) {
+                nameInput.value = preset.name;
+            }
+            document.getElementById('modal-provider-url').value = preset.url;
+            if (preset.defaultModel && !document.getElementById('modal-provider-model').value) {
+                document.getElementById('modal-provider-model').value = preset.defaultModel;
+            }
+        }
+    });
 
-        if (!apiUrl) {
-            showAlert('<i class="bi bi-exclamation-triangle"></i> Please enter API URL first', 'alert-warning');
+    // Modal test connection
+    document.getElementById('modal-test-btn').addEventListener('click', async function () {
+        const url = document.getElementById('modal-provider-url').value.trim();
+        const key = document.getElementById('modal-provider-key').value;
+        const providerId = document.getElementById('modal-provider-id').value;
+        const resultDiv = document.getElementById('modal-test-result');
+
+        if (!url) {
+            resultDiv.className = 'alert alert-warning mt-2 mb-0 py-2';
+            resultDiv.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i> Please enter an API Endpoint URL first.';
+            resultDiv.style.display = 'block';
             return;
         }
 
-        const icon = button.querySelector('i');
-        const originalIcon = icon ? icon.className : '';
-        const done = busy(button, '');
-        if (icon) icon.className = 'bi bi-hourglass-split';
+        const done = busy(this, 'Testing...');
+        resultDiv.style.display = 'none';
 
         try {
-            // Blank key: the backend falls back to the stored key for this endpoint.
-            const data = await postJson('/admin/api/load-models', {
-                api_url: apiUrl,
-                api_key: apiKey
-            });
-            if (data.success) {
-                populateModelOptions(data.models);
-                showAlert(
-                    '<i class="bi bi-' + (data.cached ? 'exclamation-triangle' : 'check-circle') + '"></i> ' +
-                    data.message,
-                    data.cached ? 'alert-warning' : 'alert-success'
-                );
-                updateModelCacheInfo(data);
-            } else {
-                showAlert('<i class="bi bi-x-circle"></i> Failed to load models: ' + data.message, 'alert-danger');
-            }
-        } catch (error) {
-            showAlert('<i class="bi bi-x-circle"></i> Network error loading models', 'alert-warning');
+            const payload = { api_url: url, api_key: key };
+            if (providerId) payload.provider_id = Number(providerId);
+
+            const res = await postJson('/admin/api/test-connection', payload);
+            resultDiv.className = 'alert ' + (res.success ? 'alert-success' : 'alert-danger') + ' mt-2 mb-0 py-2';
+            resultDiv.innerHTML = `<i class="bi bi-${res.success ? 'check-circle' : 'x-circle'} me-1"></i> ${esc(res.message || 'Test finished')}`;
+            resultDiv.style.display = 'block';
+        } catch (err) {
+            resultDiv.className = 'alert alert-danger mt-2 mb-0 py-2';
+            resultDiv.innerHTML = `<i class="bi bi-x-circle me-1"></i> Error: ${esc(err.message)}`;
+            resultDiv.style.display = 'block';
         } finally {
-            if (icon) icon.className = originalIcon;
             done();
         }
-    }
+    });
 
-    // ---------- connection test ----------
+    // Modal refresh models
+    document.getElementById('modal-refresh-models-btn').addEventListener('click', async function () {
+        const url = document.getElementById('modal-provider-url').value.trim();
+        const key = document.getElementById('modal-provider-key').value;
+        const providerId = document.getElementById('modal-provider-id').value;
+        const info = document.getElementById('modal-model-info');
 
-    function displayConnectionTestResult(data) {
-        const resultDiv = document.getElementById('connection-test-result');
-        const alertClass = data.success ? 'alert-success' : 'alert-danger';
-        const icon = data.success ? 'check-circle' : 'x-circle';
-        let statusCodeBadge = '';
-        if (data.status_code !== null && data.status_code !== undefined) {
-            const badgeClass = data.status_code >= 200 && data.status_code < 300 ? 'bg-success' : 'bg-danger';
-            statusCodeBadge = '<span class="badge ' + badgeClass + ' ms-2">HTTP ' + data.status_code + '</span>';
-        }
-        resultDiv.innerHTML =
-            '<div class="alert ' + alertClass + '" role="alert">' +
-            '<i class="bi bi-' + icon + '"></i> ' + data.message + statusCodeBadge + '</div>';
-        resultDiv.style.display = 'block';
-    }
-
-    function testConnection(button) {
-        const apiUrl = document.getElementById('openai_api_url').value.trim();
-        const apiKey = document.getElementById('openai_key').value;
-
-        if (!apiUrl) {
-            showAlert('<i class="bi bi-exclamation-triangle"></i> Please enter an API URL first', 'alert-warning');
+        if (!url) {
+            info.textContent = 'Please enter an API Endpoint URL first.';
+            info.className = 'text-warning small';
             return;
         }
 
-        const done = busy(button, 'Testing...');
+        const done = busy(this, 'Refreshing...');
+        info.textContent = 'Fetching models from endpoint...';
+        info.className = 'text-muted small';
 
-        // Blank key: the backend uses the stored key for this endpoint.
-        postJson('/admin/api/test-connection', { api_url: apiUrl, api_key: apiKey })
-            .then(data => {
-                displayConnectionTestResult(data);
-                updateConnectionStatus(data.success);
-            })
-            .catch(error => {
-                displayConnectionTestResult({
-                    success: false,
-                    message: 'Connection test failed: ' + error.message,
-                    status_code: null
-                });
-                updateConnectionStatus(false);
-            })
-            .finally(done);
-    }
+        try {
+            let res;
+            if (providerId && !key) {
+                res = await postJson(`/admin/api/providers/${providerId}/refresh-models`, {});
+            } else {
+                res = await postJson('/admin/api/load-models', { api_url: url, api_key: key });
+            }
 
-    // ---------- per-endpoint key status ----------
-
-    function checkEndpointKey() {
-        const endpointUrl = document.getElementById('endpoint-check-url').value.trim();
-        const statusBox = document.getElementById('endpoint-key-status');
-
-        if (!endpointUrl) {
-            statusBox.innerHTML =
-                '<div class="alert alert-warning mb-0" role="alert">' +
-                '<i class="bi bi-exclamation-triangle"></i> Enter an endpoint URL to check.</div>';
-            return;
-        }
-
-        postJson('/admin/api/get-endpoint-key', { endpoint_url: endpointUrl })
-            .then(data => {
-                if (!data.success) {
-                    statusBox.innerHTML =
-                        '<div class="alert alert-danger mb-0" role="alert">' +
-                        '<i class="bi bi-x-circle"></i> ' + data.message + '</div>';
-                    return;
+            if (res.success && res.models && res.models.length > 0) {
+                populateModalModelDatalist(res.models);
+                info.textContent = `Successfully loaded ${res.models.length} models.`;
+                info.className = 'text-success small';
+                const modelInput = document.getElementById('modal-provider-model');
+                if (!modelInput.value && res.models.length > 0) {
+                    modelInput.value = res.models[0];
                 }
-                statusBox.innerHTML = data.has_key
-                    ? '<div class="alert alert-success mb-0" role="alert">' +
-                      '<i class="bi bi-check-circle"></i> Key is set for this endpoint ' +
-                      '(stored value ends in "' + data.last4 + '").</div>'
-                    : '<div class="alert alert-secondary mb-0" role="alert">' +
-                      '<i class="bi bi-x-circle"></i> No key is stored for this endpoint.</div>';
-            })
-            .catch(error => {
-                statusBox.innerHTML =
-                    '<div class="alert alert-danger mb-0" role="alert">' +
-                    '<i class="bi bi-x-circle"></i> Error checking key: ' + error.message + '</div>';
-            });
-    }
+            } else {
+                info.textContent = res.message || 'No models returned from API.';
+                info.className = 'text-warning small';
+            }
+        } catch (err) {
+            info.textContent = 'Failed to load models: ' + err.message;
+            info.className = 'text-danger small';
+        } finally {
+            done();
+        }
+    });
 
-    // ---------- section saves ----------
-
-    function saveConfiguration(event) {
+    // Modal save provider form
+    document.getElementById('provider-form').addEventListener('submit', async function (event) {
         event.preventDefault();
-        const form = event.target;
-        const formData = new FormData(form);
+        const providerId = document.getElementById('modal-provider-id').value;
+        const name = document.getElementById('modal-provider-name').value.trim();
+        const url = document.getElementById('modal-provider-url').value.trim();
+        const key = document.getElementById('modal-provider-key').value;
+        const model = document.getElementById('modal-provider-model').value.trim();
+        const isDefault = document.getElementById('modal-provider-default').checked;
+        const alertBox = document.getElementById('provider-modal-alert');
+        const saveBtn = document.getElementById('modal-save-btn');
+
+        if (!name || !url) {
+            alertBox.className = 'alert alert-danger mb-3';
+            alertBox.textContent = 'Provider Name and API Endpoint URL are required.';
+            alertBox.style.display = 'block';
+            return;
+        }
 
         const payload = {
-            openai_api_url: formData.get('openai_api_url'),
-            openai_key: formData.get('openai_key'),
-            openai_model: formData.get('openai_model'),
-            api_base_url: formData.get('api_base_url')
+            name: name,
+            api_url: url,
+            default_model: model,
+            is_default: isDefault
         };
+        if (key) {
+            payload.api_key = key;
+        }
 
-        const done = busy(form.querySelector('button[type="submit"]'), 'Saving...');
+        const done = busy(saveBtn, 'Saving...');
+        alertBox.style.display = 'none';
 
-        postJson('/admin/api/save-config', payload)
-            .then(data => {
-                if (data.success) {
-                    showAlert('<i class="bi bi-check-circle"></i> Configuration saved successfully!', 'alert-success');
-                    updateConfigurationStatus(data.config);
-                    // Secret fields stay empty: blank always means "keep stored value".
-                    document.getElementById('openai_key').value = '';
-                } else {
-                    showAlert('<i class="bi bi-x-circle"></i> Failed to save configuration: ' + data.message,
-                        'alert-danger');
-                }
-            })
-            .catch(error => {
-                showAlert('<i class="bi bi-x-circle"></i> Error saving configuration: ' + error.message,
-                    'alert-danger');
-            })
-            .finally(done);
-    }
+        try {
+            let res;
+            if (providerId) {
+                res = await postJson(`/admin/api/providers/${providerId}`, payload, 'PUT');
+            } else {
+                res = await postJson('/admin/api/providers', payload, 'POST');
+            }
 
-    function saveDeadditConfig(event) {
+            if (res.success) {
+                if (providerModalInstance) providerModalInstance.hide();
+                showAlert(`<i class="bi bi-check-circle me-1"></i> Provider "${esc(name)}" saved successfully!`, 'alert-success');
+                await loadProviders();
+            } else {
+                alertBox.className = 'alert alert-danger mb-3';
+                alertBox.textContent = res.error || res.message || 'Failed to save provider.';
+                alertBox.style.display = 'block';
+            }
+        } catch (err) {
+            alertBox.className = 'alert alert-danger mb-3';
+            alertBox.textContent = 'Error saving provider: ' + err.message;
+            alertBox.style.display = 'block';
+        } finally {
+            done();
+        }
+    });
+
+    // ---------- Deaddit Security Settings Form ----------
+
+    document.getElementById('deaddit-config-form').addEventListener('submit', function (event) {
         event.preventDefault();
         const form = event.target;
         const formData = new FormData(form);
 
         const token = formData.get('api_token') || '';
         if (token && token.length < 3) {
-            showAlert('<i class="bi bi-exclamation-triangle"></i> API Token must be at least 3 characters long',
-                'alert-warning');
+            showAlert('<i class="bi bi-exclamation-triangle"></i> API Token must be at least 3 characters long', 'alert-warning');
             return;
         }
 
@@ -673,74 +779,51 @@
         postJson('/admin/api/save-deaddit-config', payload)
             .then(data => {
                 if (data.success) {
-                    showAlert('<i class="bi bi-check-circle"></i> Deaddit configuration saved successfully!',
-                        'alert-success');
+                    showAlert('<i class="bi bi-check-circle"></i> Deaddit configuration saved successfully!', 'alert-success');
                     document.getElementById('api_token').value = '';
-                    // Reload so login-required state picks up token changes.
                     setTimeout(() => window.location.reload(), 1500);
                 } else {
-                    showAlert('<i class="bi bi-x-circle"></i> Failed to save configuration: ' + data.message,
-                        'alert-danger');
+                    showAlert('<i class="bi bi-x-circle"></i> Failed to save configuration: ' + (data.error || data.message), 'alert-danger');
                 }
             })
             .catch(error => {
-                showAlert('<i class="bi bi-x-circle"></i> Error saving configuration: ' + error.message,
-                    'alert-danger');
+                showAlert('<i class="bi bi-x-circle"></i> Error saving configuration: ' + error.message, 'alert-danger');
             })
             .finally(done);
-    }
+    });
 
-    // ---------- wiring ----------
+    // ---------- Initialization & Wiring ----------
 
     document.addEventListener('DOMContentLoaded', function () {
-        document.getElementById('ai-endpoint-form').addEventListener('submit', saveConfiguration);
-        document.getElementById('deaddit-config-form').addEventListener('submit', saveDeadditConfig);
-        document.getElementById('test-connection-btn').addEventListener('click', function () {
-            testConnection(this);
-        });
-        document.getElementById('refresh-models-btn').addEventListener('click', refreshModels);
-        document.getElementById('quick-test-connection-btn').addEventListener('click', function () {
-            testConnection(this);
-        });
+        document.getElementById('btn-open-add-provider').addEventListener('click', () => openProviderModal());
+
         document.getElementById('refresh-stats-btn').addEventListener('click', function () {
-            refreshStats(this);
-        });
-        document.getElementById('check-endpoint-key-btn').addEventListener('click', checkEndpointKey);
-        document.getElementById('api_preset').addEventListener('change', function () {
-            // Small delay so setPresetUrl() has written the URL before we load its config.
-            setTimeout(setPresetUrl, 0);
+            const done = busy(this, 'Refreshing...');
+            loadSystemInfo();
+            setTimeout(() => {
+                done();
+                showAlert('<i class="bi bi-check-circle"></i> Stats refreshed', 'alert-success');
+            }, 800);
         });
 
         document.querySelectorAll('[data-toggle-password]').forEach(button => {
             button.addEventListener('click', function () {
-                const input = document.getElementById(this.getAttribute('data-toggle-password'));
+                const targetId = this.getAttribute('data-toggle-password');
+                const input = document.getElementById(targetId);
                 const icon = this.querySelector('i');
+                if (!input) return;
                 if (input.type === 'password') {
                     input.type = 'text';
-                    icon.className = 'bi bi-eye-slash';
+                    if (icon) icon.className = 'bi bi-eye-slash';
                 } else {
                     input.type = 'password';
-                    icon.className = 'bi bi-eye';
+                    if (icon) icon.className = 'bi bi-eye';
                 }
             });
         });
 
-        const urlInput = document.getElementById('openai_api_url');
-        urlInput.addEventListener('blur', function () {
-            const url = this.value.trim();
-            if (url) loadEndpointConfig(url);
-        });
-
-        document.getElementById('openai_model').addEventListener('change', function () {
-            const apiUrl = document.getElementById('openai_api_url').value.trim();
-            if (apiUrl && this.value) saveEndpointDefaultModel(apiUrl, this.value);
-        });
-
+        loadProviders();
         loadSystemInfo();
-        setCurrentPreset();
-
-        const initialUrl = urlInput.value.trim();
-        if (initialUrl) loadEndpointConfig(initialUrl);
     });
 })();
 </script>

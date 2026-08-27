@@ -9,6 +9,7 @@ Additive DDL only (plan §8): ``activity_event`` is the raw event log,
 watchlist and hot-feed demotion. No existing table or row is touched; the
 revision therefore round-trips losslessly.
 """
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -36,9 +37,7 @@ def upgrade():
     op.create_index(
         op.f("ix_activity_event_event_type"), "activity_event", ["event_type"]
     )
-    op.create_index(
-        op.f("ix_activity_event_username"), "activity_event", ["username"]
-    )
+    op.create_index(op.f("ix_activity_event_username"), "activity_event", ["username"])
 
     op.create_table(
         "platform_daily",

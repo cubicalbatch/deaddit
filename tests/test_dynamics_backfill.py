@@ -201,9 +201,7 @@ def test_backfill_deterministic(scenario):
 
 def test_backfill_dry_run_writes_nothing(scenario):
     items = list(scenario["posts"].values()) + list(scenario["comments"].values())
-    scores_before = {
-        (type(item).__name__, item.id): item.score for item in items
-    }
+    scores_before = {(type(item).__name__, item.id): item.score for item in items}
     rows_before = _rows()
 
     report = seeding.backfill_history(dry_run=True)

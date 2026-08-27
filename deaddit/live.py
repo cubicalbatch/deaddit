@@ -76,7 +76,13 @@ def decode_cursor(raw: str | None) -> tuple[datetime, str, int] | None:
 
 
 def _keyset_predicate(
-    ts_col, id_col, ts: datetime, id_: int, newer: bool, kind: str, cursor_kind: str | None
+    ts_col,
+    id_col,
+    ts: datetime,
+    id_: int,
+    newer: bool,
+    kind: str,
+    cursor_kind: str | None,
 ):
     """Keyset comparison for one source against the global (ts, kind, id) cursor.
 
@@ -240,9 +246,9 @@ def _vote_events(newer: bool, cursor) -> list[_EventRow]:
     )
     rows = _fetch_rows(
         columns,
-        lambda s: s.outerjoin(vp, Vote.post_id == vp.id).outerjoin(
-            vc, Vote.comment_id == vc.id
-        ).outerjoin(vpc, vc.post_id == vpc.id),
+        lambda s: s.outerjoin(vp, Vote.post_id == vp.id)
+        .outerjoin(vc, Vote.comment_id == vc.id)
+        .outerjoin(vpc, vc.post_id == vpc.id),
         Vote.created_at,
         Vote.id,
         (),

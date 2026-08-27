@@ -5,6 +5,7 @@ Revises: d1f0a93b7c25
 Create Date: 2026-08-25 00:00:00.000000
 
 """
+
 from alembic import op
 
 from deaddit.dynamics.ranking import HOT_SQL_FRAGMENT
@@ -21,9 +22,7 @@ def upgrade():
     # 'hot'. The stored expression text must be byte-identical to the
     # ORDER BY fragment so SQLite's planner recognizes and uses it.
     op.create_index(op.f("ix_post_score"), "post", ["score"], unique=False)
-    op.execute(
-        f"CREATE INDEX ix_post_hot_expr ON post (({HOT_SQL_FRAGMENT}))"
-    )
+    op.execute(f"CREATE INDEX ix_post_hot_expr ON post (({HOT_SQL_FRAGMENT}))")
 
 
 def downgrade():

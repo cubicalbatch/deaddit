@@ -165,9 +165,7 @@ def test_summary_nonzero_after_fake_generations(app, client, db_session, fake_ll
 # ---------------------------------------------------------------------------
 
 
-def test_routes_endpoint_lists_rows_and_resolved_default(
-    app, client, db_session
-):
+def test_routes_endpoint_lists_rows_and_resolved_default(app, client, db_session):
     db_session.add_all(
         [
             ModelRoute(

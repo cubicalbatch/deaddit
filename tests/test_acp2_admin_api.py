@@ -63,7 +63,9 @@ def _noop_tools_allowed(api_url, model_name, **kwargs):
 # GET /admin/api/agents + presets
 
 
-def test_agent_list_serializes_config_and_run_tallies(seeded_db, admin_client, db_session):
+def test_agent_list_serializes_config_and_run_tallies(
+    seeded_db, admin_client, db_session
+):
     agent = _make_agent(
         db_session, "alice", config={"min_delay": 60, "max_run_seconds": 120}
     )
@@ -262,29 +264,49 @@ def test_force_run_executes_a_full_visit(seeded_db, admin_client, db_session, fa
 def _seed_drilldown(db_session, agent):
     now = datetime.utcnow()
     older = AgentRun(
-        agent_id=agent.id, trigger="schedule", status="completed",
-        started_at=now - timedelta(hours=2), finished_at=now,
+        agent_id=agent.id,
+        trigger="schedule",
+        status="completed",
+        started_at=now - timedelta(hours=2),
+        finished_at=now,
     )
     newer = AgentRun(
-        agent_id=agent.id, trigger="manual", status="failed",
-        started_at=now - timedelta(minutes=5), error_message="boom",
+        agent_id=agent.id,
+        trigger="manual",
+        status="failed",
+        started_at=now - timedelta(minutes=5),
+        error_message="boom",
     )
     db.session.add_all([older, newer])
     db.session.flush()
     turn_one = AgentTurn(
-        run_id=newer.id, seq=1, request_messages=[], response_message={},
-        model="llama3", latency_ms=42,
+        run_id=newer.id,
+        seq=1,
+        request_messages=[],
+        response_message={},
+        model="llama3",
+        latency_ms=42,
     )
     turn_two = AgentTurn(
-        run_id=newer.id, seq=2, request_messages=[], response_message={},
-        model="llama3", latency_ms=7,
+        run_id=newer.id,
+        seq=2,
+        request_messages=[],
+        response_message={},
+        model="llama3",
+        latency_ms=7,
     )
     db.session.add_all([turn_one, turn_two])
     db.session.flush()
     call = ToolCall(
-        run_id=newer.id, turn_id=turn_one.id, name="view_inbox",
-        arguments={}, result={}, ok=False, error="HTTP 503: sad",
-        duration_ms=12, created_at=now,
+        run_id=newer.id,
+        turn_id=turn_one.id,
+        name="view_inbox",
+        arguments={},
+        result={},
+        ok=False,
+        error="HTTP 503: sad",
+        duration_ms=12,
+        created_at=now,
     )
     db.session.add(call)
     db.session.commit()
@@ -324,7 +346,9 @@ def test_turns_endpoint_unknown_run_404(seeded_db, admin_client):
     assert admin_client.get("/admin/api/runs/9999/turns").status_code == 404
 
 
-def test_tool_calls_endpoint_serializes_invocations(seeded_db, admin_client, db_session):
+def test_tool_calls_endpoint_serializes_invocations(
+    seeded_db, admin_client, db_session
+):
     agent = _make_agent(db_session, "alice")
     _, _, turn_one, _, _call = _seed_drilldown(db_session, agent)
 
@@ -412,20 +436,41 @@ def test_admin_gate_redirects_anonymous_visitors(app, client, monkeypatch):
 def test_summarize_run_counts_actions_errors_and_creations(seeded_db, db_session):
     agent = _make_agent(db_session, "alice")
     run = AgentRun(
-        agent_id=agent.id, trigger="schedule", status="completed",
-        started_at=datetime.utcnow(), finished_at=datetime.utcnow(),
+        agent_id=agent.id,
+        trigger="schedule",
+        status="completed",
+        started_at=datetime.utcnow(),
+        finished_at=datetime.utcnow(),
     )
     db.session.add(run)
     db.session.flush()
     db.session.add_all(
         [
-            ToolCall(run_id=run.id, name="create_post", arguments={}, result={},
-                     ok=True, duration_ms=5),
-            ToolCall(run_id=run.id, name="create_post", arguments={}, result={},
-                     ok=True, duration_ms=6),
-            ToolCall(run_id=run.id, name="view_inbox", arguments={}, result={},
-                     ok=False, error="HTTP 500: upstream exploded",
-                     duration_ms=99),
+            ToolCall(
+                run_id=run.id,
+                name="create_post",
+                arguments={},
+                result={},
+                ok=True,
+                duration_ms=5,
+            ),
+            ToolCall(
+                run_id=run.id,
+                name="create_post",
+                arguments={},
+                result={},
+                ok=True,
+                duration_ms=6,
+            ),
+            ToolCall(
+                run_id=run.id,
+                name="view_inbox",
+                arguments={},
+                result={},
+                ok=False,
+                error="HTTP 500: upstream exploded",
+                duration_ms=99,
+            ),
         ]
     )
     db.session.commit()
@@ -443,8 +488,11 @@ def test_summarize_run_counts_actions_errors_and_creations(seeded_db, db_session
 def test_summarize_run_without_actions_writes_idle_episode(seeded_db, db_session):
     agent = _make_agent(db_session, "alice")
     run = AgentRun(
-        agent_id=agent.id, trigger="manual", status="completed",
-        started_at=datetime.utcnow(), finished_at=datetime.utcnow(),
+        agent_id=agent.id,
+        trigger="manual",
+        status="completed",
+        started_at=datetime.utcnow(),
+        finished_at=datetime.utcnow(),
     )
     db.session.add(run)
     db.session.commit()
@@ -526,8 +574,11 @@ def test_initial_messages_inject_backfills_and_recent_episodes(seeded_db, db_ses
     agent = _make_agent(db_session, "alice")
     db.session.add_all(
         [
-            AgentMemory(agent_id=agent.id, kind="backfill",
-                        content=f"{BACKFILL_PREFIX} she posted often"),
+            AgentMemory(
+                agent_id=agent.id,
+                kind="backfill",
+                content=f"{BACKFILL_PREFIX} she posted often",
+            ),
             AgentMemory(agent_id=agent.id, kind="episode", content="quiet visit"),
             AgentMemory(agent_id=agent.id, kind="episode", content="busy visit"),
         ]

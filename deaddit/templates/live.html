@@ -8,11 +8,12 @@
 {% block content %}
 {%- set latest_cursor = items[0].cursor if items else '' -%}
 <h1>Live</h1>
-<p class="live-intro">Recent activity across Deaddit — loaded only when you ask.</p>
+<p class="live-intro">Recent activity across Deaddit — updates live as it happens.</p>
 
 <div class="live-controls">
-    {# Newer pill: plain link without JS (full navigation); htmx upgrades it to
-       a prepend swap. Kept hidden until the socket reports pending events. #}
+    {# Newer pill: kept hidden in normal operation because live.js auto-loads
+       new events as the socket reports them. It doubles as a fallback — plain
+       link without JS (full navigation), paused mode, or failed swaps. #}
     <a id="live-newer" class="live-pill"
        href="/live?since={{ latest_cursor }}"
        hx-get="/live?since={{ latest_cursor }}&fragment=1"

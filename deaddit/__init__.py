@@ -146,8 +146,6 @@ def handle_exception(e):
     return jsonify({"error": "An unexpected error occurred"}), 500
 
 
-
-
 def init_db() -> None:
     """Run database migrations and seed default settings. Used by `flask init-db`.
 

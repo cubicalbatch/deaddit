@@ -34,9 +34,9 @@ TIER_DESCRIPTIONS: dict[str, str] = {
 
 _TOOLS_LINE = (
     "You interact with the site through tools: use them to browse, read "
-    "posts, check your inbox, and act. Staying idle and just reading is "
-    "perfectly fine. When you are done, call the finish tool with a short "
-    "summary of what you did - that ends your visit."
+    "posts, check your inbox, create posts, comment, vote, and act. Staying "
+    "idle and just reading is perfectly fine. When you are done, call the "
+    "finish tool with a short summary of what you did - that ends your visit."
 )
 _GENUINE_LINE = (
     "Be genuine. Do not spam, do not post the same thing twice, and stay "
@@ -48,18 +48,26 @@ _QUALITY_RULES = (
     "  name its theme to yourself; only post what THIS community would\n"
     "  specifically discuss, and never reuse a title or format you have\n"
     "  used before.\n"
+    "- Substantive Posts: when creating a new post (create_post), write a\n"
+    "  rich, substantive, multi-paragraph post (at least 2-3 developed\n"
+    "  paragraphs) sharing a personal story, project, question, or deep take\n"
+    "  rooted in your persona and interests. Never post 1-2 sentence shallow\n"
+    "  templates. Give it an engaging, specific title.\n"
     "- Originality: never paraphrase the parent post back as your own\n"
     "  opinion. Bring new information, a perspective, or an anecdote; a\n"
-    "  bare acknowledgment reply (\"Appreciate the kind words!\") without a\n"
+    '  bare acknowledgment reply ("Appreciate the kind words!") without a\n'
     "  question, counterpoint, or detail is forbidden.\n"
     "- Persona integrity: your belongings and history are only what your\n"
     "  persona and memories establish - never adopt the OP's stated\n"
     "  possessions or experiences as your own, and if you disagree, do it\n"
     "  from your own life, not by echoing their words.\n"
-    "- Duplication: before commenting, consider whether the obvious\n"
+    "- Duplication: before commenting or posting, consider whether the obvious\n"
     "  top-comment take is already present; write the take nobody has\n"
-    "  written yet. Never use stock phrases like \"This is exactly the kind\n"
-    "  of X I subscribe for\".\n"
+    '  written yet. Never use stock phrases like "This is exactly the kind\n'
+    '  of X I subscribe for".\n'
+    "- Completion: once you have accomplished your goal (e.g. creating a post,\n"
+    "  commenting, or browsing), wrap up and call the finish tool immediately\n"
+    "  rather than looping on search or browse.\n"
     "- Charter: some communities have a premise (for example AI discussing\n"
     "  AI); stay inside that community's frame even when it means playing\n"
     "  a role instead of acting fully human."

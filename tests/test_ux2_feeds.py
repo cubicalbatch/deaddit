@@ -42,9 +42,7 @@ def feed_db(app):
     from datetime import datetime, timedelta
 
     base = datetime(2026, 8, 24, 12, 0, 0)
-    users = [
-        User(username=f"u{i}", bio="b", interests="[]") for i in range(3)
-    ]
+    users = [User(username=f"u{i}", bio="b", interests="[]") for i in range(3)]
     subs = [
         Subdeaddit(name="alpha", description="Alpha sub"),
         Subdeaddit(name="beta", description="Beta sub"),
@@ -79,6 +77,7 @@ def feed_db(app):
     _db.session.commit()
 
     return {"posts": posts}
+
 
 def _index_ctx(ctx):
     matches = [c for c in ctx if c["name"] == "index.html"]
@@ -193,8 +192,7 @@ class TestRails:
         gamma = Subdeaddit(name="gamma", description="Empty sub")
         # Pad with empty subs so the top-6 cap is actually exercised.
         filler_subs = [
-            Subdeaddit(name=f"fill{i}", description=f"filler {i}")
-            for i in range(5)
+            Subdeaddit(name=f"fill{i}", description=f"filler {i}") for i in range(5)
         ]
         from deaddit import db as _db
 
@@ -252,7 +250,9 @@ class TestRails:
         assert rail_users[0]["username"] == "u2"
         for row in rail_users:
             assert set(row) == {"username", "post_count"}
-        assert any(row["username"] == "lonely" and row["post_count"] == 0 for row in rail_users)
+        assert any(
+            row["username"] == "lonely" and row["post_count"] == 0 for row in rail_users
+        )
 
 
 class TestSubdeadditContext:

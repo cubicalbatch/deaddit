@@ -14,7 +14,6 @@ from deaddit.extensions import socketio
 logger = logging.getLogger(__name__)
 
 
-
 def handle_socket_errors(f):
     """Decorator to handle socket errors gracefully."""
 

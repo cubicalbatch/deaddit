@@ -93,7 +93,7 @@ def clear_routes() -> None:
 
 
 def ensure_seeded() -> None:
-    """Guarantee an active 'default'-tier route exists, seeded from Config.
+    """Guarantee an active 'default'-tier route exists, seeded from Config / LLMProvider.
 
     Called lazily from :func:`resolve`; the process-local ``_routes_checked``
     flag keeps the existence query to one per routes-table generation.
@@ -102,21 +102,54 @@ def ensure_seeded() -> None:
     if _routes_checked:
         return
     if not ModelRoute.query.filter_by(tier="default", is_active=True).first():
+        default_provider = None
+        try:
+            from deaddit.models import LLMProvider
+
+            default_provider = LLMProvider.get_default()
+        except Exception:
+            pass
+
+        default_api = (
+            default_provider.api_url
+            if default_provider and default_provider.api_url
+            else Config.get("OPENAI_API_URL", "http://localhost/v1")
+        )
+        default_model = (
+            default_provider.default_model
+            if default_provider and default_provider.default_model
+            else Config.get("OPENAI_MODEL", "llama3")
+        )
+
         db.session.add(
             ModelRoute(
                 tier="default",
-                model_name=Config.get("OPENAI_MODEL", "llama3"),
-                api_url=Config.get("OPENAI_API_URL", "http://localhost/v1"),
+                model_name=default_model,
+                api_url=default_api,
             )
         )
         db.session.commit()
-        logger.info("Seeded default model route from OPENAI_MODEL config")
+        logger.info(
+            "Seeded default model route from default provider / OPENAI_MODEL config"
+        )
     _routes_checked = True
 
 
 def resolve(user_persona: str | None = None) -> tuple[str, str]:
     """Resolve ``(api_url, model_name)`` for a request, reading state fresh."""
-    default_api_url = Config.get("OPENAI_API_URL", "http://localhost/v1")
+    default_provider = None
+    try:
+        from deaddit.models import LLMProvider
+
+        default_provider = LLMProvider.get_default()
+    except Exception:
+        pass
+
+    default_api_url = (
+        default_provider.api_url
+        if default_provider and default_provider.api_url
+        else Config.get("OPENAI_API_URL", "http://localhost/v1")
+    )
 
     # 1. CLI/process override wins outright.
     if _override:
@@ -140,5 +173,8 @@ def resolve(user_persona: str | None = None) -> tuple[str, str]:
     if endpoint_model:
         return default_api_url, endpoint_model
 
-    # 5. Global config fallback.
+    # 5. Default provider's model or global config fallback.
+    if default_provider and default_provider.default_model:
+        return default_api_url, default_provider.default_model
+
     return default_api_url, Config.get("OPENAI_MODEL", "llama3")

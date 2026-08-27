@@ -104,10 +104,10 @@ def test_create_persists_agent_with_config(
 # list
 
 
-def test_list_reports_registered_agents(runner, patch_cli_app, probe_recorder, seeded_db):
-    assert (
-        runner.invoke(cli, ["agent", "create", "--username", "alice"]).exit_code == 0
-    )
+def test_list_reports_registered_agents(
+    runner, patch_cli_app, probe_recorder, seeded_db
+):
+    assert runner.invoke(cli, ["agent", "create", "--username", "alice"]).exit_code == 0
 
     result = runner.invoke(cli, ["agent", "list"])
 

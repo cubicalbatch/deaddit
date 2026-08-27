@@ -5,6 +5,7 @@ Revises: e5d7f9a1c3b9
 Create Date: 2026-08-25 00:00:00.000000
 
 """
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -36,8 +37,12 @@ def upgrade():
     )
     op.create_index(op.f("ix_report_reporter"), "report", ["reporter"], unique=False)
     op.create_index(op.f("ix_report_post_id"), "report", ["post_id"], unique=False)
-    op.create_index(op.f("ix_report_comment_id"), "report", ["comment_id"], unique=False)
-    op.create_index(op.f("ix_report_created_at"), "report", ["created_at"], unique=False)
+    op.create_index(
+        op.f("ix_report_comment_id"), "report", ["comment_id"], unique=False
+    )
+    op.create_index(
+        op.f("ix_report_created_at"), "report", ["created_at"], unique=False
+    )
 
     op.create_table(
         "subdeaddit_moderator",

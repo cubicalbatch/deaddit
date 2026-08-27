@@ -168,8 +168,7 @@ class AttemptRecorder:
             db.session.commit()
         except Exception:
             logger.warning(
-                "LLM ledger write failed (request_id=%s attempt=%s); "
-                "skipping row",
+                "LLM ledger write failed (request_id=%s attempt=%s); skipping row",
                 row.request_id,
                 row.attempt,
                 exc_info=True,

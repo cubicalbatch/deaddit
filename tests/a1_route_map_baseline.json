@@ -573,5 +573,101 @@
     "methods": [
       "GET"
     ]
+  },
+  {
+    "rule": "/admin/api/providers",
+    "endpoint": "admin.api_list_providers",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/providers",
+    "endpoint": "admin.api_create_provider",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/providers/<int:provider_id>",
+    "endpoint": "admin.api_get_provider",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/providers/<int:provider_id>/update",
+    "endpoint": "admin.api_update_provider",
+    "methods": [
+      "POST",
+      "PUT"
+    ]
+  },
+  {
+    "rule": "/admin/api/providers/<int:provider_id>",
+    "endpoint": "admin.api_update_provider",
+    "methods": [
+      "POST",
+      "PUT"
+    ]
+  },
+  {
+    "rule": "/admin/api/providers/<int:provider_id>/delete",
+    "endpoint": "admin.api_delete_provider",
+    "methods": [
+      "DELETE",
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/providers/<int:provider_id>",
+    "endpoint": "admin.api_delete_provider",
+    "methods": [
+      "DELETE"
+    ]
+  },
+  {
+    "rule": "/admin/api/providers/<int:provider_id>/set-default",
+    "endpoint": "admin.api_set_default_provider",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/providers/<int:provider_id>/refresh-models",
+    "endpoint": "admin.api_refresh_provider_models",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/providers/<int:provider_id>/models",
+    "endpoint": "admin.api_get_provider_models",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/agents/<int:agent_id>/update",
+    "endpoint": "admin.api_update_agent",
+    "methods": [
+      "POST",
+      "PUT"
+    ]
+  },
+  {
+    "rule": "/admin/api/agents/<int:agent_id>",
+    "endpoint": "admin.api_update_agent",
+    "methods": [
+      "POST",
+      "PUT"
+    ]
+  },
+  {
+    "rule": "/admin/api/users/generate",
+    "endpoint": "admin.api_generate_users",
+    "methods": [
+      "POST"
+    ]
   }
 ]

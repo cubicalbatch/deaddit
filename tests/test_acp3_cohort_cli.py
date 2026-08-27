@@ -164,8 +164,8 @@ def test_valid_spec_passes():
             id="min-above-max",
         ),
         pytest.param(
-            lambda s: s["agents"][0].update(max_actions_per_run=13),
-            "max_actions_per_run: guardrail cap must be 12",
+            lambda s: s["agents"][0].update(max_actions_per_run=31),
+            "max_actions_per_run: guardrail cap must be 30",
             id="wrong-action-cap",
         ),
         pytest.param(
@@ -209,9 +209,7 @@ def test_each_rule_violation_is_reported(mutation, expected_fragment):
 
 def test_guardrail_caps_at_exact_defaults_are_accepted():
     spec = _spec()
-    spec["agents"][0]["max_actions_per_run"] = DEFAULT_CONFIG[
-        "max_actions_per_run"
-    ]
+    spec["agents"][0]["max_actions_per_run"] = DEFAULT_CONFIG["max_actions_per_run"]
     spec["agents"][0]["max_run_seconds"] = DEFAULT_CONFIG["max_run_seconds"]
     assert validate_spec(spec) == []
 
@@ -247,9 +245,7 @@ def test_load_spec_rejects_invalid_json(tmp_path):
 
 
 def _invoke_cohort(runner, spec_path, *extra):
-    return runner.invoke(
-        cli, ["agent", "create-cohort", "--spec", spec_path, *extra]
-    )
+    return runner.invoke(cli, ["agent", "create-cohort", "--spec", spec_path, *extra])
 
 
 def test_create_cohort_creates_disabled_rows_inside_guardrails(
@@ -273,13 +269,9 @@ def test_create_cohort_creates_disabled_rows_inside_guardrails(
         assert config["min_delay"] == entry["min_delay"]
         assert config["max_delay"] == entry["max_delay"]
         assert (
-            config["max_actions_per_run"]
-            == DEFAULT_CONFIG["max_actions_per_run"]
-            == 12
+            config["max_actions_per_run"] == DEFAULT_CONFIG["max_actions_per_run"] == 30
         )
-        assert (
-            config["max_run_seconds"] == DEFAULT_CONFIG["max_run_seconds"] == 300
-        )
+        assert config["max_run_seconds"] == DEFAULT_CONFIG["max_run_seconds"] == 300
         assert "daily_request_ceiling" not in config
     assert f"Cohort v{COHORT_SPEC_VERSION}: 10 agents" in result.output
     assert "probe evidence:" in result.output
@@ -314,7 +306,9 @@ def test_create_cohort_is_idempotent(
     assert Agent.query.count() == 10  # updates, never duplicates
 
 
-def test_enable_flag_enables_rows(runner, patch_cli_app, seeded_users, fake_llm, tmp_path):
+def test_enable_flag_enables_rows(
+    runner, patch_cli_app, seeded_users, fake_llm, tmp_path
+):
     _enqueue_ok_probe(fake_llm)
     result = _invoke_cohort(runner, _write_spec(tmp_path, _spec()), "--enable")
     assert result.exit_code == 0, result.output
@@ -469,9 +463,7 @@ def test_db_envvar_is_honoured(runner, tmp_path, monkeypatch, fake_llm):
         assert Agent.query.count() == 8
 
 
-def test_db_override_queries_alternate_db_not_default(
-    runner, tmp_path, fake_llm
-):
+def test_db_override_queries_alternate_db_not_default(runner, tmp_path, fake_llm):
     """Personas missing from the overridden DB fail against THAT db only:
     proof the override reaches the persona lookup, not just writes."""
     _enqueue_ok_probe(fake_llm)

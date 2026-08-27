@@ -1,5 +1,4 @@
-"""Deterministic coverage for the agent tool executor guardrails.
-"""
+"""Deterministic coverage for the agent tool executor guardrails."""
 
 from __future__ import annotations
 
@@ -121,6 +120,15 @@ def test_missing_required_field_rejected_without_side_effects(ctx, db_session):
 # Rate caps
 
 
+def _new_run_ctx(existing_ctx, db_session):
+    run = AgentRun(agent_id=existing_ctx.agent.id, trigger="manual", status="running")
+    db_session.add(run)
+    db_session.commit()
+    return ToolContext(
+        agent=existing_ctx.agent, run=run, user_username=existing_ctx.user_username
+    )
+
+
 def test_third_post_within_hour_hits_rate_cap(ctx, db_session):
     payloads = [
         {"subdeaddit": "testsub", "title": f"Post {i}", "content": f"Unique body {i}"}
@@ -128,8 +136,10 @@ def test_third_post_within_hour_hits_rate_cap(ctx, db_session):
     ]
 
     first = execute("create_post", payloads[0], ctx)
-    second = execute("create_post", payloads[1], ctx)
-    third = execute("create_post", payloads[2], ctx)
+    ctx2 = _new_run_ctx(ctx, db_session)
+    second = execute("create_post", payloads[1], ctx2)
+    ctx3 = _new_run_ctx(ctx, db_session)
+    third = execute("create_post", payloads[2], ctx3)
 
     assert first["ok"] is True
     assert second["ok"] is True
@@ -140,8 +150,30 @@ def test_third_post_within_hour_hits_rate_cap(ctx, db_session):
     assert [row.ok for row in rows] == [True, True, False]
 
 
+def test_per_run_post_limit_rejects_second_post_in_same_run(ctx, db_session):
+    first_payload = {
+        "subdeaddit": "testsub",
+        "title": "First post in session",
+        "content": "A thoughtful and unique post about morning coffee.",
+    }
+    second_payload = {
+        "subdeaddit": "testsub",
+        "title": "Second post in session",
+        "content": "Another completely distinct topic about afternoon tea.",
+    }
+
+    first = execute("create_post", first_payload, ctx)
+    second = execute("create_post", second_payload, ctx)
+
+    assert first["ok"] is True
+    assert second["ok"] is False
+    assert "already created a post" in second["error"]
+    assert Post.query.count() == 4  # 3 seeded + 1 created
+
+
 # ---------------------------------------------------------------------------
 # Duplicate suppression
+# ---------------------------------------------------------------------------
 
 
 def test_similar_own_post_rejected_but_distinct_passes(ctx, db_session):
@@ -155,6 +187,7 @@ def test_similar_own_post_rejected_but_distinct_passes(ctx, db_session):
 
     ok = execute("create_post", original, ctx)
     dup = execute("create_post", near_duplicate, ctx)
+    ctx2 = _new_run_ctx(ctx, db_session)
     distinct = execute(
         "create_post",
         {
@@ -162,16 +195,14 @@ def test_similar_own_post_rejected_but_distinct_passes(ctx, db_session):
             "title": "A completely different recipe",
             "content": "Boil water, add pasta, wait eleven minutes, drain well.",
         },
-        ctx,
+        ctx2,
     )
 
     assert ok["ok"] is True
     assert dup["ok"] is False
     assert "too similar" in dup["error"]
     assert distinct["ok"] is True
-    titles = {
-        p.title for p in Post.query.filter_by(user="alice", model="agent:alice")
-    }
+    titles = {p.title for p in Post.query.filter_by(user="alice", model="agent:alice")}
     assert len(titles) == 2
 
 

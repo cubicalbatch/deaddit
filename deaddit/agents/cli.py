@@ -47,7 +47,6 @@ def agent(ctx, db_uri) -> None:
     ctx.obj["db_uri"] = db_uri
 
 
-
 @agent.command("create")
 @click.option("--username", required=True, help="Existing user persona to embody")
 @click.option(
@@ -177,9 +176,7 @@ def create_cohort(ctx, spec_path, backfill_memory, enable) -> None:
         for entry in spec["agents"]:
             extra_config = None
             if "daily_request_ceiling" in entry:
-                extra_config = {
-                    "daily_request_ceiling": entry["daily_request_ceiling"]
-                }
+                extra_config = {"daily_request_ceiling": entry["daily_request_ceiling"]}
             row = _upsert_agent(
                 entry["username"],
                 entry["tier"],
@@ -256,8 +253,14 @@ def _fmt_dt(value) -> str:
 
 @agent.command("run-once")
 @click.argument("username")
+@click.option(
+    "--intent",
+    type=click.Choice(["post", "browse"]),
+    default=None,
+    help="Force a specific intent (post or browse).",
+)
 @click.pass_context
-def run_once_command(ctx, username) -> None:
+def run_once_command(ctx, username, intent) -> None:
     """Run one synchronous visit for USERNAME and print the trace."""
     app = _make_app((ctx.obj or {}).get("db_uri"))
     with app.app_context():
@@ -266,7 +269,7 @@ def run_once_command(ctx, username) -> None:
             raise click.ClickException(f"No agent registered for user '{username}'")
 
         try:
-            run = run_once(username, trigger="manual")
+            run = run_once(username, trigger="manual", force_intent=intent)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
 
@@ -301,8 +304,12 @@ def _finish_summary(calls):
     for call in reversed(calls):
         if call.name == "finish":
             try:
-                result = json.loads(call.result or "{}")
-            except ValueError:
+                result = (
+                    call.result
+                    if isinstance(call.result, dict)
+                    else json.loads(call.result or "{}")
+                )
+            except (ValueError, TypeError):
                 return None
             return result.get("summary") or result.get("mood")
     return None
@@ -350,7 +357,9 @@ def _pct(rate) -> str:
     help="Window end 'YYYY-MM-DD HH:MM:SS' (default: MAX(created_at))",
 )
 @click.option("--baseline-days", type=int, default=7, show_default=True)
-@click.option("--json", "as_json", is_flag=True, help="Dump the raw report dict as JSON")
+@click.option(
+    "--json", "as_json", is_flag=True, help="Dump the raw report dict as JSON"
+)
 def parity_report(db_path, window_start, window_end, baseline_days, as_json) -> None:
     """Compute parity-gate criteria (a)-(c) over a window (pure SQL, read-only)."""
     conn = connect_ro(db_path)
@@ -430,8 +439,13 @@ def parity_report(db_path, window_start, window_end, baseline_days, as_json) -> 
 @click.option("--items", "min_items", type=int, default=20, show_default=True)
 @click.option("--window-start", default=None, help="'YYYY-MM-DD HH:MM:SS'")
 @click.option("--window-end", default=None, help="'YYYY-MM-DD HH:MM:SS'")
-@click.option("-o", "--output", type=click.Path(), default=None,
-              help="Write the markdown packet here instead of stdout")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(),
+    default=None,
+    help="Write the markdown packet here instead of stdout",
+)
 def sample_packet(db_path, seed, min_items, window_start, window_end, output) -> None:
     """Generate the deterministic reviewer-sampling packet (criterion d)."""
     conn = connect_ro(db_path)

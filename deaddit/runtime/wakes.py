@@ -153,7 +153,6 @@ class WakeScheduler:
             logger.info("Interrupted %d stale agent run(s)", interrupted)
         return interrupted
 
-
     # ------------------------------------------------------------------
     # Poller
     # ------------------------------------------------------------------
@@ -213,8 +212,7 @@ class WakeScheduler:
                         )
                         db.session.commit()
                         logger.info(
-                            "Agent %s hit daily ceiling (%d requests); "
-                            "deferred %ds",
+                            "Agent %s hit daily ceiling (%d requests); deferred %ds",
                             agent.user_username,
                             used,
                             CEILING_DEFER_SECONDS,

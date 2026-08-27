@@ -144,11 +144,7 @@ def compute_report(
         if baseline_total_per_day > 0
         else None
     )
-    criterion_a_pass = (
-        None
-        if ratio is None
-        else 0.7 <= ratio <= 1.3
-    )
+    criterion_a_pass = None if ratio is None else 0.7 <= ratio <= 1.3
 
     # Criterion (b): duplicate-suppression rejection rate over write attempts
     # (loop-health signal, ToolCall aggregates). Rejections matched by

@@ -124,7 +124,9 @@ def test_nonempty_secrets_are_refused_env_only(admin_client, db_session):
     assert body["success"] is False
     assert "environment-only" in body["message"]
 
-    resp = admin_client.post("/admin/api/save-deaddit-config", json={"api_token": API_TOKEN})
+    resp = admin_client.post(
+        "/admin/api/save-deaddit-config", json={"api_token": API_TOKEN}
+    )
     body = resp.get_json()
     assert body["success"] is False
     assert "environment-only" in body["message"]
@@ -199,9 +201,7 @@ def test_save_deaddit_config_response_has_no_secret_echo(admin_client, db_sessio
     assert API_TOKEN not in text
 
 
-def test_get_endpoint_key_never_returns_full_key(
-    admin_client, db_session, monkeypatch
-):
+def test_get_endpoint_key_never_returns_full_key(admin_client, db_session, monkeypatch):
     """Env-provided keys surface only as has_key/last4, never plaintext."""
     monkeypatch.setenv("OPENAI_KEY", ENDPOINT_KEY)
 
@@ -224,7 +224,8 @@ def test_get_endpoint_key_never_returns_full_key(
 def test_get_endpoint_key_reports_unset(admin_client, db_session):
     """Virgin deployments report has_key=False (no sentinel fallback — A6 fix)."""
     resp = admin_client.post(
-        "/admin/api/get-endpoint-key", json={"endpoint_url": "http://localhost:11434/v1"}
+        "/admin/api/get-endpoint-key",
+        json={"endpoint_url": "http://localhost:11434/v1"},
     )
     body = resp.get_json()
     assert body["success"] is True

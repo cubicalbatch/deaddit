@@ -35,7 +35,9 @@ def configure_logging() -> None:
 
     file_target = os.environ.get("DEADDIT_LOG_FILE")
     if file_target is None:
-        file_target = str(Path(__file__).resolve().parent.parent / "instance" / "deaddit.log")
+        file_target = str(
+            Path(__file__).resolve().parent.parent / "instance" / "deaddit.log"
+        )
     if file_target:
         Path(file_target).parent.mkdir(parents=True, exist_ok=True)
         handlers["file"] = {

@@ -78,7 +78,9 @@ class TestRepetitionDetector:
         duplicate = (
             "I REALLY think this exact sentence is the best take available TODAY!"
         )
-        comment = create_comment(post_id=author_and_post.id, content=duplicate, user="bob")
+        comment = create_comment(
+            post_id=author_and_post.id, content=duplicate, user="bob"
+        )
 
         flags = DegeneracyFlag.query.filter_by(kind="repetition").all()
         assert len(flags) == 1
@@ -93,7 +95,9 @@ class TestRepetitionDetector:
         self, app, db_session, seeded_db, author_and_post
     ):
         create_comment(
-            post_id=author_and_post.id, content="First distinct view here.", user="alice"
+            post_id=author_and_post.id,
+            content="First distinct view here.",
+            user="alice",
         )
         create_comment(
             post_id=author_and_post.id,
@@ -143,8 +147,12 @@ class TestHotDemotion:
 
         now = datetime.utcnow()
         # echo_a's higher score leads hot outright before demotion.
-        loud = Post(title="loud", content="x", score=100, user="echo_a", subdeaddit_name="demo")
-        quiet = Post(title="quiet", content="y", score=10, user="clean_b", subdeaddit_name="demo")
+        loud = Post(
+            title="loud", content="x", score=100, user="echo_a", subdeaddit_name="demo"
+        )
+        quiet = Post(
+            title="quiet", content="y", score=10, user="clean_b", subdeaddit_name="demo"
+        )
         db_session.add_all([loud, quiet])
         db_session.commit()
 
@@ -344,7 +352,13 @@ class TestCommunityScans:
         )
         for i, u in enumerate(("u1", "u2", "u3")):
             db_session.add(
-                Post(title=f"once {i}", content="c", score=0, user=u, subdeaddit_name="echo")
+                Post(
+                    title=f"once {i}",
+                    content="c",
+                    score=0,
+                    user=u,
+                    subdeaddit_name="echo",
+                )
             )
         db_session.commit()
 
@@ -363,9 +377,7 @@ class TestCommunityScans:
             == 1
         )
 
-    def test_brigading_scan_detects_overlapping_pairs(
-        self, app, db_session, seeded_db
-    ):
+    def test_brigading_scan_detects_overlapping_pairs(self, app, db_session, seeded_db):
         for name in ("victim", "ring_a", "ring_b", "lone"):
             _ensure_user(db_session, name)
         _ensure_sub(db_session, "brig")
@@ -373,7 +385,11 @@ class TestCommunityScans:
         targets = []
         for i in range(12):
             p = Post(
-                title=f"t{i}", content="c", score=2, user="victim", subdeaddit_name="brig"
+                title=f"t{i}",
+                content="c",
+                score=2,
+                user="victim",
+                subdeaddit_name="brig",
             )
             db_session.add(p)
             targets.append(p)

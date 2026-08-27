@@ -11,7 +11,6 @@ import logging
 import sqlite3
 from pathlib import Path
 
-import pytest
 from alembic.config import Config as AlembicConfig
 from alembic.script import ScriptDirectory
 
@@ -61,9 +60,7 @@ def test_execute_job_captures_log_lines(app, monkeypatch):
         _db.session.expire_all()
 
         assert job.status == JobStatus.COMPLETED
-        rows = (
-            JobLog.query.filter_by(job_id=job.id).order_by(JobLog.seq).all()
-        )
+        rows = JobLog.query.filter_by(job_id=job.id).order_by(JobLog.seq).all()
         # 24 synthetic lines + execute_job's own bookkeeping lines.
         assert len(rows) >= 24
         assert any("synthetic line 0" in r.message for r in rows)
@@ -114,9 +111,7 @@ def test_log_write_failure_never_breaks_job(app, monkeypatch):
     with app.app_context():
         job = _make_job()
 
-        with patch(
-            "deaddit.runtime.joblog.JobLogHandler._write_batch", boom_write
-        ):
+        with patch("deaddit.runtime.joblog.JobLogHandler._write_batch", boom_write):
             jobs.execute_job(job.id, app=app)
             _db.session.expire_all()
 
@@ -190,5 +185,3 @@ def test_migration_upgrade_downgrade_round_trip(tmp_path):
     down = runner.invoke(args=["db", "downgrade", _PRE_UX5_HEAD])
     assert down.exit_code == 0, down.output
     assert "job_log" not in _table_names(db_path)
-
-

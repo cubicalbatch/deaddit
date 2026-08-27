@@ -49,9 +49,7 @@ def validate_spec(spec: dict) -> list[str]:
 
     version = spec.get("version")
     if version != COHORT_SPEC_VERSION:
-        errors.append(
-            f"version: must be {COHORT_SPEC_VERSION}, got {version!r}"
-        )
+        errors.append(f"version: must be {COHORT_SPEC_VERSION}, got {version!r}")
 
     endpoint = spec.get("endpoint")
     if not isinstance(endpoint, dict):
@@ -95,20 +93,14 @@ def validate_spec(spec: dict) -> list[str]:
         tier = entry.get("tier")
         if tier not in valid_tiers:
             errors.append(
-                f"{prefix}.tier: must be one of {sorted(valid_tiers)}, "
-                f"got {tier!r}"
+                f"{prefix}.tier: must be one of {sorted(valid_tiers)}, got {tier!r}"
             )
 
         min_delay = _as_positive_int(entry, "min_delay", prefix, errors)
         max_delay = _as_positive_int(entry, "max_delay", prefix, errors)
-        if (
-            min_delay is not None
-            and max_delay is not None
-            and min_delay > max_delay
-        ):
+        if min_delay is not None and max_delay is not None and min_delay > max_delay:
             errors.append(
-                f"{prefix}: min_delay ({min_delay}) must be <= max_delay "
-                f"({max_delay})"
+                f"{prefix}: min_delay ({min_delay}) must be <= max_delay ({max_delay})"
             )
 
         if "daily_request_ceiling" in entry:

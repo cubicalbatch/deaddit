@@ -226,6 +226,7 @@ def test_notification_insert_failure_does_not_break_create_comment(
     returns normally with the comment persisted, no Notification row written,
     and the shared session immediately usable again.
     """
+
     def boom(mapper, connection, target):
         raise RuntimeError("simulated insert failure")
 
@@ -242,7 +243,7 @@ def test_notification_insert_failure_does_not_break_create_comment(
     assert Notification.query.count() == 0
 
     # The shared session is still usable afterwards.
-    user = User(username="carol", bio="c", interests='[]')
+    user = User(username="carol", bio="c", interests="[]")
     db_session.add(user)
     db_session.commit()
     assert db_session.get(User, "carol") is not None
@@ -397,9 +398,7 @@ def test_view_inbox_tool_returns_items_and_marks_them_read(
     assert first["unread"] == 2
 
     db_session.expire_all()
-    assert all(
-        db_session.get(Notification, row.id).read_at is not None for row in rows
-    )
+    assert all(db_session.get(Notification, row.id).read_at is not None for row in rows)
     assert unread_count("alice") == 0
 
     second = execute("view_inbox", {}, ctx)
@@ -446,9 +445,7 @@ def test_build_initial_messages_includes_memory_then_unread_notice(
     assert kickoff.index("Your memory:") < kickoff.index("You have 2 unread replies")
 
 
-def test_build_initial_messages_omits_notice_when_nothing_unread(
-    seeded_db, db_session
-):
+def test_build_initial_messages_omits_notice_when_nothing_unread(seeded_db, db_session):
     agent = _agent_with_memory(db_session, "alice")
 
     kickoff = build_initial_messages(agent)[-1]["content"]

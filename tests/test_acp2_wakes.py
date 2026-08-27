@@ -50,7 +50,9 @@ def _wait_until(predicate, timeout: float = 5.0) -> bool:
 # Boot recovery: stale-run interruption
 
 
-def test_recover_interrupts_only_runs_past_budget_plus_grace(seeded_db, db_session, app):
+def test_recover_interrupts_only_runs_past_budget_plus_grace(
+    seeded_db, db_session, app
+):
     agent = _make_agent(db_session, "alice", config={"max_run_seconds": 300})
     now = datetime.utcnow()
     stale = AgentRun(
@@ -153,7 +155,9 @@ def test_poll_tick_is_flag_gated(seeded_db, db_session, app, monkeypatch):
 
     calls: list[str] = []
     monkeypatch.setattr(
-        wakes, "run_once", lambda username, *, trigger="schedule": calls.append(username)
+        wakes,
+        "run_once",
+        lambda username, *, trigger="schedule": calls.append(username),
     )
     scheduler = WakeScheduler(app)
     scheduler._poll_once()
@@ -168,7 +172,9 @@ def test_poll_tick_is_flag_gated(seeded_db, db_session, app, monkeypatch):
 # Poll tick: global concurrency bound
 
 
-def test_global_semaphore_bounds_concurrent_wakes(seeded_db, db_session, app, monkeypatch):
+def test_global_semaphore_bounds_concurrent_wakes(
+    seeded_db, db_session, app, monkeypatch
+):
     _set_flag("true")
     Setting.set_value("AGENT_MAX_CONCURRENT_RUNS", "2")
     db.session.add(User(username="carol", bio="third persona"))
@@ -256,7 +262,9 @@ def test_daily_ceiling_defers_next_wake_by_thirty_minutes(
 
     calls: list[str] = []
     monkeypatch.setattr(
-        wakes, "run_once", lambda username, *, trigger="schedule": calls.append(username)
+        wakes,
+        "run_once",
+        lambda username, *, trigger="schedule": calls.append(username),
     )
     scheduler = WakeScheduler(app)
     scheduler._poll_once()
@@ -278,7 +286,9 @@ def test_under_ceiling_agent_launches_normally(seeded_db, db_session, app, monke
 
     calls: list[str] = []
     monkeypatch.setattr(
-        wakes, "run_once", lambda username, *, trigger="schedule": calls.append(username)
+        wakes,
+        "run_once",
+        lambda username, *, trigger="schedule": calls.append(username),
     )
     scheduler = WakeScheduler(app)
     scheduler._poll_once()
@@ -297,7 +307,9 @@ def test_zero_ceiling_means_unlimited(seeded_db, db_session, app, monkeypatch):
 
     calls: list[str] = []
     monkeypatch.setattr(
-        wakes, "run_once", lambda username, *, trigger="schedule": calls.append(username)
+        wakes,
+        "run_once",
+        lambda username, *, trigger="schedule": calls.append(username),
     )
     scheduler = WakeScheduler(app)
     scheduler._poll_once()

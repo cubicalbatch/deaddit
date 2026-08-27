@@ -62,6 +62,7 @@ def _stored(row) -> dict:
     """ToolCall.result may come back as dict (JSON column) or legacy str."""
     return json.loads(row.result) if isinstance(row.result, str) else row.result
 
+
 def test_happy_path_two_turn_run(seeded_db, db_session, fake_llm):
     agent = _make_agent(db_session, "bob")
     fake_llm.enqueue(
@@ -89,7 +90,6 @@ def test_happy_path_two_turn_run(seeded_db, db_session, fake_llm):
     }
     assert run.finished_at is not None
 
-
     db_session.refresh(agent)
     assert agent.status == "idle"
     assert agent.consecutive_failures == 0
@@ -105,6 +105,7 @@ def test_happy_path_two_turn_run(seeded_db, db_session, fake_llm):
     wire_tools = {t["function"]["name"] for t in payload["tools"]}
     assert wire_tools == ALL_TOOL_NAMES
     assert all(t["type"] == "function" for t in payload["tools"])
+
 
 def test_happy_path_tool_calls_audited_and_summary_persisted(
     seeded_db, db_session, fake_llm
@@ -159,7 +160,9 @@ def test_plain_content_response_nudged_then_terminates(seeded_db, db_session, fa
 # Malformed tool arguments keep the loop alive
 
 
-def test_malformed_arguments_rejected_but_loop_continues(seeded_db, db_session, fake_llm):
+def test_malformed_arguments_rejected_but_loop_continues(
+    seeded_db, db_session, fake_llm
+):
     _make_agent(db_session, "alice")
     broken = {
         "id": "call_bad",
@@ -175,9 +178,11 @@ def test_malformed_arguments_rejected_but_loop_continues(seeded_db, db_session, 
 
     assert run.status == "completed"
     assert run.action_count == 2
-    bad_call = ToolCall.query.filter_by(name="create_post").order_by(
-        ToolCall.id.desc()
-    ).first()
+    bad_call = (
+        ToolCall.query.filter_by(name="create_post")
+        .order_by(ToolCall.id.desc())
+        .first()
+    )
     assert bad_call is not None
     assert bad_call.ok is False
     outcome = _stored(bad_call)
@@ -197,7 +202,9 @@ def test_malformed_arguments_rejected_but_loop_continues(seeded_db, db_session, 
 # Transport failure bookkeeping and consecutive-failure disabling
 
 
-def test_permanent_failure_marks_run_failed_and_strikes_agent(seeded_db, db_session, fake_llm):
+def test_permanent_failure_marks_run_failed_and_strikes_agent(
+    seeded_db, db_session, fake_llm
+):
     agent = _make_agent(db_session, "bob")
     fake_llm.enqueue_error(PermanentLLMError("boom"))
 
@@ -245,7 +252,9 @@ def test_max_actions_per_run_budget_stops_the_loop(seeded_db, db_session, fake_l
 # Scheduling hint
 
 
-def test_next_run_at_drawn_within_delay_bounds_when_enabled(seeded_db, db_session, fake_llm):
+def test_next_run_at_drawn_within_delay_bounds_when_enabled(
+    seeded_db, db_session, fake_llm
+):
     _make_agent(db_session, "alice", config={"min_delay": 60, "max_delay": 120})
     fake_llm.enqueue(
         _tool_response([_tool_call("call_1", "finish", {"summary": "bye"})])
@@ -307,3 +316,44 @@ def test_two_consecutive_rejections_force_finish(seeded_db, db_session, fake_llm
     assert run.action_count == 2
     assert ToolCall.query.filter_by(run_id=run.id).count() == 2
     assert all(c.ok is False for c in ToolCall.query.filter_by(run_id=run.id))
+
+
+def test_kickoff_prompt_post_intent_inspires_create_post(seeded_db, db_session):
+    from deaddit.agents.memory import generate_kickoff_prompt
+
+    agent = _make_agent(db_session, "alice")
+    prompt = generate_kickoff_prompt(agent, force_intent="post")
+    assert "create_post" in prompt
+    assert "inspired" in prompt.lower() or "share" in prompt.lower()
+
+
+def test_kickoff_prompt_browse_intent_guides_browsing(seeded_db, db_session):
+    from deaddit.agents.memory import generate_kickoff_prompt
+
+    agent = _make_agent(db_session, "alice")
+    prompt = generate_kickoff_prompt(agent, force_intent="browse")
+    assert "browse" in prompt.lower()
+    assert "finish" in prompt.lower()
+
+
+def test_browse_feed_empty_and_sparse_hints(seeded_db, db_session):
+    from deaddit.agents.executor import execute
+    from deaddit.agents.registry import ToolContext
+
+    agent = _make_agent(db_session, "alice")
+    run = AgentRun(agent_id=agent.id, trigger="manual", status="running")
+    db_session.add(run)
+    db_session.commit()
+    ctx = ToolContext(agent=agent, run=run, user_username="alice")
+
+    # Empty subdeaddit
+    res_empty = execute("browse_feed", {"subdeaddit": "empty_sub"}, ctx)
+    assert res_empty["ok"] is True
+    assert "hint" in res_empty
+    assert "create_post" in res_empty["hint"]
+
+    # Populated subdeaddit (testsub has 2 seeded posts)
+    res_pop = execute("browse_feed", {"subdeaddit": "testsub"}, ctx)
+    assert res_pop["ok"] is True
+    assert len(res_pop["posts"]) == 2
+    assert "create_post" in res_pop.get("hint", "")

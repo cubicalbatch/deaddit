@@ -9,9 +9,9 @@ Covers:
 from __future__ import annotations
 
 import re
-import pytest
 from pathlib import Path
 
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ADMIN_TEMPLATES = REPO_ROOT / "deaddit" / "templates" / "admin"
@@ -19,6 +19,7 @@ ADMIN_STATIC = REPO_ROOT / "deaddit" / "static" / "admin"
 
 
 # ---------------------------------------------------------------- single-item GETs
+
 
 def test_single_item_get_endpoints_return_row(client, seeded_db):
     post = seeded_db["posts"][0]
@@ -49,12 +50,15 @@ def test_single_item_get_endpoints_404_on_missing(client, seeded_db):
 
 def test_content_filter_options_rendered_server_side(client, seeded_db):
     html = client.get("/admin/content").data.decode()
-    select_block = html.split('id="postsSubdeadditFilter"', 1)[1].split("</select>", 1)[0]
+    select_block = html.split('id="postsSubdeadditFilter"', 1)[1].split("</select>", 1)[
+        0
+    ]
     assert ">testsub</option>" in select_block
     assert ">askdeaddit</option>" in select_block
 
 
 # ---------------------------------------------------------------- string-level regressions
+
 
 def test_no_per_page_1000_anywhere_under_admin_assets():
     offenders = []

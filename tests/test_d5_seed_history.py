@@ -100,7 +100,6 @@ def test_exact_sum_invariants(app, pinned_now, db_session):
     assert checked > 0
 
 
-
 def test_vote_attention_shape_and_hot_feed(app, pinned_now):
     """Seeded attention is long-tailed positive; hot feed reflects scores."""
     seeding.seed_history(days=14, seed=42, now=NOW)
@@ -116,9 +115,7 @@ def test_vote_attention_shape_and_hot_feed(app, pinned_now):
     assert top is not None and top.score > 0
     # (d) no fabricated display score without vote rows.
     for model in (Post, Comment):
-        fabricated = model.query.filter(
-            model.vote_count == 0, model.score != 0
-        ).count()
+        fabricated = model.query.filter(model.vote_count == 0, model.score != 0).count()
         assert fabricated == 0
 
 

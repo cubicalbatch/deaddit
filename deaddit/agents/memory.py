@@ -1,12 +1,14 @@
 """Conversation bootstrap and long-term memory for agent runs."""
 
 import logging
+import random
 import re
 from collections import Counter
 from datetime import datetime
 
 from deaddit import Config
 from deaddit.agents.prompts import build_system_prompt
+from deaddit.agents.registry import AutonomyTier
 from deaddit.dynamics.inbox import unread_count
 from deaddit.extensions import db
 from deaddit.llm import ChatRequest, LLMClient, Sampling
@@ -19,16 +21,65 @@ KICKOFF_PROMPT = (
     "then finish."
 )
 
-def build_initial_messages(agent: Agent) -> list[dict]:
+POST_INTENT_PROBABILITY = 0.30
+
+
+def generate_kickoff_prompt(
+    agent: Agent,
+    user: User | None = None,
+    unread: int = 0,
+    *,
+    force_intent: str | None = None,
+) -> str:
+    """Generate a dynamic kickoff prompt based on unread count, tier, and probabilistic intent."""
+    if unread > 0:
+        return (
+            "You're waking up. Catch up on your replies, join ongoing "
+            "conversations, and then finish."
+        )
+
+    tier = getattr(agent.autonomy_tier, "value", str(agent.autonomy_tier))
+    if tier == AutonomyTier.LURKER.value:
+        return (
+            "You're waking up. Browse the community feeds, read interesting posts, "
+            "and see what's new. When you are done, call finish to end your visit."
+        )
+
+    is_post_intent = (
+        force_intent == "post"
+        if force_intent is not None
+        else (random.random() < POST_INTENT_PROBABILITY)
+    )
+
+    if is_post_intent:
+        subscriptions = (agent.state or {}).get("subscriptions") or []
+        sub_hint = (
+            f" (such as {', '.join(subscriptions)})"
+            if subscriptions
+            else " (such as CasualConversation, AskDeaddit, LifeProTips, quietthoughts, slowliving, or search existing communities)"
+        )
+        return (
+            f"You're waking up feeling inspired to share something meaningful with the community today. "
+            f"Think about an experience, project, observation, question, or story related to your persona and interests. "
+            f"Find a relevant subdeaddit{sub_hint} (or check quiet/sparse communities that need fresh discussion) "
+            f"and create a rich, high-quality, multi-paragraph post using the create_post tool. "
+            f"Once your post is published, call the finish tool to conclude your visit."
+        )
+    else:
+        return (
+            "You're waking up. Browse your feed or search for topics of interest, "
+            "read discussions, vote on good contributions, and join the conversation with a thoughtful "
+            "comment if something catches your eye. If you encounter an empty or quiet community, "
+            "feel free to start a conversation with create_post. When you're done, call finish."
+        )
+
+
+def build_initial_messages(
+    agent: Agent, *, force_intent: str | None = None
+) -> list[dict]:
     """Build the opening messages array for an agent conversation."""
     user = db.session.get(User, agent.user_username)
-    messages: list[dict] = [
-        {"role": "system", "content": build_system_prompt(agent, user)},
-        {"role": "user", "content": KICKOFF_PROMPT},
-    ]
-    memory_block = _memory_block(agent)
-    if memory_block:
-        messages[-1]["content"] += "\n\n" + memory_block
+    unread = 0
     try:
         unread = unread_count(agent.user_username)
     except Exception:
@@ -37,12 +88,22 @@ def build_initial_messages(agent: Agent) -> list[dict]:
             agent.user_username,
             exc_info=True,
         )
-    else:
-        if unread > 0:
-            messages[-1]["content"] += (
-                f"\n\nYou have {unread} unread replies. Use the view_inbox "
-                "tool to read them before deciding what to do."
-            )
+
+    kickoff = generate_kickoff_prompt(
+        agent, user, unread=unread, force_intent=force_intent
+    )
+    messages: list[dict] = [
+        {"role": "system", "content": build_system_prompt(agent, user)},
+        {"role": "user", "content": kickoff},
+    ]
+    memory_block = _memory_block(agent)
+    if memory_block:
+        messages[-1]["content"] += "\n\n" + memory_block
+    if unread > 0:
+        messages[-1]["content"] += (
+            f"\n\nYou have {unread} unread replies. Use the view_inbox "
+            "tool to read them before deciding what to do."
+        )
     return messages
 
 
@@ -59,10 +120,38 @@ _LLM_SYSTEM_PROMPT = (
 
 _STOPWORDS = frozenset(
     {
-        "about", "also", "been", "because", "just", "know", "like", "more",
-        "most", "much", "only", "over", "really", "some", "than", "that",
-        "their", "them", "then", "there", "they", "think", "this", "very",
-        "was", "were", "what", "when", "which", "with", "would", "your",
+        "about",
+        "also",
+        "been",
+        "because",
+        "just",
+        "know",
+        "like",
+        "more",
+        "most",
+        "much",
+        "only",
+        "over",
+        "really",
+        "some",
+        "than",
+        "that",
+        "their",
+        "them",
+        "then",
+        "there",
+        "they",
+        "think",
+        "this",
+        "very",
+        "was",
+        "were",
+        "what",
+        "when",
+        "which",
+        "with",
+        "would",
+        "your",
     }
 )
 
@@ -89,15 +178,13 @@ def summarize_run(agent: Agent, run: AgentRun) -> None:
     summarization can never fail the run.
     """
     try:
-        calls = (
-            ToolCall.query.filter_by(run_id=run.id).order_by(ToolCall.id).all()
-        )
+        calls = ToolCall.query.filter_by(run_id=run.id).order_by(ToolCall.id).all()
         content = (
-            _episode_content(calls) if calls else "Woke up, looked around, and finished without taking any tool actions."
+            _episode_content(calls)
+            if calls
+            else "Woke up, looked around, and finished without taking any tool actions."
         )
-        db.session.add(
-            AgentMemory(agent_id=agent.id, kind="episode", content=content)
-        )
+        db.session.add(AgentMemory(agent_id=agent.id, kind="episode", content=content))
     except Exception:
         logger.exception(
             "Episode summarization failed for run %s; ignoring.",
@@ -121,9 +208,7 @@ def _episode_content(calls: list) -> str:
         detail = f' e.g. "{_snippet(example, 80)}"' if example else ""
         sentences.append(f"{len(failed)} action(s) errored{detail}.")
     created = Counter(
-        call.name
-        for call in calls
-        if call.ok and call.name.startswith("create_")
+        call.name for call in calls if call.ok and call.name.startswith("create_")
     )
     if created:
         made = ", ".join(
@@ -151,9 +236,7 @@ def backfill_persona_history(
     agent = Agent.query.filter_by(user_username=user_username).first()
     if agent is None:
         raise ValueError(f"No agent registered for user '{user_username}'")
-    existing = AgentMemory.query.filter_by(
-        agent_id=agent.id, kind="backfill"
-    ).count()
+    existing = AgentMemory.query.filter_by(agent_id=agent.id, kind="backfill").count()
     if existing:
         return 0
 
@@ -203,13 +286,9 @@ def backfill_persona_history(
 
 def _persona_items(user_username: str) -> list[dict]:
     items: list[dict] = []
-    posts = (
-        Post.query.filter_by(user=user_username).order_by(Post.created_at).all()
-    )
+    posts = Post.query.filter_by(user=user_username).order_by(Post.created_at).all()
     comments = (
-        Comment.query.filter_by(user=user_username)
-        .order_by(Comment.created_at)
-        .all()
+        Comment.query.filter_by(user=user_username).order_by(Comment.created_at).all()
     )
     for post in posts:
         items.append(
@@ -278,9 +357,7 @@ def _extractive_summary(chunk: list[dict]) -> str:
             for token in re.findall(r"[A-Za-z][A-Za-z']{3,}", text)
             if token.lower() not in _STOPWORDS
         )
-    parts = [
-        f"wrote {len(posts)} post(s) and {len(comments)} comment(s)"
-    ]
+    parts = [f"wrote {len(posts)} post(s) and {len(comments)} comment(s)"]
     top = ", ".join(word for word, _ in words.most_common(6))
     if top:
         parts.append(f"recurring topics: {top}")

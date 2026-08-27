@@ -163,5 +163,3 @@ def _execute_batch_operation(job: Job) -> dict[str, Any]:
         results.append({"operation": operation, "job_id": sub_job.id})
 
     return {"batch_results": results, "count": len(results)}
-
-

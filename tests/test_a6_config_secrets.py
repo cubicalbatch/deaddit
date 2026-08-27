@@ -212,9 +212,7 @@ def test_secret_falls_back_to_stale_db_row_with_once_warning(
     assert caplog.text.count("secrets-drain") == 1
 
 
-def test_secret_returns_default_when_neither_env_nor_row(
-    app, db_session, monkeypatch
-):
+def test_secret_returns_default_when_neither_env_nor_row(app, db_session, monkeypatch):
     db_session.query(Setting).filter(Setting.key == "API_TOKEN").delete()
     db_session.commit()
     monkeypatch.delenv("API_TOKEN", raising=False)
@@ -341,9 +339,10 @@ def isolated_instance_dir(monkeypatch, tmp_path):
     """Point every Flask app's instance dir at a tmp dir during drain tests."""
     instance_dir = tmp_path / "instance"
     instance_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(Flask, "auto_find_instance_path", lambda self: str(instance_dir))
+    monkeypatch.setattr(
+        Flask, "auto_find_instance_path", lambda self: str(instance_dir)
+    )
     return instance_dir
-
 
 
 def _seed_file_db(db_file: str, rows: dict[str, str]) -> None:
@@ -352,8 +351,6 @@ def _seed_file_db(db_file: str, rows: dict[str, str]) -> None:
         db.create_all()
         for key, value in rows.items():
             Setting.set_value(key, value, None)
-
-
 
 
 def _all_output(result) -> str:
@@ -422,7 +419,12 @@ def test_drain_dry_run_leaves_rows_in_place(tmp_path, env_pointed_db):
     verify = create_app({"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_file}"})
     with verify.app_context():
         remaining = {row.key for row in db.session.query(Setting).all()}
-    assert {"OPENAI_KEY", "API_TOKEN", "API_KEY_GROQ", "DEFAULT_DATA_LOADED"} <= remaining
+    assert {
+        "OPENAI_KEY",
+        "API_TOKEN",
+        "API_KEY_GROQ",
+        "DEFAULT_DATA_LOADED",
+    } <= remaining
 
 
 def test_drain_refuses_prod_shape_unless_forced(tmp_path, isolated_instance_dir):
@@ -441,9 +443,7 @@ def test_drain_refuses_prod_shape_unless_forced(tmp_path, isolated_instance_dir)
 
     verify = create_app({"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_file}"})
     with verify.app_context():
-        rows_before = {
-            row.key: row.value for row in db.session.query(Setting).all()
-        }
+        rows_before = {row.key: row.value for row in db.session.query(Setting).all()}
     assert rows_before["API_TOKEN"] == LEGACY_ROWS["API_TOKEN"]
 
     forced = runner.invoke(cli, ["secrets-drain", "--i-know-this-is-prod"])

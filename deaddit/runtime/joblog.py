@@ -71,9 +71,9 @@ class JobLogHandler(logging.Handler):
         entry = {
             "level": record.levelname,
             "message": record.getMessage(),
-            "created_at": datetime.fromtimestamp(
-                record.created, tz=UTC
-            ).replace(tzinfo=None),
+            "created_at": datetime.fromtimestamp(record.created, tz=UTC).replace(
+                tzinfo=None
+            ),
         }
         should_flush = False
         with self._lock:

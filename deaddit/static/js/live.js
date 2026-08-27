@@ -1,6 +1,8 @@
-// Live activity page (UX-6 Slice B): socket-driven "N new events" pill plus
-// htmx-powered prepend (newer) / append (older) swaps. Degrades silently:
-// without a socket the page stays fully usable via the plain links.
+// Live activity page (UX-6 Slice B): socket-driven auto-update. New events
+// are prepended the moment they arrive; the "N new events" pill doubles as a
+// fallback (paused mode, failed swaps, no-JS full navigation) plus the
+// htmx-powered append (older) swap. Degrades silently: without a socket the
+// page stays fully usable via the plain links.
 
 const list = document.getElementById('live-list');
 const pill = document.getElementById('live-newer');
@@ -10,6 +12,7 @@ const errorEl = document.getElementById('live-error');
 let paused = false;
 let pendingCount = 0;
 let socket = null;
+let loadInFlight = false; // an htmx prepend is fetching the pending events
 let lastLoadAt = 0; // an in-flight live_count emitted just before our ack can
                     // arrive right after a load; ignore those stragglers.
 
@@ -28,6 +31,8 @@ function syncPillUrl() {
 }
 
 function showError() {
+    loadInFlight = false; // a failed swap leaves events pending; the pump
+                          // re-emits each tick so the next count retries it
     if (errorEl) errorEl.hidden = false;
 }
 
@@ -53,15 +58,32 @@ if (list && pill) {
             if (Date.now() - lastLoadAt < 1500) return;
             pendingCount = Number(data && data.count) || 0;
             if (!pill) return;
-            if (!paused && pendingCount > 0) {
+            if (pendingCount <= 0) {
+                pill.hidden = true;
+                return;
+            }
+            if (paused) {
+                // Paused: show the click-to-load badge; the server re-emits
+                // each tick so the count stays fresh until resume.
                 pill.textContent = pendingCount + ' new ' +
                     (pendingCount === 1 ? 'event' : 'events') + ' — click to load';
                 pill.hidden = false;
-            } else if (pendingCount <= 0) {
-                pill.hidden = true;
+                return;
             }
-            // While paused, leave the badge untouched until resume; the server
-            // re-emits each tick so the count converges afterwards.
+            // Live mode: load the new events the moment they arrive instead
+            // of waiting for a click. The pill still appears briefly and
+            // stays clickable as a fallback if a swap ever fails.
+            if (loadInFlight) return; // a fetch already covers these events
+            pill.textContent = pendingCount + ' new ' +
+                (pendingCount === 1 ? 'event' : 'events');
+            pill.hidden = false;
+            syncPillUrl();
+            loadInFlight = true;
+            if (window.htmx) {
+                window.htmx.trigger(pill, 'click');
+            } else {
+                pill.click(); // no htmx: plain link (full navigation)
+            }
         });
         socket.on('connect_error', degrade);
     } catch (_) {
@@ -93,6 +115,7 @@ document.body.addEventListener('htmx:afterSwap', (e) => {
     const elt = (e.detail.requestConfig && e.detail.requestConfig.elt) || e.detail.elt;
     if (errorEl) errorEl.hidden = true;
     if (elt && elt.id === 'live-newer') {
+        loadInFlight = false;
         lastLoadAt = Date.now();
         pendingCount = 0;
         pill.hidden = true;

@@ -96,9 +96,7 @@ def notify_comment_created(comment: Comment) -> None:
             )
         else:
             recipient = (
-                db.session.query(Post.user)
-                .filter(Post.id == comment.post_id)
-                .scalar()
+                db.session.query(Post.user).filter(Post.id == comment.post_id).scalar()
             )
         _emit(
             recipient=recipient,

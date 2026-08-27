@@ -65,6 +65,7 @@ def _llm_spec(tool) -> ToolSpec:
         _llm_spec_cache[tool.name] = spec
     return spec
 
+
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
 
@@ -144,7 +145,6 @@ def _check_rate_cap(name: str, ctx: ToolContext) -> str | None:
         .count()
     )
 
-
     if recent_count >= cap:
         return _RATE_CAP_MESSAGES.get(
             name, f"you've used {name} a lot recently; try again later"
@@ -198,9 +198,7 @@ def _check_duplicate(name: str, ctx: ToolContext, validated: dict) -> str | None
     for text in prior_texts:
         if not text:
             continue
-        if _jaccard(candidate_trigrams, _trigrams(text)) >= (
-            _DUP_SIMILARITY_THRESHOLD
-        ):
+        if _jaccard(candidate_trigrams, _trigrams(text)) >= (_DUP_SIMILARITY_THRESHOLD):
             return "too similar to your earlier content; write something new"
     return None
 
@@ -271,7 +269,6 @@ def _truncate_result(result: dict) -> dict:
         max_len //= 2
     serialized = json.dumps(result, default=str)
     return {"truncated": True, "preview": serialized[: _MAX_RESULT_CHARS - 96]}
-
 
 
 def _persist_and_return(

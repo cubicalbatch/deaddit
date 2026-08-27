@@ -78,9 +78,7 @@ def _d4_in_chain() -> bool:
     heads = script.get_heads()
     if len(heads) != 1:
         return False
-    return any(
-        rev.revision == _D4_REVISION for rev in script.walk_revisions()
-    )
+    return any(rev.revision == _D4_REVISION for rev in script.walk_revisions())
 
 
 def test_single_head_after_full_upgrade(tmp_path):
@@ -97,9 +95,7 @@ def test_single_head_after_full_upgrade(tmp_path):
     # linear ancestry. No instance/deaddit.db touched.
     heads = _heads()
     assert len(heads) == 1, f"branched alembic heads: {heads}"
-    assert _d4_in_chain(), (
-        f"{_D4_REVISION} not in the ancestry of sole head {heads}"
-    )
+    assert _d4_in_chain(), f"{_D4_REVISION} not in the ancestry of sole head {heads}"
 
 
 def test_upgrade_then_downgrade_round_trip(tmp_path):
@@ -186,9 +182,14 @@ def test_orm_soft_removal_round_trip(tmp_path):
         comment.removal_reason = "spam"
         db.session.add_all(
             [
-                Report(reporter="snitch", post_id=post.id, reason="spam", status="open"),
                 Report(
-                    reporter="snitch", comment_id=comment.id, reason="spam", status="open"
+                    reporter="snitch", post_id=post.id, reason="spam", status="open"
+                ),
+                Report(
+                    reporter="snitch",
+                    comment_id=comment.id,
+                    reason="spam",
+                    status="open",
                 ),
                 SubdeadditModerator(subdeaddit_name="t", username="mod"),
                 Ban(username="author", reason="spam"),

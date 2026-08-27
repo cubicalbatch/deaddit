@@ -131,9 +131,7 @@ def test_set_route_and_clear_routes_reset_seed_gate(app, db_session):
 
 
 def test_inactive_route_is_ignored(app, db_session):
-    db_session.add(
-        ModelRoute(tier="default", model_name="inactive", is_active=False)
-    )
+    db_session.add(ModelRoute(tier="default", model_name="inactive", is_active=False))
     db_session.commit()
     routing._routes_checked = True
 
@@ -155,7 +153,9 @@ def test_endpoint_config_falls_back_to_openai_model(app, db_session):
     routing._routes_checked = True
     db_session.query(ModelRoute).delete()
 
-    db_session.add(ApiEndpointConfig(api_url=DEFAULT_URL, default_model="endpoint-model"))
+    db_session.add(
+        ApiEndpointConfig(api_url=DEFAULT_URL, default_model="endpoint-model")
+    )
     db_session.commit()
     assert routing.resolve()[1] == "endpoint-model"
 

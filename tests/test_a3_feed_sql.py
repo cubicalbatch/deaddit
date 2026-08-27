@@ -36,7 +36,9 @@ def _page_titles(html: str) -> list[str]:
     return re.findall(r"Feed post (\d{2})", html)
 
 
-def test_subdeaddit_feed_pages_are_deterministic_windows(app, client, db_session, seeded_db):
+def test_subdeaddit_feed_pages_are_deterministic_windows(
+    app, client, db_session, seeded_db
+):
     db_session.add_all(_backfill_posts("testsub", 12))
     db_session.commit()
 

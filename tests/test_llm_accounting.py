@@ -49,9 +49,7 @@ def test_successful_complete_records_ok_row_with_usage_and_cost(
     app, db_session, fake_llm
 ):
     db_session.add(
-        ModelPrice(
-            pattern=MODEL, prompt_price_per_1k=0.5, completion_price_per_1k=1.5
-        )
+        ModelPrice(pattern=MODEL, prompt_price_per_1k=0.5, completion_price_per_1k=1.5)
     )
     db_session.commit()
     fake_llm.enqueue_content("hello")  # usage: 1 prompt / 1 completion / 2 total
@@ -143,9 +141,7 @@ _OK_PAYLOAD = {
 }
 
 
-def test_retry_500_500_200_records_fail_fail_ok_rows(
-    app, db_session, monkeypatch
-):
+def test_retry_500_500_200_records_fail_fail_ok_rows(app, db_session, monkeypatch):
     session = _FakeSession(
         [
             _FakeResponse(500, text="server oops"),
@@ -252,9 +248,7 @@ def test_ledger_db_failure_does_not_break_generation(
         def rollback(self):
             pass
 
-    monkeypatch.setattr(
-        accounting, "db", SimpleNamespace(session=_FailingSession())
-    )
+    monkeypatch.setattr(accounting, "db", SimpleNamespace(session=_FailingSession()))
     fake_llm.enqueue_content("still works")
 
     result = LLMClient().complete(_req())
@@ -267,13 +261,10 @@ def test_ledger_db_failure_does_not_break_generation(
 def test_estimate_cost_unit_rules(app, db_session):
     assert accounting.estimate_cost("http://127.0.0.1:1/v1", "m", None, None) == 0.0
     assert (
-        accounting.estimate_cost("http://llm.test/v1", "unknown-model", 100, 50)
-        is None
+        accounting.estimate_cost("http://llm.test/v1", "unknown-model", 100, 50) is None
     )
     db_session.add(
-        ModelPrice(
-            pattern="m", prompt_price_per_1k=1.0, completion_price_per_1k=2.0
-        )
+        ModelPrice(pattern="m", prompt_price_per_1k=1.0, completion_price_per_1k=2.0)
     )
     db_session.commit()
     assert accounting.estimate_cost(

@@ -321,10 +321,7 @@ def test_older_fragment_is_bare_items_with_oob_control(app, client):
     first = client.get("/live?fragment=1").get_data(as_text=True)
     keys = _fragment_keys(first)
     assert "<ol" in first  # cursor-less fragment keeps the wrapped layout
-    resp = client.get(
-        "/live?fragment=1&before="
-        + live_mod.encode_cursor(*keys[-1])
-    )
+    resp = client.get("/live?fragment=1&before=" + live_mod.encode_cursor(*keys[-1]))
     html = resp.get_data(as_text=True)
     assert resp.status_code == 200
     assert "<ol" not in html and "</ol" not in html
@@ -497,11 +494,17 @@ def test_join_without_payload_is_accepted(app):
         client = socketio.test_client(app, namespace="/live")
         try:
             client.emit("join_activity", namespace="/live")
-            joined = [m for m in client.get_received(namespace="/live") if m["name"] == "joined"]
+            joined = [
+                m
+                for m in client.get_received(namespace="/live")
+                if m["name"] == "joined"
+            ]
             assert joined and joined[0]["args"][0]["room"] == "activity"
             assert get_live_pump().running is True
             client.emit("leave_activity", namespace="/live")
-            left = [m for m in client.get_received(namespace="/live") if m["name"] == "left"]
+            left = [
+                m for m in client.get_received(namespace="/live") if m["name"] == "left"
+            ]
             assert left
         finally:
             client.disconnect(namespace="/live")

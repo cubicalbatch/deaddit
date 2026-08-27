@@ -142,9 +142,7 @@ def subdeaddit(subdeaddit_name):
     # Check if the subdeaddit exists
     community = Subdeaddit.query.filter_by(name=subdeaddit_name).first_or_404()
 
-    query = Post.query.filter_by(
-        subdeaddit_name=subdeaddit_name, removed=False
-    )
+    query = Post.query.filter_by(subdeaddit_name=subdeaddit_name, removed=False)
 
     sort = normalize_post_sort(request.args.get("sort"))
     if sort == "rising":
@@ -192,10 +190,10 @@ def subdeaddit(subdeaddit_name):
     )
 
 
-
 # Maximum rendered comment nesting depth; deeper replies are flattened into
 # a "continue this thread" tail on their depth-cap ancestor.
 DEPTH_CAP = 8
+
 
 @bp.route("/d/<subdeaddit_name>/<int:post_id>")
 def post(subdeaddit_name, post_id):
@@ -314,7 +312,9 @@ def post(subdeaddit_name, post_id):
     truncated_title = (
         "removed post"
         if post.removed
-        else (post.title[:60] + "...") if len(post.title) > 60 else post.title
+        else (post.title[:60] + "...")
+        if len(post.title) > 60
+        else post.title
     )
 
     return render_template(
@@ -324,9 +324,7 @@ def post(subdeaddit_name, post_id):
         sort=sort,
         # Direct links to removed posts stay reachable: the template renders
         # a tombstone notice instead of title/body, comments stay visible.
-        post_body_html=(
-            "" if post.removed else format_content_html(post.content)
-        ),
+        post_body_html=("" if post.removed else format_content_html(post.content)),
         removal_reason=post.removal_reason,
         subdeaddit_name=subdeaddit_name,
         title=f"Deaddit - {truncated_title}",
@@ -377,9 +375,7 @@ def user_profile(username):
     # Listings/pagination exclude removed rows; profile stats keep counting
     # everything (soft removal must not corrupt the displayed totals).
     visible_posts = Post.query.filter_by(user=username, removed=False).count()
-    visible_comments = Comment.query.filter_by(
-        user=username, removed=False
-    ).count()
+    visible_comments = Comment.query.filter_by(user=username, removed=False).count()
 
     post_upvotes = (
         db.session.query(func.coalesce(func.sum(Post.score), 0))
@@ -429,9 +425,7 @@ def user_profile(username):
         for post in posts:
             post.title = process_post_title(post.title)
         context["posts"] = posts
-        context["comment_counts"] = get_comment_counts_bulk(
-            [post.id for post in posts]
-        )
+        context["comment_counts"] = get_comment_counts_bulk([post.id for post in posts])
         total = visible_posts
     else:
         context["comments"] = (

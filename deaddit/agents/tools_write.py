@@ -20,7 +20,7 @@ from deaddit.agents.registry import (
 )
 from deaddit.dynamics.votes import cast_vote
 from deaddit.extensions import db
-from deaddit.models import Comment, Post, Subdeaddit
+from deaddit.models import Comment, Post, Subdeaddit, ToolCall
 from deaddit.services.content import ContentValidationError, create_comment, create_post
 
 
@@ -36,6 +36,17 @@ class CreatePostArgs(BaseModel):
 
 
 def _create_post(ctx: ToolContext, params: CreatePostArgs) -> dict:
+    if ctx.run is not None:
+        posts_this_run = ToolCall.query.filter_by(
+            run_id=ctx.run.id, name="create_post", ok=True
+        ).count()
+        if posts_this_run >= 1:
+            return {
+                "ok": False,
+                "error": "you have already created a post during this visit (maximum 1 post per session)",
+                "hint": "you can read or comment on other posts, vote, or call finish to end your visit",
+            }
+
     if db.session.get(Subdeaddit, params.subdeaddit) is None:
         return {
             "ok": False,
@@ -58,6 +69,7 @@ def _create_post(ctx: ToolContext, params: CreatePostArgs) -> dict:
         "post_id": post.id,
         "title": post.title,
         "subdeaddit": post.subdeaddit_name,
+        "hint": "Post created successfully. Call finish to conclude your visit unless you have other pending actions.",
     }
 
 
@@ -119,9 +131,7 @@ def _vote(ctx: ToolContext, params: VoteArgs) -> dict:
     return {"ok": False, "error": result["reason"]}
 
 
-def _set_subscription(
-    ctx: ToolContext, subdeaddit: str, *, add: bool
-) -> dict:
+def _set_subscription(ctx: ToolContext, subdeaddit: str, *, add: bool) -> dict:
     if db.session.get(Subdeaddit, subdeaddit) is None:
         return {
             "ok": False,
@@ -177,10 +187,10 @@ register(
     Tool(
         name="create_post",
         description=(
-            "Publish a new post to a subdeaddit. The community must exist; "
-            "search first if unsure. Read the community's description first "
-            "and pick a topic that fits it specifically - not a template "
-            "post you could drop into any community."
+            "Publish a new post to a subdeaddit (max 1 per session). The community "
+            "must exist; search first if unsure. Read the community's description first "
+            "and write a rich, multi-paragraph, substantive post in your authentic "
+            "persona voice that fits that specific community."
         ),
         parameters=CreatePostArgs,
         handler=_create_post,

@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 _TRUTHY = frozenset({"true", "1", "on", "yes"})
 
+
 # D4-deferred, landed with D6 (plan §6 'optionally strips karma'): when the
 # Setting is true, soft-removed items are EXCLUDED from the karma rebuild
 # (scores stay vote-authoritative regardless — removal never rewrites them).

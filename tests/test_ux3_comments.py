@@ -44,7 +44,6 @@ def deep_thread(app, db_session):
     sub = Subdeaddit(name="deep", description="d")
     db_session.add_all([user, sub])
 
-
     post = Post(
         title="Deep thread",
         content="post body",
@@ -73,7 +72,6 @@ def deep_thread(app, db_session):
         db_session.flush()
         chain_ids.append(comment.id)
         parent_id = comment.id
-
 
     root = Comment(
         post_id=post.id,
@@ -283,8 +281,10 @@ class TestFormatter:
 
     def test_url_at_end_of_sentence(self):
         out = format_content_html("see https://example.com/docs.")
-        assert out == '<p>see <a href="https://example.com/docs" rel="nofollow noopener noreferrer">https://example.com/docs</a>.</p>'
-
+        assert (
+            out
+            == '<p>see <a href="https://example.com/docs" rel="nofollow noopener noreferrer">https://example.com/docs</a>.</p>'
+        )
 
     def test_only_allowed_tags_emitted(self):
         sample = (
@@ -316,12 +316,12 @@ class TestFormatter:
 
 class TestCommentSort:
     def test_top_and_new_differ(self, app, client, ctx, deep_thread):
-        top_tree = _get_tree(
-            app, client, ctx, deep_thread["post_id"], "?sort=top"
-        )[0]["comment_tree"]
-        new_tree = _get_tree(
-            app, client, ctx, deep_thread["post_id"], "?sort=new"
-        )[0]["comment_tree"]
+        top_tree = _get_tree(app, client, ctx, deep_thread["post_id"], "?sort=top")[0][
+            "comment_tree"
+        ]
+        new_tree = _get_tree(app, client, ctx, deep_thread["post_id"], "?sort=new")[0][
+            "comment_tree"
+        ]
 
         top_roots = [n["id"] for n in top_tree]
         new_roots = [n["id"] for n in new_tree]

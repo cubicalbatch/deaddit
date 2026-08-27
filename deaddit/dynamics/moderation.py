@@ -71,9 +71,7 @@ def _report_target(report: Report) -> tuple[Post | Comment, str]:
     return item, kind
 
 
-def report_content(
-    reporter: str, target: str, target_id: int, reason: str
-) -> Report:
+def report_content(reporter: str, target: str, target_id: int, reason: str) -> Report:
     """File a complaint about a post or comment; returns the open Report."""
     reason = (reason or "").strip()
     if not reason:
@@ -142,9 +140,7 @@ def remove_report(report_id: int, moderator: str, removal_reason: str) -> Report
     return report
 
 
-def dismiss_report(
-    report_id: int, moderator: str, note: str | None = None
-) -> Report:
+def dismiss_report(report_id: int, moderator: str, note: str | None = None) -> Report:
     """Dismiss a report without touching its target item."""
     report = _load_report(report_id)
     if report.status != "open":
@@ -171,9 +167,7 @@ def ban_user(
     """
     if db.session.get(User, username) is None:
         raise ValueError(f"user '{username}' does not exist")
-    stored_reason = (
-        f"banned by {banned_by}: {reason}" if banned_by else reason
-    )
+    stored_reason = f"banned by {banned_by}: {reason}" if banned_by else reason
     ban = Ban(
         username=username,
         subdeaddit_name=subdeaddit_name,
@@ -205,9 +199,7 @@ def lift_ban(ban_id: int) -> Ban:
     return ban
 
 
-def active_ban_for(
-    username: str, subdeaddit_name: str | None = None
-) -> Ban | None:
+def active_ban_for(username: str, subdeaddit_name: str | None = None) -> Ban | None:
     """Return the active Ban governing ``username``, or None.
 
     A site-wide ban always wins. Otherwise only a scoped ban matching
@@ -262,5 +254,3 @@ def list_reports(status: str | None = "open"):
     if status is not None:
         query = query.filter(Report.status == status)
     return query
-
-

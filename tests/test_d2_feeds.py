@@ -57,9 +57,7 @@ def d2_feed(app):
             Subdeaddit(name="alpha", description="Alpha sub"),
         ]
     )
-    spec = [
-        (BASE + timedelta(days=i), ((i * 7) % 23) - 3) for i in range(N_OLD)
-    ]
+    spec = [(BASE + timedelta(days=i), ((i * 7) % 23) - 3) for i in range(N_OLD)]
     now = datetime.utcnow()
     for j in range(N_RECENT):
         spec.append((now - timedelta(hours=2 * (j + 1)), 30 - 3 * j))
@@ -80,10 +78,7 @@ def d2_feed(app):
     _db.session.add_all(posts)
     _db.session.flush()
 
-    rows = [
-        {"id": p.id, "score": p.score, "created_at": p.created_at}
-        for p in posts
-    ]
+    rows = [{"id": p.id, "score": p.score, "created_at": p.created_at} for p in posts]
     _db.session.commit()
     return {"rows": rows}
 
@@ -115,8 +110,13 @@ def comment_thread(app):
         vote_count=6,
         created_at=BASE,
     )
-    _db.session.add_all([User(username="u0", bio="b", interests="[]"),
-                         Subdeaddit(name="alpha", description="A"), post])
+    _db.session.add_all(
+        [
+            User(username="u0", bio="b", interests="[]"),
+            Subdeaddit(name="alpha", description="A"),
+            post,
+        ]
+    )
     _db.session.flush()
 
     comments = []
@@ -153,9 +153,7 @@ def _expected_ids(rows, sort):
 
     def key(r):
         return (
-            -post_rank_key(
-                sort, score=r["score"], created_at=r["created_at"], now=now
-            ),
+            -post_rank_key(sort, score=r["score"], created_at=r["created_at"], now=now),
             -r["id"],
         )
 
@@ -182,12 +180,16 @@ def _walk(client, ctx, path, template, per_page):
 
 class TestFeedSorts:
     @pytest.mark.parametrize("sort", POST_SORTS)
-    @pytest.mark.parametrize("path,template,per_page", [
-        ("/", "index.html", INDEX_PER_PAGE),
-        ("/d/alpha", "subdeaddit.html", SUB_PER_PAGE),
-    ])
-    def test_first_page_ordered_per_sort(self, app, ctx, d2_feed, sort,
-                                         path, template, per_page):
+    @pytest.mark.parametrize(
+        "path,template,per_page",
+        [
+            ("/", "index.html", INDEX_PER_PAGE),
+            ("/d/alpha", "subdeaddit.html", SUB_PER_PAGE),
+        ],
+    )
+    def test_first_page_ordered_per_sort(
+        self, app, ctx, d2_feed, sort, path, template, per_page
+    ):
         client = app.test_client()
         resp = client.get(f"{path}?sort={sort}")
         assert resp.status_code == 200
@@ -196,10 +198,13 @@ class TestFeedSorts:
         assert ids == expected[:per_page]
         assert _ctx_of(ctx, template)["sort"] == sort
 
-    @pytest.mark.parametrize("path,template", [
-        ("/", "index.html"),
-        ("/d/alpha", "subdeaddit.html"),
-    ])
+    @pytest.mark.parametrize(
+        "path,template",
+        [
+            ("/", "index.html"),
+            ("/d/alpha", "subdeaddit.html"),
+        ],
+    )
     def test_missing_param_is_hot(self, app, ctx, d2_feed, path, template):
         client = app.test_client()
         client.get(path)
@@ -209,12 +214,16 @@ class TestFeedSorts:
         assert ids == _expected_ids(d2_feed["rows"], "hot")[: len(ids)]
 
     @pytest.mark.parametrize("garbage", ["bogus", "", "TOP", "'; DROP TABLE"])
-    @pytest.mark.parametrize("path,template", [
-        ("/", "index.html"),
-        ("/d/alpha", "subdeaddit.html"),
-    ])
-    def test_garbage_falls_back_to_hot(self, app, ctx, d2_feed, garbage,
-                                       path, template):
+    @pytest.mark.parametrize(
+        "path,template",
+        [
+            ("/", "index.html"),
+            ("/d/alpha", "subdeaddit.html"),
+        ],
+    )
+    def test_garbage_falls_back_to_hot(
+        self, app, ctx, d2_feed, garbage, path, template
+    ):
         client = app.test_client()
         sep = "&" if "?" in path else "?"
         url = f"{path}{sep}sort={garbage}" if garbage else path
@@ -225,13 +234,16 @@ class TestFeedSorts:
         assert ids == _expected_ids(d2_feed["rows"], "hot")[: len(ids)]
 
     @pytest.mark.parametrize("sort", POST_SORTS)
-    @pytest.mark.parametrize("path,template,per_page", [
-        ("/", "index.html", INDEX_PER_PAGE),
-        ("/d/alpha", "subdeaddit.html", SUB_PER_PAGE),
-    ])
-    def test_walk_all_pages_partitions_exactly_once(self, app, ctx, d2_feed,
-                                                    sort, path, template,
-                                                    per_page):
+    @pytest.mark.parametrize(
+        "path,template,per_page",
+        [
+            ("/", "index.html", INDEX_PER_PAGE),
+            ("/d/alpha", "subdeaddit.html", SUB_PER_PAGE),
+        ],
+    )
+    def test_walk_all_pages_partitions_exactly_once(
+        self, app, ctx, d2_feed, sort, path, template, per_page
+    ):
         client = app.test_client()
         seen = _walk(client, ctx, f"{path}?sort={sort}", template, per_page)
         expected = _expected_ids(d2_feed["rows"], sort)
@@ -241,13 +253,16 @@ class TestFeedSorts:
 
 class TestInsertStability:
     @pytest.mark.parametrize("sort", POST_SORTS)
-    @pytest.mark.parametrize("path,template,per_page", [
-        ("/", "index.html", INDEX_PER_PAGE),
-        ("/d/alpha", "subdeaddit.html", SUB_PER_PAGE),
-    ])
-    def test_new_posts_do_not_displace_old_ones(self, app, ctx, d2_feed,
-                                                sort, path, template,
-                                                per_page):
+    @pytest.mark.parametrize(
+        "path,template,per_page",
+        [
+            ("/", "index.html", INDEX_PER_PAGE),
+            ("/d/alpha", "subdeaddit.html", SUB_PER_PAGE),
+        ],
+    )
+    def test_new_posts_do_not_displace_old_ones(
+        self, app, ctx, d2_feed, sort, path, template, per_page
+    ):
         from deaddit import db as _db
 
         client = app.test_client()
@@ -276,8 +291,10 @@ class TestInsertStability:
         old_rows = [r for r in d2_feed["rows"] if r["id"] in set(before)]
         expected_now = _expected_ids(
             d2_feed["rows"]
-            + [{"id": p.id, "score": p.score, "created_at": p.created_at}
-               for p in fresh],
+            + [
+                {"id": p.id, "score": p.score, "created_at": p.created_at}
+                for p in fresh
+            ],
             sort,
         )
         # Every previously-seen id still appears exactly once...
@@ -304,54 +321,69 @@ class TestCommentSorts:
 
     def test_top_order(self, app, ctx, comment_thread):
         assert self._tree_ids(app, ctx, comment_thread, "?sort=top") == [
-            "steady", "grindy", "divided", "downbad",
+            "steady",
+            "grindy",
+            "divided",
+            "downbad",
         ]
 
     def test_default_is_top(self, app, ctx, comment_thread):
         assert self._tree_ids(app, ctx, comment_thread) == [
-            "steady", "grindy", "divided", "downbad",
+            "steady",
+            "grindy",
+            "divided",
+            "downbad",
         ]
 
-    def test_garbage_comment_sort_falls_back_to_top(self, app, ctx,
-                                                    comment_thread):
+    def test_garbage_comment_sort_falls_back_to_top(self, app, ctx, comment_thread):
         assert self._tree_ids(app, ctx, comment_thread, "?sort=bogus") == [
-            "steady", "grindy", "divided", "downbad",
+            "steady",
+            "grindy",
+            "divided",
+            "downbad",
         ]
 
     def test_new_order(self, app, ctx, comment_thread):
         assert self._tree_ids(app, ctx, comment_thread, "?sort=new") == [
-            "downbad", "grindy", "divided", "steady",
+            "downbad",
+            "grindy",
+            "divided",
+            "steady",
         ]
 
-    def test_best_orders_by_hand_computed_wilson(self, app, ctx,
-                                                 comment_thread):
+    def test_best_orders_by_hand_computed_wilson(self, app, ctx, comment_thread):
         splits = self._splits()
-        wilsons = {
-            t: wilson_lower_bound(up, down) for t, (up, down) in splits.items()
-        }
+        wilsons = {t: wilson_lower_bound(up, down) for t, (up, down) in splits.items()}
         # Hand-computed expectations: steady .65 > grindy .34 >
         # divided .24 > downbad .00.
         assert (
-            wilsons["steady"] > wilsons["grindy"]
-            > wilsons["divided"] > wilsons["downbad"]
+            wilsons["steady"]
+            > wilsons["grindy"]
+            > wilsons["divided"]
+            > wilsons["downbad"]
         )
         assert self._tree_ids(app, ctx, comment_thread, "?sort=best") == [
-            "steady", "grindy", "divided", "downbad",
+            "steady",
+            "grindy",
+            "divided",
+            "downbad",
         ]
 
-
-    def test_controversial_orders_by_min_up_down(self, app, ctx,
-                                                 comment_thread):
+    def test_controversial_orders_by_min_up_down(self, app, ctx, comment_thread):
         splits = self._splits()
         cont = {t: min(up, down) for t, (up, down) in splits.items()}
         assert cont == {
-            "steady": 1, "divided": 5, "grindy": 9, "downbad": 0,
+            "steady": 1,
+            "divided": 5,
+            "grindy": 9,
+            "downbad": 0,
         }
-        assert self._tree_ids(app, ctx, comment_thread,
-                              "?sort=controversial") == [
-            "grindy", "divided", "steady", "downbad",
+        assert self._tree_ids(app, ctx, comment_thread, "?sort=controversial") == [
+            "grindy",
+            "divided",
+            "steady",
+            "downbad",
         ]
-
 
 
 @pytest.fixture()
@@ -369,6 +401,7 @@ def ranking_indexes(app):
     db.session.commit()
     yield
 
+
 class TestQueryPlans:
     @staticmethod
     def _plan_lines(app, sub_filtered: bool, sort: str) -> list[str]:
@@ -381,18 +414,20 @@ class TestQueryPlans:
             q = q.filter(rising_filter())
         q = q.order_by(*post_order_by(sort))
 
-        sql = str(q.statement.compile(
-            dialect=db.engine.dialect,
-            compile_kwargs={"literal_binds": True},
-        ))
+        sql = str(
+            q.statement.compile(
+                dialect=db.engine.dialect,
+                compile_kwargs={"literal_binds": True},
+            )
+        )
         rows = db.session.execute(sa_text(f"EXPLAIN QUERY PLAN {sql}")).fetchall()
         return [row[3] for row in rows]
 
     @pytest.mark.parametrize("sort", POST_SORTS)
-    @pytest.mark.parametrize("sub_filtered", [False, True],
-                             ids=["all", "sub"])
-    def test_no_bare_table_scan(self, app, d2_feed, ranking_indexes,
-                                sub_filtered, sort):
+    @pytest.mark.parametrize("sub_filtered", [False, True], ids=["all", "sub"])
+    def test_no_bare_table_scan(
+        self, app, d2_feed, ranking_indexes, sub_filtered, sort
+    ):
         lines = self._plan_lines(app, sub_filtered, sort)
         plan = "\n".join(lines)
         for line in lines:

@@ -92,9 +92,7 @@ class TestFeedExclusion:
         html = client.get("/search?q=Hello").get_data(as_text=True)
         _assert_absent(html, "Hello World")
 
-    def test_removed_post_hidden_from_profile_posts_tab(
-        self, client, removal_scenario
-    ):
+    def test_removed_post_hidden_from_profile_posts_tab(self, client, removal_scenario):
         html = client.get("/user/alice?tab=posts").get_data(as_text=True)
         _assert_absent(html, "Hello World")
 
@@ -165,9 +163,7 @@ class TestApiExclusion:
         assert [r["content"] for r in replies] == ["reply that must survive"]
         assert all(r["removed"] is False for r in replies)
         # Live siblings are untouched.
-        assert any(
-            n["content"] == "Welcome!" and n["removed"] is False for n in tree
-        )
+        assert any(n["content"] == "Welcome!" and n["removed"] is False for n in tree)
 
     def test_api_post_live_comment_not_marked(self, client, seeded_db):
         payload = client.get(f"/api/post/{seeded_db['posts'][0].id}").get_json()

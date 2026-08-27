@@ -42,10 +42,21 @@ function formatRelative(ms) {
     return ms >= 45 * 1000 ? 'just now' : 'now';
 }
 
+// Server timestamps are naive UTC ISO strings (no offset). The ES2015+ spec
+// parses an offset-less date-time as LOCAL time, which skews every relative
+// time by the client's UTC offset; assume UTC when no offset is present.
+function parseServerTime(value) {
+    if (!value) return NaN;
+    if (value.indexOf('T') !== -1 && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(value)) {
+        value += 'Z';
+    }
+    return Date.parse(value);
+}
+
 function upgradeTimes() {
     const now = Date.now();
     document.querySelectorAll('time[datetime]').forEach((el) => {
-        const ts = Date.parse(el.getAttribute('datetime'));
+        const ts = parseServerTime(el.getAttribute('datetime'));
         if (Number.isNaN(ts)) return;
         el.title = new Date(ts).toLocaleString();
         el.textContent = ts <= now ? formatRelative(now - ts) : 'in ' + formatRelative(ts - now);

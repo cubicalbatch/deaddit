@@ -15,6 +15,48 @@
     </div>
 </div>
 
+<!-- Generate Personas & Agents -->
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-magic me-2"></i>Generate Personas &amp; Agents</h5></div>
+    <div class="card-body">
+        <form id="generate-personas-form" class="row g-3">
+            <div class="col-md-2">
+                <label for="gen-count-input" class="form-label">Count (1-500)</label>
+                <input type="number" id="gen-count-input" class="form-control" min="1" max="500" value="5" required>
+            </div>
+            <div class="col-md-6">
+                <label for="gen-topic-input" class="form-label">Theme / Topic Hint <span class="text-muted small">(Optional)</span></label>
+                <input type="text" id="gen-topic-input" class="form-control" placeholder="e.g. coffee lovers, mechanics and DIYers, sci-fi authors">
+            </div>
+            <div class="col-md-4">
+                <label for="gen-tier-select" class="form-label">Agent Autonomy Tier</label>
+                <select id="gen-tier-select" class="form-select">
+                    <option value="regular" selected>regular</option>
+                    <option value="power_user">power_user</option>
+                    <option value="lurker">lurker</option>
+                </select>
+            </div>
+
+            <div class="col-12">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="gen-auto-agent-check" checked>
+                    <label class="form-check-label" for="gen-auto-agent-check">
+                        Auto-create autonomous agent per user
+                    </label>
+                </div>
+            </div>
+
+            <div class="col-12">
+                <button type="submit" id="gen-submit-btn" class="btn btn-success btn-sm">
+                    <i class="bi bi-stars"></i> <span id="gen-btn-text">Generate</span>
+                </button>
+            </div>
+        </form>
+
+        <div id="gen-alert-container" class="mt-3" style="display: none;"></div>
+    </div>
+</div>
+
 <!-- Create Agent -->
 <div class="card mb-4">
     <div class="card-header"><h5 class="mb-0">Create Agent</h5></div>
@@ -35,12 +77,20 @@
                 </select>
             </div>
             <div class="col-md-3">
-                <label for="api-url-input" class="form-label">API URL</label>
-                <input type="text" id="api-url-input" class="form-control" placeholder="(server default)">
+                <label for="provider-select" class="form-label">LLM Provider</label>
+                <select id="provider-select" class="form-select">
+                    <option value="">Loading providers…</option>
+                </select>
             </div>
             <div class="col-md-3">
                 <label for="model-input" class="form-label">Model</label>
-                <input type="text" id="model-input" class="form-control" placeholder="(server default)">
+                <div class="input-group">
+                    <input type="text" id="model-input" class="form-control" list="agent-model-options" placeholder="(default model)">
+                    <datalist id="agent-model-options"></datalist>
+                    <button type="button" id="refresh-agent-models-btn" class="btn btn-outline-secondary" title="Refresh models from provider">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
             </div>
 
             <div class="col-md-6">
@@ -194,6 +244,95 @@
         }
     }
 
+    let providersList = [];
+
+    async function loadProviders() {
+        const select = document.getElementById("provider-select");
+        try {
+            const data = await api("/admin/api/providers");
+            providersList = data.providers || [];
+            select.innerHTML = "";
+            if (!providersList.length) {
+                select.appendChild(el("option", "", "No providers configured"));
+                return;
+            }
+
+            let defaultProvider = null;
+            providersList.forEach((p) => {
+                const opt = el("option", "", p.name + (p.is_default ? " (Default)" : ""));
+                opt.value = p.id;
+                if (p.is_default) {
+                    opt.selected = true;
+                    defaultProvider = p;
+                }
+                select.appendChild(opt);
+            });
+
+            if (!defaultProvider && providersList.length > 0) {
+                defaultProvider = providersList[0];
+            }
+
+            updateModelOptionsForProvider(defaultProvider);
+        } catch (err) {
+            select.innerHTML = "<option>Error loading providers</option>";
+            console.error("Failed to load providers:", err);
+        }
+    }
+
+    function updateModelOptionsForProvider(provider) {
+        const datalist = document.getElementById("agent-model-options");
+        const modelInput = document.getElementById("model-input");
+        datalist.innerHTML = "";
+        if (!provider) return;
+
+        (provider.models || []).forEach((m) => {
+            const opt = document.createElement("option");
+            opt.value = m;
+            datalist.appendChild(opt);
+        });
+
+        if (provider.default_model) {
+            modelInput.value = provider.default_model;
+        } else if (provider.models && provider.models.length > 0) {
+            modelInput.value = provider.models[0];
+        } else {
+            modelInput.value = "";
+        }
+    }
+
+    document.getElementById("provider-select").addEventListener("change", function () {
+        const selectedId = Number(this.value);
+        const provider = providersList.find(p => p.id === selectedId);
+        if (provider) {
+            updateModelOptionsForProvider(provider);
+        }
+    });
+
+    document.getElementById("refresh-agent-models-btn").addEventListener("click", async function () {
+        const providerId = document.getElementById("provider-select").value;
+        if (!providerId) return;
+        const icon = this.querySelector("i");
+        const origClass = icon ? icon.className : "";
+        if (icon) icon.className = "spinner-border spinner-border-sm";
+        this.disabled = true;
+        try {
+            const data = await api(`/admin/api/providers/${providerId}/refresh-models`, { method: "POST" });
+            if (data.models) {
+                const provider = providersList.find(p => p.id === Number(providerId));
+                if (provider) {
+                    provider.models = data.models;
+                    if (data.default_model) provider.default_model = data.default_model;
+                    updateModelOptionsForProvider(provider);
+                }
+            }
+        } catch (err) {
+            alert("Failed to refresh models: " + err.message);
+        } finally {
+            if (icon) icon.className = origClass;
+            this.disabled = false;
+        }
+    });
+
     function actionsCell(agent) {
         const cell = el("td");
         const toggleBtn = el("button", "btn btn-sm " + (agent.is_enabled ? "btn-outline-warning" : "btn-outline-success"),
@@ -210,11 +349,11 @@
         if (agent.status === "running") runBtn.disabled = true;
         runBtn.title = "Runs one visit synchronously (may take a few minutes)";
         runBtn.addEventListener("click", () => runForceRun(agent.id, runBtn));
-        const viewLink = el("a", "btn btn-sm btn-outline-secondary ms-1", "View");
-        viewLink.href = {{ url_for('admin.agent_detail', username='__U__') | tojson }}.replace("__U__", encodeURIComponent(agent.user_username));
+        const editLink = el("a", "btn btn-sm btn-outline-secondary ms-1", "Edit");
+        editLink.href = {{ url_for('admin.agent_detail', username='__U__') | tojson }}.replace("__U__", encodeURIComponent(agent.user_username));
         cell.appendChild(toggleBtn);
         cell.appendChild(runBtn);
-        cell.appendChild(viewLink);
+        cell.appendChild(editLink);
         return cell;
     }
 
@@ -297,9 +436,13 @@
             enable: document.getElementById("enable-check").checked,
             backfill_memory: document.getElementById("backfill-check").checked,
         };
-        const apiUrl = document.getElementById("api-url-input").value.trim();
+        const providerId = document.getElementById("provider-select").value;
+        if (providerId) {
+            payload.provider_id = Number(providerId);
+            const provider = providersList.find(p => p.id === Number(providerId));
+            if (provider) payload.api_url = provider.api_url;
+        }
         const model = document.getElementById("model-input").value.trim();
-        if (apiUrl) payload.api_url = apiUrl;
         if (model) payload.model = model;
         const minDelay = document.getElementById("min-delay-input").value;
         const maxDelay = document.getElementById("max-delay-input").value;
@@ -324,6 +467,94 @@
         }
     });
 
+    document.getElementById("generate-personas-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const countInput = document.getElementById("gen-count-input");
+        const topicInput = document.getElementById("gen-topic-input");
+        const tierSelect = document.getElementById("gen-tier-select");
+        const autoAgentCheck = document.getElementById("gen-auto-agent-check");
+        const submitBtn = document.getElementById("gen-submit-btn");
+        const btnText = document.getElementById("gen-btn-text");
+        const alertContainer = document.getElementById("gen-alert-container");
+
+        const count = parseInt(countInput.value, 10);
+        if (isNaN(count) || count < 1 || count > 500) {
+            alertContainer.style.display = "block";
+            alertContainer.innerHTML = '<div class="alert alert-danger mb-0 py-2">Count must be between 1 and 500.</div>';
+            return;
+        }
+
+        submitBtn.disabled = true;
+        const origText = btnText ? btnText.textContent : "Generate";
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Generating…';
+        alertContainer.style.display = "none";
+        alertContainer.innerHTML = "";
+
+        const payload = {
+            count: count,
+            tier: tierSelect.value,
+            auto_create_agent: autoAgentCheck.checked,
+        };
+        const topicVal = topicInput.value.trim();
+        if (topicVal) payload.topic_hint = topicVal;
+
+        try {
+            const data = await api("{{ url_for('admin.api_generate_users') }}", {
+                method: "POST",
+                body: JSON.stringify(payload),
+            });
+
+            const usersCount = (data.users || []).length;
+            const agentsCount = (data.agents || []).length;
+            let html = '<div class="alert alert-success alert-dismissible fade show mb-0" role="alert">';
+            html += '<strong><i class="bi bi-check-circle-fill me-1"></i> Generated ' + usersCount + ' persona(s)';
+            if (agentsCount > 0) {
+                html += ' and enrolled ' + agentsCount + ' agent(s)';
+            }
+            html += '!</strong>';
+
+            if (data.users && data.users.length > 0) {
+                html += '<div class="mt-3 row g-2">';
+                data.users.forEach((u) => {
+                    const interests = Array.isArray(u.interests) ? u.interests.join(", ") : esc(u.interests);
+                    const traits = Array.isArray(u.personality_traits) ? u.personality_traits.join(", ") : esc(u.personality_traits);
+                    html += '<div class="col-md-6 col-lg-4">';
+                    html += '<div class="card p-2 border h-100 bg-body-tertiary" style="font-size: 0.85rem;">';
+                    html += '<div class="d-flex justify-content-between align-items-start">';
+                    html += '<strong class="text-primary">' + esc(u.username) + '</strong>';
+                    html += '<span class="badge bg-secondary">' + esc(u.gender) + ', ' + esc(u.age) + '</span>';
+                    html += '</div>';
+                    html += '<div class="text-muted small mt-1">' + esc(u.occupation) + ' &bull; ' + esc(u.education) + '</div>';
+                    html += '<div class="mt-1 small" style="max-height: 4rem; overflow-y: auto;" title="' + esc(u.bio) + '">' + esc(u.bio) + '</div>';
+                    if (interests) {
+                        html += '<div class="mt-1 small"><strong>Interests:</strong> ' + esc(interests) + '</div>';
+                    }
+                    if (traits) {
+                        html += '<div class="small"><strong>Traits:</strong> ' + esc(traits) + '</div>';
+                    }
+                    html += '</div></div>';
+                });
+                html += '</div>';
+            }
+            html += '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+            html += '</div>';
+
+            alertContainer.innerHTML = html;
+            alertContainer.style.display = "block";
+
+            await loadAgents();
+            await loadCandidates();
+        } catch (err) {
+            alertContainer.innerHTML = '<div class="alert alert-danger alert-dismissible fade show mb-0" role="alert">' +
+                '<i class="bi bi-exclamation-triangle-fill me-1"></i> <strong>Error:</strong> ' + esc(err.message) +
+                '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button></div>';
+            alertContainer.style.display = "block";
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="bi bi-stars"></i> <span id="gen-btn-text">' + esc(origText) + '</span>';
+        }
+    });
+
     document.getElementById("start-all-btn").addEventListener("click", async (event) => {
         event.target.disabled = true;
         try {
@@ -345,6 +576,7 @@
     });
 
     loadPresets();
+    loadProviders();
     loadCandidates();
     loadAgents();
 })();

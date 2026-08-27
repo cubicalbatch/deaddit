@@ -164,9 +164,7 @@ def test_site_wide_ban_blocks_everything(seeded_db, db_session):
         "score": int(post.score or 0),
     }
     with pytest.raises(ContentValidationError, match="User 'bob' is banned"):
-        create_post(
-            title="hi", content="hello", user="bob", subdeaddit="askdeaddit"
-        )
+        create_post(title="hi", content="hello", user="bob", subdeaddit="askdeaddit")
     with pytest.raises(ContentValidationError, match="User 'bob' is banned"):
         create_comment(post_id=post.id, content="hey", user="bob")
 
@@ -178,9 +176,7 @@ def test_sub_scoped_ban_only_blocks_that_sub(seeded_db, db_session):
     result = cast_vote("bob", "post", seeded_db["posts"][0].id, 1)
     assert result["reason"] == "user 'bob' is banned"
     with pytest.raises(ContentValidationError, match="User 'bob' is banned"):
-        create_post(
-            title="nope", content="blocked", user="bob", subdeaddit="testsub"
-        )
+        create_post(title="nope", content="blocked", user="bob", subdeaddit="testsub")
 
     # Free elsewhere: vote on askdeaddit content and post there.
     other_post = seeded_db["posts"][2]
@@ -203,7 +199,9 @@ def test_expired_ban_does_not_block_and_expire_bans_lifts_exact_rows(
         subdeaddit_name="testsub",
         expires_at=datetime.utcnow() - timedelta(hours=1),
     )
-    live = ban_user("alice", "current", expires_at=datetime.utcnow() + timedelta(days=7))
+    live = ban_user(
+        "alice", "current", expires_at=datetime.utcnow() + timedelta(days=7)
+    )
 
     # Expired bans don't count as active.
     assert active_ban_for("bob", "testsub") is None
@@ -278,6 +276,7 @@ def test_comment_on_removed_post_rejected(seeded_db, db_session):
     ):
         create_comment(post_id=post.id, content="reply", user="bob")
 
+
 @pytest.fixture()
 def exploding_notify(monkeypatch):
     """Make notify_mod_action raise the moment it is called."""
@@ -285,9 +284,7 @@ def exploding_notify(monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("inbox subsystem down")
 
-    monkeypatch.setattr(
-        moderation.notifications, "notify_mod_action", boom
-    )
+    monkeypatch.setattr(moderation.notifications, "notify_mod_action", boom)
 
 
 def test_remove_report_survives_notification_failure(

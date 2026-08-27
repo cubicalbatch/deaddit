@@ -18,6 +18,7 @@ SQLite (>= 3.35) supports ALTER TABLE DROP COLUMN natively, so no batch
 table rebuild is needed — that would trip FOREIGN KEY enforcement and drop
 the D2 expression index.
 """
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -51,9 +52,7 @@ def downgrade():
     op.drop_index(op.f("ix_comment_score"), table_name="comment")
 
     for table in ("post", "comment"):
-        op.add_column(
-            table, sa.Column("upvote_count", sa.Integer(), nullable=True)
-        )
+        op.add_column(table, sa.Column("upvote_count", sa.Integer(), nullable=True))
         op.execute(f"UPDATE {table} SET upvote_count = score")
 
     op.create_index(

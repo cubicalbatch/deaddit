@@ -28,11 +28,13 @@ def production_disabled(f):
             # This endpoint will return 404 when PRODUCTION=true
             pass
     """
+
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if Config.get("PRODUCTION", "false").lower() == "true":
             abort(404)
         return f(*args, **kwargs)
+
     return decorated_function
 
 
@@ -140,9 +142,7 @@ def _linkify(escaped_line: str) -> str:
                 url = url[:-1]
             else:
                 break
-        return (
-            f'<a href="{url}" rel="nofollow noopener noreferrer">{url}</a>{trail}'
-        )
+        return f'<a href="{url}" rel="nofollow noopener noreferrer">{url}</a>{trail}'
 
     return _URL_RE.sub(_anchor, escaped_line)
 

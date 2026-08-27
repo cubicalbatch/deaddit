@@ -8,6 +8,7 @@ Covers the two pure-sqlite3 ``agent`` subcommands backed by
 - ``sample-packet`` is deterministic for a fixed seed, honours ``-o``,
   and fails cleanly when candidates are insufficient.
 """
+
 from __future__ import annotations
 
 import json
@@ -74,8 +75,9 @@ def _seed_tool_calls(conn, attempts, rejections) -> None:
         )
 
 
-def _build_report_db(path, *, tool_attempts=20, dup_rejections=1,
-                     runs=(), usage_rows=True):
+def _build_report_db(
+    path, *, tool_attempts=20, dup_rejections=1, runs=(), usage_rows=True
+):
     """Known-stats DB: criterion a PASS, b PASS at 1/20, c INDETERMINATE."""
     conn = _make_db(path)
     _seed_baseline(conn)
@@ -85,7 +87,9 @@ def _build_report_db(path, *, tool_attempts=20, dup_rejections=1,
         conn.execute(
             "INSERT INTO llm_usage (id, created_at, status, prompt_tokens,"
             " completion_tokens, total_tokens, estimated_cost)"
-            " VALUES (1, ?, 'ok', 100, 50, 150, 0.002)", (WS,))
+            " VALUES (1, ?, 'ok', 100, 50, 150, 0.002)",
+            (WS,),
+        )
     conn.commit()
     conn.close()
     return path
@@ -104,8 +108,15 @@ def runner():
 def test_parity_report_renders_all_verdicts(runner, report_db):
     result = runner.invoke(
         agent,
-        ["parity-report", "--db", str(report_db),
-         "--window-start", WS, "--window-end", WE],
+        [
+            "parity-report",
+            "--db",
+            str(report_db),
+            "--window-start",
+            WS,
+            "--window-end",
+            WE,
+        ],
     )
     assert result.exit_code == 0
     out = result.output
@@ -113,11 +124,14 @@ def test_parity_report_renders_all_verdicts(runner, report_db):
     assert "baseline:" in out and "5.00 total/day" in out
     assert "6.00 total/day" in out and "(ratio 1.200)" in out
     assert "criterion a" in out and "-> PASS" in out
-    assert "criterion b" in out and "1/20" in out and "5.0%" in out \
-        and "-> PASS" in out
+    assert "criterion b" in out and "1/20" in out and "5.0%" in out and "-> PASS" in out
     # No agent_run rows: zero terminal runs must read INDETERMINATE.
-    assert "criterion c" in out and "0/0" in out and "n/a" in out \
+    assert (
+        "criterion c" in out
+        and "0/0" in out
+        and "n/a" in out
         and "-> INDETERMINATE" in out
+    )
     # Dashboard footer lines.
     assert "volume:" in out and "distinct active authors" in out
     assert "llm_spend:" in out and "$0.0020" in out
@@ -126,14 +140,21 @@ def test_parity_report_renders_all_verdicts(runner, report_db):
 def test_parity_report_json_roundtrip(runner, report_db):
     result = runner.invoke(
         agent,
-        ["parity-report", "--db", str(report_db), "--json",
-         "--window-start", WS, "--window-end", WE],
+        [
+            "parity-report",
+            "--db",
+            str(report_db),
+            "--json",
+            "--window-start",
+            WS,
+            "--window-end",
+            WE,
+        ],
     )
     assert result.exit_code == 0
     conn = connect_ro(str(report_db))
     try:
-        expected = compute_report(
-            conn, window_start=WS, window_end=WE)
+        expected = compute_report(conn, window_start=WS, window_end=WE)
     finally:
         conn.close()
     assert json.loads(result.output) == expected
@@ -141,12 +162,10 @@ def test_parity_report_json_roundtrip(runner, report_db):
 
 def test_parity_report_exit_zero_even_when_failing(runner, tmp_path):
     """A failing gate is still a successful report run."""
-    db = _build_report_db(
-        tmp_path / "fail.db", tool_attempts=10, dup_rejections=2)
+    db = _build_report_db(tmp_path / "fail.db", tool_attempts=10, dup_rejections=2)
     result = runner.invoke(
         agent,
-        ["parity-report", "--db", str(db),
-         "--window-start", WS, "--window-end", WE],
+        ["parity-report", "--db", str(db), "--window-start", WS, "--window-end", WE],
     )
     assert result.exit_code == 0
     assert "criterion b" in result.output and "-> FAIL" in result.output
@@ -155,11 +174,20 @@ def test_parity_report_exit_zero_even_when_failing(runner, tmp_path):
 def test_parity_report_strict_thresholds(runner, tmp_path):
     """Boundary equality fails under the plan's strict `<` wording."""
     # dup rate exactly 10% of 20 attempts.
-    db_b = _build_report_db(
-        tmp_path / "b.db", tool_attempts=20, dup_rejections=2)
+    db_b = _build_report_db(tmp_path / "b.db", tool_attempts=20, dup_rejections=2)
     out_b = runner.invoke(
-        agent, ["parity-report", "--db", str(db_b), "--json",
-                "--window-start", WS, "--window-end", WE]).output
+        agent,
+        [
+            "parity-report",
+            "--db",
+            str(db_b),
+            "--json",
+            "--window-start",
+            WS,
+            "--window-end",
+            WE,
+        ],
+    ).output
     assert json.loads(out_b)["criterion_b"]["pass"] is False
 
     # fail rate exactly 5% of 20 terminal runs (19 completed + 1 failed).
@@ -169,12 +197,23 @@ def test_parity_report_strict_thresholds(runner, tmp_path):
         status = "failed" if rid == 0 else "completed"
         conn.execute(
             "INSERT INTO agent_run (id, status, started_at) VALUES (?, ?, ?)",
-            (rid, status, f"2026-08-20 {rid:02d}:00:00"))
+            (rid, status, f"2026-08-20 {rid:02d}:00:00"),
+        )
     conn.commit()
     conn.close()
     out_c = runner.invoke(
-        agent, ["parity-report", "--db", str(db_c), "--json",
-                "--window-start", WS, "--window-end", WE]).output
+        agent,
+        [
+            "parity-report",
+            "--db",
+            str(db_c),
+            "--json",
+            "--window-start",
+            WS,
+            "--window-end",
+            WE,
+        ],
+    ).output
     cc = json.loads(out_c)["criterion_c"]
     assert cc["rate"] == 0.05
     assert cc["pass"] is False
@@ -183,9 +222,15 @@ def test_parity_report_strict_thresholds(runner, tmp_path):
 def test_parity_report_indeterminate_empty_window(runner, report_db):
     result = runner.invoke(
         agent,
-        ["parity-report", "--db", str(report_db),
-         "--window-start", "2026-07-01 00:00:00",
-         "--window-end", "2026-07-02 00:00:00"],
+        [
+            "parity-report",
+            "--db",
+            str(report_db),
+            "--window-start",
+            "2026-07-01 00:00:00",
+            "--window-end",
+            "2026-07-02 00:00:00",
+        ],
     )
     assert result.exit_code == 0
     out = result.output
@@ -199,13 +244,14 @@ def _seed_candidates(conn, n_comments=25, n_posts=0):
         conn.execute(
             "INSERT INTO post (id, title, content, subdeaddit_name, user,"
             " created_at, model) VALUES (?, 't', 'c', 'python', ?, ?, ?)",
-            (900 + i, f"A{i % 2}", f"2026-08-20 0{i}:00:00", "agent:eve"))
+            (900 + i, f"A{i % 2}", f"2026-08-20 0{i}:00:00", "agent:eve"),
+        )
     for i in range(n_comments):
         conn.execute(
             "INSERT INTO comment (id, post_id, parent_id, content, user,"
             " created_at, model) VALUES (?, 1, NULL, 'c', ?, ?, ?)",
-            (700 + i, "A0", f"2026-08-20 {i % 24:02d}:{i // 24:02d}:00",
-             "agent:eve"))
+            (700 + i, "A0", f"2026-08-20 {i % 24:02d}:{i // 24:02d}:00", "agent:eve"),
+        )
 
 
 @pytest.fixture()
@@ -233,11 +279,21 @@ def test_sample_packet_stdout_deterministic(runner, packet_db):
 
 def test_sample_packet_output_file_identical_bytes(runner, packet_db):
     to_stdout = runner.invoke(
-        agent, ["sample-packet", "--db", str(packet_db), "--seed", "42"])
+        agent, ["sample-packet", "--db", str(packet_db), "--seed", "42"]
+    )
     with runner.isolated_filesystem(temp_dir=packet_db.parent):
         to_file = runner.invoke(
-            agent, ["sample-packet", "--db", str(packet_db), "--seed", "42",
-                    "-o", "packet.md"])
+            agent,
+            [
+                "sample-packet",
+                "--db",
+                str(packet_db),
+                "--seed",
+                "42",
+                "-o",
+                "packet.md",
+            ],
+        )
         assert to_file.exit_code == 0
         written = open("packet.md", encoding="utf-8").read()
     # click.echo appends one newline after the exact packet bytes.
@@ -248,8 +304,7 @@ def test_sample_packet_output_file_identical_bytes(runner, packet_db):
 def test_sample_packet_insufficient_candidates(runner, packet_db):
     result = runner.invoke(
         agent,
-        ["sample-packet", "--db", str(packet_db), "--seed", "42",
-         "--items", "999"],
+        ["sample-packet", "--db", str(packet_db), "--seed", "42", "--items", "999"],
     )
     assert result.exit_code != 0
     # Click prints the ClickException to stderr with exit code 1.

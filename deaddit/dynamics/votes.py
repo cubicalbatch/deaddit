@@ -70,11 +70,7 @@ def cast_vote(
 
     # Phase D4: banned voters and removed content are rejected. The frozen
     # D1 vocabulary above is untouched; these are additive reasons.
-    ban_sub = (
-        item.subdeaddit_name
-        if target == "post"
-        else item.post.subdeaddit_name
-    )
+    ban_sub = item.subdeaddit_name if target == "post" else item.post.subdeaddit_name
     if active_ban_for(voter, ban_sub) is not None:
         return _reject(f"user '{voter}' is banned", score)
     if getattr(item, "removed", False):

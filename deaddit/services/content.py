@@ -66,12 +66,9 @@ def _check_rate_limit(user: str, kind: str) -> None:
         return
     model = Post if kind == "post" else Comment
     cutoff = datetime.utcnow() - timedelta(hours=1)
-    recent = model.query.filter(
-        model.user == user, model.created_at >= cutoff
-    ).count()
+    recent = model.query.filter(model.user == user, model.created_at >= cutoff).count()
     if recent >= limit:
         raise ContentValidationError("rate_limited")
-
 
 
 def _clear_read_caches() -> None:
@@ -185,7 +182,9 @@ def create_comment(
     _commit()
     _clear_read_caches()
     notifications.notify_comment_created(comment)
-    activity.record_event(event_type="comment", username=user, post_id=post_id, comment_id=comment.id)
+    activity.record_event(
+        event_type="comment", username=user, post_id=post_id, comment_id=comment.id
+    )
     degeneracy.detect_repetition_for_comment(comment)
     return comment
 
