@@ -1323,6 +1323,7 @@ a:focus {
    causes layout shift. The cap keeps a tall image from dominating the
    feed; object-fit crops rather than distorting it. */
 .post-card__media {
+    position: relative;
     margin: 0 0 var(--space-sm);
     border-radius: var(--radius-sm);
     overflow: hidden;
@@ -1335,6 +1336,47 @@ a:focus {
     max-height: 320px;
     height: auto;
     object-fit: cover;
+}
+
+/* Expanded presentation (plan 6C): the cropped/height-capped thumbnail
+   gives way to the full normalized original at its own aspect ratio. */
+.post-card__thumb.is-expanded {
+    max-height: none;
+    object-fit: contain;
+}
+
+/* Per-card expand/minimize control. Injected by js/image-feed.js - see that
+   file for why this never ships server-rendered. Positioned inside
+   .post-card__media (position: relative above) so it overlays the image
+   without affecting layout. */
+.post-card__expand {
+    position: absolute;
+    top: var(--space-sm);
+    right: var(--space-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    appearance: none;
+    border: 1px solid rgb(255 255 255 / 40%);
+    border-radius: var(--radius-sm);
+    background-color: rgb(0 0 0 / 55%);
+    color: #fff;
+    font-size: var(--font-size-base);
+    cursor: pointer;
+    transition: background-color var(--motion-fast) var(--ease-out-quart);
+}
+
+.post-card__expand:hover {
+    background-color: rgb(0 0 0 / 75%);
+}
+
+/* .post-card__media clips overflow, which would clip the default outline on
+   a corner-positioned button; draw the focus ring inside the button instead. */
+.post-card__expand:focus {
+    outline-offset: -2px;
 }
 
 .post-card__comments {

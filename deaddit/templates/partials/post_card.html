@@ -24,8 +24,13 @@
         </div>
         {% if post.image %}
         <div class="post-card__media">
+            {#- data-original-src is inert markup: it carries the full-image
+                URL for js/image-feed.js to swap in on expand. Nothing but
+                that script reads it, and its absence changes nothing here -
+                the thumbnail above is the complete no-JS presentation. #}
             <img class="post-card__thumb"
                  src="{{ m.image_thumb_url(post.image) }}"
+                 data-original-src="{{ m.image_original_url(post.image) }}"
                  width="{{ post.image.width }}" height="{{ post.image.height }}"
                  alt="{{ post.image.alt_text }}" loading="lazy" decoding="async">
         </div>
