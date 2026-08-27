@@ -669,5 +669,61 @@
     "methods": [
       "POST"
     ]
+  },
+  {
+    "rule": "/admin/api/image-providers",
+    "endpoint": "admin.api_list_image_providers",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/image-providers",
+    "endpoint": "admin.api_create_image_provider",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/image-providers/test-connection",
+    "endpoint": "admin.api_test_image_provider_connection",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/api/image-providers/<int:provider_id>",
+    "endpoint": "admin.api_get_image_provider",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/image-providers/<int:provider_id>",
+    "endpoint": "admin.api_update_image_provider",
+    "methods": [
+      "PUT"
+    ]
+  },
+  {
+    "rule": "/admin/api/image-providers/<int:provider_id>",
+    "endpoint": "admin.api_delete_image_provider",
+    "methods": [
+      "DELETE"
+    ]
+  },
+  {
+    "rule": "/admin/api/image-providers/<int:provider_id>/models",
+    "endpoint": "admin.api_search_image_provider_models",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/image-providers/<int:provider_id>/models/validate",
+    "endpoint": "admin.api_validate_image_provider_model",
+    "methods": [
+      "POST"
+    ]
   }
 ]

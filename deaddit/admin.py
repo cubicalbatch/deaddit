@@ -5,6 +5,8 @@ Provides web-based UI for job management and content generation.
 
 import base64
 import logging
+import os
+import re
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -23,6 +25,9 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from deaddit import db
 from deaddit.config import Config
+from deaddit.images import client as image_client
+from deaddit.images import verification as image_verification
+from deaddit.images.types import ImageProviderError
 from deaddit.llm import routing
 from deaddit.llm.capabilities import probe_endpoint, set_manual_override
 from deaddit.models import (
@@ -33,6 +38,8 @@ from deaddit.models import (
     Comment,
     DegeneracyFlag,
     EndpointCapability,
+    ImageModel,
+    ImageProvider,
     Job,
     LLMProvider,
     LLMUsage,
@@ -2002,6 +2009,440 @@ def api_get_provider_models(provider_id):
             "default_model": provider.default_model,
             "last_fetched": last_fetched.isoformat() if last_fetched else None,
             "count": len(model_names),
+        }
+    )
+
+
+# --- Image providers (separate from LLM providers; see refactor/image_post_plan.md 3A) ---
+
+_IMAGE_PROVIDER_TYPES = ("fal", "runware")
+_DEFAULT_IMAGE_CREDENTIAL_ENV = {
+    "fal": "FALAI_API_KEY",
+    "runware": "RUNWARE_API_KEY",
+}
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _image_provider_payload(provider):
+    """Serialize a provider for the admin API.
+
+    Never includes a secret value - ImageProvider has no credential column,
+    only the name of the environment variable that holds it - but callers
+    still need to know whether that variable is currently set, so a
+    computed boolean is added here rather than a secret.
+    """
+    data = provider.to_dict()
+    data["credential_set"] = bool(os.environ.get(provider.credential_env))
+    data["cached_model_count"] = (
+        ImageModel.query.filter_by(provider_id=provider.id, is_active=True).count()
+        if provider.id is not None
+        else 0
+    )
+    return data
+
+
+def _cache_image_model_options(provider, options):
+    """Upsert search results into ImageModel for admin visibility.
+
+    Only meaningful once *provider* is persisted (has an id); a draft
+    provider used for a pre-save connection test is never cached.
+    """
+    if provider.id is None or not options:
+        return
+    now = datetime.utcnow()
+    for option in options:
+        row = ImageModel.query.filter_by(
+            provider_id=provider.id, model_identifier=option.model_id
+        ).first()
+        if row is None:
+            row = ImageModel(provider_id=provider.id, model_identifier=option.model_id)
+            db.session.add(row)
+        row.display_name = option.display_name
+        row.category = option.category
+        row.provider_metadata = option.metadata or None
+        row.last_fetched = now
+        row.is_active = True
+    db.session.commit()
+
+
+@admin_bp.route("/api/image-providers", methods=["GET"])
+@production_disabled
+@admin_required
+def api_list_image_providers():
+    """List all configured image providers."""
+    providers = ImageProvider.query.order_by(ImageProvider.id.asc()).all()
+    return jsonify(
+        {
+            "success": True,
+            "providers": [_image_provider_payload(p) for p in providers],
+        }
+    )
+
+
+@admin_bp.route("/api/image-providers", methods=["POST"])
+@production_disabled
+@admin_required
+def api_create_image_provider():
+    """Create a new image provider.
+
+    Never accepts a secret value - only a provider_type (which adapter to
+    use), a credential_env name (where the real key lives, in the process
+    environment), and an optional default_model that must pass the
+    adapter's validate_model before it is ever accepted.
+    """
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name") or "").strip()
+    provider_type = str(payload.get("provider_type") or "").strip()
+    credential_env = str(payload.get("credential_env") or "").strip()
+    is_enabled = bool(payload.get("is_enabled", True))
+    default_model = str(payload.get("default_model") or "").strip()
+
+    if not name:
+        return jsonify({"success": False, "error": "Provider name is required"}), 400
+    if ImageProvider.query.filter_by(name=name).first():
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"An image provider named {name!r} already exists",
+                }
+            ),
+            400,
+        )
+    if provider_type not in _IMAGE_PROVIDER_TYPES:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"provider_type must be one of {sorted(_IMAGE_PROVIDER_TYPES)}",
+                }
+            ),
+            400,
+        )
+    if not credential_env:
+        credential_env = _DEFAULT_IMAGE_CREDENTIAL_ENV[provider_type]
+    if not _ENV_NAME_RE.match(credential_env):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "credential_env must be a valid environment variable name",
+                }
+            ),
+            400,
+        )
+
+    provider = ImageProvider(
+        name=name,
+        provider_type=provider_type,
+        credential_env=credential_env,
+        is_enabled=is_enabled,
+    )
+
+    if default_model:
+        try:
+            verdict = image_client.validate_model(provider, default_model)
+        except ImageProviderError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+        if not verdict.compatible:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": verdict.reason
+                        or f"model {default_model!r} is not compatible with this provider",
+                    }
+                ),
+                400,
+            )
+        provider.default_model = default_model
+
+    db.session.add(provider)
+    db.session.commit()
+    return jsonify(
+        {"success": True, "provider": _image_provider_payload(provider)}
+    ), 201
+
+
+@admin_bp.route("/api/image-providers/test-connection", methods=["POST"])
+@production_disabled
+@admin_required
+def api_test_image_provider_connection():
+    """Authenticated catalog search only - never generation, never a secret in/out.
+
+    Accepts either {"provider_id": N} for a saved provider, or
+    {"provider_type", "credential_env"} for an unsaved draft so the admin UI
+    can test before the first save.
+    """
+    payload = request.get_json(silent=True) or {}
+    provider_id = payload.get("provider_id")
+    query = str(payload.get("query") or "")
+
+    if provider_id:
+        try:
+            provider = db.session.get(ImageProvider, int(provider_id))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "message": "Invalid provider_id"}), 400
+        if not provider:
+            return jsonify(
+                {"success": False, "message": "Image provider not found"}
+            ), 404
+    else:
+        provider_type = str(payload.get("provider_type") or "").strip()
+        credential_env = str(payload.get("credential_env") or "").strip()
+        if provider_type not in _IMAGE_PROVIDER_TYPES:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "message": f"provider_type must be one of {sorted(_IMAGE_PROVIDER_TYPES)}",
+                    }
+                ),
+                400,
+            )
+        if not credential_env:
+            credential_env = _DEFAULT_IMAGE_CREDENTIAL_ENV[provider_type]
+        if not _ENV_NAME_RE.match(credential_env):
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "message": "credential_env must be a valid environment variable name",
+                    }
+                ),
+                400,
+            )
+        provider = ImageProvider(
+            name="(unsaved)",
+            provider_type=provider_type,
+            credential_env=credential_env,
+            is_enabled=True,
+        )
+
+    result = image_verification.test_connection(provider, query=query)
+    return jsonify(
+        {
+            "success": result.ok,
+            "message": result.message,
+            "sample_model_ids": result.sample_model_ids,
+        }
+    )
+
+
+@admin_bp.route("/api/image-providers/<int:provider_id>", methods=["GET"])
+@production_disabled
+@admin_required
+def api_get_image_provider(provider_id):
+    """Get a single image provider."""
+    provider = db.session.get(ImageProvider, provider_id)
+    if not provider:
+        return jsonify({"success": False, "error": "Image provider not found"}), 404
+    return jsonify({"success": True, "provider": _image_provider_payload(provider)})
+
+
+@admin_bp.route("/api/image-providers/<int:provider_id>", methods=["PUT"])
+@production_disabled
+@admin_required
+def api_update_image_provider(provider_id):
+    """Update an image provider.
+
+    Field changes are applied to the in-session object first; if a
+    requested default_model fails validate_model, every change from this
+    request (including provider_type/credential_env/is_enabled) is rolled
+    back so the update is all-or-nothing.
+    """
+    provider = db.session.get(ImageProvider, provider_id)
+    if not provider:
+        return jsonify({"success": False, "error": "Image provider not found"}), 404
+
+    payload = request.get_json(silent=True) or {}
+
+    if "name" in payload:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            return (
+                jsonify({"success": False, "error": "Provider name cannot be empty"}),
+                400,
+            )
+        if ImageProvider.query.filter(
+            ImageProvider.id != provider.id, ImageProvider.name == name
+        ).first():
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"An image provider named {name!r} already exists",
+                    }
+                ),
+                400,
+            )
+        provider.name = name
+
+    if "provider_type" in payload:
+        provider_type = str(payload.get("provider_type") or "").strip()
+        if provider_type not in _IMAGE_PROVIDER_TYPES:
+            db.session.rollback()
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"provider_type must be one of {sorted(_IMAGE_PROVIDER_TYPES)}",
+                    }
+                ),
+                400,
+            )
+        provider.provider_type = provider_type
+
+    if "credential_env" in payload:
+        credential_env = str(payload.get("credential_env") or "").strip()
+        if not _ENV_NAME_RE.match(credential_env):
+            db.session.rollback()
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "credential_env must be a valid environment variable name",
+                    }
+                ),
+                400,
+            )
+        provider.credential_env = credential_env
+
+    if "is_enabled" in payload:
+        provider.is_enabled = bool(payload.get("is_enabled"))
+
+    if "default_model" in payload:
+        model_id = str(payload.get("default_model") or "").strip()
+        if not model_id:
+            provider.default_model = None
+        else:
+            try:
+                verdict = image_client.validate_model(provider, model_id)
+            except ImageProviderError as exc:
+                db.session.rollback()
+                return jsonify({"success": False, "error": str(exc)}), 400
+            if not verdict.compatible:
+                db.session.rollback()
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": verdict.reason
+                            or f"model {model_id!r} is not compatible with this provider",
+                        }
+                    ),
+                    400,
+                )
+            provider.default_model = model_id
+
+    provider.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({"success": True, "provider": _image_provider_payload(provider)})
+
+
+@admin_bp.route("/api/image-providers/<int:provider_id>", methods=["DELETE"])
+@production_disabled
+@admin_required
+def api_delete_image_provider(provider_id):
+    """Delete an image provider, refusing while any agent config references it.
+
+    Per-agent image configuration lands in 3B under
+    Agent.config["image_posts"]["provider_id"]; this check is written
+    against that shape now so it is already correct once 3B ships.
+    """
+    provider = db.session.get(ImageProvider, provider_id)
+    if not provider:
+        return jsonify({"success": False, "error": "Image provider not found"}), 404
+
+    referencing = [
+        agent
+        for agent in Agent.query.all()
+        if isinstance(agent.config, dict)
+        and (agent.config.get("image_posts") or {}).get("provider_id") == provider.id
+    ]
+    if referencing:
+        usernames = ", ".join(sorted(agent.user_username for agent in referencing))
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Cannot delete: referenced by agent image configuration ({usernames})",
+                }
+            ),
+            400,
+        )
+
+    db.session.delete(provider)
+    db.session.commit()
+    return jsonify({"success": True, "message": "Image provider deleted successfully"})
+
+
+@admin_bp.route("/api/image-providers/<int:provider_id>/models", methods=["GET"])
+@production_disabled
+@admin_required
+def api_search_image_provider_models(provider_id):
+    """Paginated/typeahead catalog search - never an unbounded catalog fetch.
+
+    Forwards ?q= and ?cursor= to the adapter's search_models, which owns
+    page size; this route never asks for more than one page.
+    """
+    provider = db.session.get(ImageProvider, provider_id)
+    if not provider:
+        return jsonify({"success": False, "error": "Image provider not found"}), 404
+
+    query = request.args.get("q", "")
+    cursor = request.args.get("cursor") or None
+
+    try:
+        result = image_client.search_models(provider, query=query, cursor=cursor)
+    except ImageProviderError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+    _cache_image_model_options(provider, result.options)
+
+    return jsonify(
+        {
+            "success": True,
+            "options": [
+                {
+                    "model_id": option.model_id,
+                    "display_name": option.display_name,
+                    "category": option.category,
+                    "metadata": option.metadata,
+                }
+                for option in result.options
+            ],
+            "next_cursor": result.next_cursor,
+        }
+    )
+
+
+@admin_bp.route(
+    "/api/image-providers/<int:provider_id>/models/validate", methods=["POST"]
+)
+@production_disabled
+@admin_required
+def api_validate_image_provider_model(provider_id):
+    """Confirm a manually-typed model id before it may become a default_model."""
+    provider = db.session.get(ImageProvider, provider_id)
+    if not provider:
+        return jsonify({"success": False, "error": "Image provider not found"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    model_id = str(payload.get("model_id") or "").strip()
+    if not model_id:
+        return jsonify({"success": False, "error": "model_id is required"}), 400
+
+    try:
+        verdict = image_client.validate_model(provider, model_id)
+    except ImageProviderError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+    return jsonify(
+        {
+            "success": True,
+            "compatible": verdict.compatible,
+            "reason": verdict.reason,
         }
     )
 

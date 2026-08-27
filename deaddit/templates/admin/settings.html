@@ -146,6 +146,145 @@
     </div>
 </div>
 
+<!-- Section 1b: Image Providers (separate from LLM providers) -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-image me-1"></i> Image Providers
+                </h5>
+                <button type="button" class="btn btn-primary btn-sm" id="btn-open-add-image-provider">
+                    <i class="bi bi-plus-lg me-1"></i> Add Image Provider
+                </button>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Configure fal.ai / Runware image-generation providers used by agent image posts.
+                    Credentials are never stored here - only the name of the environment variable
+                    that holds the key, so multiple accounts of the same type can each use their
+                    own variable.
+                </p>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0" id="image-providers-table">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 90px;">Enabled</th>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Credential Env</th>
+                                <th>Default Model</th>
+                                <th>Cached Models</th>
+                                <th class="text-end" style="min-width: 200px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="image-providers-tbody">
+                            <tr>
+                                <td colspan="7" class="text-center text-muted py-3">
+                                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                    Loading image providers...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="no-image-providers-alert" class="alert alert-info mt-3" style="display: none;">
+                    <i class="bi bi-info-circle me-1"></i> No image providers saved yet. Click <strong>Add Image Provider</strong> to configure fal.ai or Runware.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Add / Edit Image Provider -->
+<div class="modal fade" id="imageProviderModal" tabindex="-1" aria-labelledby="imageProviderModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="imageProviderModalLabel">
+                    <i class="bi bi-image me-1"></i> <span id="imageProviderModalTitle">Add Image Provider</span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="image-provider-form">
+                <input type="hidden" id="modal-image-provider-id" value="">
+                <div class="modal-body">
+                    <div id="image-provider-modal-alert" class="alert" style="display: none;"></div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label for="modal-image-provider-type" class="form-label fw-bold small">API Type <span class="text-danger">*</span></label>
+                            <select class="form-select" id="modal-image-provider-type">
+                                <option value="fal">fal.ai</option>
+                                <option value="runware">Runware</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="modal-image-provider-name" class="form-label fw-bold small">Provider Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="modal-image-provider-name" required placeholder="e.g. fal.ai (main account)">
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-7">
+                            <label for="modal-image-provider-credential-env" class="form-label fw-bold small">Credential Environment Variable <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control font-monospace" id="modal-image-provider-credential-env" required placeholder="FALAI_API_KEY">
+                            <div class="form-text">
+                                The API key lives only in this environment variable - never entered or shown here.
+                                Use a different name to configure a second account of the same type.
+                            </div>
+                        </div>
+                        <div class="col-md-5 d-flex align-items-center pt-3">
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input" type="checkbox" id="modal-image-provider-enabled" role="switch" checked>
+                                <label class="form-check-label fw-bold small" for="modal-image-provider-enabled">Enabled</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-2">
+                        <div class="col-12">
+                            <label for="modal-image-provider-model" class="form-label fw-bold small">Default Model</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace" id="modal-image-provider-model" placeholder="Search the catalog or type a model id...">
+                                <button type="button" class="btn btn-outline-secondary" id="modal-image-model-search-btn" title="Search catalog">
+                                    <i class="bi bi-search"></i> Search
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" id="modal-image-model-validate-btn" title="Validate this model id">
+                                    <i class="bi bi-check2-circle"></i> Validate
+                                </button>
+                            </div>
+                            <div class="form-text">
+                                <span id="modal-image-model-info" class="text-muted"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="modal-image-model-results" class="list-group mb-2" style="display: none; max-height: 220px; overflow-y: auto;"></div>
+                    <div class="text-center mb-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="modal-image-model-more-btn" style="display: none;">
+                            Load more
+                        </button>
+                    </div>
+
+                    <div id="modal-image-test-result" class="mt-2" style="display: none;"></div>
+                </div>
+                <div class="modal-footer d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-info" id="modal-image-test-btn">
+                        <i class="bi bi-wifi me-1"></i> Test Connection
+                    </button>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary" id="modal-image-save-btn">
+                            <i class="bi bi-check-lg me-1"></i> Save Image Provider
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Section 2: Deaddit API & Security -->
 <div class="row mb-4">
     <div class="col-md-12">
@@ -272,6 +411,10 @@
 
     let providersData = [];
     let providerModalInstance = null;
+
+    let imageProvidersData = [];
+    let imageProviderModalInstance = null;
+    let imageModelSearchCursor = null;
 
     const PRESETS = {
         openai: { name: 'OpenAI', url: 'https://api.openai.com/v1', defaultModel: 'gpt-4o' },
@@ -755,6 +898,371 @@
         }
     });
 
+    // ---------- Image Providers Table & Actions ----------
+
+    const IMAGE_DEFAULT_CREDENTIAL_ENV = {
+        fal: 'FALAI_API_KEY',
+        runware: 'RUNWARE_API_KEY'
+    };
+
+    async function loadImageProviders() {
+        const tbody = document.getElementById('image-providers-tbody');
+        const emptyAlert = document.getElementById('no-image-providers-alert');
+        try {
+            const data = await fetch('/admin/api/image-providers').then(r => r.json());
+            imageProvidersData = data.providers || [];
+            tbody.innerHTML = '';
+
+            if (imageProvidersData.length === 0) {
+                emptyAlert.style.display = 'block';
+                return;
+            }
+            emptyAlert.style.display = 'none';
+
+            imageProvidersData.forEach(p => {
+                const tr = document.createElement('tr');
+
+                const tdEnabled = document.createElement('td');
+                tdEnabled.innerHTML = p.is_enabled
+                    ? '<span class="badge bg-success">Enabled</span>'
+                    : '<span class="badge bg-secondary">Disabled</span>';
+                tr.appendChild(tdEnabled);
+
+                const tdName = document.createElement('td');
+                tdName.innerHTML = `<strong>${esc(p.name)}</strong>`;
+                tr.appendChild(tdName);
+
+                const tdType = document.createElement('td');
+                tdType.innerHTML = `<span class="badge bg-light text-dark border">${esc(p.provider_type)}</span>`;
+                tr.appendChild(tdType);
+
+                const tdCred = document.createElement('td');
+                const credBadge = p.credential_set
+                    ? '<span class="badge bg-success-subtle text-success border border-success-subtle"><i class="bi bi-key-fill me-1"></i>Set</span>'
+                    : '<span class="badge bg-secondary-subtle text-secondary border">Not set</span>';
+                tdCred.innerHTML = `<code class="small">${esc(p.credential_env)}</code> ${credBadge}`;
+                tr.appendChild(tdCred);
+
+                const tdModel = document.createElement('td');
+                tdModel.innerHTML = p.default_model
+                    ? `<span class="badge bg-info-subtle text-info-emphasis border border-info-subtle font-monospace">${esc(p.default_model)}</span>`
+                    : `<span class="text-muted small">None</span>`;
+                tr.appendChild(tdModel);
+
+                const tdCount = document.createElement('td');
+                tdCount.innerHTML = `<span class="badge bg-light text-dark border">${p.cached_model_count || 0} cached</span>`;
+                tr.appendChild(tdCount);
+
+                const tdActions = document.createElement('td');
+                tdActions.className = 'text-end';
+                tdActions.innerHTML = `
+                    <button type="button" class="btn btn-sm btn-outline-info test-image-provider-btn" data-id="${p.id}" title="Test Connection">
+                        <i class="bi bi-wifi"></i> Test
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary ms-1 edit-image-provider-btn" data-id="${p.id}" title="Edit Image Provider">
+                        <i class="bi bi-pencil"></i> Edit
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger ms-1 delete-image-provider-btn" data-id="${p.id}" data-name="${esc(p.name)}" title="Delete Image Provider">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                `;
+                tr.appendChild(tdActions);
+
+                tbody.appendChild(tr);
+            });
+
+            wireImageProviderTableButtons();
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="7" class="text-danger text-center py-3">Error loading image providers: ${esc(err.message)}</td></tr>`;
+        }
+    }
+
+    function wireImageProviderTableButtons() {
+        document.querySelectorAll('.test-image-provider-btn').forEach(btn => {
+            btn.addEventListener('click', async function () {
+                const id = this.getAttribute('data-id');
+                const done = busy(this, 'Testing');
+                try {
+                    const res = await postJson('/admin/api/image-providers/test-connection', { provider_id: Number(id) });
+                    if (res.success) {
+                        showAlert('<i class="bi bi-check-circle me-1"></i> ' + res.message, 'alert-success');
+                    } else {
+                        showAlert('<i class="bi bi-x-circle me-1"></i> Connection failed: ' + (res.message || 'Error'), 'alert-danger');
+                    }
+                } catch (err) {
+                    showAlert('<i class="bi bi-x-circle me-1"></i> Connection test failed: ' + err.message, 'alert-danger');
+                } finally {
+                    done();
+                }
+            });
+        });
+
+        document.querySelectorAll('.edit-image-provider-btn').forEach(btn => {
+            btn.addEventListener('click', function () {
+                const id = Number(this.getAttribute('data-id'));
+                const provider = imageProvidersData.find(p => p.id === id);
+                if (provider) openImageProviderModal(provider);
+            });
+        });
+
+        document.querySelectorAll('.delete-image-provider-btn').forEach(btn => {
+            btn.addEventListener('click', async function () {
+                const id = this.getAttribute('data-id');
+                const name = this.getAttribute('data-name');
+                if (!confirm(`Are you sure you want to delete the image provider "${name}"?`)) return;
+
+                const done = busy(this, '');
+                try {
+                    const res = await postJson(`/admin/api/image-providers/${id}`, {}, 'DELETE');
+                    if (res.success) {
+                        showAlert('<i class="bi bi-check-circle me-1"></i> Image provider deleted', 'alert-success');
+                        await loadImageProviders();
+                    } else {
+                        showAlert('<i class="bi bi-x-circle me-1"></i> ' + (res.error || res.message), 'alert-danger');
+                    }
+                } catch (err) {
+                    showAlert('<i class="bi bi-x-circle me-1"></i> ' + err.message, 'alert-danger');
+                } finally {
+                    done();
+                }
+            });
+        });
+    }
+
+    // ---------- Image Provider Modal (Add / Edit) ----------
+
+    function openImageProviderModal(provider = null) {
+        const form = document.getElementById('image-provider-form');
+        form.reset();
+        imageModelSearchCursor = null;
+        document.getElementById('modal-image-test-result').style.display = 'none';
+        document.getElementById('image-provider-modal-alert').style.display = 'none';
+        document.getElementById('modal-image-model-info').textContent = '';
+        document.getElementById('modal-image-model-results').style.display = 'none';
+        document.getElementById('modal-image-model-results').innerHTML = '';
+        document.getElementById('modal-image-model-more-btn').style.display = 'none';
+
+        const enabledSwitch = document.getElementById('modal-image-provider-enabled');
+        const typeSelect = document.getElementById('modal-image-provider-type');
+
+        if (provider) {
+            document.getElementById('imageProviderModalTitle').textContent = 'Edit Image Provider';
+            document.getElementById('modal-image-provider-id').value = provider.id;
+            document.getElementById('modal-image-provider-name').value = provider.name || '';
+            typeSelect.value = provider.provider_type || 'fal';
+            document.getElementById('modal-image-provider-credential-env').value = provider.credential_env || '';
+            document.getElementById('modal-image-provider-model').value = provider.default_model || '';
+            enabledSwitch.checked = Boolean(provider.is_enabled);
+            document.getElementById('modal-image-model-info').textContent = provider.credential_set
+                ? 'Credential is set.'
+                : 'Credential is NOT set - export ' + (provider.credential_env || 'the env var') + ' before generating.';
+        } else {
+            document.getElementById('imageProviderModalTitle').textContent = 'Add Image Provider';
+            document.getElementById('modal-image-provider-id').value = '';
+            document.getElementById('modal-image-provider-name').value = '';
+            typeSelect.value = 'fal';
+            document.getElementById('modal-image-provider-credential-env').value = IMAGE_DEFAULT_CREDENTIAL_ENV.fal;
+            document.getElementById('modal-image-provider-model').value = '';
+            enabledSwitch.checked = true;
+        }
+
+        if (!imageProviderModalInstance) {
+            imageProviderModalInstance = new bootstrap.Modal(document.getElementById('imageProviderModal'));
+        }
+        imageProviderModalInstance.show();
+    }
+
+    // Default the credential env when the type changes, but only if the field
+    // still holds one of the known defaults (so an intentionally-custom name
+    // for a second account of the same type is never clobbered).
+    document.getElementById('modal-image-provider-type').addEventListener('change', function () {
+        const envInput = document.getElementById('modal-image-provider-credential-env');
+        const known = Object.values(IMAGE_DEFAULT_CREDENTIAL_ENV);
+        if (!envInput.value || known.includes(envInput.value)) {
+            envInput.value = IMAGE_DEFAULT_CREDENTIAL_ENV[this.value] || '';
+        }
+    });
+
+    function renderImageModelResults(options, append) {
+        const list = document.getElementById('modal-image-model-results');
+        if (!append) list.innerHTML = '';
+        (options || []).forEach(option => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'list-group-item list-group-item-action py-1';
+            item.innerHTML = `<span class="font-monospace">${esc(option.model_id)}</span>` +
+                (option.display_name ? ` <span class="text-muted small">- ${esc(option.display_name)}</span>` : '');
+            item.addEventListener('click', () => {
+                document.getElementById('modal-image-provider-model').value = option.model_id;
+                list.style.display = 'none';
+            });
+            list.appendChild(item);
+        });
+        list.style.display = (options && options.length) ? 'block' : list.style.display;
+    }
+
+    async function runImageModelSearch(append) {
+        const providerId = document.getElementById('modal-image-provider-id').value;
+        const info = document.getElementById('modal-image-model-info');
+        const moreBtn = document.getElementById('modal-image-model-more-btn');
+
+        if (!providerId) {
+            info.textContent = 'Save the provider first, then search its catalog.';
+            info.className = 'text-warning small';
+            return;
+        }
+
+        const query = document.getElementById('modal-image-provider-model').value.trim();
+        const params = new URLSearchParams();
+        if (query) params.set('q', query);
+        if (append && imageModelSearchCursor) params.set('cursor', imageModelSearchCursor);
+
+        info.textContent = 'Searching catalog...';
+        info.className = 'text-muted small';
+
+        try {
+            const res = await fetch(`/admin/api/image-providers/${providerId}/models?` + params.toString()).then(r => r.json());
+            if (res.success) {
+                renderImageModelResults(res.options, append);
+                imageModelSearchCursor = res.next_cursor || null;
+                moreBtn.style.display = imageModelSearchCursor ? 'inline-block' : 'none';
+                info.textContent = `${(res.options || []).length} result(s)${append ? ' added' : ''}.`;
+                info.className = 'text-success small';
+            } else {
+                info.textContent = res.error || 'Search failed.';
+                info.className = 'text-danger small';
+            }
+        } catch (err) {
+            info.textContent = 'Search failed: ' + err.message;
+            info.className = 'text-danger small';
+        }
+    }
+
+    document.getElementById('modal-image-model-search-btn').addEventListener('click', function () {
+        imageModelSearchCursor = null;
+        runImageModelSearch(false);
+    });
+    document.getElementById('modal-image-model-more-btn').addEventListener('click', function () {
+        runImageModelSearch(true);
+    });
+
+    document.getElementById('modal-image-model-validate-btn').addEventListener('click', async function () {
+        const providerId = document.getElementById('modal-image-provider-id').value;
+        const modelId = document.getElementById('modal-image-provider-model').value.trim();
+        const info = document.getElementById('modal-image-model-info');
+
+        if (!providerId) {
+            info.textContent = 'Save the provider first, then validate a model id.';
+            info.className = 'text-warning small';
+            return;
+        }
+        if (!modelId) {
+            info.textContent = 'Enter a model id to validate.';
+            info.className = 'text-warning small';
+            return;
+        }
+
+        const done = busy(this, 'Validating...');
+        try {
+            const res = await postJson(`/admin/api/image-providers/${providerId}/models/validate`, { model_id: modelId });
+            if (res.success && res.compatible) {
+                info.textContent = 'Compatible: this model can be used as a default.';
+                info.className = 'text-success small';
+            } else {
+                info.textContent = (res.reason || res.error || 'Not compatible.');
+                info.className = 'text-danger small';
+            }
+        } catch (err) {
+            info.textContent = 'Validation failed: ' + err.message;
+            info.className = 'text-danger small';
+        } finally {
+            done();
+        }
+    });
+
+    // Modal test connection (works before save too, using type + credential env)
+    document.getElementById('modal-image-test-btn').addEventListener('click', async function () {
+        const providerId = document.getElementById('modal-image-provider-id').value;
+        const providerType = document.getElementById('modal-image-provider-type').value;
+        const credentialEnv = document.getElementById('modal-image-provider-credential-env').value.trim();
+        const resultDiv = document.getElementById('modal-image-test-result');
+
+        const done = busy(this, 'Testing...');
+        resultDiv.style.display = 'none';
+
+        try {
+            const payload = providerId
+                ? { provider_id: Number(providerId) }
+                : { provider_type: providerType, credential_env: credentialEnv };
+            const res = await postJson('/admin/api/image-providers/test-connection', payload);
+            resultDiv.className = 'alert ' + (res.success ? 'alert-success' : 'alert-danger') + ' mt-2 mb-0 py-2';
+            resultDiv.innerHTML = `<i class="bi bi-${res.success ? 'check-circle' : 'x-circle'} me-1"></i> ${esc(res.message || 'Test finished')}`;
+            resultDiv.style.display = 'block';
+        } catch (err) {
+            resultDiv.className = 'alert alert-danger mt-2 mb-0 py-2';
+            resultDiv.innerHTML = `<i class="bi bi-x-circle me-1"></i> Error: ${esc(err.message)}`;
+            resultDiv.style.display = 'block';
+        } finally {
+            done();
+        }
+    });
+
+    // Modal save image provider form
+    document.getElementById('image-provider-form').addEventListener('submit', async function (event) {
+        event.preventDefault();
+        const providerId = document.getElementById('modal-image-provider-id').value;
+        const name = document.getElementById('modal-image-provider-name').value.trim();
+        const providerType = document.getElementById('modal-image-provider-type').value;
+        const credentialEnv = document.getElementById('modal-image-provider-credential-env').value.trim();
+        const model = document.getElementById('modal-image-provider-model').value.trim();
+        const isEnabled = document.getElementById('modal-image-provider-enabled').checked;
+        const alertBox = document.getElementById('image-provider-modal-alert');
+        const saveBtn = document.getElementById('modal-image-save-btn');
+
+        if (!name || !credentialEnv) {
+            alertBox.className = 'alert alert-danger mb-3';
+            alertBox.textContent = 'Provider Name and Credential Environment Variable are required.';
+            alertBox.style.display = 'block';
+            return;
+        }
+
+        const payload = {
+            name: name,
+            provider_type: providerType,
+            credential_env: credentialEnv,
+            is_enabled: isEnabled,
+            default_model: model
+        };
+
+        const done = busy(saveBtn, 'Saving...');
+        alertBox.style.display = 'none';
+
+        try {
+            let res;
+            if (providerId) {
+                res = await postJson(`/admin/api/image-providers/${providerId}`, payload, 'PUT');
+            } else {
+                res = await postJson('/admin/api/image-providers', payload, 'POST');
+            }
+
+            if (res.success) {
+                if (imageProviderModalInstance) imageProviderModalInstance.hide();
+                showAlert(`<i class="bi bi-check-circle me-1"></i> Image provider "${esc(name)}" saved successfully!`, 'alert-success');
+                await loadImageProviders();
+            } else {
+                alertBox.className = 'alert alert-danger mb-3';
+                alertBox.textContent = res.error || res.message || 'Failed to save image provider.';
+                alertBox.style.display = 'block';
+            }
+        } catch (err) {
+            alertBox.className = 'alert alert-danger mb-3';
+            alertBox.textContent = 'Error saving image provider: ' + err.message;
+            alertBox.style.display = 'block';
+        } finally {
+            done();
+        }
+    });
+
     // ---------- Deaddit Security Settings Form ----------
 
     document.getElementById('deaddit-config-form').addEventListener('submit', function (event) {
@@ -796,6 +1304,7 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('btn-open-add-provider').addEventListener('click', () => openProviderModal());
+        document.getElementById('btn-open-add-image-provider').addEventListener('click', () => openImageProviderModal());
 
         document.getElementById('refresh-stats-btn').addEventListener('click', function () {
             const done = busy(this, 'Refreshing...');
@@ -823,6 +1332,7 @@
         });
 
         loadProviders();
+        loadImageProviders();
         loadSystemInfo();
     });
 })();
