@@ -93,9 +93,7 @@ def create(
     app = _make_app((ctx.obj or {}).get("db_uri"))
     with app.app_context():
         if not random_persona:
-            _upsert_agent(
-                username, tier, api_url, model, min_delay, max_delay, enable
-            )
+            _upsert_agent(username, tier, api_url, model, min_delay, max_delay, enable)
             return
 
         api_url, config = _agent_config(
@@ -324,6 +322,7 @@ def list_agents(ctx) -> None:
                 f"{row.status:<10} {_fmt_dt(row.last_run_at):<20} "
                 f"{_fmt_dt(row.next_run_at):<20} {row.consecutive_failures or 0:>5}"
             )
+
 
 def _fmt_dt(value) -> str:
     return value.strftime("%Y-%m-%d %H:%M:%S") if value else "-"

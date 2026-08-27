@@ -30,7 +30,6 @@ def _seed_templates(app):
         create_version("alpha", "A2 {x}")
 
 
-
 def _seed_agent(app, username="pin_owner"):
     with app.app_context():
         user = User(username=username)
@@ -69,6 +68,7 @@ class TestPromptsApi:
         assert alpha["versions"] == [1, 2]
         assert alpha["latest_version"] == 2
         assert alpha["pinned_by"] == [f"agent:{agent_id}"]
+
     def test_detail_lists_immutable_versions(self, app, authed_client):
         _seed_templates(app)
         resp = authed_client.get(f"{LIST}/alpha")
@@ -146,12 +146,8 @@ class TestPinsApi:
         agent_id = _seed_agent(app, "clearable")
         with app.app_context():
             set_pin("agent", str(agent_id), "alpha", 1)
-        assert (
-            authed_client.delete(f"{PINS}/agent/{agent_id}").status_code == 200
-        )
-        assert (
-            authed_client.delete(f"{PINS}/agent/{agent_id}").status_code == 404
-        )
+        assert authed_client.delete(f"{PINS}/agent/{agent_id}").status_code == 200
+        assert authed_client.delete(f"{PINS}/agent/{agent_id}").status_code == 404
 
 
 class TestRenderAuditApi:

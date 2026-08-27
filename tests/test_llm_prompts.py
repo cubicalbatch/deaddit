@@ -27,7 +27,6 @@ from deaddit.llm.prompts import (
     create_version,
     get_version,
     render,
-    render_pinned,
     resolve_pin,
     set_pin,
     versioning_enabled,
@@ -219,7 +218,6 @@ class TestPinResolution:
 
         db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
         db_session.commit()
-        pin = resolve_pin("agent", key)
         assert build_system_prompt(agent, user) == render(
             DEFAULT_BODY, system_prompt_variables(agent, user)
         )
@@ -236,14 +234,14 @@ class TestPinResolution:
 
     def test_set_pin_rejects_unknown_template(self, app, db_session):
         from deaddit.llm.prompts import PromptError
+
         agent = self._agent(db_session, "unknown_template")
         with pytest.raises(PromptError):
             set_pin("agent", str(agent.id), "no-such-template", 1)
 
+
 class TestRenderAudit:
-    def test_build_system_prompt_writes_numeric_agent_audit_row(
-        self, app, db_session
-    ):
+    def test_build_system_prompt_writes_numeric_agent_audit_row(self, app, db_session):
         version = create_template("aud", DEFAULT_BODY)
         user = User(username="audited")
         db_session.add(user)
@@ -277,6 +275,7 @@ class TestRenderAudit:
         replay = render(version.body, json.loads(row.variables_json))
         assert replay == text
         assert _sha(replay) == row.rendered_sha256
+
 
 # --- parity freeze: live-prompt byte stability -----------------------------
 

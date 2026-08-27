@@ -155,9 +155,7 @@ def test_list_reports_registered_agents(
     runner, patch_cli_app, probe_recorder, seeded_db
 ):
     assert runner.invoke(cli, ["agent", "create", "--username", "alice"]).exit_code == 0
-    assert (
-        runner.invoke(cli, ["agent", "create", "--random-persona"]).exit_code == 0
-    )
+    assert runner.invoke(cli, ["agent", "create", "--random-persona"]).exit_code == 0
     fixed = Agent.query.filter_by(persona_mode="fixed").one()
     random = Agent.query.filter_by(persona_mode="random").one()
 
