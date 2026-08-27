@@ -477,7 +477,9 @@ def test_summarize_run_counts_actions_errors_and_creations(seeded_db, db_session
 
     summarize_run(agent, run)
 
-    row = AgentMemory.query.filter_by(agent_id=agent.id, kind="episode").one()
+    row = AgentMemory.query.filter_by(
+        user_username=agent.user_username, kind="episode"
+    ).one()
     content = row.content
     assert content.startswith("Last visit: 3 tool action(s), 2 ok / 1 error:")
     assert "create_post x2" in content
@@ -575,12 +577,16 @@ def test_initial_messages_inject_backfills_and_recent_episodes(seeded_db, db_ses
     db.session.add_all(
         [
             AgentMemory(
-                agent_id=agent.id,
+                user_username=agent.user_username,
                 kind="backfill",
                 content=f"{BACKFILL_PREFIX} she posted often",
             ),
-            AgentMemory(agent_id=agent.id, kind="episode", content="quiet visit"),
-            AgentMemory(agent_id=agent.id, kind="episode", content="busy visit"),
+            AgentMemory(
+                user_username=agent.user_username, kind="episode", content="quiet visit"
+            ),
+            AgentMemory(
+                user_username=agent.user_username, kind="episode", content="busy visit"
+            ),
         ]
     )
     db.session.commit()

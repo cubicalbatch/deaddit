@@ -54,6 +54,7 @@ def test_recover_interrupts_only_runs_past_budget_plus_grace(
     seeded_db, db_session, app
 ):
     agent = _make_agent(db_session, "alice", config={"max_run_seconds": 300})
+    agent2 = _make_agent(db_session, "bob", config={"max_run_seconds": 300})
     now = datetime.utcnow()
     stale = AgentRun(
         agent_id=agent.id,
@@ -63,7 +64,7 @@ def test_recover_interrupts_only_runs_past_budget_plus_grace(
     )
     # Within the 300s budget + grace window: a live run, must be left alone.
     fresh = AgentRun(
-        agent_id=agent.id,
+        agent_id=agent2.id,
         trigger="schedule",
         status="running",
         started_at=now - timedelta(seconds=270),

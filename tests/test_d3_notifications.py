@@ -420,8 +420,16 @@ def _agent_with_memory(db_session, username):
     db_session.flush()
     db_session.add_all(
         [
-            AgentMemory(agent_id=agent.id, kind="backfill", content="likes testing"),
-            AgentMemory(agent_id=agent.id, kind="episode", content="visited testsub"),
+            AgentMemory(
+                user_username=agent.user_username,
+                kind="backfill",
+                content="likes testing",
+            ),
+            AgentMemory(
+                user_username=agent.user_username,
+                kind="episode",
+                content="visited testsub",
+            ),
         ]
     )
     db_session.commit()

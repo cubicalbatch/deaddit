@@ -104,6 +104,8 @@ def _make_agent(db_session) -> Agent:
 
 
 def _new_run(db_session, agent) -> AgentRun:
+    for prev in AgentRun.query.filter_by(agent_id=agent.id, status="running").all():
+        prev.status = "completed"
     run = AgentRun(agent_id=agent.id, trigger="manual", status="running")
     db_session.add(run)
     db_session.commit()

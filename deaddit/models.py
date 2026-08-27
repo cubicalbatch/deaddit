@@ -368,13 +368,13 @@ class Setting(db.Model):
     @staticmethod
     def get_value(key, default=None):
         """Get a setting value by key, returning default if not found."""
-        setting = Setting.query.get(key)
+        setting = db.session.get(Setting, key)
         return setting.value if setting else default
 
     @staticmethod
     def set_value(key, value, description=None):
         """Set a setting value, creating or updating as needed."""
-        setting = Setting.query.get(key)
+        setting = db.session.get(Setting, key)
         if setting:
             setting.value = value
             if description:
@@ -523,6 +523,24 @@ class AgentRun(db.Model):
         ),
     )
 
+    def __init__(self, **kwargs):
+        if "persona_username" not in kwargs:
+            agent = kwargs.get("agent")
+            if agent and getattr(agent, "user_username", None):
+                kwargs["persona_username"] = agent.user_username
+            elif "agent_id" in kwargs and kwargs["agent_id"]:
+                try:
+                    ag = (
+                        db.session.get(Agent, kwargs["agent_id"])
+                        if db.session
+                        else None
+                    )
+                    if ag and ag.user_username:
+                        kwargs["persona_username"] = ag.user_username
+                except Exception:
+                    pass
+        super().__init__(**kwargs)
+
 
 class AgentTurn(db.Model):
     """A single LLM request/response exchange within a run."""
@@ -583,6 +601,22 @@ class AgentMemory(db.Model):
             "created_at",
         ),
     )
+
+    def __init__(self, **kwargs):
+        if "user_username" not in kwargs:
+            if "agent_id" in kwargs:
+                agent_id = kwargs.pop("agent_id")
+                try:
+                    ag = db.session.get(Agent, agent_id) if db.session else None
+                    if ag and ag.user_username:
+                        kwargs["user_username"] = ag.user_username
+                except Exception:
+                    pass
+            elif "agent" in kwargs:
+                agent = kwargs.pop("agent")
+                if agent and getattr(agent, "user_username", None):
+                    kwargs["user_username"] = agent.user_username
+        super().__init__(**kwargs)
 
 
 # --- Platform dynamics: votes & karma ---

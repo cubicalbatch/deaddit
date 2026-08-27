@@ -121,6 +121,11 @@ def test_missing_required_field_rejected_without_side_effects(ctx, db_session):
 
 
 def _new_run_ctx(existing_ctx, db_session):
+    for prev in AgentRun.query.filter_by(
+        agent_id=existing_ctx.agent.id, status="running"
+    ).all():
+        prev.status = "completed"
+    db_session.commit()
     run = AgentRun(agent_id=existing_ctx.agent.id, trigger="manual", status="running")
     db_session.add(run)
     db_session.commit()

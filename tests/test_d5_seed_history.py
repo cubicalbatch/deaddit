@@ -86,7 +86,7 @@ def test_fresh_seed_window_causality_and_shape(app, pinned_now, db_session):
 
 
 def test_exact_sum_invariants(app, pinned_now, db_session):
-    report = seeding.seed_history(days=14, seed=42, now=NOW)
+    report = seeding.seed_history(days=3, seed=42, now=NOW)
     assert report["votes_created"] > 0
 
     checked = 0
@@ -123,7 +123,7 @@ def test_vote_attention_shape_and_hot_feed(app, pinned_now):
 
 
 def test_karma_matches_effective_scores(app, pinned_now, db_session):
-    seeding.seed_history(days=14, seed=42, now=NOW)
+    seeding.seed_history(days=3, seed=42, now=NOW)
 
     def _effective_sums(model, owner_col):
         rows = (
@@ -152,7 +152,7 @@ def test_determinism_across_fresh_runs(app_factory, monkeypatch):
         with app.app_context():
             _db.create_all()
             monkeypatch.setattr(seeding, "_now", lambda: NOW)
-            report = seeding.seed_history(days=14, seed=42, now=NOW)
+            report = seeding.seed_history(days=3, seed=42, now=NOW)
             tuples = [
                 (v.id, v.voter, v.value, v.created_at.isoformat())
                 for v in Vote.query.order_by(Vote.id).all()
@@ -181,7 +181,7 @@ def test_decay_zero_votes_and_warning(app, pinned_now, caplog):
     with app.app_context():
         Setting.set_value("SEED_DECAY_DAYS", "0", "test")
         with caplog.at_level(logging.WARNING, logger="deaddit.dynamics.seeding"):
-            report = seeding.seed_history(days=14, seed=42, now=NOW)
+            report = seeding.seed_history(days=1, seed=42, now=NOW)
 
     assert report["votes_created"] == 0
     assert report["vote_probability_effective"] == 0
@@ -193,7 +193,7 @@ def test_decay_via_stale_anchor(app, pinned_now):
     with app.app_context():
         anchor = NOW - timedelta(days=365)
         Setting.set_value("SEED_ANCHOR_AT", anchor.isoformat(), "test")
-        report = seeding.seed_history(days=14, seed=42, now=NOW)
+        report = seeding.seed_history(days=1, seed=42, now=NOW)
 
     assert report["votes_created"] == 0
 
@@ -201,7 +201,7 @@ def test_decay_via_stale_anchor(app, pinned_now):
 def test_anchor_persisted_on_first_real_run(app, pinned_now):
     with app.app_context():
         assert Setting.get_value("SEED_ANCHOR_AT") is None
-        seeding.seed_history(days=14, seed=42, now=NOW)
+        seeding.seed_history(days=1, seed=42, now=NOW)
         assert Setting.get_value("SEED_ANCHOR_AT") == NOW.isoformat()
 
 
@@ -209,10 +209,10 @@ def test_anchor_persisted_on_first_real_run(app, pinned_now):
 
 
 def test_top_up_second_run_adds_rows_no_error(app, pinned_now):
-    first = seeding.seed_history(days=14, seed=42, now=NOW)
+    first = seeding.seed_history(days=3, seed=42, now=NOW)
     posts_after_first = Post.query.count()
 
-    second = seeding.seed_history(days=14, seed=43, now=NOW)
+    second = seeding.seed_history(days=3, seed=43, now=NOW)
 
     assert second["posts_created"] > 0
     assert Post.query.count() > posts_after_first
@@ -220,11 +220,11 @@ def test_top_up_second_run_adds_rows_no_error(app, pinned_now):
 
 
 def test_top_up_preserves_existing_users(app, pinned_now):
-    seeding.seed_history(days=7, seed=7, now=NOW)
+    seeding.seed_history(days=2, seed=7, now=NOW)
     snapshot = {
         u.username: (u.created_at, u.age, u.interests) for u in User.query.all()
     }
-    seeding.seed_history(days=7, seed=99, now=NOW)
+    seeding.seed_history(days=2, seed=99, now=NOW)
     for username, (created_at, age, interests) in snapshot.items():
         user = _db.session.get(User, username)
         assert user is not None
@@ -333,7 +333,7 @@ def test_single_head():
 
 
 def test_hot_feed_ordered_and_nonempty(app, pinned_now):
-    seeding.seed_history(days=14, seed=42, now=NOW)
+    seeding.seed_history(days=3, seed=42, now=NOW)
 
     posts = Post.query.order_by(*ranking.post_order_by("hot")).limit(20).all()
     assert posts

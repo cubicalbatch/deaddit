@@ -78,7 +78,7 @@ def _golden_agent(app, db_session):
     ]:
         db_session.add(
             AgentMemory(
-                agent_id=agent.id,
+                user_username=user.username,
                 kind="episode",
                 content=content,
                 created_at=base + datetime.timedelta(minutes=minutes),
