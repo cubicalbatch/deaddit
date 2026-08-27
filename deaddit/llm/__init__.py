@@ -40,6 +40,7 @@ from deaddit.llm.provider import (
     set_provider,
 )
 from deaddit.llm.tools import ToolSpec, validate_tool_args
+from deaddit.llm.vision import ImageDescriptionError, describe_image
 
 __all__ = [
     "LAST_PROBE_EVIDENCE",
@@ -50,6 +51,7 @@ __all__ = [
     "ChatRequest",
     "ChatResult",
     "Done",
+    "ImageDescriptionError",
     "LLMClient",
     "LLMError",
     "PermanentLLMError",
@@ -61,6 +63,7 @@ __all__ = [
     "ToolCallDelta",
     "ToolSpec",
     "TransientLLMError",
+    "describe_image",
     "ensure_tools_allowed",
     "get_capability",
     "get_provider",

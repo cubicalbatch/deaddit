@@ -6,9 +6,11 @@ writes are not allowed here.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Literal
 
+from flask import current_app
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 
@@ -21,7 +23,11 @@ from deaddit.agents.registry import (
 )
 from deaddit.dynamics.inbox import get_inbox, mark_inbox_read
 from deaddit.extensions import db
+from deaddit.images.storage import media_root, resolve_media_path
+from deaddit.llm import describe_image, is_vision_capable
 from deaddit.models import Comment, Post, Subdeaddit, User
+
+logger = logging.getLogger(__name__)
 
 _MAX_COMMENT_DEPTH = 6
 
@@ -180,23 +186,73 @@ def _build_comment_tree(post_id: int, params: ReadPostArgs) -> list[dict]:
     return top_level
 
 
+def _load_image_description(ctx: ToolContext, post: Post) -> dict:
+    """Bounded image description for a non-removed image post (plan 5B).
+
+    Vision is attempted only when the reading agent's already-resolved
+    endpoint/model has a stored ``supports_vision=True`` verdict. False,
+    unknown, a missing file, or any nested vision failure all degrade to
+    the complete stored source prompt - reading a post must never fail
+    because image description failed.
+    """
+    image = post.image
+    fallback = {
+        "present": True,
+        "description": image.source_prompt,
+        "description_source": "generation_prompt",
+    }
+    if not (ctx.llm_api_url and ctx.llm_model):
+        return fallback
+    try:
+        if not is_vision_capable(ctx.llm_api_url, ctx.llm_model):
+            return fallback
+        read_timeout = 30.0
+        if ctx.deadline is not None:
+            remaining = ctx.deadline.remaining()
+            if remaining <= 0:
+                return fallback
+            read_timeout = min(read_timeout, remaining)
+        root = media_root(current_app)
+        image_bytes = resolve_media_path(root, image.original_path).read_bytes()
+        description = describe_image(
+            image_bytes,
+            api_url=ctx.llm_api_url,
+            model=ctx.llm_model,
+            api_key=ctx.llm_api_key,
+            agent=ctx.user_username,
+            read_timeout=read_timeout,
+        )
+    except Exception:
+        logger.warning(
+            "image description failed for post %s; falling back to source prompt",
+            post.id,
+            exc_info=True,
+        )
+        return fallback
+    return {
+        "present": True,
+        "description": description,
+        "description_source": "vision",
+    }
+
+
 def _read_post(ctx: ToolContext, params: ReadPostArgs) -> dict:
     post = db.session.get(Post, params.post_id)
     if post is None:
         return {"ok": False, "error": "post not found"}
-    return {
-        "ok": True,
-        "post": {
-            "id": post.id,
-            "title": post.title,
-            "subdeaddit": post.subdeaddit_name,
-            "author": post.user,
-            "content": (post.content or "")[:2000],
-            "score": post.score,
-            "created_at": _iso(post.created_at),
-            "comments": _build_comment_tree(post.id, params),
-        },
+    post_dict: dict = {
+        "id": post.id,
+        "title": post.title,
+        "subdeaddit": post.subdeaddit_name,
+        "author": post.user,
+        "content": (post.content or "")[:2000],
+        "score": post.score,
+        "created_at": _iso(post.created_at),
+        "comments": _build_comment_tree(post.id, params),
     }
+    if post.image is not None and not post.removed:
+        post_dict["image"] = _load_image_description(ctx, post)
+    return {"ok": True, "post": post_dict}
 
 
 class SearchArgs(BaseModel):
