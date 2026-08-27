@@ -27,7 +27,10 @@ def test_provider_crud_and_auto_default(admin_client, app):
         assert res.get_json()["providers"] == []
 
         # 1. Create first provider (should become default automatically)
-        with patch("deaddit.admin.fetch_all_models_from_api", return_value=(["gpt-4o", "gpt-4o-mini"], "OK")):
+        with patch(
+            "deaddit.admin.fetch_all_models_from_api",
+            return_value=(["gpt-4o", "gpt-4o-mini"], "OK"),
+        ):
             res = admin_client.post(
                 "/admin/api/providers",
                 json={
@@ -47,7 +50,10 @@ def test_provider_crud_and_auto_default(admin_client, app):
         p1_id = p1_data["id"]
 
         # 2. Create second provider with is_default=False
-        with patch("deaddit.admin.fetch_all_models_from_api", return_value=(["llama-3.3-70b-versatile"], "OK")):
+        with patch(
+            "deaddit.admin.fetch_all_models_from_api",
+            return_value=(["llama-3.3-70b-versatile"], "OK"),
+        ):
             res = admin_client.post(
                 "/admin/api/providers",
                 json={
@@ -133,8 +139,16 @@ def test_provider_model_refresh_and_retrieval(admin_client, app):
         db.session.commit()
 
         # Mock API returning models
-        with patch("deaddit.admin.fetch_all_models_from_api", return_value=(["llama3:latest", "mistral:latest", "phi3:latest"], "Success")):
-            res = admin_client.post(f"/admin/api/providers/{provider.id}/refresh-models")
+        with patch(
+            "deaddit.admin.fetch_all_models_from_api",
+            return_value=(
+                ["llama3:latest", "mistral:latest", "phi3:latest"],
+                "Success",
+            ),
+        ):
+            res = admin_client.post(
+                f"/admin/api/providers/{provider.id}/refresh-models"
+            )
         assert res.status_code == 200
         data = res.get_json()
         assert data["success"] is True
@@ -148,7 +162,11 @@ def test_provider_model_refresh_and_retrieval(admin_client, app):
         # Query provider models GET endpoint
         res = admin_client.get(f"/admin/api/providers/{provider.id}/models")
         assert res.status_code == 200
-        assert res.get_json()["models"] == ["llama3:latest", "mistral:latest", "phi3:latest"]
+        assert res.get_json()["models"] == [
+            "llama3:latest",
+            "mistral:latest",
+            "phi3:latest",
+        ]
 
 
 def test_provider_connection_test(admin_client, app):
@@ -166,7 +184,9 @@ def test_provider_connection_test(admin_client, app):
         # Test using provider_id
         with patch("requests.get") as mock_get:
             mock_get.return_value.status_code = 200
-            res = admin_client.post("/admin/api/test-connection", json={"provider_id": provider.id})
+            res = admin_client.post(
+                "/admin/api/test-connection", json={"provider_id": provider.id}
+            )
             assert res.status_code == 200
             assert res.get_json()["success"] is True
             # Verify headers used the provider's api_key
@@ -177,7 +197,9 @@ def test_provider_connection_test(admin_client, app):
         # Test failure response
         with patch("requests.get") as mock_get:
             mock_get.return_value.status_code = 401
-            res = admin_client.post("/admin/api/test-connection", json={"provider_id": provider.id})
+            res = admin_client.post(
+                "/admin/api/test-connection", json={"provider_id": provider.id}
+            )
             assert res.status_code == 200
             assert res.get_json()["success"] is False
             assert "401" in res.get_json()["message"]
@@ -202,9 +224,18 @@ def test_config_api_key_resolution_with_providers(app):
         db.session.commit()
 
         # Lookup by matching endpoint URL
-        assert Config.get_api_key_for_endpoint("https://custom.llm.com/v1") == "secret-key-abc"
-        assert Config.get_api_key_for_endpoint("https://custom.llm.com/v1/") == "secret-key-abc"
-        assert Config.get_api_key_for_endpoint("https://secondary.llm.com/v1") == "secret-key-xyz"
+        assert (
+            Config.get_api_key_for_endpoint("https://custom.llm.com/v1")
+            == "secret-key-abc"
+        )
+        assert (
+            Config.get_api_key_for_endpoint("https://custom.llm.com/v1/")
+            == "secret-key-abc"
+        )
+        assert (
+            Config.get_api_key_for_endpoint("https://secondary.llm.com/v1")
+            == "secret-key-xyz"
+        )
 
         # Lookup with None/empty fallback to default provider
         assert Config.get_api_key_for_endpoint(None) == "secret-key-abc"

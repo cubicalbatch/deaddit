@@ -2,7 +2,7 @@
 
 Asserts concrete rendered strings for the three dashboard sections:
 Agents (Runs (24h) bucket counts, 24h window exclusions), Platform Pulse
-(provenance badges agent:/seed:/legacy:), and LLM Spend (SUM over
+(provenance badges agent:/seed:), and LLM Spend (SUM over
 estimated_cost with NULL-cost rows ignored, em-dash fallback on empty DB).
 """
 
@@ -78,7 +78,7 @@ def test_dashboard_renders_agent_runs_provenance_and_spend(
             )
         )
 
-    # Provenance buckets: agent-posted, seeded, and legacy content today.
+    # Provenance buckets: agent-posted and seeded content today.
     db_session.add_all(
         [
             Post(
@@ -95,14 +95,6 @@ def test_dashboard_renders_agent_runs_provenance_and_spend(
                 user="agenthost",
                 subdeaddit_name="testsub",
                 model="seed",
-                created_at=now,
-            ),
-            Post(
-                title="legacy post",
-                content="body",
-                user="agenthost",
-                subdeaddit_name="testsub",
-                model="test-model",
                 created_at=now,
             ),
         ]
@@ -164,7 +156,6 @@ def test_dashboard_renders_agent_runs_provenance_and_spend(
     # Provenance badges for posts and comments.
     assert "agent: 1" in html
     assert "seed: 1" in html
-    assert "legacy: 1" in html
 
     # Spend: summed tokens (100+200+200) and summed cost (0.5+0.25); the
     # NULL-cost row must not collapse the sum.

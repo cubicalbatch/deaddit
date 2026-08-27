@@ -303,35 +303,3 @@ def _freeze_version(mapper, connection, target):  # noqa: ANN001
             f"(attempted change to {', '.join(changed)}); "
             f"write a new version instead."
         )
-
-
-# --- legacy one-shot seed (GenerationTemplate.parameters -> v1 rows) -----
-
-
-def seed_from_generation_templates() -> list[PromptTemplateVersion]:
-    """Create v1 rows from legacy ``GenerationTemplate.parameters``.
-
-    Idempotent: templates that already exist are skipped. Body derivation
-    is deterministic — a string ``parameters["prompt"]`` becomes the body
-    verbatim; anything else becomes canonical JSON (sorted keys, tight
-    separators).
-    """
-    from deaddit.models import GenerationTemplate
-
-    seeded: list[PromptTemplateVersion] = []
-    for legacy in GenerationTemplate.query.all():
-        if get_template(legacy.name) is not None:
-            continue
-        params = legacy.parameters
-        if isinstance(params, dict) and isinstance(params.get("prompt"), str):
-            body = params["prompt"]
-        else:
-            body = json.dumps(params, sort_keys=True, separators=(",", ":"))
-        row = create_template(
-            name=legacy.name,
-            body=body,
-            description=legacy.description,
-            created_by="migration:generation_template",
-        )
-        seeded.append(row)
-    return seeded

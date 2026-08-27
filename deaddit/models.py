@@ -107,13 +107,7 @@ class User(db.Model):
 
 
 class JobType(Enum):
-    CREATE_SUBDEADDIT = "create_subdeaddit"
-    CREATE_USER = "create_user"
-    CREATE_POST = "create_post"
-    CREATE_COMMENT = "create_comment"
     BATCH_OPERATION = "batch_operation"
-    SCHEDULED_TASK = "scheduled_task"
-    CONTENT_CLEANUP = "content_cleanup"
 
 
 class JobStatus(Enum):
@@ -170,29 +164,6 @@ class Job(db.Model):
             "heartbeat_at": self.heartbeat_at.isoformat()
             if self.heartbeat_at
             else None,
-        }
-
-
-class GenerationTemplate(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    description = db.Column(db.Text)
-    type = db.Column(db.Enum(JobType), nullable=False)
-    parameters = db.Column(db.JSON, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(
-        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "name": self.name,
-            "description": self.description,
-            "type": self.type.value if self.type else None,
-            "parameters": self.parameters,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 

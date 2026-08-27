@@ -1,12 +1,8 @@
-"""
-Job queue plumbing for Deaddit's remaining BATCH_OPERATION jobs.
+"""Job queue plumbing for Deaddit's BATCH_OPERATION jobs.
 
-Legacy LLM content generation (CREATE_SUBDEADDIT/CREATE_USER/CREATE_POST/
-CREATE_COMMENT executors) has been deleted — content is now produced by the
-agent runtime. What remains here is execute_job dispatching BATCH_OPERATION,
-create_job for batch sub-jobs, and thread-local progress updates.
-The legacy status/stats helpers went with the /admin/jobs UI. Job claiming
-and heartbeat logic live in deaddit.runtime.
+Provides execute_job dispatching BATCH_OPERATION, create_job for batch sub-jobs,
+and thread-local progress updates. Job claiming and heartbeat logic live in
+deaddit.runtime.
 """
 
 import logging

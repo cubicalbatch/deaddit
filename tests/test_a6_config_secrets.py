@@ -1,20 +1,15 @@
-"""A6: config/secrets split, settings TTL cache, and the secrets-drain CLI."""
+"""A6: config/secrets split and settings TTL cache."""
 
 from __future__ import annotations
 
 import json
-import logging
 import os
 
 import pytest
-from click.testing import CliRunner
-from flask import Flask
 from sqlalchemy import text
 
-import deaddit.cli as cli_module
 import deaddit.settings.service as settings_service
 from deaddit import create_app, db
-from deaddit.cli import cli
 from deaddit.config import SECRET_KEYS, Config, is_secret_key
 from deaddit.models import Setting
 from deaddit.settings.service import SecretNotPersistable
@@ -28,16 +23,6 @@ def _fresh_settings_cache(monkeypatch):
     monkeypatch.delenv("DEADDIT_DB_PATH", raising=False)
     yield
     settings_service.clear()
-
-
-@pytest.fixture(autouse=True)
-def _fresh_stale_warning_state():
-    """Reset the once-per-process stale-secret warning set around each test."""
-    from deaddit import config as config_module
-
-    config_module._warned_stale_secrets.clear()
-    yield
-    config_module._warned_stale_secrets.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -190,26 +175,14 @@ def test_create_app_clears_settings_cache(app, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_secret_env_beats_stale_db_row_without_warning(
-    app, db_session, monkeypatch, caplog
-):
+def test_secret_ignores_db_row(app, db_session, monkeypatch):
     Setting.set_value("API_TOKEN", "legacy-db-token", None)
+    monkeypatch.delenv("API_TOKEN", raising=False)
+    # Secrets are strictly environment-only; DB rows are ignored
+    assert Config.get("API_TOKEN") is None
+
     monkeypatch.setenv("API_TOKEN", "env-token")
-    with caplog.at_level(logging.WARNING, logger="deaddit.config"):
-        assert Config.get("API_TOKEN") == "env-token"
-    assert "secrets-drain" not in caplog.text
-
-
-def test_secret_falls_back_to_stale_db_row_with_once_warning(
-    app, db_session, monkeypatch, caplog
-):
-    Setting.set_value("OPENAI_KEY", "sk-legacy", None)
-    monkeypatch.delenv("OPENAI_KEY", raising=False)
-    with caplog.at_level(logging.WARNING, logger="deaddit.config"):
-        assert Config.get("OPENAI_KEY") == "sk-legacy"
-        assert Config.get("OPENAI_KEY") == "sk-legacy"
-        assert Config.get("OPENAI_KEY") == "sk-legacy"
-    assert caplog.text.count("secrets-drain") == 1
+    assert Config.get("API_TOKEN") == "env-token"
 
 
 def test_secret_returns_default_when_neither_env_nor_row(app, db_session, monkeypatch):
@@ -252,10 +225,10 @@ def test_defect1_endpoint_double_write_refused_and_zero_rows(app, db_session):
     assert secret_rows == []
 
 
-def test_defect2_get_all_settings_masks_every_secret(app, db_session):
-    Setting.set_value("OPENAI_KEY", "sk-openai-plain", None)
-    Setting.set_value("API_TOKEN", "tok-plain", None)
-    Setting.set_value("API_KEY_GROQ", "gsk-plain", None)
+def test_defect2_get_all_settings_masks_every_secret(app, db_session, monkeypatch):
+    monkeypatch.setenv("OPENAI_KEY", "sk-openai-plain")
+    monkeypatch.setenv("API_TOKEN", "tok-plain")
+    monkeypatch.setenv("API_KEY_GROQ", "gsk-plain")
 
     all_blob = json.dumps(Config.get_all_settings())
     for plaintext in ("sk-openai-plain", "tok-plain", "gsk-plain"):
@@ -319,146 +292,3 @@ def test_engine_actually_lands_in_env_file(tmp_path, monkeypatch):
     with app.app_context():
         db.create_all()
     assert os.path.exists(str(target))
-
-
-# ---------------------------------------------------------------------------
-# Drain CLI round-trip
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def env_pointed_db(monkeypatch, tmp_path):
-    """DEADDIT_DB_PATH pointing at a tmp sqlite file (non-prod-shaped URI)."""
-    db_file = tmp_path / "drain-target.db"
-    monkeypatch.setenv("DEADDIT_DB_PATH", str(db_file))
-    return db_file
-
-
-@pytest.fixture()
-def isolated_instance_dir(monkeypatch, tmp_path):
-    """Point every Flask app's instance dir at a tmp dir during drain tests."""
-    instance_dir = tmp_path / "instance"
-    instance_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(
-        Flask, "auto_find_instance_path", lambda self: str(instance_dir)
-    )
-    return instance_dir
-
-
-def _seed_file_db(db_file: str, rows: dict[str, str]) -> None:
-    app = create_app({"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_file}"})
-    with app.app_context():
-        db.create_all()
-        for key, value in rows.items():
-            Setting.set_value(key, value, None)
-
-
-def _all_output(result) -> str:
-    combined = result.output
-    try:
-        combined += result.stderr
-    except Exception:
-        pass
-    return combined
-
-
-LEGACY_ROWS = {
-    "OPENAI_KEY": "sk legacy space",
-    "API_TOKEN": "tok#hash",
-    "API_KEY_GROQ": "gsk_plain",
-    "DEFAULT_DATA_LOADED": "true",
-}
-
-
-def test_drain_exports_once_and_scrubs(tmp_path, env_pointed_db):
-    db_file = str(env_pointed_db)
-    _seed_file_db(db_file, LEGACY_ROWS)
-
-    runner = CliRunner()
-    result = runner.invoke(cli, ["secrets-drain"])
-    assert result.exit_code == 0, _all_output(result)
-
-    out = result.output
-    assert out.count("sk legacy space") == 1
-    assert out.count("tok#hash") == 1
-    assert "OPENAI_KEY=" in out
-    assert "'sk legacy space'" in out  # shlex.quote applied
-    assert "API_KEY_GROQ=gsk_plain" in out  # plain values unquoted
-    assert "# DRY RUN" not in out
-    summary = json.loads(out.strip().splitlines()[-1])
-    assert summary == {"found": 3, "removed": 3, "dry_run": False}
-
-    verify = create_app({"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_file}"})
-    with verify.app_context():
-        remaining = {row.key: row.value for row in db.session.query(Setting).all()}
-    assert "OPENAI_KEY" not in remaining
-    assert "API_TOKEN" not in remaining
-    assert "API_KEY_GROQ" not in remaining
-    assert remaining["DEFAULT_DATA_LOADED"] == "true"
-
-    # Idempotent by construction: a rerun finds nothing.
-    rerun = runner.invoke(cli, ["secrets-drain"])
-    assert rerun.exit_code == 0
-    rerun_summary = json.loads(rerun.output.strip().splitlines()[-1])
-    assert rerun_summary["found"] == 0
-    assert rerun_summary["removed"] == 0
-
-
-def test_drain_dry_run_leaves_rows_in_place(tmp_path, env_pointed_db):
-    db_file = str(env_pointed_db)
-    _seed_file_db(db_file, LEGACY_ROWS)
-
-    runner = CliRunner()
-    result = runner.invoke(cli, ["secrets-drain", "--dry-run"])
-    assert result.exit_code == 0, _all_output(result)
-    assert "# DRY RUN" in result.output
-    assert result.output.count("tok#hash") == 1
-    summary = json.loads(result.output.strip().splitlines()[-1])
-    assert summary == {"found": 3, "removed": 0, "dry_run": True}
-
-    verify = create_app({"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_file}"})
-    with verify.app_context():
-        remaining = {row.key for row in db.session.query(Setting).all()}
-    assert {
-        "OPENAI_KEY",
-        "API_TOKEN",
-        "API_KEY_GROQ",
-        "DEFAULT_DATA_LOADED",
-    } <= remaining
-
-
-def test_drain_refuses_prod_shape_unless_forced(tmp_path, isolated_instance_dir):
-    db_file = str(isolated_instance_dir / "deaddit.db")
-    _seed_file_db(db_file, LEGACY_ROWS)
-
-    runner = CliRunner()
-    # Bare create_app() resolves sqlite:///deaddit.db against the instance dir,
-    # i.e. exactly the production shape.
-    refused = runner.invoke(cli, ["secrets-drain"])
-    assert refused.exit_code != 0
-    combined = _all_output(refused)
-    assert "Refusing to drain the production database" in combined
-    assert "keep-me" not in combined
-    assert "--i-know-this-is-prod" in combined
-
-    verify = create_app({"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_file}"})
-    with verify.app_context():
-        rows_before = {row.key: row.value for row in db.session.query(Setting).all()}
-    assert rows_before["API_TOKEN"] == LEGACY_ROWS["API_TOKEN"]
-
-    forced = runner.invoke(cli, ["secrets-drain", "--i-know-this-is-prod"])
-    assert forced.exit_code == 0, _all_output(forced)
-    forced_verify = create_app({"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_file}"})
-    with forced_verify.app_context():
-        rows_after = {row.key: row.value for row in db.session.query(Setting).all()}
-    assert "API_TOKEN" not in rows_after
-    assert rows_after["DEFAULT_DATA_LOADED"] == "true"
-
-
-def test_drain_cli_module_uses_lazy_create_app_binding(monkeypatch):
-    """The command must call create_app through deaddit.cli's own binding."""
-    assert cli_module.create_app.__module__ == "deaddit"
-
-
-def test_flask_cli_exposes_secrets_drain_command(app):
-    assert "secrets-drain" in app.cli.commands

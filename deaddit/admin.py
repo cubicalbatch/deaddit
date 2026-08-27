@@ -336,14 +336,12 @@ def dashboard():
     )
 
     def _bucket(rows):
-        out = {"agent": 0, "seed": 0, "legacy": 0}
+        out = {"agent": 0, "seed": 0}
         for marker, n in rows:
             if marker and str(marker).startswith("agent:"):
                 out["agent"] += n
             elif marker == "seed":
                 out["seed"] += n
-            else:
-                out["legacy"] += n
         return out
 
     degeneracy_active = DegeneracyFlag.query.filter(
@@ -1730,9 +1728,7 @@ def api_list_providers():
         p_dict = p.to_dict()
         p_dict["models"] = model_names
         p_dict["model_count"] = len(model_names)
-        p_dict["last_fetched"] = (
-            last_fetched.isoformat() if last_fetched else None
-        )
+        p_dict["last_fetched"] = last_fetched.isoformat() if last_fetched else None
         result.append(p_dict)
     return jsonify({"success": True, "providers": result})
 
@@ -1854,7 +1850,7 @@ def api_update_provider(provider_id):
         new_default = bool(payload.get("is_default"))
         if new_default:
             for p in LLMProvider.query.all():
-                p.is_default = (p.id == provider.id)
+                p.is_default = p.id == provider.id
         else:
             if LLMProvider.query.count() == 1:
                 provider.is_default = True
@@ -1925,9 +1921,7 @@ def api_refresh_provider_models(provider_id):
         return jsonify({"success": False, "error": "Provider not found"}), 404
 
     api_key = (
-        provider.api_key
-        or Config.get_api_key_for_endpoint(provider.api_url)
-        or ""
+        provider.api_key or Config.get_api_key_for_endpoint(provider.api_url) or ""
     )
     models, fetch_message = fetch_all_models_from_api(provider.api_url, api_key)
 
@@ -1986,15 +1980,11 @@ def api_get_provider_models(provider_id):
 
     cached_models = ApiModel.get_models_for_api(provider.api_url)
     model_names = [m.model_name for m in cached_models]
-    last_fetched = (
-        max(m.last_fetched for m in cached_models) if cached_models else None
-    )
+    last_fetched = max(m.last_fetched for m in cached_models) if cached_models else None
 
     if not model_names and request.args.get("refresh") == "true":
         api_key = (
-            provider.api_key
-            or Config.get_api_key_for_endpoint(provider.api_url)
-            or ""
+            provider.api_key or Config.get_api_key_for_endpoint(provider.api_url) or ""
         )
         models, _ = fetch_all_models_from_api(provider.api_url, api_key)
         if models:
@@ -2531,9 +2521,12 @@ def api_create_agent():
         api_key = provider.api_key or Config.get_api_key_for_endpoint(api_url)
     elif payload.get("api_url"):
         api_url = str(payload.get("api_url") or "").strip()
-        model = str(payload.get("model") or Config.get("OPENAI_MODEL", "llama3")).strip()
+        model = str(
+            payload.get("model") or Config.get("OPENAI_MODEL", "llama3")
+        ).strip()
         matching_p = LLMProvider.query.filter(
-            (LLMProvider.api_url == api_url.rstrip("/")) | (LLMProvider.api_url == api_url)
+            (LLMProvider.api_url == api_url.rstrip("/"))
+            | (LLMProvider.api_url == api_url)
         ).first()
         if matching_p:
             provider = matching_p
@@ -2543,11 +2536,17 @@ def api_create_agent():
     elif default_p:
         provider = default_p
         api_url = str(default_p.api_url or "").strip()
-        model = str(payload.get("model") or default_p.default_model or Config.get("OPENAI_MODEL", "llama3")).strip()
+        model = str(
+            payload.get("model")
+            or default_p.default_model
+            or Config.get("OPENAI_MODEL", "llama3")
+        ).strip()
         api_key = default_p.api_key or Config.get_api_key_for_endpoint(api_url)
     else:
         api_url = str(Config.get("OPENAI_API_URL") or "").strip()
-        model = str(payload.get("model") or Config.get("OPENAI_MODEL", "llama3")).strip()
+        model = str(
+            payload.get("model") or Config.get("OPENAI_MODEL", "llama3")
+        ).strip()
         api_key = Config.get_api_key_for_endpoint(api_url)
 
     try:
@@ -2773,7 +2772,11 @@ def api_update_agent(agent_id):
 
     # provider_id
     if "provider_id" in payload or "provider_id" in cfg_in:
-        pid = payload["provider_id"] if "provider_id" in payload else cfg_in.get("provider_id")
+        pid = (
+            payload["provider_id"]
+            if "provider_id" in payload
+            else cfg_in.get("provider_id")
+        )
         if pid:
             try:
                 provider = db.session.get(LLMProvider, int(pid))

@@ -1,4 +1,4 @@
-"""Deterministic synthetic vote-history backfill and history seeding."""
+"""Deterministic synthetic history seeding."""
 
 from __future__ import annotations
 
@@ -152,86 +152,6 @@ def _resolves_to_production(uri: object, instance_path: str) -> bool:
     else:
         resolved = os.path.abspath(os.path.join(instance_path, path))
     return resolved == _production_db_path(instance_path)
-
-
-def backfill_history(
-    batch_size=500, seed=42, dry_run=False, allow_production=False
-) -> dict:
-    """Backfill deterministic synthetic vote history for legacy content.
-
-    Items with any existing Vote rows are skipped entirely (idempotency).
-    Items whose |score| exceeds the voter capacity are reported under
-    "unbackfilled_infeasible" and left untouched.
-
-    Refuses to run against the production database (<instance>/deaddit.db)
-    unless allow_production=True.
-    """
-    if (
-        not allow_production
-        and has_app_context()
-        and _resolves_to_production(
-            current_app.config.get("SQLALCHEMY_DATABASE_URI"),
-            current_app.instance_path,
-        )
-    ):
-        raise RuntimeError(
-            "refusing to backfill production without allow_production=True"
-        )
-    report = {
-        "posts_backfilled": 0,
-        "comments_backfilled": 0,
-        "votes_created": 0,
-        "skipped_already_voted": 0,
-        "unbackfilled_infeasible": [],
-    }
-
-    user_count = db.session.query(func.count(User.username)).scalar() or 0
-    capacity = user_count - 1
-    if capacity <= 0:
-        return report
-    usernames, weights = _activity_weights()
-    voter_pool = list(zip(usernames, weights, strict=True))
-
-    voted_post_ids = {
-        row[0]
-        for row in db.session.query(Vote.post_id).filter(Vote.post_id.isnot(None))
-    }
-    voted_comment_ids = {
-        row[0]
-        for row in db.session.query(Vote.comment_id).filter(Vote.comment_id.isnot(None))
-    }
-
-    pending = 0
-    for kind, model, voted_ids in (
-        ("post", Post, voted_post_ids),
-        ("comment", Comment, voted_comment_ids),
-    ):
-        for item in model.query.order_by(model.id).all():
-            if item.id in voted_ids:
-                report["skipped_already_voted"] += 1
-                continue
-
-            score = int(item.score)
-            if abs(score) > capacity:
-                report["unbackfilled_infeasible"].append(
-                    {"kind": kind, "id": item.id, "score": score}
-                )
-                continue
-
-            rng = random.Random(f"{kind}:{item.id}")
-            created = _backfill_item(rng, item, kind, capacity, voter_pool, dry_run)
-            report[f"{kind}s_backfilled"] += 1
-            report["votes_created"] += created
-
-            pending += 1
-            if pending >= batch_size:
-                pending = 0
-                if not dry_run:
-                    db.session.commit()
-
-    if not dry_run:
-        db.session.commit()
-    return report
 
 
 # --- Phase D5: deterministic history seeding ---

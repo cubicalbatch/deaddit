@@ -1,6 +1,5 @@
-"""Settings layer: TTL-cached config resolution, env-only secrets, drain tool."""
+"""Settings layer: TTL-cached config resolution, env-only secrets."""
 
-from .drain import drain_secrets
 from .service import (
     DEFAULT_TTL_SECONDS,
     MISSING,
@@ -18,7 +17,6 @@ __all__ = [
     "SecretNotPersistable",
     "cached",
     "clear",
-    "drain_secrets",
     "invalidate",
     "register_invalidation_hook",
     "ttl_seconds",

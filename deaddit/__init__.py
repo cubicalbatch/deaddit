@@ -71,11 +71,6 @@ def create_app(config: Any = None) -> Flask:
     app.register_blueprint(web_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(live_bp)
-    # Register the drain command on the Flask CLI too (lazy import:
-    # deaddit.cli imports create_app from this module at its own import time).
-    from .cli import secrets_drain_command  # noqa: E402
-
-    app.cli.add_command(secrets_drain_command)
 
     # Import websocket handlers so their @socketio.on decorators register
     from . import websocket  # noqa: F401

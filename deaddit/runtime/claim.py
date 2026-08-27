@@ -64,7 +64,7 @@ def sweep_stale_jobs(stale_minutes: int = HEARTBEAT_STALE_MINUTES) -> int:
     """Return stale RUNNING jobs to PENDING and return how many were swept.
 
     A job is stale when its ``heartbeat_at`` is older than the cutoff, or when
-    it has no heartbeat at all (legacy rows from before Phase A5).
+    it has no heartbeat timestamp recorded.
     """
     cutoff = datetime.utcnow() - timedelta(minutes=stale_minutes)
     result = db.session.execute(

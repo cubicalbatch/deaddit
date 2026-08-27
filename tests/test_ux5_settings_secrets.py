@@ -5,8 +5,7 @@ API_TOKEN / SECRET_KEY / OPENAI_KEY / API_KEY_* from the environment and
 refuses to persist them (``SecretNotPersistable``). These tests pin the
 post-A6 behaviour of /admin/settings and its save APIs:
 
-* blank/absent secret fields never touch anything (and legacy DB rows,
-  i.e. rows written before A6, are left byte-identical),
+* blank/absent secret fields never touch anything,
 * non-empty secrets are REFUSED with an explicit environment-only
   message while the non-secret rest of the request still commits,
 * short tokens keep their dedicated validation error,
@@ -43,29 +42,20 @@ def admin_client(client):
 
 
 @pytest.fixture()
-def legacy_secret_rows(admin_client, db_session):
-    """Seed one of each secret flavor as a pre-A6 database would have them.
-
-    The save APIs refuse to write secrets since A6, so legacy rows can only
-    exist in databases predating the change (or be recreated by hand).
-    """
-    for key, value in (
-        ("OPENAI_KEY", OPENAI_KEY),
-        ("API_TOKEN", API_TOKEN),
-        ("API_KEY_GROQ", ENDPOINT_KEY),
-    ):
-        db_session.add(Setting(key=key, value=value))
-    db_session.commit()
-    return {k: _setting_value(db_session, k) for k in SECRET_KEYS}
+def env_secrets(monkeypatch):
+    """Seed secrets in the environment."""
+    monkeypatch.setenv("OPENAI_KEY", OPENAI_KEY)
+    monkeypatch.setenv("API_TOKEN", API_TOKEN)
+    monkeypatch.setenv("API_KEY_GROQ", ENDPOINT_KEY)
+    return {
+        "OPENAI_KEY": OPENAI_KEY,
+        "API_TOKEN": API_TOKEN,
+        "API_KEY_GROQ": ENDPOINT_KEY,
+    }
 
 
-def test_blank_secrets_are_unchanged_on_resave(
-    legacy_secret_rows, admin_client, db_session
-):
-    before = {k: _setting_value(db_session, k) for k in SECRET_KEYS}
-    assert before == legacy_secret_rows
-
-    # First re-save with every secret field blank.
+def test_blank_secrets_on_save_do_not_persist(admin_client, db_session):
+    # First save with every secret field blank.
     resp = admin_client.post(
         "/admin/api/save-config",
         json={"openai_api_url": ENDPOINT, "openai_key": "", "openai_model": "llama3"},
@@ -80,29 +70,25 @@ def test_blank_secrets_are_unchanged_on_resave(
     assert resp.status_code == 200
     assert resp.get_json()["success"] is True
 
-    # Second re-save with the keys absent from the payload entirely.
+    # Second save with the keys absent from the payload entirely.
     resp = admin_client.post("/admin/api/save-config", json={"openai_model": "llama3"})
     assert resp.get_json()["success"] is True
     resp = admin_client.post("/admin/api/save-deaddit-config", json={})
     assert resp.get_json()["success"] is True
 
-    after = {k: _setting_value(db_session, k) for k in SECRET_KEYS}
-    assert after == before
+    for k in SECRET_KEYS:
+        assert _setting_value(db_session, k) is None
 
 
-def test_whitespace_only_secret_is_unchanged(
-    legacy_secret_rows, admin_client, db_session
-):
-    """Whitespace-only payloads count as blank and must not clobber secrets."""
-    before = {k: _setting_value(db_session, k) for k in ("OPENAI_KEY", "API_TOKEN")}
-
+def test_whitespace_only_secret_is_ignored(admin_client, db_session):
+    """Whitespace-only payloads count as blank and do not persist."""
     resp = admin_client.post("/admin/api/save-config", json={"openai_key": "   \t "})
     assert resp.get_json()["success"] is True
     resp = admin_client.post("/admin/api/save-deaddit-config", json={"api_token": "  "})
     assert resp.get_json()["success"] is True
 
-    assert _setting_value(db_session, "OPENAI_KEY") == before["OPENAI_KEY"]
-    assert _setting_value(db_session, "API_TOKEN") == before["API_TOKEN"]
+    assert _setting_value(db_session, "OPENAI_KEY") is None
+    assert _setting_value(db_session, "API_TOKEN") is None
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +147,7 @@ def test_short_token_is_rejected_without_write(admin_client, db_session):
 # (c) rendered page leaks neither bullet masks nor secret values
 
 
-def test_render_hides_all_secrets(admin_client, db_session, legacy_secret_rows):
+def test_render_hides_all_secrets(admin_client, db_session, env_secrets):
     resp = admin_client.get("/admin/settings")
     assert resp.status_code == 200
     html = resp.get_data(as_text=True)

@@ -1,10 +1,9 @@
 """Phase LLM-5: prompt versioning registry — deterministic tests (FakeProvider only).
 
 Covers: render determinism (byte-identical), version immutability, pin
-resolution precedence, unknown-variable errors, legacy
-GenerationTemplate seeding, render audit trail, live-prompt byte
-stability vs the pre-phase golden snapshot, and ChatResult template
-echo.
+resolution precedence, unknown-variable errors, render audit trail,
+live-prompt byte stability vs the pre-phase golden snapshot, and ChatResult
+template echo.
 """
 
 from __future__ import annotations
@@ -25,20 +24,16 @@ from deaddit.llm.prompts import (
     clear_pin,
     create_template,
     create_version,
-    get_template,
     get_version,
     render,
     render_pinned,
     resolve_pin,
-    seed_from_generation_templates,
     set_pin,
     versioning_enabled,
 )
 from deaddit.models import (
     Agent,
     AgentMemory,
-    GenerationTemplate,
-    JobType,
     PromptRenderAudit,
     User,
 )
@@ -241,52 +236,6 @@ class TestRenderAudit:
         replay = render(version_row.body, json.loads(row.variables_json))
         assert replay == text
         assert _sha(replay) == row.rendered_sha256
-
-
-# --- legacy GenerationTemplate seed ----------------------------------------
-
-
-class TestLegacySeed:
-    def test_prompt_string_becomes_verbatim_body(self, app, db_session):
-        db_session.add(
-            GenerationTemplate(
-                name="post_tpl",
-                type=JobType.CREATE_POST,
-                parameters={"prompt": "Write about {topic} in {style}"},
-                description="d",
-            )
-        )
-        db_session.commit()
-        seeded = seed_from_generation_templates()
-        assert len(seeded) == 1
-        assert seeded[0].version == 1
-        assert seeded[0].body == "Write about {topic} in {style}"
-        assert render(seeded[0].body, {"topic": "cats", "style": "haiku"}) == (
-            "Write about cats in haiku"
-        )
-
-    def test_non_prompt_parameters_become_canonical_json(self, app, db_session):
-        db_session.add(
-            GenerationTemplate(
-                name="odd_tpl",
-                type=JobType.CREATE_USER,
-                parameters={"b": 2, "a": 1},
-            )
-        )
-        db_session.commit()
-        seeded = seed_from_generation_templates()
-        assert seeded[0].body == '{"a":1,"b":2}'
-
-    def test_idempotent(self, app, db_session):
-        db_session.add(
-            GenerationTemplate(
-                name="idem", type=JobType.CREATE_POST, parameters={"prompt": "p {x}"}
-            )
-        )
-        db_session.commit()
-        assert len(seed_from_generation_templates()) == 1
-        assert seed_from_generation_templates() == []
-        assert get_template("idem") is not None
 
 
 # --- parity freeze: live-prompt byte stability -----------------------------

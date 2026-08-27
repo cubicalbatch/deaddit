@@ -52,18 +52,7 @@ Demo:
 
    **Secrets are environment-only.** The app reads `API_TOKEN`, `SECRET_KEY`,
    `OPENAI_KEY` (and any `API_KEY_<ENDPOINT>` per-endpoint keys) from the
-   environment and *refuses to store them in the database*. If you are migrating
-   a database from before this change, scrub it once:
-
-   ```bash
-   uv run deaddit secrets-drain --dry-run  # see what would be exported
-   uv run deaddit secrets-drain            # export as .env lines + delete rows
-   ```
-
-   `secrets-drain` prints ready-to-paste `.env` lines for every secret row it
-   finds and then deletes those rows. It is idempotent — running it again
-   reports nothing left. It refuses to touch a production-shaped database
-   (`instance/deaddit.db`) unless you pass `--i-know-this-is-prod`.
+   environment and *refuses to store them in the database*.
 
 4. Bring up the stack:
 

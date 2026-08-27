@@ -2,10 +2,9 @@
 
 Every creator validates its input, then ``db.session.add`` + ``commit`` inside
 itself and returns the ORM object. Validation failures raise
-:class:`ContentValidationError` with the exact legacy 400 body text from
-``deaddit/api.py`` so the HTTP wrapper can map them verbatim. On
-:class:`sqlalchemy.exc.SQLAlchemyError` the session is rolled back and the
-exception re-raised unchanged (including ``IntegrityError`` for PK collisions).
+:class:`ContentValidationError`. On :class:`sqlalchemy.exc.SQLAlchemyError`
+the session is rolled back and the exception re-raised unchanged (including
+``IntegrityError`` for PK collisions).
 
 Each function requires an active Flask application context; none of them
 creates one.
@@ -28,11 +27,7 @@ __all__ = ["ContentValidationError", "get_available_models"]
 
 
 class ContentValidationError(ValueError):
-    """Raised when creation input fails validation.
-
-    The message maps verbatim to the legacy 400 error bodies of
-    ``deaddit/api.py`` ``ingest()`` / ``ingest_user()``.
-    """
+    """Raised when creation input fails validation."""
 
 
 @cache
@@ -107,7 +102,7 @@ def create_post(
 
     Raises:
         ContentValidationError: on an empty title/content, unknown author, or
-            unknown subdeaddit (legacy 400 messages).
+            unknown subdeaddit.
     """
     if not title or not content:
         raise ContentValidationError("Invalid post data")

@@ -1,13 +1,10 @@
 """Vote-authoritative score repair and karma rebuild (Phase D1, Wave B S2).
 
-Nightly recompute per the frozen D1 contract:
+Nightly recompute per the D1 contract:
 
-- Items WITH at least one Vote row are vote-authoritative: ``score`` and
-  ``vote_count`` are repaired from the Vote rows (drift is logged).
-- Items WITHOUT any Vote row are legacy: untouched. Since Resolution 4
-  collapsed the old display alias into a single column, a vote-less item's
-  fabricated ``score`` simply stays display truth until Wave 6 removes
-  fabrication.
+- All items are vote-authoritative: ``score`` and ``vote_count`` are repaired
+  from the Vote rows (drift is logged). Items without votes have score 0 and
+  vote_count 0.
 - Karma = sum of effective scores over a user's posts/comments, where
   effective_score = item.score. Only users who own at least one post or
   comment are updated.
@@ -60,12 +57,11 @@ def _vote_aggregates(vote_column: Any) -> dict[int, tuple[int, int]]:
 def recompute_scores_and_karma() -> dict[str, int]:
     """Repair vote-authoritative aggregates and rebuild user karma.
 
-    Returns the summary ``{"repaired", "drift_votes", "karma_updates",
-    "legacy_items"}``: items whose aggregates were fixed, individual column
-    mismatches found against Vote truth, karma columns changed, and
-    vote-less legacy items left untouched.
+    Returns the summary ``{"repaired", "drift_votes", "karma_updates"}``:
+    items whose aggregates were fixed, individual column mismatches found
+    against Vote truth, and karma columns changed.
     """
-    repaired = drift_votes = legacy_items = 0
+    repaired = drift_votes = 0
     _strip_karma_enabled = strip_karma_on_remove()
     effective: dict[tuple[str, int], int] = {}
 
@@ -73,14 +69,7 @@ def recompute_scores_and_karma() -> dict[str, int]:
         aggregates = _vote_aggregates(vote_column)
         for item in db.session.query(model).all():
             agg = aggregates.get(item.id)
-            if agg is None:
-                # Legacy item with zero votes: untouched; its fabricated
-                # score is the displayed value by construction.
-                legacy_items += 1
-                effective[(name, item.id)] = item.score
-                continue
-
-            total, count = agg
+            total, count = agg if agg is not None else (0, 0)
             changed = False
             if item.score != total:
                 drift_votes += 1
@@ -123,7 +112,6 @@ def recompute_scores_and_karma() -> dict[str, int]:
         "repaired": repaired,
         "drift_votes": drift_votes,
         "karma_updates": karma_updates,
-        "legacy_items": legacy_items,
     }
     logger.info("dynamics recompute summary: %s", summary)
     return summary

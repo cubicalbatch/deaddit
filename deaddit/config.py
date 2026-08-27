@@ -4,12 +4,9 @@ Non-secret settings resolve database first, then environment variables, then
 built-in defaults (DB > env > defaults), served through the process-local TTL
 cache in :mod:`deaddit.settings.service`.
 
-Since refactor A6, secret keys (``API_TOKEN``, ``SECRET_KEY``, ``OPENAI_KEY``
-and every ``API_KEY_*`` endpoint key) are environment-only: :meth:`Config.set`
-refuses to persist them, the environment wins over any stale database row left
-by an earlier deployment (served with a once-per-process warning so pre-A6
-installations keep working), and ``deaddit secrets-drain`` exports and scrubs
-those legacy rows.
+Secret keys (``API_TOKEN``, ``SECRET_KEY``, ``OPENAI_KEY`` and every
+``API_KEY_*`` endpoint key) are environment-only: :meth:`Config.set` refuses to
+persist them, and they resolve strictly from the environment or defaults.
 """
 
 import logging
@@ -21,9 +18,6 @@ from deaddit.settings.service import SecretNotPersistable, cached, invalidate
 logger = logging.getLogger(__name__)
 
 SECRET_KEYS = frozenset({"API_TOKEN", "SECRET_KEY", "OPENAI_KEY"})
-
-# Secrets read from a stale DB row warn exactly once per process per key.
-_warned_stale_secrets: set[str] = set()
 
 # Sentinel: no DB/env/DEFAULTS layer answered for a non-secret key.
 _UNSET = object()
@@ -118,23 +112,10 @@ class Config:
 
     @classmethod
     def _get_secret(cls, key: str, default: str | None = None) -> str | None:
-        """Resolve a secret: environment first, stale DB row as grace fallback."""
+        """Resolve a secret: environment first, then built-in default."""
         env_value = os.environ.get(key)
         if env_value is not None:
             return env_value
-        try:
-            db_value = Setting.get_value(key)
-        except Exception:
-            db_value = None
-        if db_value is not None:
-            if key not in _warned_stale_secrets:
-                _warned_stale_secrets.add(key)
-                logger.warning(
-                    "Secret %s still stored in database; run `deaddit secrets-drain`"
-                    " to scrub it",
-                    key,
-                )
-            return db_value
         default_value = cls.DEFAULTS.get(key)
         if default_value is not None:
             return default_value
@@ -185,11 +166,8 @@ class Config:
         if is_secret_key(key):
             if os.environ.get(key) is not None:
                 return "environment"
-            try:
-                if Setting.get_value(key) is not None:
-                    return "database (stale)"
-            except Exception:
-                pass
+            if cls.DEFAULTS.get(key) is not None:
+                return "default"
             return "none"
 
         try:

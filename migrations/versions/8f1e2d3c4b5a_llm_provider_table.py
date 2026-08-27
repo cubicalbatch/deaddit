@@ -24,7 +24,9 @@ def upgrade():
         sa.Column("api_url", sa.String(length=255), nullable=False),
         sa.Column("api_key", sa.String(length=255), nullable=True),
         sa.Column("default_model", sa.String(length=100), nullable=True),
-        sa.Column("is_default", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column(
+            "is_default", sa.Boolean(), nullable=False, server_default=sa.text("0")
+        ),
         sa.Column("created_at", sa.DateTime(), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
     )
