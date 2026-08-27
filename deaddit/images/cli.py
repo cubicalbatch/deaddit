@@ -1,6 +1,6 @@
 """Click commands for manually verifying image-provider wiring and cleanup.
 
-Three commands live here, and they are not equivalent:
+Four commands live here, and they are not equivalent:
 
 ``check-connection`` runs an authenticated catalog search only. It never
 generates an image, so it never costs money, and is safe to run as often as
@@ -11,14 +11,15 @@ so a developer can deliberately prove the full generation path works against
 the live API at an explicit integration milestone - never automatically, and
 never from a test. It refuses to run without --yes-i-know-this-costs-money.
 
-``reconcile-media`` is the operator-safe cleanup command (plan 7A): it
-reports generated-image files with no owning ``post_image`` row, and
-database rows whose files have gone missing. It is dry-run by default and
-only ever deletes files when passed --apply, at which point it applies the
-same production-database guard as ``deaddit dynamics seed-history``.
+``regenerate-thumbnails`` rebuilds stored thumbnails from their full-size
+originals on disk (no provider calls, originals untouched) at the current
+size/quality defaults, for thumbnails written before those defaults stopped
+looking over-compressed in the feed. Like ``reconcile-media`` it is dry-run
+by default and requires --apply plus the production guard to rewrite.
 
 ``check-connection`` and ``smoke-fal`` are never imported by, or run under,
-pytest; ``reconcile-media`` is safe to and is covered by the test suite.
+pytest; ``reconcile-media`` and ``regenerate-thumbnails`` are safe to and
+are covered by the test suite.
 """
 
 from __future__ import annotations
@@ -32,7 +33,13 @@ from deaddit.dynamics import seeding
 from deaddit.images.client import generate
 from deaddit.images.providers import register_default_adapters
 from deaddit.images.service import preview_orphaned_media
-from deaddit.images.storage import media_root, reconcile_media
+from deaddit.images.storage import (
+    MediaStorageError,
+    media_root,
+    reconcile_media,
+    regenerate_thumbnail,
+    resolve_media_path,
+)
 from deaddit.images.types import Deadline, ImageProviderError
 from deaddit.images.verification import test_connection
 from deaddit.models import ImageProvider, PostImage
@@ -253,6 +260,112 @@ def reconcile_media_cmd(apply_changes: bool, confirmed_prod: bool) -> None:
             )
             for entry in report.incomplete_rows:
                 click.echo(f"  post_id={entry['post_id']} missing={entry['missing']}")
+
+
+@images.command("regenerate-thumbnails")
+@click.option(
+    "--max-size",
+    default=800,
+    show_default=True,
+    help="Longest thumbnail edge, in pixels.",
+)
+@click.option(
+    "--apply",
+    "apply_changes",
+    is_flag=True,
+    default=False,
+    help="Actually rewrite thumbnail files. Without this, only reports.",
+)
+@click.option(
+    "--i-know-this-is-prod",
+    "confirmed_prod",
+    is_flag=True,
+    default=False,
+    help="Required alongside --apply against the production database "
+    "(instance/deaddit.db).",
+)
+def regenerate_thumbnails_cmd(
+    max_size: int, apply_changes: bool, confirmed_prod: bool
+) -> None:
+    """Rebuild stored thumbnails from their full-size originals on disk.
+
+    Thumbnails written under the old 400px/default-quality pipeline look
+    over-compressed once the feed upscales them. This command re-derives
+    every thumbnail from the original already on disk - no provider calls,
+    originals untouched - keeping each thumbnail's filename, and therefore
+    its public URL, stable.
+
+    Dry-run by default: reports how many thumbnails would be rewritten and
+    which originals are missing from disk. Pass --apply to rewrite the
+    files; applying against the production database (instance/deaddit.db)
+    additionally requires --i-know-this-is-prod, the same guard
+    ``reconcile-media`` uses.
+    """
+    app = create_app()
+    with app.app_context():
+        root = media_root(app)
+        targets: list[PostImage] = []
+        missing: list[tuple[int, str]] = []
+        for row in PostImage.query.all():
+            try:
+                original = resolve_media_path(root, row.original_path)
+            except MediaStorageError:
+                missing.append((row.post_id, "unresolvable original path"))
+                continue
+            if original.is_file():
+                targets.append(row)
+            else:
+                missing.append((row.post_id, row.original_path))
+
+        if not apply_changes:
+            click.echo(
+                f"[dry-run] {len(targets)} thumbnail(s) would be regenerated "
+                f"at max edge {max_size}px."
+            )
+            if missing:
+                click.echo(
+                    f"{len(missing)} post_image row(s) have no original to "
+                    "regenerate from and would be skipped:"
+                )
+                for post_id, why in missing:
+                    click.echo(f"  post_id={post_id} missing={why}")
+            click.echo(
+                "Dry run only - no files were rewritten. Pass --apply to rewrite."
+            )
+            return
+
+        if not confirmed_prod and seeding._resolves_to_production(
+            app.config.get("SQLALCHEMY_DATABASE_URI"), app.instance_path
+        ):
+            raise click.ClickException(
+                "Refusing to rewrite media against the production database "
+                "(instance/deaddit.db). Pass --i-know-this-is-prod to force."
+            )
+
+        rewritten = 0
+        failed: list[tuple[int, str]] = []
+        for row in targets:
+            try:
+                regenerate_thumbnail(
+                    root,
+                    row.original_path,
+                    row.thumbnail_path,
+                    thumbnail_max=max_size,
+                )
+            except (MediaStorageError, OSError) as exc:
+                failed.append((row.post_id, str(exc)))
+                continue
+            rewritten += 1
+        click.echo(f"Regenerated {rewritten} thumbnail(s).")
+        if failed:
+            click.echo(f"{len(failed)} thumbnail(s) could not be regenerated:")
+            for post_id, why in failed:
+                click.echo(f"  post_id={post_id} error={why}")
+        if missing:
+            click.echo(
+                f"{len(missing)} post_image row(s) were skipped with no "
+                "original on disk."
+            )
 
 
 __all__ = ["images"]

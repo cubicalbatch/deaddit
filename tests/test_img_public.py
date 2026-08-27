@@ -422,3 +422,80 @@ def test_hard_deletes_remove_files_and_reconciliation_defaults_to_a_dry_run(
     assert not orphan.is_file()
     assert _files_exist(app, kept)
     assert _files_exist(app, soft_removed), "soft removal must keep evidence files"
+
+
+def test_regenerate_thumbnails_cli_rebuilds_legacy_thumbnails(
+    app, db_session, monkeypatch
+):
+    monkeypatch.setattr(images_cli, "create_app", lambda *a, **k: app)
+    from deaddit.cli import cli
+
+    runner = CliRunner()
+    root = Path(app.config["GENERATED_IMAGES_ROOT"])
+
+    # Legacy state: a post whose thumbnail was written small (20px here)
+    # under the old default-quality pipeline, plus a row whose original
+    # file has gone missing and can only be skipped.
+    source = Image.new("RGB", (1600, 1200), color=(40, 100, 200))
+    buf = BytesIO()
+    source.save(buf, format="JPEG")
+    legacy_stored = store_variants(buf.getvalue(), root, thumbnail_max=20)
+    post = Post(
+        title="Legacy",
+        content="body text",
+        subdeaddit_name="testsub",
+        user="alice",
+    )
+    db_session.add(post)
+    db_session.flush()
+    db_session.add(
+        PostImage(
+            post_id=post.id,
+            original_path=legacy_stored.original_path,
+            thumbnail_path=legacy_stored.thumbnail_path,
+            mime_type=legacy_stored.mime_type,
+            byte_size=legacy_stored.original_size,
+            width=legacy_stored.width,
+            height=legacy_stored.height,
+            alt_text="A solid blue rectangle",
+            source_prompt=_PRIVATE_PROMPT,
+            provider_snapshot="Fal",
+            model_snapshot="fal-ai/flux-1-schnell",
+            request_snapshot="req-secret-1",
+        )
+    )
+    gone = _make_image_post(app, db_session, title="Gone")
+    (root / gone.original_path).unlink()
+    db_session.commit()
+
+    thumbnail_file = root / legacy_stored.thumbnail_path
+    with Image.open(thumbnail_file) as thumb:
+        assert thumb.size == (20, 15)
+
+    before = thumbnail_file.read_bytes()
+    dry_run = runner.invoke(cli, ["images", "regenerate-thumbnails"])
+    assert dry_run.exit_code == 0
+    assert "dry-run" in dry_run.output
+    assert f"post_id={gone.post_id}" in dry_run.output
+    assert thumbnail_file.read_bytes() == before, "a dry run must never rewrite files"
+
+    # An apply against a production database needs an explicit override.
+    monkeypatch.setattr(
+        images_cli.seeding, "_resolves_to_production", lambda *a, **k: True
+    )
+    refused = runner.invoke(cli, ["images", "regenerate-thumbnails", "--apply"])
+    assert refused.exit_code != 0
+    assert "production" in refused.output.lower()
+
+    applied = runner.invoke(
+        cli,
+        ["images", "regenerate-thumbnails", "--apply", "--i-know-this-is-prod"],
+    )
+    assert applied.exit_code == 0
+    assert "Regenerated 1 thumbnail(s)" in applied.output
+    # Same URL-bearing filename, now sized for the feed column; the
+    # original is untouched and the missing-original row was skipped.
+    with Image.open(thumbnail_file) as thumb:
+        assert thumb.size == (800, 600)
+    with Image.open(root / legacy_stored.original_path) as original:
+        assert original.size == (1600, 1200)

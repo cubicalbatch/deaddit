@@ -264,20 +264,57 @@ def _decode_image(data: bytes) -> tuple[Image.Image, str]:
     return image, image_format
 
 
+#: JPEG/WEBP encoder quality for every stored variant. Pillow's implicit
+#: defaults (75 for JPEG, 80 for WEBP) leave blocky artifacts that the feed
+#: magnifies by upscaling, so encode at an explicit near-transparent quality
+#: instead. PNG is lossless and ignores this.
+_ENCODE_QUALITY = 88
+
+
 def _encode_image(image: Image.Image, image_format: str) -> bytes:
+    options: dict[str, Any] = {}
+    if image_format == "JPEG":
+        options = {"quality": _ENCODE_QUALITY, "optimize": True}
+    elif image_format == "WEBP":
+        options = {"quality": _ENCODE_QUALITY}
     output = BytesIO()
     try:
-        image.save(output, format=image_format)
+        image.save(output, format=image_format, **options)
     except Exception as exc:
         raise MalformedImageError("decoded image could not be re-encoded") from exc
     return output.getvalue()
+
+
+def _normalized_for_encoding(image: Image.Image, image_format: str) -> Image.Image:
+    """Convert JPEG-incompatible modes to RGB, closing a swapped source."""
+
+    if image_format == "JPEG" and image.mode in {"CMYK", "P", "RGBA", "LA"}:
+        converted = image.convert("RGB")
+        image.close()
+        return converted
+    return image
+
+
+def _build_thumbnail(
+    image: Image.Image, image_format: str, thumbnail_max: int
+) -> bytes:
+    """Downscale a copy of *image* and encode it as thumbnail bytes."""
+
+    thumbnail = image.copy()
+    try:
+        thumbnail.thumbnail((thumbnail_max, thumbnail_max), Image.Resampling.LANCZOS)
+        return _encode_image(thumbnail, image_format)
+    finally:
+        thumbnail.close()
 
 
 def store_variants(
     data: bytes,
     root: Path,
     *,
-    thumbnail_max: int = 400,
+    # Longest thumbnail edge. 800 matches the feed column's ~800 CSS px so
+    # collapsed cards render 1:1 instead of upscaling a smaller file.
+    thumbnail_max: int = 800,
 ) -> StoredImage:
     """Normalize an image and atomically store its original and thumbnail."""
 
@@ -290,18 +327,9 @@ def store_variants(
     temporary_paths: list[Path] = []
     moved_paths: list[Path] = []
     try:
-        if image_format == "JPEG" and image.mode in {"CMYK", "P", "RGBA", "LA"}:
-            normalized = image.convert("RGB")
-            image.close()
-            image = normalized
-
-        thumbnail = image.copy()
-        thumbnail.thumbnail((thumbnail_max, thumbnail_max), Image.Resampling.LANCZOS)
-        try:
-            original_data = _encode_image(image, image_format)
-            thumbnail_data = _encode_image(thumbnail, image_format)
-        finally:
-            thumbnail.close()
+        image = _normalized_for_encoding(image, image_format)
+        original_data = _encode_image(image, image_format)
+        thumbnail_data = _build_thumbnail(image, image_format, thumbnail_max)
 
         extension = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}[image_format]
         mime_type = {
@@ -343,6 +371,41 @@ def store_variants(
         raise
     finally:
         image.close()
+
+
+def regenerate_thumbnail(
+    root: Path,
+    original_path: str,
+    thumbnail_path: str,
+    *,
+    thumbnail_max: int = 800,
+) -> None:
+    """Rebuild an existing thumbnail file from its stored full-size original.
+
+    Rewrites *thumbnail_path* in place - same filename, so the public URL
+    and any cached references stay valid - using the current thumbnail size
+    and encoder quality. The original file is never modified. Raises
+    :class:`MalformedImageError` if the original cannot be decoded and
+    :class:`MediaPathTraversalError` for unsafe paths.
+    """
+
+    if thumbnail_max <= 0:
+        raise ValueError("thumbnail_max must be positive")
+
+    root = Path(root)
+    ensure_media_tree(root)
+    original_file = resolve_media_path(root, original_path)
+    thumbnail_file = resolve_media_path(root, thumbnail_path)
+    image, image_format = _decode_image(original_file.read_bytes())
+    try:
+        image = _normalized_for_encoding(image, image_format)
+        thumbnail_data = _build_thumbnail(image, image_format, thumbnail_max)
+    finally:
+        image.close()
+
+    temporary = root / "tmp" / f"{thumbnail_file.name}.tmp"
+    temporary.write_bytes(thumbnail_data)
+    os.replace(temporary, thumbnail_file)
 
 
 def resolve_media_path(root: Path, relpath: str) -> Path:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +22,7 @@ from deaddit.images.storage import (
     download_image,
     media_root,
     reconcile_media,
+    regenerate_thumbnail,
     resolve_media_path,
     store_variants,
 )
@@ -85,6 +87,65 @@ def test_store_variants_normalizes_supported_formats_and_strips_exif(tmp_path):
             assert "exif" not in original.info
         with Image.open(root / result.thumbnail_path) as thumbnail:
             assert max(thumbnail.size) <= 20
+
+
+def test_store_variants_default_thumbnail_matches_feed_column_width(tmp_path):
+    """The feed column renders thumbnails ~800 CSS px wide.
+
+    Storing a 400px file forced the browser to upscale it ~2x, which is
+    what made collapsed cards read as over-compressed.
+    """
+    source = Image.new("RGB", (1600, 1200), color=(90, 140, 60))
+    output = BytesIO()
+    source.save(output, format="JPEG")
+
+    result = store_variants(output.getvalue(), tmp_path)
+
+    with Image.open(tmp_path / result.thumbnail_path) as thumbnail:
+        assert thumbnail.size == (800, 600)
+    with Image.open(tmp_path / result.original_path) as original:
+        assert original.size == (1600, 1200)
+
+
+def test_store_variants_encodes_jpeg_above_pillow_default_quality(tmp_path):
+    """Regression guard for the implicit q75 re-encode.
+
+    High-entropy content must encode to more bytes than a default-quality
+    re-encode of the same pixels, or feed thumbnails go visibly blocky.
+    """
+    rng = random.Random(20260827)
+    noise = Image.new("RGB", (400, 300))
+    noise.putdata(
+        [
+            (rng.randrange(256), rng.randrange(256), rng.randrange(256))
+            for _ in range(400 * 300)
+        ]
+    )
+    output = BytesIO()
+    noise.save(output, format="JPEG")
+
+    result = store_variants(output.getvalue(), tmp_path)
+
+    with Image.open(tmp_path / result.thumbnail_path) as stored:
+        default_quality = BytesIO()
+        stored.save(default_quality, format="JPEG")  # Pillow default: q75
+    assert result.thumbnail_size > default_quality.getbuffer().nbytes
+
+
+def test_regenerate_thumbnail_rewrites_file_in_place_from_original(tmp_path):
+    """A legacy 400px thumbnail can be rebuilt without changing its URL."""
+    source = Image.new("RGB", (1600, 1200), color=(20, 90, 170))
+    output = BytesIO()
+    source.save(output, format="JPEG")
+    legacy = store_variants(output.getvalue(), tmp_path, thumbnail_max=20)
+
+    regenerate_thumbnail(tmp_path, legacy.original_path, legacy.thumbnail_path)
+
+    with Image.open(tmp_path / legacy.thumbnail_path) as thumbnail:
+        assert thumbnail.size == (800, 600)
+    with Image.open(tmp_path / legacy.original_path) as original:
+        assert original.size == (1600, 1200)
+    assert not list((tmp_path / "tmp").iterdir())
 
 
 def test_store_failure_leaves_no_files_and_deletion_is_idempotent(tmp_path):
