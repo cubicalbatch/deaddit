@@ -78,7 +78,7 @@ def test_happy_path_two_turn_run(seeded_db, db_session, fake_llm):
         )
     )
 
-    run = run_once("bob")
+    run = run_once(agent.id)
 
     assert run.status == "completed"
     assert run.turn_count == 2
@@ -110,7 +110,7 @@ def test_happy_path_two_turn_run(seeded_db, db_session, fake_llm):
 def test_happy_path_tool_calls_audited_and_summary_persisted(
     seeded_db, db_session, fake_llm
 ):
-    _make_agent(db_session, "bob")
+    agent = _make_agent(db_session, "bob")
     fake_llm.enqueue(_tool_response([_tool_call("call_1", "view_profile", {})]))
     fake_llm.enqueue(
         _tool_response(
@@ -118,7 +118,7 @@ def test_happy_path_tool_calls_audited_and_summary_persisted(
         )
     )
 
-    run = run_once("bob")
+    run = run_once(agent.id)
 
     calls = ToolCall.query.filter_by(run_id=run.id).order_by(ToolCall.id).all()
     assert [c.name for c in calls] == ["view_profile", "finish"]
@@ -136,11 +136,11 @@ def test_happy_path_tool_calls_audited_and_summary_persisted(
 
 
 def test_plain_content_response_nudged_then_terminates(seeded_db, db_session, fake_llm):
-    _make_agent(db_session, "alice")
+    agent = _make_agent(db_session, "alice")
     fake_llm.enqueue_content("Just thinking out loud.")
     fake_llm.enqueue_content("Still nothing to do.")
 
-    run = run_once("alice")
+    run = run_once(agent.id)
 
     # Two turns consumed, zero actions, no hang, terminal completed status.
     assert run.status == "completed"
@@ -163,7 +163,7 @@ def test_plain_content_response_nudged_then_terminates(seeded_db, db_session, fa
 def test_malformed_arguments_rejected_but_loop_continues(
     seeded_db, db_session, fake_llm
 ):
-    _make_agent(db_session, "alice")
+    agent = _make_agent(db_session, "alice")
     broken = {
         "id": "call_bad",
         "type": "function",
@@ -174,7 +174,7 @@ def test_malformed_arguments_rejected_but_loop_continues(
         _tool_response([_tool_call("call_ok", "finish", {"summary": "gave up"})])
     )
 
-    run = run_once("alice")
+    run = run_once(agent.id)
 
     assert run.status == "completed"
     assert run.action_count == 2
@@ -208,7 +208,7 @@ def test_permanent_failure_marks_run_failed_and_strikes_agent(
     agent = _make_agent(db_session, "bob")
     fake_llm.enqueue_error(PermanentLLMError("boom"))
 
-    run = run_once("bob")
+    run = run_once(agent.id)
 
     assert run.status == "failed"
     assert "boom" in run.error_message
@@ -222,7 +222,7 @@ def test_five_consecutive_failures_disable_the_agent(seeded_db, db_session, fake
     agent = _make_agent(db_session, "bob")
     for _ in range(5):
         fake_llm.enqueue_error(PermanentLLMError("boom"))
-        run_once("bob")
+        run_once(agent.id)
 
     db_session.refresh(agent)
     assert agent.consecutive_failures == 5
@@ -236,11 +236,11 @@ def test_five_consecutive_failures_disable_the_agent(seeded_db, db_session, fake
 
 
 def test_max_actions_per_run_budget_stops_the_loop(seeded_db, db_session, fake_llm):
-    _make_agent(db_session, "alice", config={"max_actions_per_run": 1})
+    agent = _make_agent(db_session, "alice", config={"max_actions_per_run": 1})
     fake_llm.enqueue(_tool_response([_tool_call("call_1", "view_profile", {})]))
     fake_llm.enqueue_content("This response must never be consumed.")
 
-    run = run_once("alice")
+    run = run_once(agent.id)
 
     assert run.status == "completed"
     assert run.action_count == 1
@@ -255,13 +255,13 @@ def test_max_actions_per_run_budget_stops_the_loop(seeded_db, db_session, fake_l
 def test_next_run_at_drawn_within_delay_bounds_when_enabled(
     seeded_db, db_session, fake_llm
 ):
-    _make_agent(db_session, "alice", config={"min_delay": 60, "max_delay": 120})
+    agent = _make_agent(db_session, "alice", config={"min_delay": 60, "max_delay": 120})
     fake_llm.enqueue(
         _tool_response([_tool_call("call_1", "finish", {"summary": "bye"})])
     )
     before = datetime.utcnow()
 
-    run = run_once("alice")
+    run = run_once(agent.id)
 
     agent = Agent.query.filter_by(user_username="alice").one()
     assert agent.next_run_at is not None
@@ -271,12 +271,12 @@ def test_next_run_at_drawn_within_delay_bounds_when_enabled(
 
 
 def test_next_run_at_left_none_when_disabled(seeded_db, db_session, fake_llm):
-    _make_agent(db_session, "alice", enabled=False)
+    agent = _make_agent(db_session, "alice", enabled=False)
     fake_llm.enqueue(
         _tool_response([_tool_call("call_1", "finish", {"summary": "bye"})])
     )
 
-    run_once("alice")
+    run_once(agent.id)
 
     agent = Agent.query.filter_by(user_username="alice").one()
     assert agent.is_enabled is False
@@ -288,13 +288,13 @@ def test_next_run_at_left_none_when_disabled(seeded_db, db_session, fake_llm):
 
 
 def test_manual_run_allowed_while_flag_off(seeded_db, db_session, fake_llm):
-    _make_agent(db_session, "alice")
+    agent = _make_agent(db_session, "alice")
     assert is_runtime_enabled() is False
     fake_llm.enqueue(
         _tool_response([_tool_call("call_1", "finish", {"summary": "quiet"})])
     )
 
-    run = run_once("alice")
+    run = run_once(agent.id)
 
     assert run.status == "completed"
     assert AgentRun.query.filter_by(status="completed").count() == 1
@@ -303,14 +303,14 @@ def test_manual_run_allowed_while_flag_off(seeded_db, db_session, fake_llm):
 def test_two_consecutive_rejections_force_finish(seeded_db, db_session, fake_llm):
     """Plan semantics: after 2 consecutive guardrail rejections the loop
     forces finish instead of letting the model keep flailing."""
-    _make_agent(db_session, "alice", config={"max_actions_per_run": 99})
+    agent = _make_agent(db_session, "alice", config={"max_actions_per_run": 99})
     bad = {"subdeaddit": "testsub", "title": "x" * 400, "content": "hi"}
     fake_llm.enqueue(_tool_response([_tool_call("c1", "create_post", bad)]))
     fake_llm.enqueue(_tool_response([_tool_call("c2", "create_post", bad)]))
     # Unconsumed on purpose: the run must stop before a third turn.
     fake_llm.enqueue(_tool_response([_tool_call("c3", "view_profile", {})]))
 
-    run = run_once("alice")
+    run = run_once(agent.id)
 
     assert run.status == "completed"
     assert run.action_count == 2
@@ -445,7 +445,7 @@ def test_loop_offers_both_post_tools_under_optional_policy(
     seeded_db, db_session, fake_llm
 ):
     provider = _make_image_provider(db_session)
-    _make_agent(
+    agent = _make_agent(
         db_session,
         "bob",
         config={
@@ -458,7 +458,7 @@ def test_loop_offers_both_post_tools_under_optional_policy(
     )
     fake_llm.enqueue(_tool_response([_tool_call("c1", "finish", {"summary": "done"})]))
 
-    run_once("bob")
+    run_once(agent.id)
 
     wire_tools = {
         t["function"]["name"] for t in fake_llm.requests[0]["payload"]["tools"]
@@ -471,7 +471,7 @@ def test_loop_omits_create_post_under_image_only_policy(
     seeded_db, db_session, fake_llm
 ):
     provider = _make_image_provider(db_session)
-    _make_agent(
+    agent = _make_agent(
         db_session,
         "bob",
         config={
@@ -484,7 +484,7 @@ def test_loop_omits_create_post_under_image_only_policy(
     )
     fake_llm.enqueue(_tool_response([_tool_call("c1", "finish", {"summary": "done"})]))
 
-    run_once("bob")
+    run_once(agent.id)
 
     wire_tools = {
         t["function"]["name"] for t in fake_llm.requests[0]["payload"]["tools"]
@@ -494,10 +494,10 @@ def test_loop_omits_create_post_under_image_only_policy(
 
 
 def test_loop_omits_create_image_post_when_disabled(seeded_db, db_session, fake_llm):
-    _make_agent(db_session, "bob")  # default config: no image_posts key
+    agent = _make_agent(db_session, "bob")  # default config: no image_posts key
     fake_llm.enqueue(_tool_response([_tool_call("c1", "finish", {"summary": "done"})]))
 
-    run_once("bob")
+    run_once(agent.id)
 
     wire_tools = {
         t["function"]["name"] for t in fake_llm.requests[0]["payload"]["tools"]
@@ -519,10 +519,10 @@ def test_tool_context_carries_effective_llm_config_and_deadline(
         return original_execute(name, raw_arguments, ctx)
 
     monkeypatch.setattr(loop_module, "execute", _capture)
-    _make_agent(db_session, "bob")
+    agent = _make_agent(db_session, "bob")
     fake_llm.enqueue(_tool_response([_tool_call("c1", "finish", {"summary": "done"})]))
 
-    run_once("bob")
+    run_once(agent.id)
 
     ctx = captured["ctx"]
     assert ctx.llm_model

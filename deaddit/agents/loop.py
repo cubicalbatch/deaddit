@@ -13,6 +13,8 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
+
 from deaddit import Config
 from deaddit.agents.executor import execute
 from deaddit.agents.memory import build_initial_messages, summarize_run
@@ -25,7 +27,7 @@ from deaddit.llm import (
     PermanentLLMError,
     Sampling,
 )
-from deaddit.models import Agent, AgentRun, AgentTurn, Setting
+from deaddit.models import Agent, AgentRun, AgentTurn, Setting, User
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +47,14 @@ CONSECUTIVE_FAILURE_DISABLE_THRESHOLD = 5
 
 FAILURE_BACKOFF_SECONDS = 300
 
+RESERVATION_ATTEMPTS = 5
+
 
 def is_runtime_enabled() -> bool:
     """Read the AGENT_RUNTIME_ENABLED feature flag (Setting row, default false).
 
-    Nothing consults this yet - scheduling arrives in Phase 2. Explicit manual
-    invocation (`deaddit agent run-once`) is always allowed regardless of the
-    flag: explicit user intent satisfies decision 1.
+    The wake scheduler consults this flag before polling for due agents.
+    Explicit manual invocation is always allowed regardless of the flag.
     """
     value = Setting.get_value("AGENT_RUNTIME_ENABLED", "false")
     return str(value or "false").strip().lower() == "true"
@@ -68,7 +71,8 @@ def _recover_stale_runs(agent: Agent) -> bool:
     """Mark runs stuck past max_run_seconds + 60s grace as 'interrupted'.
 
     Returns True when a genuinely live run still exists (agent must be
-    refused). Stale-running recovery proper lands in Phase 2.
+    refused). Stale-running recovery runs per-agent in this loop and per-tick
+    in the wake scheduler.
     """
     now = datetime.utcnow()
     grace = timedelta(
@@ -93,6 +97,100 @@ def _recover_stale_runs(agent: Agent) -> bool:
 
 def _effective_config(agent: Agent) -> dict[str, Any]:
     return {**DEFAULT_CONFIG, **(agent.config or {})}
+
+
+def _previous_persona(agent: Agent) -> str | None:
+    run = (
+        AgentRun.query.filter_by(agent_id=agent.id).order_by(AgentRun.id.desc()).first()
+    )
+    return run.persona_username if run is not None else None
+
+
+def _eligible_personas(agent: Agent) -> list[str]:
+    fixed = {
+        row[0]
+        for row in db.session.query(Agent.user_username).filter(
+            Agent.user_username.isnot(None)
+        )
+    }
+    running = {
+        row[0]
+        for row in db.session.query(AgentRun.persona_username).filter(
+            AgentRun.status == "running"
+        )
+    }
+    pool = [
+        row[0]
+        for row in db.session.query(User.username).order_by(User.username)
+        if row[0] not in fixed and row[0] not in running
+    ]
+    previous = _previous_persona(agent)
+    if previous in pool and len(pool) > 1:
+        pool.remove(previous)
+    return pool
+
+
+def _select_persona(agent: Agent) -> str:
+    if agent.persona_mode != "random":
+        user = db.session.get(User, agent.user_username)
+        if user is None:
+            raise ValueError(
+                f"Fixed agent {agent.id} has no user '{agent.user_username}'"
+            )
+        return agent.user_username
+    pool = _eligible_personas(agent)
+    if not pool:
+        raise ValueError(f"No eligible persona available for random agent {agent.id}")
+    return random.choice(pool)
+
+
+def reserve_persona_run(agent: Agent, *, trigger: str) -> AgentRun:
+    """Own persona eligibility and run reservation for every agent run.
+
+    Admin, CLI, and worker callers must reach persona selection only through
+    ``run_once`` and this helper. IntegrityError retries handle conflicts from
+    the partial unique index ``uq_agent_run_running_persona``.
+    """
+    for _ in range(RESERVATION_ATTEMPTS):
+        persona = _select_persona(agent)
+        run = AgentRun(
+            agent_id=agent.id,
+            persona_username=persona,
+            trigger=trigger,
+            status="running",
+            started_at=datetime.utcnow(),
+            turn_count=0,
+            action_count=0,
+            token_usage={},
+        )
+        agent.status = "running"
+        db.session.add(run)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            continue
+        logger.info(
+            "Agent %s reserved persona '%s' (run %s)",
+            agent.id,
+            run.persona_username,
+            run.id,
+        )
+        return run
+    raise ValueError(
+        f"Could not reserve a persona for agent {agent.id} "
+        f"after {RESERVATION_ATTEMPTS} attempts"
+    )
+
+
+def _backoff_without_strike(agent: Agent) -> None:
+    """Back off scheduled pool exhaustion without a permanent-LLM failure strike."""
+    now = datetime.utcnow()
+    agent.status = "error"
+    agent.last_run_at = now
+    if agent.is_enabled:
+        agent.next_run_at = now + timedelta(seconds=FAILURE_BACKOFF_SECONDS)
+    db.session.commit()
 
 
 def _fail(
@@ -131,19 +229,19 @@ def _fail(
 
 
 def run_once(
-    username: str,
+    agent_id: int,
     *,
     trigger: str = "manual",
     force_intent: str | None = None,
 ) -> AgentRun:
     """Run one full agent visit synchronously. Caller provides the app context."""
-    agent = Agent.query.filter_by(user_username=username).first()
+    agent = db.session.get(Agent, agent_id)
     if agent is None:
-        raise ValueError(f"No agent registered for user '{username}'")
+        raise ValueError(f"No agent with id {agent_id}")
 
     if _recover_stale_runs(agent):
         raise ValueError(
-            f"Agent '{username}' already has a run in progress "
+            f"Agent '{agent.user_username}' already has a run in progress "
             f"(stale-running recovery lands in Phase 2)"
         )
 
@@ -195,22 +293,15 @@ def run_once(
         api_key = Config.get_api_key_for_endpoint(api_url)
     specs = specs_for(agent.autonomy_tier, agent=agent)
 
-    now = datetime.utcnow()
-    run = AgentRun(
-        agent_id=agent.id,
-        persona_username=username,
-        trigger=trigger,
-        status="running",
-        started_at=now,
-        turn_count=0,
-        action_count=0,
-        token_usage={},
-    )
-    agent.status = "running"
-    db.session.add(run)
-    db.session.commit()
+    try:
+        run = reserve_persona_run(agent, trigger=trigger)
+    except ValueError:
+        if trigger == "schedule":
+            _backoff_without_strike(agent)
+        raise
 
-    messages = build_initial_messages(agent, force_intent=force_intent)
+    user = db.session.get(User, run.persona_username)
+    messages = build_initial_messages(agent, user, force_intent=force_intent)
     usage: dict[str, int] = dict.fromkeys(USAGE_KEYS, 0)
     turn_count = 0
     action_count = 0
@@ -221,7 +312,7 @@ def run_once(
     ctx = ToolContext(
         agent=agent,
         run=run,
-        user_username=username,
+        user_username=run.persona_username,
         llm_api_url=api_url,
         llm_api_key=api_key,
         llm_model=model,

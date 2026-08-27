@@ -442,7 +442,7 @@ def test_build_initial_messages_includes_memory_then_unread_notice(
     agent = _agent_with_memory(db_session, "alice")
     _seed_inbox(db_session, "alice", 2)
 
-    messages = build_initial_messages(agent)
+    messages = build_initial_messages(agent, db_session.get(User, "alice"))
     kickoff = messages[-1]["content"]
 
     assert "Your memory:" in kickoff
@@ -456,7 +456,9 @@ def test_build_initial_messages_includes_memory_then_unread_notice(
 def test_build_initial_messages_omits_notice_when_nothing_unread(seeded_db, db_session):
     agent = _agent_with_memory(db_session, "alice")
 
-    kickoff = build_initial_messages(agent)[-1]["content"]
+    kickoff = build_initial_messages(agent, db_session.get(User, "alice"))[-1][
+        "content"
+    ]
 
     assert "Your memory:" in kickoff
     assert "Recent visits:" in kickoff

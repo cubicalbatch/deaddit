@@ -213,7 +213,7 @@ class WakeScheduler:
                         db.session.commit()
                         logger.info(
                             "Agent %s hit daily ceiling (%d requests); deferred %ds",
-                            agent.user_username,
+                            agent.id,
                             used,
                             CEILING_DEFER_SECONDS,
                         )
@@ -224,7 +224,7 @@ class WakeScheduler:
                     # At capacity: remaining candidates stay due and get
                     # picked up next tick.
                     break
-                self._executor.submit(self._run_agent, agent.user_username)  # type: ignore[union-attr]
+                self._executor.submit(self._run_agent, agent.id)  # type: ignore[union-attr]
 
     def _ensure_pool(self) -> None:
         """(Re)build the semaphore + executor when concurrency changes."""
@@ -255,16 +255,16 @@ class WakeScheduler:
     # Execution
     # ------------------------------------------------------------------
 
-    def _run_agent(self, username: str) -> None:
+    def _run_agent(self, agent_id: int) -> None:
         """Run one scheduled visit; release the slot afterwards."""
         try:
             with self.app.app_context():
-                run_once(username, trigger="schedule")
+                run_once(agent_id, trigger="schedule")
         except Exception:
-            logger.exception("Scheduled wake for agent %s failed", username)
+            logger.exception("Scheduled wake for agent %s failed", agent_id)
             try:
                 with self.app.app_context():
-                    agent = Agent.query.filter_by(user_username=username).first()
+                    agent = db.session.get(Agent, agent_id)
                     if agent is not None:
                         agent.next_run_at = datetime.utcnow() + timedelta(
                             seconds=FAILURE_BACKOFF_SECONDS
@@ -272,7 +272,8 @@ class WakeScheduler:
                         db.session.commit()
             except Exception:
                 logger.exception(
-                    "Failed to back off agent %s after failed wake", username
+                    "Failed to back off agent %s after failed wake",
+                    agent_id,
                 )
                 db.session.rollback()
         finally:

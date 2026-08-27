@@ -269,7 +269,7 @@ def run_once_command(ctx, username, intent) -> None:
             raise click.ClickException(f"No agent registered for user '{username}'")
 
         try:
-            run = run_once(username, trigger="manual", force_intent=intent)
+            run = run_once(exists.id, trigger="manual", force_intent=intent)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
 

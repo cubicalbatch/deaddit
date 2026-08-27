@@ -340,7 +340,7 @@ def test_full_run_passes_the_description_on_without_persisting_base64(
     set_manual_override(DEFAULT_API_URL, DEFAULT_MODEL, True)
     set_vision_manual_override(DEFAULT_API_URL, DEFAULT_MODEL, True)
     post = _make_image_post(app, db_session)
-    _make_agent(db_session)
+    agent = _make_agent(db_session)
 
     def _tool_response(name, arguments, call_id):
         return {
@@ -369,7 +369,7 @@ def test_full_run_passes_the_description_on_without_persisting_base64(
         _tool_response("finish", {"summary": "done", "mood": "calm"}, "call_2")
     )
 
-    run = run_once("alice")
+    run = run_once(agent.id)
     assert run.status == "completed"
 
     # The vision request really did carry base64 pixel data...

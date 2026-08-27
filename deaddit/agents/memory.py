@@ -56,7 +56,9 @@ def generate_kickoff_prompt(
     image_optional = cfg["enabled"] and not image_only
 
     if is_post_intent:
-        subscriptions = (agent.state or {}).get("subscriptions") or []
+        subscriptions = ((user.agent_state if user else None) or {}).get(
+            "subscriptions"
+        ) or []
         sub_hint = (
             f" (such as {', '.join(subscriptions)})"
             if subscriptions
@@ -103,17 +105,16 @@ def generate_kickoff_prompt(
 
 
 def build_initial_messages(
-    agent: Agent, *, force_intent: str | None = None
+    agent: Agent, user: User, *, force_intent: str | None = None
 ) -> list[dict]:
     """Build the opening messages array for an agent conversation."""
-    user = db.session.get(User, agent.user_username)
     unread = 0
     try:
-        unread = unread_count(agent.user_username)
+        unread = unread_count(user.username)
     except Exception:
         logger.warning(
             "Unread-notification count failed for %s",
-            agent.user_username,
+            user.username,
             exc_info=True,
         )
 
@@ -124,7 +125,7 @@ def build_initial_messages(
         {"role": "system", "content": build_system_prompt(agent, user)},
         {"role": "user", "content": kickoff},
     ]
-    memory_block = _memory_block(agent)
+    memory_block = _memory_block(user.username)
     if memory_block:
         messages[-1]["content"] += "\n\n" + memory_block
     if unread > 0:
@@ -408,15 +409,15 @@ def _extractive_summary(chunk: list[dict]) -> str:
 # Kickoff context injection
 
 
-def _memory_block(agent: Agent) -> str:
+def _memory_block(user_username: str) -> str:
     backfills = (
-        AgentMemory.query.filter_by(user_username=agent.user_username, kind="backfill")
+        AgentMemory.query.filter_by(user_username=user_username, kind="backfill")
         .order_by(AgentMemory.id.asc())
         .limit(3)
         .all()
     )
     episodes = (
-        AgentMemory.query.filter_by(user_username=agent.user_username, kind="episode")
+        AgentMemory.query.filter_by(user_username=user_username, kind="episode")
         .order_by(AgentMemory.id.desc())
         .limit(5)
         .all()

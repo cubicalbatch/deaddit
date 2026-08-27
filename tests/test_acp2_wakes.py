@@ -154,11 +154,11 @@ def test_poll_tick_is_flag_gated(seeded_db, db_session, app, monkeypatch):
     agent.next_run_at = datetime.utcnow() - timedelta(seconds=10)
     db.session.commit()
 
-    calls: list[str] = []
+    calls: list[int] = []
     monkeypatch.setattr(
         wakes,
         "run_once",
-        lambda username, *, trigger="schedule": calls.append(username),
+        lambda agent_id, *, trigger="schedule": calls.append(agent_id),
     )
     scheduler = WakeScheduler(app)
     scheduler._poll_once()
@@ -192,12 +192,12 @@ def test_global_semaphore_bounds_concurrent_wakes(
     lock = threading.Lock()
     state = {"active": 0, "peak": 0, "ran": []}
 
-    def fake_run_once(username, *, trigger="schedule"):
+    def fake_run_once(agent_id, *, trigger="schedule"):
         assert trigger == "schedule"
         with lock:
             state["active"] += 1
             state["peak"] = max(state["peak"], state["active"])
-            state["ran"].append(username)
+            state["ran"].append(agent_id)
         gate.wait(timeout=10)
         with lock:
             state["active"] -= 1
@@ -207,12 +207,14 @@ def test_global_semaphore_bounds_concurrent_wakes(
 
     # First tick fills both slots; both runs block inside the fake.
     scheduler._poll_once()
-    assert _wait_until(lambda: sorted(state["ran"]) == ["alice", "bob"])
+    assert _wait_until(
+        lambda: sorted(state["ran"]) == [agents["alice"].id, agents["bob"].id]
+    )
     assert state["peak"] == 2
 
     # While both slots are held, further ticks submit nothing new.
     scheduler._poll_once()
-    assert sorted(state["ran"]) == ["alice", "bob"]
+    assert sorted(state["ran"]) == [agents["alice"].id, agents["bob"].id]
 
     gate.set()
     scheduler._executor.shutdown(wait=True)
@@ -227,7 +229,11 @@ def test_global_semaphore_bounds_concurrent_wakes(
     scheduler._poll_once()
     scheduler._executor.shutdown(wait=True)
 
-    assert sorted(state["ran"]) == ["alice", "bob", "carol"]
+    assert sorted(state["ran"]) == [
+        agents["alice"].id,
+        agents["bob"].id,
+        agents["carol"].id,
+    ]
     assert state["peak"] == 2
     scheduler.stop(wait=False)
 
@@ -261,11 +267,11 @@ def test_daily_ceiling_defers_next_wake_by_thirty_minutes(
     db.session.commit()
     _seed_today_turns(db_session, agent, 2)
 
-    calls: list[str] = []
+    calls: list[int] = []
     monkeypatch.setattr(
         wakes,
         "run_once",
-        lambda username, *, trigger="schedule": calls.append(username),
+        lambda agent_id, *, trigger="schedule": calls.append(agent_id),
     )
     scheduler = WakeScheduler(app)
     scheduler._poll_once()
@@ -285,17 +291,17 @@ def test_under_ceiling_agent_launches_normally(seeded_db, db_session, app, monke
     db.session.commit()
     _seed_today_turns(db_session, agent, 1)
 
-    calls: list[str] = []
+    calls: list[int] = []
     monkeypatch.setattr(
         wakes,
         "run_once",
-        lambda username, *, trigger="schedule": calls.append(username),
+        lambda agent_id, *, trigger="schedule": calls.append(agent_id),
     )
     scheduler = WakeScheduler(app)
     scheduler._poll_once()
     scheduler._executor.shutdown(wait=True)
 
-    assert calls == [agent.user_username]
+    assert calls == [agent.id]
     scheduler.stop(wait=False)
 
 
@@ -306,17 +312,17 @@ def test_zero_ceiling_means_unlimited(seeded_db, db_session, app, monkeypatch):
     db.session.commit()
     _seed_today_turns(db_session, agent, 50)
 
-    calls: list[str] = []
+    calls: list[int] = []
     monkeypatch.setattr(
         wakes,
         "run_once",
-        lambda username, *, trigger="schedule": calls.append(username),
+        lambda agent_id, *, trigger="schedule": calls.append(agent_id),
     )
     scheduler = WakeScheduler(app)
     scheduler._poll_once()
     scheduler._executor.shutdown(wait=True)
 
-    assert calls == ["alice"]
+    assert calls == [agent.id]
     scheduler.stop(wait=False)
 
 

@@ -3621,7 +3621,7 @@ def api_force_run(agent_id):
     if agent is None:
         return jsonify({"success": False, "error": "agent not found"}), 404
     try:
-        run = run_once(agent.user_username, trigger="manual")
+        run = run_once(agent_id, trigger="manual")
     except ValueError as exc:
         # Already running / no agent registered.
         return jsonify({"success": False, "error": str(exc)}), 409
