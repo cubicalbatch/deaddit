@@ -21,7 +21,7 @@
     ]
   },
   {
-    "rule": "/admin/agents/<username>",
+    "rule": "/admin/agents/<int:agent_id>",
     "endpoint": "agent_detail",
     "methods": [
       "GET"
@@ -37,6 +37,13 @@
   {
     "rule": "/admin/api/agents",
     "endpoint": "api_agents_list",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "rule": "/admin/api/agents/<int:agent_id>",
+    "endpoint": "api_get_agent",
     "methods": [
       "GET"
     ]

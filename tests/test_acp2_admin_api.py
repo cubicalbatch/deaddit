@@ -418,7 +418,7 @@ def test_dashboard_pages_render_and_register_endpoints(app, seeded_db, admin_cli
     assert "admin.agent_detail" in endpoints
 
     assert admin_client.get("/admin/agents").status_code == 200
-    assert admin_client.get("/admin/agents/alice").status_code == 200
+    assert admin_client.get("/admin/agents/1").status_code == 200
 
 
 def test_admin_gate_redirects_anonymous_visitors(app, client, monkeypatch):

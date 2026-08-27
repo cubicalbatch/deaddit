@@ -1,11 +1,11 @@
 {% extends "admin/base.html" %}
 
-{% block title %}Agent {{ username }}{% endblock %}
+{% block title %}Agent #{{ agent_id }}{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
     <h1 class="h2">
-        Agent: <span id="agent-username">{{ username }}</span>
+        Agent: <span id="agent-username">#{{ agent_id }}</span>
         <span id="agent-status-chip" class="badge bg-secondary ms-2" style="display: none;"></span>
     </h1>
     <div class="btn-toolbar">
@@ -198,7 +198,7 @@
 (function () {
     "use strict";
 
-    const USERNAME = {{ username | tojson }};
+    const AGENT_ID = {{ agent_id | tojson }};
     const STATUS_BADGE = {
         idle: "bg-success",
         running: "bg-primary",
@@ -248,13 +248,12 @@
 
     let agent = null;
 
-    function detailUrl(name) {
-        return {{ url_for('admin.agent_detail', username='__U__') | tojson }}.replace("__U__", encodeURIComponent(name));
-    }
-
     async function loadAgent() {
-        const data = await api("{{ url_for('admin.api_agents_list') }}");
-        agent = data.agents.find((candidate) => candidate.user_username === USERNAME) || null;
+        try {
+            agent = await api("/admin/api/agents/" + AGENT_ID);
+        } catch (err) {
+            agent = null;
+        }
         const chip = document.getElementById("agent-status-chip");
         const toggleBtn = document.getElementById("toggle-btn");
         const runBtn = document.getElementById("force-run-btn");
@@ -273,10 +272,12 @@
             document.getElementById("overview-dl")
                 .appendChild(el("dt", "col-sm-5", "Error"));
             document.getElementById("overview-dl")
-                .appendChild(el("dd", "col-sm-7", "No agent registered for '" + USERNAME + "'."));
+                .appendChild(el("dd", "col-sm-7", "No agent registered for agent #" + AGENT_ID));
             document.getElementById("runs-list").innerHTML = "";
             return;
         }
+        document.getElementById("agent-username").textContent =
+            agent.display_label || agent.user_username;
         chip.style.display = "";
         chip.className = "badge ms-2 " + (STATUS_BADGE[agent.status] || "bg-dark");
         chip.textContent = agent.status;
@@ -401,6 +402,7 @@
     }
 
     async function loadRuns() {
+        if (!agent) return;
         const list = document.getElementById("runs-list");
         list.innerHTML = "";
         nextBeforeId = null;

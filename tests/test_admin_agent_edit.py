@@ -278,7 +278,7 @@ def test_update_agent_auth_gating(app, client, seeded_db, db_session, monkeypatc
 
 def test_admin_agent_detail_page_renders_form(seeded_db, admin_client, db_session):
     agent = _make_agent(db_session, "alice")
-    resp = admin_client.get(f"/admin/agents/{agent.user_username}")
+    resp = admin_client.get(f"/admin/agents/{agent.id}")
     assert resp.status_code == 200
     html = resp.get_data(as_text=True)
     assert "Edit Agent Configuration" in html
@@ -301,4 +301,4 @@ def test_admin_agents_page_renders_edit_action(seeded_db, admin_client, db_sessi
     html = resp.get_data(as_text=True)
     assert "Registered Agents" in html
     assert "Edit" in html
-    assert "/admin/agents/__U__" in html
+    assert "/admin/agents/__ID__" in html

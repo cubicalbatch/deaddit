@@ -2987,6 +2987,11 @@ def _resolve_image_posts(raw, tier):
     }, None
 
 
+def _agent_display_label(agent):
+    """Return the human-readable identity for an agent."""
+    return agent.user_username if agent.user_username is not None else f"Random #{agent.id}"
+
+
 def _agent_json(agent, counts=None):
     """Serialize an Agent row; ``counts`` maps run status -> count."""
     from deaddit.models import AgentRun
@@ -3002,6 +3007,8 @@ def _agent_json(agent, counts=None):
     return {
         "id": agent.id,
         "user_username": agent.user_username,
+        "persona_mode": agent.persona_mode or "fixed",
+        "display_label": _agent_display_label(agent),
         "autonomy_tier": agent.autonomy_tier,
         "is_enabled": bool(agent.is_enabled),
         "status": agent.status,
@@ -3021,6 +3028,7 @@ def _run_json(run):
     return {
         "id": run.id,
         "agent_id": run.agent_id,
+        "persona_username": run.persona_username,
         "trigger": run.trigger,
         "status": run.status,
         "started_at": run.started_at.isoformat() if run.started_at else None,
@@ -3112,7 +3120,10 @@ def api_agents_list():
     """List every registered agent with run tallies."""
     from deaddit.models import Agent, AgentRun
 
-    agents = Agent.query.order_by(Agent.user_username).all()
+    agents = Agent.query.all()
+    agents.sort(
+        key=lambda a: (a.persona_mode or "fixed", a.user_username or "", a.id)
+    )
     tally_rows = (
         db.session.query(AgentRun.agent_id, AgentRun.status, func.count(AgentRun.id))
         .group_by(AgentRun.agent_id, AgentRun.status)
@@ -3145,7 +3156,10 @@ def api_persona_candidates():
         .group_by(Comment.user)
         .subquery()
     )
-    taken = [username for (username,) in db.session.query(Agent.user_username).all()]
+    taken = db.session.query(Agent.user_username).filter(
+        Agent.persona_mode == "fixed", Agent.user_username.isnot(None)
+    ).all()
+    taken = [username for (username,) in taken]
     activity = func.coalesce(posts_sq.c.n, 0) + func.coalesce(comments_sq.c.n, 0)
     rows = (
         db.session.query(User, posts_sq.c.n, comments_sq.c.n)
@@ -3205,19 +3219,38 @@ def api_create_agent():
     from deaddit.models import Agent
 
     payload = request.get_json(silent=True) or {}
-    username = str(payload.get("username") or "").strip()
-    if not username:
-        return jsonify({"success": False, "error": "username is required"}), 400
-    if db.session.get(User, username) is None:
+    persona_mode = str(payload.get("persona_mode") or "fixed").strip()
+    if persona_mode not in {"fixed", "random"}:
         return (
-            jsonify({"success": False, "error": f"User '{username}' does not exist"}),
+            jsonify(
+                {"success": False, "error": f"Unknown persona_mode '{persona_mode}'"}
+            ),
             400,
         )
-    if Agent.query.filter_by(user_username=username).first() is not None:
+
+    username = str(payload.get("username") or "").strip()
+    if persona_mode == "fixed":
+        if not username:
+            return jsonify({"success": False, "error": "username is required"}), 400
+        if db.session.get(User, username) is None:
+            return (
+                jsonify({"success": False, "error": f"User '{username}' does not exist"}),
+                400,
+            )
+        if Agent.query.filter_by(user_username=username).first() is not None:
+            return (
+                jsonify({"success": False, "error": f"'{username}' already has an agent"}),
+                409,
+            )
+    elif username:
         return (
-            jsonify({"success": False, "error": f"'{username}' already has an agent"}),
-            409,
+            jsonify(
+                {"success": False, "error": "random agents must not specify a username"}
+            ),
+            400,
         )
+    else:
+        username = None
 
     tier = payload.get("autonomy_tier") or "regular"
     if tier not in _AGENTIC_TIERS:
@@ -3288,6 +3321,8 @@ def api_create_agent():
         "max_actions_per_run": DEFAULT_CONFIG["max_actions_per_run"],
         "max_run_seconds": DEFAULT_CONFIG["max_run_seconds"],
     }
+    if persona_mode == "random" and payload.get("backfill_memory", True):
+        config["backfill_memory"] = True
     daily_ceiling = payload.get("daily_request_ceiling")
     if daily_ceiling is not None:
         try:
@@ -3318,6 +3353,7 @@ def api_create_agent():
     # Owner decision 1: nothing runs by default - enable is opt-in.
     enable = bool(payload.get("enable", False))
     agent = Agent(
+        persona_mode=persona_mode,
         user_username=username,
         autonomy_tier=tier,
         is_enabled=enable,
@@ -3332,7 +3368,7 @@ def api_create_agent():
 
     episodes = 0
     warning = None
-    if payload.get("backfill_memory", True):
+    if persona_mode == "fixed" and payload.get("backfill_memory", True):
         try:
             from deaddit.agents.memory import backfill_persona_history
         except ImportError as exc:
@@ -3352,6 +3388,19 @@ def api_create_agent():
     return jsonify(result), 201
 
 
+@admin_bp.route("/api/agents/<int:agent_id>", methods=["GET"])
+@production_disabled
+@admin_required
+def api_get_agent(agent_id):
+    """Return one agent by id."""
+    from deaddit.models import Agent
+
+    agent = db.session.get(Agent, agent_id)
+    if agent is None:
+        return jsonify({"success": False, "error": "agent not found"}), 404
+    return jsonify(_agent_json(agent))
+
+
 @admin_bp.route("/api/agents/<int:agent_id>", methods=["PUT", "POST"])
 @admin_bp.route("/api/agents/<int:agent_id>/update", methods=["POST", "PUT"])
 @production_disabled
@@ -3369,6 +3418,37 @@ def api_update_agent(agent_id):
         return jsonify({"success": False, "error": "agent not found"}), 404
 
     payload = request.get_json(silent=True) or {}
+    cfg_in = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+
+    current_mode = agent.persona_mode or "fixed"
+    for source in (payload, cfg_in):
+        if "persona_mode" in source:
+            mode_value = str(source["persona_mode"] or "").strip()
+            if mode_value != current_mode:
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "persona_mode is immutable; create a new agent instead",
+                        }
+                    ),
+                    400,
+                )
+
+    for source in (payload, cfg_in):
+        for key in ("user_username", "username"):
+            if key in source:
+                username_value = str(source[key] or "").strip() or None
+                if username_value != agent.user_username:
+                    return (
+                        jsonify(
+                            {
+                                "success": False,
+                                "error": "fixed persona is immutable; create a new agent instead",
+                            }
+                        ),
+                        400,
+                    )
 
     # 1. Autonomy Tier
     if "autonomy_tier" in payload:
@@ -3832,12 +3912,12 @@ def agents_dashboard():
     return render_template("admin/agents.html")
 
 
-@admin_bp.route("/agents/<username>")
+@admin_bp.route("/agents/<int:agent_id>")
 @production_disabled
 @admin_required
-def agent_detail(username):
-    """Single-agent detail page with run timeline and thought drill-down."""
-    return render_template("admin/agent_detail.html", username=username)
+def agent_detail(agent_id):
+    """Single-agent detail page addressed by numeric agent id."""
+    return render_template("admin/agent_detail.html", agent_id=agent_id)
 
 
 # --- Moderation: reports queue (Phase D4) ---
@@ -4185,8 +4265,8 @@ def pins_clear_api(target_kind, target_key):
 def prompt_renders_api():
     """Recent render-audit rows: which prompt version produced which run.
 
-    ``?limit=<n>`` (default 50, max 500). Joins agent_run via
-    subject_key == Agent.user_username and overlapping run timestamps.
+    ``?limit=<n>`` (default 50, max 500). ``subject_key`` is the agent's
+    decimal id (for example, ``"42"``); this endpoint lists the audit rows.
     """
     limit = min(request.args.get("limit", 50, type=int) or 50, 500)
     rows = (

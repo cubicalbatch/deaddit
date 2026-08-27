@@ -434,7 +434,7 @@
         runBtn.title = "Runs one visit synchronously (may take a few minutes)";
         runBtn.addEventListener("click", () => runForceRun(agent.id, runBtn));
         const editLink = el("a", "btn btn-sm btn-outline-secondary ms-1", "Edit");
-        editLink.href = {{ url_for('admin.agent_detail', username='__U__') | tojson }}.replace("__U__", encodeURIComponent(agent.user_username));
+        editLink.href = {{ url_for('admin.agent_detail', agent_id=0) | replace("/0", "/__ID__") | tojson }}.replace("__ID__", agent.id);
         cell.appendChild(toggleBtn);
         cell.appendChild(runBtn);
         cell.appendChild(editLink);
@@ -471,7 +471,7 @@
                 const row = el("tr");
                 const personaCell = el("td");
                 const link = document.createElement("a");
-                link.href = {{ url_for('admin.agent_detail', username='__U__') | tojson }}.replace("__U__", encodeURIComponent(agent.user_username));
+                link.href = {{ url_for('admin.agent_detail', agent_id=0) | replace("/0", "/__ID__") | tojson }}.replace("__ID__", agent.id);
                 link.textContent = agent.user_username;
                 personaCell.appendChild(link);
                 row.appendChild(personaCell);
