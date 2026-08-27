@@ -110,7 +110,7 @@
             <div class="col-12">
                 <div class="form-check form-check-inline">
                     <input class="form-check-input" type="checkbox" id="backfill-check" checked>
-                    <label class="form-check-label" for="backfill-check">Backfill memory from persona history</label>
+                    <label id="backfill-label" class="form-check-label" for="backfill-check">Backfill memory from persona history</label>
                 </div>
                 <div class="form-check form-check-inline">
                     <input class="form-check-input" type="checkbox" id="enable-check">
@@ -247,29 +247,45 @@
         }
     }
 
+    function updateBackfillLabel() {
+        const select = document.getElementById("persona-select");
+        const label = document.getElementById("backfill-label");
+        if (!select || !label) return;
+        label.textContent = select.value === "__random__"
+            ? "Backfill each selected persona lazily on first use"
+            : "Backfill memory from persona history";
+    }
+
     async function loadCandidates() {
         const select = document.getElementById("persona-select");
         try {
             const data = await api("{{ url_for('admin.api_persona_candidates') }}");
             select.innerHTML = "";
             if (!data.candidates.length) {
-                select.appendChild(el("option", "", "No candidate personas"));
-                return;
+                select.appendChild(el("option", "", "No candidate personas")).value = "";
+            } else {
+                select.appendChild(el("option", "", "Choose a persona…")).value = "";
+                data.candidates.forEach((candidate) => {
+                    const label = candidate.username +
+                        " — posts " + candidate.post_count +
+                        ", comments " + candidate.comment_count +
+                        (candidate.personality_preview ? " — " + candidate.personality_preview : "");
+                    select.appendChild(el("option", "", label)).value = candidate.username;
+                });
             }
-            select.appendChild(el("option", "", "Choose a persona…")).value = "";
-            data.candidates.forEach((candidate) => {
-                const label = candidate.username +
-                    " — posts " + candidate.post_count +
-                    ", comments " + candidate.comment_count +
-                    (candidate.personality_preview ? " — " + candidate.personality_preview : "");
-                select.appendChild(el("option", "", label)).value = candidate.username;
-            });
+            const randomOption = el("option", "", "Random — choose an unmanaged persona each run");
+            randomOption.value = "__random__";
+            select.appendChild(randomOption);
+            updateBackfillLabel();
         } catch (err) {
             select.innerHTML = "";
             select.appendChild(el("option", "", "Failed to load candidates"));
+            updateBackfillLabel();
             console.error(err);
         }
     }
+
+    document.getElementById("persona-select").addEventListener("change", updateBackfillLabel);
 
     let providersList = [];
 
@@ -472,7 +488,7 @@
                 const personaCell = el("td");
                 const link = document.createElement("a");
                 link.href = {{ url_for('admin.agent_detail', agent_id=0) | replace("/0", "/__ID__") | tojson }}.replace("__ID__", agent.id);
-                link.textContent = agent.user_username;
+                link.textContent = agent.display_label || agent.user_username;
                 personaCell.appendChild(link);
                 row.appendChild(personaCell);
                 row.appendChild(el("td", null, agent.autonomy_tier));
@@ -504,22 +520,26 @@
         event.preventDefault();
         const feedback = document.getElementById("create-feedback");
         const submit = document.getElementById("create-submit");
-        const username = document.getElementById("persona-select").value;
+        const selectedValue = document.getElementById("persona-select").value;
         feedback.textContent = "";
         feedback.className = "ms-2 small";
-        if (!username) {
+        if (!selectedValue) {
             feedback.textContent = "Pick a persona first.";
             feedback.classList.add("text-danger");
             return;
         }
+        const isRandom = selectedValue === "__random__";
         submit.disabled = true;
-        feedback.textContent = "Creating… (backfill may take a while)";
+        feedback.textContent = isRandom
+            ? "Creating… (persona memory will be backfilled lazily)"
+            : "Creating… (backfill may take a while)";
         const payload = {
-            username: username,
+            persona_mode: isRandom ? "random" : "fixed",
             autonomy_tier: document.getElementById("tier-select").value,
             enable: document.getElementById("enable-check").checked,
             backfill_memory: document.getElementById("backfill-check").checked,
         };
+        if (!isRandom) payload.username = selectedValue;
         const providerId = document.getElementById("provider-select").value;
         if (providerId) {
             payload.provider_id = Number(providerId);
@@ -547,8 +567,14 @@
         payload.image_posts = imagePosts;
         try {
             const data = await api("{{ url_for('admin.api_create_agent') }}", {method: "POST", body: JSON.stringify(payload)});
-            let message = "Created agent for '" + data.agent.user_username + "'";
-            if (payload.backfill_memory && !data.warning) message += ", backfilled " + data.episodes + " episodes";
+            const displayLabel = data.agent.display_label ||
+                data.agent.user_username || (isRandom ? "Random agent" : selectedValue);
+            let message = isRandom
+                ? "Created random agent '" + displayLabel + "'"
+                : "Created agent for '" + displayLabel + "'";
+            if (!isRandom && payload.backfill_memory && !data.warning) {
+                message += ", backfilled " + data.episodes + " episodes";
+            }
             if (data.warning) message += " (warning: " + data.warning + ")";
             feedback.textContent = message;
             feedback.classList.add(data.warning ? "text-warning" : "text-success");

@@ -277,7 +277,7 @@
             return;
         }
         document.getElementById("agent-username").textContent =
-            agent.display_label || agent.user_username;
+            agent.display_label || agent.user_username || ("Agent #" + AGENT_ID);
         chip.style.display = "";
         chip.className = "badge ms-2 " + (STATUS_BADGE[agent.status] || "bg-dark");
         chip.textContent = agent.status;
@@ -295,8 +295,11 @@
 
         const dl = document.getElementById("overview-dl");
         dl.innerHTML = "";
+        const personaMode = agent.persona_mode || "fixed";
         const rows = [
-            ["Persona", agent.user_username],
+            ["Persona", agent.display_label || agent.user_username || ("Agent #" + AGENT_ID)],
+            ["Mode", personaMode],
+            ["Fixed persona", personaMode === "random" ? "None — selected per run" : (agent.user_username || "—")],
             ["Tier", agent.autonomy_tier],
             ["Enabled", agent.is_enabled ? "yes" : "no"],
             ["Consecutive failures", String(agent.consecutive_failures)],
@@ -368,6 +371,8 @@
         const left = el("div");
         left.appendChild(el("strong", null, "#" + run.id));
         left.appendChild(el("span", "ms-2 text-muted small", run.trigger));
+        left.appendChild(el("span", "ms-2 text-muted small",
+            "as " + (run.persona_username || "—")));
         left.appendChild(document.createTextNode(" "));
         left.appendChild(el("span", "badge ms-2 " + (RUN_BADGE[run.status] || "bg-dark"), run.status));
         head.appendChild(left);
