@@ -11,7 +11,7 @@ here; every such render writes an audit row. The flag defaults to
 byte-identical pre-LLM-5 assembly.
 """
 
-from deaddit.agents.registry import AutonomyTier
+from deaddit.agents.registry import AutonomyTier, image_posts_config
 from deaddit.llm.prompts import render_pinned, versioning_enabled
 from deaddit.models import Agent, AgentMemory, User
 
@@ -73,6 +73,33 @@ _QUALITY_RULES = (
     "  a role instead of acting fully human."
 )
 
+_IMAGE_GUIDANCE_OPTIONAL = (
+    "\n\nImage posts: create_image_post is an occasional alternative to "
+    "create_post, for the rare case where a visual is genuinely central to "
+    "what you want to share - most of your posts should still be plain "
+    "text. When you do use it, request a detailed, persona-consistent "
+    "scene in image_prompt: something you plausibly saw, took, or found, "
+    "described as if photographed, not as instructions to an image "
+    "generator. Present the picture as real - never mention that it was "
+    "generated or discuss how it was made. Give the post a specific, "
+    "engaging title, and add body text only when it adds natural context; "
+    "a short caption or no body at all is fine and does not need the "
+    "multi-paragraph treatment required for create_post."
+)
+
+_IMAGE_GUIDANCE_IMAGE_ONLY = (
+    "\n\nImage posts: every post you make uses create_image_post - "
+    "create_post is not available to you, so if you decide (or are asked) "
+    "to post, it must be an image post. Request a detailed, "
+    "persona-consistent scene in image_prompt: something you plausibly "
+    "saw, took, or found, described as if photographed, not as "
+    "instructions to an image generator. Present the picture as real - "
+    "never mention that it was generated or discuss how it was made. Give "
+    "the post a specific, engaging title, and add body text only when it "
+    "adds natural context; a short caption or no body at all is fine and "
+    "does not need the multi-paragraph treatment required for create_post."
+)
+
 
 def _persona_block(user: User) -> str:
     lines: list[str] = []
@@ -112,6 +139,22 @@ def _subscriptions_section(agent: Agent) -> str:
     return "\n\nYou are currently subscribed to: " + ", ".join(subscriptions)
 
 
+def _image_guidance_section(agent: Agent) -> str:
+    """Image-post rules for agents with image posting enabled, else "".
+
+    Empty for a disabled (or absent) ``image_posts`` config so this
+    section never changes the assembled prompt for image-disabled
+    agents (registry.image_posts_config normalizes both cases the same
+    way).
+    """
+    cfg = image_posts_config(agent)
+    if not cfg["enabled"]:
+        return ""
+    if cfg["policy"] == "image_only":
+        return _IMAGE_GUIDANCE_IMAGE_ONLY
+    return _IMAGE_GUIDANCE_OPTIONAL
+
+
 def _memories_section(agent: Agent) -> str:
     memories = (
         AgentMemory.query.filter_by(agent_id=agent.id, kind="episode")
@@ -132,15 +175,17 @@ def system_prompt_variables(agent: Agent, user: User) -> dict[str, str]:
     """Named variables a versioned system-prompt template is rendered with.
 
     The default template body is
-    ``{persona_block}\\n\\n{tier_line}\\n\\n{rules_block}``
+    ``{persona_block}\\n\\n{tier_line}\\n\\n{rules_block}{image_guidance_section}``
     followed by ``{subscriptions_section}{memories_section}``; rendering
     it with these variables reproduces :func:`build_system_prompt`'s
-    assembly byte-for-byte.
+    assembly byte-for-byte. ``image_guidance_section`` is "" for agents
+    with image posting disabled, so it never changes their prompt.
     """
     return {
         "persona_block": _persona_block(user),
         "tier_line": _tier_line(agent),
         "rules_block": _TOOLS_LINE + "\n" + _GENUINE_LINE + "\n" + _QUALITY_RULES,
+        "image_guidance_section": _image_guidance_section(agent),
         "subscriptions_section": _subscriptions_section(agent),
         "memories_section": _memories_section(agent),
     }
@@ -162,6 +207,7 @@ def build_system_prompt(agent: Agent, user: User) -> str:
         f"{variables['persona_block']}\n\n"
         f"{variables['tier_line']}\n\n"
         f"{variables['rules_block']}"
+        f"{variables['image_guidance_section']}"
         f"{variables['subscriptions_section']}"
         f"{variables['memories_section']}"
     )

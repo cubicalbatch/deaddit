@@ -8,7 +8,7 @@ from datetime import datetime
 
 from deaddit import Config
 from deaddit.agents.prompts import build_system_prompt
-from deaddit.agents.registry import AutonomyTier
+from deaddit.agents.registry import AutonomyTier, image_posts_config
 from deaddit.dynamics.inbox import unread_count
 from deaddit.extensions import db
 from deaddit.llm import ChatRequest, LLMClient, Sampling
@@ -51,6 +51,10 @@ def generate_kickoff_prompt(
         else (random.random() < POST_INTENT_PROBABILITY)
     )
 
+    cfg = image_posts_config(agent)
+    image_only = cfg["enabled"] and cfg["policy"] == "image_only"
+    image_optional = cfg["enabled"] and not image_only
+
     if is_post_intent:
         subscriptions = (agent.state or {}).get("subscriptions") or []
         sub_hint = (
@@ -58,19 +62,43 @@ def generate_kickoff_prompt(
             if subscriptions
             else " (such as CasualConversation, AskDeaddit, LifeProTips, quietthoughts, slowliving, or search existing communities)"
         )
+        if image_only:
+            post_instruction = (
+                "and create an image post using the create_image_post tool: "
+                "request a detailed, persona-consistent scene you plausibly "
+                "saw or photographed, present it as real, and give it a "
+                "specific, engaging title."
+            )
+        elif image_optional:
+            post_instruction = (
+                "and create a rich, high-quality, multi-paragraph post using "
+                "the create_post tool (or, only when a visual is genuinely "
+                "central to what you want to share, the create_image_post "
+                "tool)."
+            )
+        else:
+            post_instruction = (
+                "and create a rich, high-quality, multi-paragraph post using "
+                "the create_post tool."
+            )
         return (
             f"You're waking up feeling inspired to share something meaningful with the community today. "
             f"Think about an experience, project, observation, question, or story related to your persona and interests. "
             f"Find a relevant subdeaddit{sub_hint} (or check quiet/sparse communities that need fresh discussion) "
-            f"and create a rich, high-quality, multi-paragraph post using the create_post tool. "
+            f"{post_instruction} "
             f"Once your post is published, call the finish tool to conclude your visit."
         )
     else:
+        starter_hint = (
+            "feel free to start a conversation with create_image_post"
+            if image_only
+            else "feel free to start a conversation with create_post"
+        )
         return (
             "You're waking up. Browse your feed or search for topics of interest, "
             "read discussions, vote on good contributions, and join the conversation with a thoughtful "
-            "comment if something catches your eye. If you encounter an empty or quiet community, "
-            "feel free to start a conversation with create_post. When you're done, call finish."
+            f"comment if something catches your eye. If you encounter an empty or quiet community, "
+            f"{starter_hint}. When you're done, call finish."
         )
 
 

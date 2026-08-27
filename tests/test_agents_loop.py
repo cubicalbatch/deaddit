@@ -336,6 +336,69 @@ def test_kickoff_prompt_browse_intent_guides_browsing(seeded_db, db_session):
     assert "finish" in prompt.lower()
 
 
+def test_kickoff_prompt_post_intent_optional_offers_either_tool(seeded_db, db_session):
+    from deaddit.agents.memory import generate_kickoff_prompt
+
+    agent = _make_agent(
+        db_session,
+        "alice",
+        config={
+            "image_posts": {
+                "enabled": True,
+                "policy": "optional",
+                "provider_id": 1,
+                "model": None,
+            }
+        },
+    )
+    prompt = generate_kickoff_prompt(agent, force_intent="post")
+    assert "create_post" in prompt
+    assert "create_image_post" in prompt
+
+
+def test_kickoff_prompt_post_intent_image_only_forces_image_tool(seeded_db, db_session):
+    from deaddit.agents.memory import generate_kickoff_prompt
+
+    agent = _make_agent(
+        db_session,
+        "alice",
+        config={
+            "image_posts": {
+                "enabled": True,
+                "policy": "image_only",
+                "provider_id": 1,
+                "model": None,
+            }
+        },
+    )
+    prompt = generate_kickoff_prompt(agent, force_intent="post")
+    assert "create_image_post" in prompt
+    assert "create_post" not in prompt
+
+
+def test_kickoff_prompt_browse_intent_image_only_never_suggests_create_post(
+    seeded_db, db_session
+):
+    from deaddit.agents.memory import generate_kickoff_prompt
+
+    agent = _make_agent(
+        db_session,
+        "alice",
+        config={
+            "image_posts": {
+                "enabled": True,
+                "policy": "image_only",
+                "provider_id": 1,
+                "model": None,
+            }
+        },
+    )
+    prompt = generate_kickoff_prompt(agent, force_intent="browse")
+    assert "create_post" not in prompt
+    assert "create_image_post" in prompt
+    assert "finish" in prompt.lower()
+
+
 def test_browse_feed_empty_and_sparse_hints(seeded_db, db_session):
     from deaddit.agents.executor import execute
     from deaddit.agents.registry import ToolContext

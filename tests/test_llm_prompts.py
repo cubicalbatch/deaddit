@@ -39,7 +39,7 @@ from deaddit.models import (
 )
 
 DEFAULT_BODY = (
-    "{persona_block}\n\n{tier_line}\n\n{rules_block}"
+    "{persona_block}\n\n{tier_line}\n\n{rules_block}{image_guidance_section}"
     "{subscriptions_section}{memories_section}"
 )
 
@@ -277,6 +277,85 @@ class TestParityFreezeByteStability:
         assert PromptRenderAudit.query.count() == 1
         # registry path and direct renderer agree byte-for-byte
         assert render(v1.body, system_prompt_variables(agent, user)) == pinned_text
+
+
+# --- 4C: image-post guidance -----------------------------------------------
+
+
+def _agent_with_image_posts(db_session, username, image_posts_config=None):
+    user = User(username=username)
+    db_session.add(user)
+    db_session.flush()
+    config = {}
+    if image_posts_config is not None:
+        config["image_posts"] = image_posts_config
+    agent = Agent(user_username=username, autonomy_tier="regular", config=config)
+    db_session.add(agent)
+    db_session.commit()
+    return agent, user
+
+
+class TestImagePostGuidance:
+    def test_disabled_agent_has_no_image_guidance_section(self, app, db_session):
+        agent, user = _agent_with_image_posts(db_session, "no_images", None)
+        variables = system_prompt_variables(agent, user)
+        assert variables["image_guidance_section"] == ""
+        assert "create_image_post" not in build_system_prompt(agent, user)
+
+    def test_optional_policy_offers_image_post_as_occasional_alternative(
+        self, app, db_session
+    ):
+        agent, user = _agent_with_image_posts(
+            db_session,
+            "optional_images",
+            {"enabled": True, "policy": "optional", "provider_id": 1, "model": None},
+        )
+        prompt = build_system_prompt(agent, user)
+        assert "create_image_post" in prompt
+        assert "create_post" in prompt
+        # most posts should stay text; image posts are the occasional case
+        assert "occasional" in prompt.lower()
+        assert "most" in prompt.lower()
+        # never discuss generation / share the image as real
+        assert "never mention" in prompt.lower()
+        assert "as real" in prompt.lower()
+        # no contradictory multi-paragraph requirement for image bodies
+        assert "does not need the multi-paragraph treatment" in prompt
+
+    def test_image_only_policy_requires_the_image_tool(self, app, db_session):
+        agent, user = _agent_with_image_posts(
+            db_session,
+            "image_only_agent",
+            {
+                "enabled": True,
+                "policy": "image_only",
+                "provider_id": 1,
+                "model": None,
+            },
+        )
+        prompt = build_system_prompt(agent, user)
+        assert "create_image_post" in prompt
+        assert "create_post is not available to you" in prompt
+        assert "never mention" in prompt.lower()
+        assert "as real" in prompt.lower()
+
+    def test_image_guidance_flows_through_versioned_template(self, app, db_session):
+        """The image-aware rules reach a pinned render through the same
+        named variable as the live assembly, not through separate wiring."""
+        agent, user = _agent_with_image_posts(
+            db_session,
+            "pinned_optional",
+            {"enabled": True, "policy": "optional", "provider_id": 1, "model": None},
+        )
+        create_template("agent.system_prompt.imgtest", DEFAULT_BODY)
+        set_pin("agent", "pinned_optional", "agent.system_prompt.imgtest", 1)
+        from deaddit.models import Setting
+
+        db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
+        db_session.commit()
+        pinned_text = build_system_prompt(agent, user)
+        assert pinned_text == render(DEFAULT_BODY, system_prompt_variables(agent, user))
+        assert "create_image_post" in pinned_text
 
 
 # --- ChatRequest/ChatResult echo -------------------------------------------
