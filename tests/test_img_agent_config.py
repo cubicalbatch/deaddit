@@ -286,3 +286,39 @@ def test_image_posts_config_round_trip_and_validation(
         "edit-image-policy-select",
     ):
         assert field in edit_form
+
+
+def test_random_agent_image_posts_round_trip(
+    seeded_db, admin_client, db_session, fake_fal
+):
+    provider = _make_provider(db_session)
+    created = admin_client.post(
+        "/admin/api/agents",
+        json={"persona_mode": "random", "backfill_memory": False},
+    )
+    assert created.status_code == 201
+    agent_data = created.get_json()["agent"]
+    assert agent_data["persona_mode"] == "random"
+    assert agent_data["user_username"] is None
+
+    fake_fal.enqueue_validate(ModelValidation(compatible=True))
+    image_config = {
+        "enabled": True,
+        "provider_id": provider.id,
+        "model": "fal-ai/flux-1/dev",
+        "policy": "optional",
+    }
+    updated = admin_client.put(
+        f"/admin/api/agents/{agent_data['id']}",
+        json={"image_posts": image_config},
+    )
+    assert updated.status_code == 200
+    assert updated.get_json()["agent"]["config"]["image_posts"] == image_config
+
+    updated_agent = updated.get_json()["agent"]
+    assert updated_agent["persona_mode"] == "random"
+    assert updated_agent["user_username"] is None
+    agent = db_session.get(Agent, agent_data["id"])
+    assert agent.persona_mode == "random"
+    assert agent.user_username is None
+    assert agent.config["image_posts"] == image_config

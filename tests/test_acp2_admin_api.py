@@ -55,6 +55,22 @@ def _make_agent(db_session, username, *, enabled=False, config=None):
     return agent
 
 
+def _make_random_agent(db_session, *, enabled=False, config=None):
+    agent = Agent(
+        persona_mode="random",
+        user_username=None,
+        autonomy_tier="regular",
+        is_enabled=enabled,
+        status="idle",
+        config=config or {},
+        state={},
+        consecutive_failures=0,
+    )
+    db_session.add(agent)
+    db_session.commit()
+    return agent
+
+
 def _noop_tools_allowed(api_url, model_name, **kwargs):
     return None
 
@@ -124,6 +140,9 @@ def test_create_agent_is_disabled_by_default_with_budget_config(
     )
     assert resp.status_code == 201
     body = resp.get_json()
+    assert body["agent"]["persona_mode"] == "fixed"
+    assert body["agent"]["user_username"] == "alice"
+    assert body["agent"]["display_label"] == "alice"
     assert body["agent"]["is_enabled"] is False
     assert body["agent"]["next_run_at"] is None
     config = body["agent"]["config"]
@@ -131,6 +150,89 @@ def test_create_agent_is_disabled_by_default_with_budget_config(
     assert {"max_actions_per_run", "max_run_seconds"} <= set(config)
     assert "daily_request_ceiling" not in config
 
+
+def test_create_random_agent_defaults_and_opt_out(
+    seeded_db, admin_client, db_session, monkeypatch
+):
+    monkeypatch.setattr(capabilities, "ensure_tools_allowed", _noop_tools_allowed)
+
+    default = admin_client.post("/admin/api/agents", json={"persona_mode": "random"})
+    assert default.status_code == 201
+    default_data = default.get_json()["agent"]
+    assert default_data["persona_mode"] == "random"
+    assert default_data["user_username"] is None
+    assert default_data["display_label"] == f"Random #{default_data['id']}"
+    assert default_data["is_enabled"] is False
+    assert default_data["config"]["backfill_memory"] is True
+
+    opted_out = admin_client.post(
+        "/admin/api/agents",
+        json={"persona_mode": "random", "backfill_memory": False},
+    )
+    assert opted_out.status_code == 201
+    opted_out_data = opted_out.get_json()["agent"]
+    assert opted_out_data["persona_mode"] == "random"
+    assert opted_out_data["user_username"] is None
+    assert "backfill_memory" not in opted_out_data["config"]
+    assert Agent.query.filter_by(persona_mode="random").count() == 2
+
+
+def test_create_agent_persona_mode_validation(seeded_db, admin_client, monkeypatch):
+    monkeypatch.setattr(capabilities, "ensure_tools_allowed", _noop_tools_allowed)
+    for payload in (
+        {"persona_mode": "random", "username": "alice"},
+        {"persona_mode": "fixed"},
+        {"persona_mode": "mystery", "username": "alice"},
+    ):
+        response = admin_client.post("/admin/api/agents", json=payload)
+        assert response.status_code == 400
+
+
+def test_random_agents_have_distinct_ids_and_deterministic_list_order(
+    seeded_db, admin_client, db_session, monkeypatch
+):
+    monkeypatch.setattr(capabilities, "ensure_tools_allowed", _noop_tools_allowed)
+    _make_agent(db_session, "alice")
+    _make_agent(db_session, "bob")
+    first = _make_random_agent(db_session)
+    second = _make_random_agent(db_session)
+
+    response = admin_client.get("/admin/api/agents")
+    assert response.status_code == 200
+    rows = response.get_json()["agents"]
+    assert [row["display_label"] for row in rows] == [
+        "alice",
+        "bob",
+        f"Random #{first.id}",
+        f"Random #{second.id}",
+    ]
+    assert [row["persona_mode"] for row in rows[:2]] == ["fixed", "fixed"]
+    assert [row["user_username"] for row in rows[:2]] == ["alice", "bob"]
+    assert rows[2]["persona_mode"] == rows[3]["persona_mode"] == "random"
+    assert rows[2]["user_username"] is rows[3]["user_username"] is None
+    assert first.id != second.id
+
+    detail = admin_client.get(f"/admin/api/agents/{second.id}")
+    assert detail.status_code == 200
+    assert detail.get_json()["id"] == second.id
+    assert detail.get_json()["display_label"] == f"Random #{second.id}"
+    assert admin_client.get("/admin/api/agents/999999").status_code == 404
+
+
+def test_candidates_exclude_fixed_but_not_random_agents(
+    seeded_db, admin_client, db_session
+):
+    _make_random_agent(db_session)
+    candidates = admin_client.get("/admin/api/personas/candidates")
+    assert candidates.status_code == 200
+    usernames = {row["username"] for row in candidates.get_json()["candidates"]}
+    assert {"alice", "bob"} <= usernames
+
+    _make_agent(db_session, "alice")
+    candidates = admin_client.get("/admin/api/personas/candidates")
+    usernames = {row["username"] for row in candidates.get_json()["candidates"]}
+    assert "alice" not in usernames
+    assert "bob" in usernames
 
 def test_create_agent_validates_input(seeded_db, admin_client, db_session, monkeypatch):
     monkeypatch.setattr(capabilities, "ensure_tools_allowed", _noop_tools_allowed)
@@ -248,15 +350,67 @@ def test_force_run_executes_a_full_visit(seeded_db, admin_client, db_session, fa
     resp = admin_client.post(f"/admin/api/agents/{agent.id}/force-run")
     assert resp.status_code == 200
     run = resp.get_json()["run"]
+    assert run["agent_id"] == agent.id
+    assert run["persona_username"] == "alice"
     assert run["trigger"] == "manual"
     assert run["status"] == "completed"
     assert run["turn_count"] == 2
+    persisted = AgentRun.query.filter_by(agent_id=agent.id).one()
+    assert persisted.persona_username == run["persona_username"]
 
     db.session.refresh(agent)
     assert agent.status == "idle"
     assert agent.last_run_at is not None
     episode = AgentMemory.query.filter_by(kind="episode").one()
     assert "without taking any tool actions" in episode.content
+
+
+def test_random_force_run_snapshots_selected_persona(
+    seeded_db, admin_client, db_session, fake_llm, monkeypatch
+):
+    monkeypatch.setattr(capabilities, "ensure_tools_allowed", _noop_tools_allowed)
+    agent = _make_random_agent(
+        db_session, config={"min_delay": 0, "max_delay": 0, "backfill_memory": False}
+    )
+    fake_llm.enqueue_content("Just looking around.")
+    fake_llm.enqueue_content("Done, finishing.")
+
+    response = admin_client.post(f"/admin/api/agents/{agent.id}/force-run")
+    assert response.status_code == 200
+    run = response.get_json()["run"]
+    assert run["agent_id"] == agent.id
+    assert run["persona_username"] in {"alice", "bob"}
+    persisted = AgentRun.query.filter_by(agent_id=agent.id).one()
+    assert persisted.persona_username == run["persona_username"]
+
+
+def test_persona_identity_is_immutable_but_current_mode_is_idempotent(
+    seeded_db, admin_client, db_session
+):
+    fixed = _make_agent(db_session, "alice")
+    unchanged = admin_client.put(
+        f"/admin/api/agents/{fixed.id}", json={"persona_mode": "fixed"}
+    )
+    assert unchanged.status_code == 200
+    assert unchanged.get_json()["agent"]["persona_mode"] == "fixed"
+
+    conversion = admin_client.put(
+        f"/admin/api/agents/{fixed.id}", json={"persona_mode": "random"}
+    )
+    assert conversion.status_code == 400
+    assert "immutable" in conversion.get_json()["error"]
+    username_change = admin_client.put(
+        f"/admin/api/agents/{fixed.id}", json={"username": "bob"}
+    )
+    assert username_change.status_code == 400
+    assert "immutable" in username_change.get_json()["error"]
+
+    random_agent = _make_random_agent(db_session)
+    fixed_assignment = admin_client.put(
+        f"/admin/api/agents/{random_agent.id}", json={"username": "bob"}
+    )
+    assert fixed_assignment.status_code == 400
+    assert "immutable" in fixed_assignment.get_json()["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -412,13 +566,16 @@ def test_pause_all_clears_wakes_and_sets_idle(seeded_db, admin_client, db_sessio
 # Pages and auth gating
 
 
-def test_dashboard_pages_render_and_register_endpoints(app, seeded_db, admin_client):
+def test_dashboard_pages_render_and_register_endpoints(
+    app, seeded_db, admin_client, db_session
+):
     endpoints = {rule.endpoint for rule in app.url_map.iter_rules()}
     assert "admin.agents_dashboard" in endpoints
     assert "admin.agent_detail" in endpoints
 
+    agent = _make_agent(db_session, "alice")
     assert admin_client.get("/admin/agents").status_code == 200
-    assert admin_client.get("/admin/agents/1").status_code == 200
+    assert admin_client.get(f"/admin/agents/{agent.id}").status_code == 200
 
 
 def test_admin_gate_redirects_anonymous_visitors(app, client, monkeypatch):

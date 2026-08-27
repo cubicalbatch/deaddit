@@ -9,7 +9,7 @@ import pytest
 import deaddit.llm.capabilities as capabilities
 from deaddit.extensions import db
 from deaddit.llm.errors import CapabilityError
-from deaddit.models import Agent
+from deaddit.models import Agent, AgentRun
 
 
 @pytest.fixture()
@@ -278,9 +278,26 @@ def test_update_agent_auth_gating(app, client, seeded_db, db_session, monkeypatc
 
 def test_admin_agent_detail_page_renders_form(seeded_db, admin_client, db_session):
     agent = _make_agent(db_session, "alice")
+    db.session.add(
+        AgentRun(
+            agent_id=agent.id,
+            persona_username="alice",
+            trigger="manual",
+            status="completed",
+            started_at=datetime.utcnow(),
+            finished_at=datetime.utcnow(),
+        )
+    )
+    db.session.commit()
     resp = admin_client.get(f"/admin/agents/{agent.id}")
     assert resp.status_code == 200
     html = resp.get_data(as_text=True)
+    assert f"const AGENT_ID = {agent.id};" in html
+    assert 'api("/admin/api/agents/" + AGENT_ID)' in html
+    assert '"Mode", personaMode' in html
+    assert '"Fixed persona",' in html
+    assert "run.persona_username" in html
+    assert '"as " + (run.persona_username' in html
     assert "Edit Agent Configuration" in html
     assert "edit-agent-form" in html
     assert "edit-tier-select" in html
@@ -292,6 +309,8 @@ def test_admin_agent_detail_page_renders_form(seeded_db, admin_client, db_sessio
     assert "edit-max-seconds" in html
     assert "reset-status-btn" in html
     assert "save-agent-btn" in html
+    run_body = admin_client.get(f"/admin/api/agents/{agent.id}/runs").get_json()
+    assert run_body["runs"][0]["persona_username"] == "alice"
 
 
 def test_admin_agents_page_renders_edit_action(seeded_db, admin_client, db_session):
