@@ -20,11 +20,13 @@ from deaddit.models import (
     AgentMemory,
     AgentRun,
     AgentTurn,
+    Comment,
     ImageProvider,
     Notification,
     Post,
     ToolCall,
     User,
+    Vote,
 )
 
 ALL_TOOL_NAMES = {
@@ -637,6 +639,42 @@ def test_random_agent_resolves_persona_once_and_acts_as_it(
     assert post.user == persona
     assert post.model == f"agent:{persona}"
     assert run.agent_id == agent.id
+
+
+def test_random_persona_writes_comments_and_votes_as_selected_user(
+    seeded_db, db_session, fake_llm, monkeypatch
+):
+    agent = _make_random_agent(db_session)
+    target = seeded_db["posts"][1]  # bob's post; alice can comment and vote
+    _rig_selection(monkeypatch, "alice")
+    fake_llm.enqueue(
+        _tool_response(
+            [
+                _tool_call(
+                    "comment",
+                    "create_comment",
+                    {"post_id": target.id, "content": "A useful reply."},
+                ),
+                _tool_call(
+                    "vote",
+                    "vote",
+                    {"target_type": "post", "target_id": target.id, "direction": 1},
+                ),
+            ]
+        )
+    )
+    fake_llm.enqueue(_finish())
+
+    run = run_once(agent.id)
+
+    comment = (
+        Comment.query.filter_by(post_id=target.id).order_by(Comment.id.desc()).first()
+    )
+    vote = Vote.query.filter_by(voter="alice", post_id=target.id).one()
+    assert run.persona_username == "alice"
+    assert comment.user == "alice"
+    assert comment.model == "agent:alice"
+    assert vote.value == 1
 
 
 def test_two_random_runs_pick_different_personas(seeded_db, db_session, fake_llm):

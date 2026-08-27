@@ -174,6 +174,51 @@ def test_update_agent_toggle_enable_status(seeded_db, admin_client, db_session):
     assert agent.status == "idle"
 
 
+def test_random_agent_can_enable_edit_and_pause(
+    seeded_db, admin_client, db_session, monkeypatch
+):
+    monkeypatch.setattr(capabilities, "ensure_tools_allowed", _noop_tools_allowed)
+    agent = Agent(
+        persona_mode="random",
+        user_username=None,
+        autonomy_tier="regular",
+        is_enabled=False,
+        config={"min_delay": 60, "max_delay": 900},
+        state={},
+        next_run_at=None,
+    )
+    db_session.add(agent)
+    db_session.commit()
+
+    enabled = admin_client.put(
+        f"/admin/api/agents/{agent.id}", json={"is_enabled": True}
+    )
+    assert enabled.status_code == 200
+    db.session.refresh(agent)
+    assert agent.is_enabled is True
+    assert agent.next_run_at is not None
+
+    edited = admin_client.put(
+        f"/admin/api/agents/{agent.id}",
+        json={"min_delay": 120, "max_delay": 600, "max_actions_per_run": 15},
+    )
+    assert edited.status_code == 200
+    db.session.refresh(agent)
+    assert agent.user_username is None
+    assert agent.config["min_delay"] == 120
+    assert agent.config["max_delay"] == 600
+    assert agent.config["max_actions_per_run"] == 15
+
+    paused = admin_client.put(
+        f"/admin/api/agents/{agent.id}", json={"is_enabled": False}
+    )
+    assert paused.status_code == 200
+    db.session.refresh(agent)
+    assert agent.is_enabled is False
+    assert agent.next_run_at is None
+    assert agent.status == "idle"
+
+
 def test_update_agent_reset_status_and_errors(seeded_db, admin_client, db_session):
     agent = _make_agent(db_session, "alice", enabled=True, status="failed", failures=5)
     agent.next_run_at = None
