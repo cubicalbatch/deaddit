@@ -510,21 +510,12 @@ def test_failed_wake_backs_off_random_agent_without_strike(
 
     monkeypatch.setattr(wakes, "run_once", fail)
     scheduler = WakeScheduler(app)
-    scheduler._poll_once()
-    assert _wait_until(lambda: calls == [agent.id])
-    scheduler._executor.shutdown(wait=True)
-
-    def backed_off():
-        db_session.expire_all()
-        row = db_session.get(Agent, agent.id)
-        return (
-            row is not None
-            and row.next_run_at is not None
-            and row.next_run_at > datetime.utcnow()
-        )
-
-    assert _wait_until(backed_off)
+    # Execute synchronously: sqlite:// uses one shared in-memory connection,
+    # so an executor thread can race the test session's transaction.
+    scheduler._run_agent(agent.id)
     db_session.refresh(agent)
+
+    assert calls == [agent.id]
     delta = (agent.next_run_at - datetime.utcnow()).total_seconds()
     assert 270 <= delta <= 330
     assert agent.consecutive_failures == 0
