@@ -1,7 +1,8 @@
 # PERCENT_DONE
-- Percent: ~65%
-- Last completed: 4C — image-aware agent prompts (commit b83082b). Phase 4 done.
-- In flight: 5A — vision capability declaration and probing
-- Next: 5B bounded image description, 5C read summaries, then Phase 6 (public UI)
-- Full test suite green as of b83082b. Disabled-agent prompt golden unchanged.
+- Percent: ~70%
+- Last completed: 5A — vision capability declaration and probing (commit da53b94)
+- In flight: 5B — bounded image description through the reading agent's LLM
+- Next: 5C read summaries, then Phase 6 (public UI), 7 (moderation), 8 (verification)
+- 5B entry point: deaddit.llm.capabilities.is_vision_capable(api_url, model_name) -> bool
+  (returns False for unknown/no-row; never probes).
 - Paid fal generations used so far: 0 of 10 budget.
