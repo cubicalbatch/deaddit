@@ -18,9 +18,12 @@ from deaddit.llm import capabilities
 from deaddit.llm.capabilities import (
     ensure_tools_allowed,
     get_capability,
+    is_vision_capable,
     mark_stale,
     probe_endpoint,
+    probe_vision,
     set_manual_override,
+    set_vision_manual_override,
 )
 from deaddit.llm.errors import CapabilityError, TransientLLMError
 from deaddit.models import EndpointCapability
@@ -234,10 +237,187 @@ def test_admin_override_route_sets_manual_row(app, client, db_session):
 
 
 # ---------------------------------------------------------------------------
+# Vision capability -- Phase 5A
+
+
+def test_vision_probe_success_records_true_verdict(app, db_session, fake_llm):
+    _seed_verdict(db_session, supports_tools=True)
+    fake_llm.enqueue_content("Red.")
+
+    cap = probe_vision(API_URL, MODEL)
+
+    assert cap.supports_vision is True
+    assert cap.vision_probe_method == "probe"
+    assert cap.vision_probed_at is not None
+    assert is_vision_capable(API_URL, MODEL) is True
+
+    # The probe request sends an OpenAI-style image content array.
+    payload = fake_llm.requests[0]["payload"]
+    assert payload["model"] == MODEL
+    content = payload["messages"][0]["content"]
+    assert content[0]["type"] == "text"
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+    assert capabilities.LAST_VISION_PROBE_EVIDENCE["reply_text"] == "Red."
+
+
+def test_vision_probe_non_matching_reply_is_verdict_false(app, db_session, fake_llm):
+    _seed_verdict(db_session, supports_tools=True)
+    fake_llm.enqueue_content("I cannot see any images.")
+
+    cap = probe_vision(API_URL, MODEL)
+
+    assert cap.supports_vision is False
+    assert cap.vision_probe_method == "probe"
+    assert is_vision_capable(API_URL, MODEL) is False
+
+
+def test_vision_probe_http400_image_error_is_verdict_false(app, db_session, fake_llm):
+    from deaddit.llm.errors import PermanentLLMError
+
+    _seed_verdict(db_session, supports_tools=True)
+    fake_llm.enqueue_error(
+        PermanentLLMError("HTTP 400: this model does not support image input")
+    )
+    cap = probe_vision(API_URL, MODEL)
+    assert cap.supports_vision is False
+    assert cap.vision_probe_method == "probe"
+
+
+def test_vision_probe_transient_error_records_nothing_and_reraises(
+    app, db_session, fake_llm
+):
+    _seed_verdict(db_session, supports_tools=True)
+    fake_llm.enqueue_error(TransientLLMError("connection timed out after retries"))
+    with pytest.raises(TransientLLMError):
+        probe_vision(API_URL, MODEL)
+    assert get_capability(API_URL, MODEL).supports_vision is None
+
+
+def test_vision_probe_manual_override_wins(app, db_session, fake_llm):
+    set_vision_manual_override(API_URL, MODEL, True)
+    before = len(fake_llm._queue)
+
+    cap = probe_vision(API_URL, MODEL)
+
+    assert cap.vision_probe_method == "manual"
+    assert cap.supports_vision is True
+    # Refused to overwrite: no provider call was even attempted.
+    assert len(fake_llm._queue) == before
+
+
+def test_vision_probe_with_no_row_probes_tools_first(app, db_session, fake_llm):
+    fake_llm.enqueue_tool_calls(_tool_call(json.dumps({"message": "ping"})))
+    fake_llm.enqueue_content("red")
+
+    cap = probe_vision(API_URL, MODEL)
+
+    assert cap.supports_tools is True
+    assert cap.probe_method == "probe"
+    assert cap.supports_vision is True
+    assert cap.vision_probe_method == "probe"
+
+
+def test_vision_override_does_not_touch_tools_verdict(app, db_session):
+    _seed_verdict(db_session, supports_tools=True, method="probe")
+    original = get_capability(API_URL, MODEL)
+    original_probed_at = original.probed_at
+
+    set_vision_manual_override(API_URL, MODEL, False)
+
+    cap = get_capability(API_URL, MODEL)
+    assert cap.supports_tools is True
+    assert cap.probe_method == "probe"
+    assert cap.probed_at == original_probed_at
+    assert cap.supports_vision is False
+    assert cap.vision_probe_method == "manual"
+
+
+def test_vision_override_on_missing_row_creates_conservative_row(app, db_session):
+    set_vision_manual_override(API_URL, MODEL, True)
+    cap = get_capability(API_URL, MODEL)
+    assert cap.supports_tools is False
+    assert cap.probe_method is None
+    assert cap.supports_vision is True
+    assert cap.vision_probe_method == "manual"
+
+
+def test_is_vision_capable_unknown_and_missing_default_to_false(app, db_session):
+    assert is_vision_capable(API_URL, MODEL) is False  # no row at all
+
+    _seed_verdict(db_session, supports_tools=True)
+    assert is_vision_capable(API_URL, MODEL) is False  # supports_vision is NULL
+
+    set_vision_manual_override(API_URL, MODEL, False)
+    assert is_vision_capable(API_URL, MODEL) is False
+
+
+# ---------------------------------------------------------------------------
+# Admin page: vision
+
+
+def test_admin_capabilities_page_shows_vision_verdict(app, client, db_session):
+    _seed_verdict(db_session, supports_tools=True)
+    set_vision_manual_override(API_URL, MODEL, True)
+    resp = client.get("/admin/capabilities")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "Yes" in html
+    assert "manual" in html
+
+
+def test_admin_probe_vision_route_records_verdict_end_to_end(
+    app, client, db_session, fake_llm
+):
+    _seed_verdict(db_session, supports_tools=True)
+    fake_llm.enqueue_content("Red")
+    resp = client.post(
+        "/admin/capabilities/probe-vision",
+        data={"api_url": API_URL, "model_name": MODEL},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    cap = get_capability(API_URL, MODEL)
+    assert cap is not None and cap.supports_vision is True
+    html = resp.get_data(as_text=True)
+    assert "vision" in html.lower()
+
+
+def test_admin_override_vision_route_sets_manual_row(app, client, db_session):
+    _seed_verdict(db_session, supports_tools=True)
+    resp = client.post(
+        "/admin/capabilities/override-vision",
+        data={"api_url": API_URL, "model_name": MODEL, "supports_vision": "false"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    cap = get_capability(API_URL, MODEL)
+    assert cap.supports_vision is False
+    assert cap.vision_probe_method == "manual"
+    # The tools verdict established by the fixture is untouched.
+    assert cap.supports_tools is True
+    assert cap.probe_method == "probe"
+
+
+# ---------------------------------------------------------------------------
 # Migration (tmp sqlite only — never the live instance DB)
 
 
 _EXPECTED_COLUMNS = {
+    "api_url",
+    "model_name",
+    "supports_tools",
+    "supports_streaming",
+    "context_tokens",
+    "probed_at",
+    "probe_method",
+    "supports_vision",
+    "vision_probed_at",
+    "vision_probe_method",
+}
+
+_PRE_VISION_COLUMNS = {
     "api_url",
     "model_name",
     "supports_tools",
@@ -281,3 +461,55 @@ def test_migration_upgrade_creates_table_and_downgrade_round_trips(tmp_path):
     up = runner.invoke(args=["db", "upgrade"])
     assert up.exit_code == 0, up.output
     assert {r[1] for r in _table_info(db_path)} == _EXPECTED_COLUMNS
+
+
+def test_vision_migration_adds_and_removes_columns_without_data_loss(tmp_path):
+    db_path = tmp_path / "mig_vision.db"
+    app = create_app(
+        {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_path}", "TESTING": True}
+    )
+    runner = app.test_cli_runner()
+
+    # Land on the revision just before this phase's migration, then seed an
+    # existing tools verdict the way an already-deployed instance would have.
+    pre = runner.invoke(args=["db", "upgrade", "1f095c2a711e"])
+    assert pre.exit_code == 0, pre.output
+    assert {r[1] for r in _table_info(db_path)} == _PRE_VISION_COLUMNS
+
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO endpoint_capability "
+        "(api_url, model_name, supports_tools, probe_method) VALUES (?, ?, ?, ?)",
+        (API_URL, MODEL, 1, "probe"),
+    )
+    conn.commit()
+    conn.close()
+
+    up = runner.invoke(args=["db", "upgrade"])
+    assert up.exit_code == 0, up.output
+    assert {r[1] for r in _table_info(db_path)} == _EXPECTED_COLUMNS
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT supports_tools, probe_method, supports_vision, "
+        "vision_probe_method FROM endpoint_capability "
+        "WHERE api_url = ? AND model_name = ?",
+        (API_URL, MODEL),
+    ).fetchone()
+    conn.close()
+    # The pre-existing tools verdict survives untouched; vision is NULL
+    # (unknown), not a fabricated verdict.
+    assert row == (1, "probe", None, None)
+
+    down = runner.invoke(args=["db", "downgrade", "1f095c2a711e"])
+    assert down.exit_code == 0, down.output
+    assert {r[1] for r in _table_info(db_path)} == _PRE_VISION_COLUMNS
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT supports_tools, probe_method FROM endpoint_capability "
+        "WHERE api_url = ? AND model_name = ?",
+        (API_URL, MODEL),
+    ).fetchone()
+    conn.close()
+    assert row == (1, "probe")

@@ -327,6 +327,14 @@ class EndpointCapability(db.Model):
     Rows are written by deaddit.llm.capabilities.probe_endpoint or by a
     human override (probe_method='manual', which always wins over probes).
     ``supports_streaming`` stays NULL until streaming lands in Phase 4.
+
+    ``supports_vision`` (Phase 5A) is a separate three-state verdict for
+    image-input support: NULL means unknown, which callers must treat
+    conservatively as non-vision. It is probed and overridden independently
+    of the tools verdict above, via its own ``vision_probed_at`` /
+    ``vision_probe_method`` columns, so a vision action never touches
+    ``supports_tools``, ``supports_streaming``, ``probed_at`` or
+    ``probe_method``.
     """
 
     api_url = db.Column(db.String(255), primary_key=True)
@@ -336,6 +344,9 @@ class EndpointCapability(db.Model):
     context_tokens = db.Column(db.Integer, nullable=True)
     probed_at = db.Column(db.DateTime)
     probe_method = db.Column(db.String(20))  # 'probe' | 'declared' | 'manual'
+    supports_vision = db.Column(db.Boolean, nullable=True)
+    vision_probed_at = db.Column(db.DateTime, nullable=True)
+    vision_probe_method = db.Column(db.String(20), nullable=True)  # 'probe' | 'manual'
 
 
 class Setting(db.Model):

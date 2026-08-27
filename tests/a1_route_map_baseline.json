@@ -413,8 +413,22 @@
     ]
   },
   {
+    "rule": "/admin/capabilities/override-vision",
+    "endpoint": "capabilities_override_vision",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
     "rule": "/admin/capabilities/probe",
     "endpoint": "capabilities_probe",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "rule": "/admin/capabilities/probe-vision",
+    "endpoint": "capabilities_probe_vision",
     "methods": [
       "POST"
     ]

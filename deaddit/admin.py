@@ -29,7 +29,12 @@ from deaddit.images import client as image_client
 from deaddit.images import verification as image_verification
 from deaddit.images.types import ImageProviderError
 from deaddit.llm import routing
-from deaddit.llm.capabilities import probe_endpoint, set_manual_override
+from deaddit.llm.capabilities import (
+    probe_endpoint,
+    probe_vision,
+    set_manual_override,
+    set_vision_manual_override,
+)
 from deaddit.models import (
     Agent,
     AgentRun,
@@ -1223,6 +1228,51 @@ def capabilities_override():
     flash(
         f"Manual override saved: {model_name} tool calling "
         f"{'supported' if supports_tools else 'disabled'}.",
+        "success",
+    )
+    return redirect(url_for("admin.capabilities"))
+
+
+@admin_bp.route("/capabilities/probe-vision", methods=["POST"])
+@production_disabled
+@admin_required
+def capabilities_probe_vision():
+    """Run a vision probe for one endpoint/model and flash the verdict."""
+    api_url = request.form.get("api_url", "").strip()
+    model_name = request.form.get("model_name", "").strip()
+    api_key = request.form.get("api_key", "").strip() or None
+    if not api_url or not model_name:
+        flash("Both API URL and model name are required.", "error")
+        return redirect(url_for("admin.capabilities"))
+    try:
+        cap = probe_vision(api_url, model_name, api_key=api_key)
+    except Exception as exc:
+        flash(f"Vision probe could not determine a verdict: {exc}", "error")
+        return redirect(url_for("admin.capabilities"))
+    verdict = "supported" if cap.supports_vision else "NOT supported"
+    flash(
+        f"Probe verdict for {model_name}: vision {verdict} "
+        f"(vision_probe_method={cap.vision_probe_method}).",
+        "success" if cap.supports_vision else "warning",
+    )
+    return redirect(url_for("admin.capabilities"))
+
+
+@admin_bp.route("/capabilities/override-vision", methods=["POST"])
+@production_disabled
+@admin_required
+def capabilities_override_vision():
+    """Record a manual vision-capability override for one endpoint/model."""
+    api_url = request.form.get("api_url", "").strip()
+    model_name = request.form.get("model_name", "").strip()
+    supports_vision = request.form.get("supports_vision") == "true"
+    if not api_url or not model_name:
+        flash("Both API URL and model name are required.", "error")
+        return redirect(url_for("admin.capabilities"))
+    set_vision_manual_override(api_url, model_name, supports_vision)
+    flash(
+        f"Manual override saved: {model_name} vision "
+        f"{'supported' if supports_vision else 'disabled'}.",
         "success",
     )
     return redirect(url_for("admin.capabilities"))

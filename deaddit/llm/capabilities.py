@@ -25,6 +25,8 @@ CLI::
 from __future__ import annotations
 
 import argparse
+import base64
+import io
 import json
 import re
 import uuid
@@ -46,6 +48,9 @@ from deaddit.models import EndpointCapability
 
 # A 400 that names tools/function is the provider saying "I don't do tools".
 _TOOLS_HINT_RE = re.compile(r"\b(tools?|function)\b", re.IGNORECASE)
+
+# A 400 that names image/vision input is the provider saying "no vision".
+_VISION_HINT_RE = re.compile(r"\b(image|vision|multimodal)\b", re.IGNORECASE)
 
 LAST_PROBE_EVIDENCE: dict | None = None
 """Raw echo-test evidence from the most recent probe_endpoint call.
@@ -285,6 +290,170 @@ def probe_streaming(
     cap.supports_streaming = supports_streaming
     db.session.commit()
     return supports_streaming
+
+
+# ---------------------------------------------------------------------------
+# Vision (image-input) capability -- Phase 5A.
+#
+# A third, independent verdict on the same row. It never reads or writes
+# supports_tools, supports_streaming, probed_at or probe_method: those stay
+# exactly as the tools/streaming probes left them. Its own probed_at/method
+# columns give it the same "manual always wins" precedence without
+# entangling it with the tools verdict.
+
+
+def _probe_image_data_url() -> str:
+    """A tiny solid-color PNG, generated once, encoded as a data URL."""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (2, 2), color=(255, 0, 0)).save(buf, format="PNG")
+    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+_PROBE_IMAGE_DATA_URL = _probe_image_data_url()
+_VISION_PROBE_EXPECTED_WORD = "red"
+
+LAST_VISION_PROBE_EVIDENCE: dict | None = None
+"""Raw evidence from the most recent probe_vision call.
+
+Keys: ``response_id``, ``finish_reason`` and ``reply_text``. Cleared at the
+start of each probe so decision re-probes never see stale evidence.
+"""
+
+
+def _vision_probe_payload(model_name: str) -> dict:
+    """Chat payload asking the model to name the color of a tiny image."""
+    return {
+        "model": model_name,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "What single color fills this image? Reply with "
+                            "exactly one word and nothing else."
+                        ),
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": _PROBE_IMAGE_DATA_URL},
+                    },
+                ],
+            }
+        ],
+        "max_tokens": 10,
+    }
+
+
+def is_vision_capable(api_url: str, model_name: str) -> bool:
+    """Conservative vision read for callers describing images to an agent.
+
+    A normal agent read never probes; a never-probed endpoint or an
+    explicit ``supports_vision=NULL`` verdict both return False here, so
+    "unknown" degrades to the stored source prompt rather than a guess.
+    """
+    cap = get_capability(api_url, model_name)
+    return bool(cap is not None and cap.supports_vision)
+
+
+def set_vision_manual_override(
+    api_url: str, model_name: str, supports_vision: bool
+) -> None:
+    """Record a human decision on vision support; it always wins over probes."""
+    cap = get_capability(api_url, model_name)
+    if cap is None:
+        # supports_tools is NOT NULL; a vision-only override on a
+        # never-probed endpoint has no tools evidence, so it defaults to
+        # False and probe_method is left unset -- the tools verdict is
+        # simply not yet known, not "probed and failed".
+        cap = EndpointCapability(
+            api_url=api_url, model_name=model_name, supports_tools=False
+        )
+        db.session.add(cap)
+    cap.supports_vision = supports_vision
+    cap.vision_probe_method = "manual"
+    cap.vision_probed_at = datetime.utcnow()
+    db.session.commit()
+
+
+def _record_vision_verdict(
+    api_url: str, model_name: str, *, supports_vision: bool
+) -> EndpointCapability:
+    cap = get_capability(api_url, model_name)
+    cap.supports_vision = supports_vision
+    cap.vision_probed_at = datetime.utcnow()
+    cap.vision_probe_method = "probe"
+    db.session.commit()
+    return cap
+
+
+def probe_vision(
+    api_url: str,
+    model_name: str,
+    api_key: str | None = None,
+    read_timeout: int = 30,
+) -> EndpointCapability:
+    """Probe one endpoint/model for image-input (vision) support.
+
+    Sends a tiny solid-color image as an OpenAI-compatible data URL and
+    asks the model to name the color; a matching answer is the only way to
+    earn a True verdict. A ``vision_probe_method='manual'`` row is never
+    overwritten -- the existing row is returned unchanged. When no row
+    exists yet, :func:`probe_endpoint` runs FIRST so an honest tools
+    verdict lands before the vision verdict is added to that same row.
+    Transient failures raise :class:`TransientLLMError` without touching
+    the cache. This never changes supports_tools, supports_streaming,
+    probed_at or probe_method.
+    """
+    global LAST_VISION_PROBE_EVIDENCE
+    existing = get_capability(api_url, model_name)
+    if existing is not None and existing.vision_probe_method == "manual":
+        return existing
+    LAST_VISION_PROBE_EVIDENCE = None
+
+    cap = get_capability(api_url, model_name)
+    if cap is None:
+        # Create the honest row first; supports_tools must not stay NULL.
+        cap = probe_endpoint(
+            api_url, model_name, api_key=api_key, read_timeout=read_timeout
+        )
+
+    provider = get_provider()
+    try:
+        response = provider(
+            api_url=api_url,
+            payload=_vision_probe_payload(model_name),
+            api_key=api_key,
+            request_id=f"vision-probe-{uuid.uuid4().hex[:12]}",
+            read_timeout=read_timeout,
+        )
+    except TransientLLMError:
+        # Low confidence: record nothing, let the caller retry later.
+        raise
+    except PermanentLLMError as exc:
+        text = str(exc)
+        if "HTTP 400" in text and _VISION_HINT_RE.search(text):
+            # The provider told us outright: a VERDICT, not a fallback.
+            LAST_VISION_PROBE_EVIDENCE = {"error": text}
+            return _record_vision_verdict(api_url, model_name, supports_vision=False)
+        raise
+
+    choice = response["choices"][0] if response.get("choices") else {}
+    message = choice.get("message") or {}
+    reply_text = message.get("content")
+    if not isinstance(reply_text, str):
+        reply_text = ""
+    supports_vision = _VISION_PROBE_EXPECTED_WORD in reply_text.lower()
+    LAST_VISION_PROBE_EVIDENCE = {
+        "response_id": response.get("id"),
+        "finish_reason": choice.get("finish_reason"),
+        "reply_text": reply_text,
+    }
+    return _record_vision_verdict(api_url, model_name, supports_vision=supports_vision)
 
 
 def ensure_tools_allowed(
