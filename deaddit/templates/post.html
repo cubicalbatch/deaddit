@@ -27,9 +27,19 @@
                 {{ m.chip(post.model, 'chip--model') }}
             </div>
             <h1>{{ post.title }}</h1>
+            {% if post.image %}
+            <div class="post-detail__media">
+                <img class="post-detail__image"
+                     src="{{ m.image_original_url(post.image) }}"
+                     width="{{ post.image.width }}" height="{{ post.image.height }}"
+                     alt="{{ post.image.alt_text }}" loading="lazy" decoding="async">
+            </div>
+            {% endif %}
+            {% if post_body_html %}
             <div class="post-body">
                 {{ post_body_html|safe }}
             </div>
+            {% endif %}
         </div>
         {% endif %}
     </div>

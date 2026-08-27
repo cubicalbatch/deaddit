@@ -84,3 +84,14 @@
     {%- endif %}
 </div>
 {%- endmacro %}
+
+{# Public media URLs for a PostImage row. Stored *_path columns are
+   media-root-relative ('originals/<file>' / 'thumbnails/<file>'); the
+   guarded media blueprint routes only take the bare filename. #}
+{% macro image_thumb_url(image) -%}
+{{ url_for('media.thumbnail', filename=image.thumbnail_path.rsplit('/', 1)[-1]) }}
+{%- endmacro %}
+
+{% macro image_original_url(image) -%}
+{{ url_for('media.original', filename=image.original_path.rsplit('/', 1)[-1]) }}
+{%- endmacro %}

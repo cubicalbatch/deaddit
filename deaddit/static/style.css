@@ -378,6 +378,20 @@ body {
     letter-spacing: -0.02em;
 }
 
+/* Detail image: the normalized original, shown at its own aspect ratio
+   (width/height attributes reserve the space) and never wider than the
+   reading column, so it can never push past the card or the viewport. */
+.post-detail__media {
+    margin-top: var(--space-lg);
+}
+
+.post-detail__image {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius-md);
+}
+
 .post-body {
     max-width: 68ch;
     margin-top: var(--space-lg);
@@ -1304,6 +1318,25 @@ a:focus {
     margin: 0;
 }
 
+/* Collapsed-card thumbnail: width/height attributes on the <img> reserve
+   the correct aspect ratio before the file loads, so this box never
+   causes layout shift. The cap keeps a tall image from dominating the
+   feed; object-fit crops rather than distorting it. */
+.post-card__media {
+    margin: 0 0 var(--space-sm);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background-color: var(--bg-canvas);
+}
+
+.post-card__thumb {
+    display: block;
+    width: 100%;
+    max-height: 320px;
+    height: auto;
+    object-fit: cover;
+}
+
 .post-card__comments {
     color: var(--text-2);
     text-decoration: none;
@@ -1328,6 +1361,10 @@ a:focus {
     .post-card__rail {
         flex-direction: row;
         justify-content: center;
+    }
+
+    .post-card__thumb {
+        max-height: 220px;
     }
 }
 
@@ -1553,6 +1590,85 @@ a.pagenav__link:hover {
 
 .community-header.community-hero .community-hero__stats {
     font-size: var(--font-size-base);
+}
+
+/* Feed-wide image toolbar (plan 6B/6C). .feed-wrap contains every
+   .feed-page this template renders, including ones HTMX appends afterend
+   the current one, so the :has() rule below keeps re-evaluating as more
+   pages load in - the toolbar shows exactly when the live DOM holds at
+   least one image card, with no JS involved. The toolbar itself lives
+   outside .feed-page (see post_list.html) so HTMX's hx-select=".feed-page"
+   on "Load More" never pulls a second copy into the live DOM. Expand-
+   all/minimize-all click handling is wired up separately; this covers
+   markup, layout, and DOM-driven visibility only. */
+.feed-wrap {
+    min-width: 0;
+}
+
+.image-feed-toolbar {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.feed-wrap:has(.post-card__media) .image-feed-toolbar {
+    display: flex;
+}
+
+.image-feed-toolbar__label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+}
+
+.image-feed-toolbar__actions {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+.image-feed-toolbar__btn {
+    appearance: none;
+    border: 1px solid var(--border);
+    background-color: var(--bg-canvas);
+    color: var(--text-1);
+    font-family: var(--font-family);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    min-height: 36px;
+    padding: 0 var(--space-md);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--motion-fast) var(--ease-out-quart);
+}
+
+.image-feed-toolbar__btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+@media (max-width: 480px) {
+    .image-feed-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .image-feed-toolbar__actions {
+        justify-content: stretch;
+    }
+
+    .image-feed-toolbar__btn {
+        flex: 1;
+    }
 }
 
 /* Load more: htmx button + no-JS fallback link */

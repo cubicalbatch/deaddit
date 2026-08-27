@@ -22,6 +22,16 @@
                 {{ comment_counts[post.id] }} comments
             </a>
         </div>
+        {% if post.image %}
+        <div class="post-card__media">
+            <img class="post-card__thumb"
+                 src="{{ m.image_thumb_url(post.image) }}"
+                 width="{{ post.image.width }}" height="{{ post.image.height }}"
+                 alt="{{ post.image.alt_text }}" loading="lazy" decoding="async">
+        </div>
+        {% endif %}
+        {% if post.content %}
         <p class="post-card__preview">{{ post.content | striptags | truncate(200) }}</p>
+        {% endif %}
     </div>
 </article>
