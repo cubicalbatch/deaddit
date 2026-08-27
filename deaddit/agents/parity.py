@@ -45,7 +45,7 @@ _DT_FMT = "%Y-%m-%d %H:%M:%S"
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_WRITE_TOOLS = ("create_post", "create_comment")
+_WRITE_TOOLS = ("create_post", "create_image_post", "create_comment")
 
 
 def _fmt(dt: datetime) -> str:
@@ -149,13 +149,14 @@ def compute_report(
     # Criterion (b): duplicate-suppression rejection rate over write attempts
     # (loop-health signal, ToolCall aggregates). Rejections matched by
     # substring on the raw stored result text.
+    _write_tool_placeholders = ", ".join("?" * len(_WRITE_TOOLS))
     attempts = conn.execute(
-        "SELECT COUNT(*) FROM tool_call WHERE name IN (?, ?) "
+        f"SELECT COUNT(*) FROM tool_call WHERE name IN ({_write_tool_placeholders}) "
         "AND created_at >= ? AND created_at < ?",
         (*_WRITE_TOOLS, ws, we),
     ).fetchone()[0]
     dup_rejections = conn.execute(
-        "SELECT COUNT(*) FROM tool_call WHERE name IN (?, ?) "
+        f"SELECT COUNT(*) FROM tool_call WHERE name IN ({_write_tool_placeholders}) "
         "AND created_at >= ? AND created_at < ? "
         "AND result LIKE '%' || ? || '%'",
         (*_WRITE_TOOLS, ws, we, DUP_REJECTION_MARKER),

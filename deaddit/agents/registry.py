@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     from deaddit.llm import ToolSpec
 
 __all__ = [
+    "DISABLED_IMAGE_POSTS_CONFIG",
+    "POST_TOOL_NAMES",
     "TOOL_REGISTRY",
     "AutonomyTier",
     "RateClass",
@@ -26,6 +28,7 @@ __all__ = [
     "ToolContext",
     "all_tools",
     "get",
+    "image_posts_config",
     "register",
     "specs_for",
     "tools_for",
@@ -69,11 +72,26 @@ class RateClass(str, Enum):
 
 @dataclass(frozen=True)
 class ToolContext:
-    """Everything a tool handler needs besides its arguments."""
+    """Everything a tool handler needs besides its arguments.
+
+    ``llm_api_url``/``llm_api_key``/``llm_model`` mirror the effective LLM
+    configuration the run resolved before its first request (plan 4B: needed
+    by later vision-description reads); they live only on this in-memory
+    object and are never written to ``ToolCall`` or any other persisted row.
+    ``deadline`` is the run's overall wall-clock budget as a
+    :class:`~deaddit.images.types.Deadline` (or ``None`` outside a real run);
+    handlers that spend real time - image generation chief among them - read
+    ``deadline.remaining()`` to bound their own work instead of overrunning
+    the run.
+    """
 
     agent: Any  # deaddit.models.Agent row
     run: Any  # deaddit.models.AgentRun row
     user_username: str  # persona username (= agent.user_username)
+    llm_api_url: str | None = None
+    llm_api_key: str | None = None
+    llm_model: str | None = None
+    deadline: Any = None  # deaddit.images.types.Deadline | None
 
 
 @dataclass(frozen=True)
@@ -125,17 +143,81 @@ def all_tools() -> list[Tool]:
     return list(TOOL_REGISTRY.values())
 
 
-def tools_for(tier: str | AutonomyTier) -> list[Tool]:
-    """Tools whose min_tier is met or exceeded by the given tier."""
+#: The two tools that publish a post. Both draw from the same per-run/hourly
+#: post budget and the same duplicate/loop guardrails (plan 4B) - an
+#: image-post failure must never leave a text post as an unthrottled
+#: fallback, and vice versa.
+POST_TOOL_NAMES: tuple[str, ...] = ("create_post", "create_image_post")
+
+#: Canonical shape of a disabled/absent ``Agent.config["image_posts"]``.
+DISABLED_IMAGE_POSTS_CONFIG: dict[str, Any] = {
+    "enabled": False,
+    "policy": "optional",
+    "provider_id": None,
+    "model": None,
+}
+
+
+def image_posts_config(agent: Any) -> dict[str, Any]:
+    """Normalize *agent*'s namespaced image-post configuration.
+
+    Missing ``image_posts``, a non-dict value, or ``enabled: false`` all
+    normalize to :data:`DISABLED_IMAGE_POSTS_CONFIG`. An enabled config with
+    a missing/invalid ``policy`` defaults to ``"optional"`` here rather than
+    being rejected - admin-side validation (3B) is what keeps stored config
+    well-formed; this function only has to be safe to call on anything that
+    might be sitting in the database.
+    """
+    config = getattr(agent, "config", None)
+    raw = config.get("image_posts") if isinstance(config, dict) else None
+    if not isinstance(raw, dict) or not raw.get("enabled"):
+        return dict(DISABLED_IMAGE_POSTS_CONFIG)
+    policy = raw.get("policy")
+    if policy not in ("optional", "image_only"):
+        policy = "optional"
+    return {
+        "enabled": True,
+        "policy": policy,
+        "provider_id": raw.get("provider_id"),
+        "model": raw.get("model"),
+    }
+
+
+def _offer_post_tool(name: str, cfg: dict[str, Any]) -> bool:
+    """Whether *name* (one of :data:`POST_TOOL_NAMES`) should be offered."""
+    if name == "create_image_post":
+        return cfg["enabled"]
+    if name == "create_post":
+        return not (cfg["enabled"] and cfg["policy"] == "image_only")
+    return True
+
+
+def tools_for(tier: str | AutonomyTier, agent: Any = None) -> list[Tool]:
+    """Tools whose min_tier is met or exceeded by the given tier.
+
+    When *agent* is given, ``create_post``/``create_image_post`` are also
+    filtered by its namespaced ``image_posts`` configuration: disabled omits
+    ``create_image_post``, and the ``image_only`` policy omits ``create_post``
+    (plan 4B). Omitting *agent* skips this filter entirely (tier-only
+    behaviour), which non-agent-aware callers rely on.
+    """
     active = parse_tier(tier)
-    return [tool for tool in all_tools() if active.allows(tool.min_tier)]
+    tools = [tool for tool in all_tools() if active.allows(tool.min_tier)]
+    if agent is None:
+        return tools
+    cfg = image_posts_config(agent)
+    return [
+        tool
+        for tool in tools
+        if tool.name not in POST_TOOL_NAMES or _offer_post_tool(tool.name, cfg)
+    ]
 
 
-def specs_for(tier: str | AutonomyTier) -> list[ToolSpec]:
-    """Wire-format tool payloads for the LLM at the given tier."""
+def specs_for(tier: str | AutonomyTier, agent: Any = None) -> list[ToolSpec]:
+    """Wire-format tool payloads for the LLM at the given tier (see tools_for)."""
     from deaddit.llm import ToolSpec
 
     return [
         ToolSpec(tool.name, tool.description, tool.parameters)
-        for tool in tools_for(tier)
+        for tool in tools_for(tier, agent=agent)
     ]

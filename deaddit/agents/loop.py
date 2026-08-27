@@ -18,6 +18,7 @@ from deaddit.agents.executor import execute
 from deaddit.agents.memory import build_initial_messages, summarize_run
 from deaddit.agents.registry import ToolContext, specs_for
 from deaddit.extensions import db
+from deaddit.images.types import Deadline
 from deaddit.llm import (
     ChatRequest,
     LLMClient,
@@ -192,7 +193,7 @@ def run_once(
         api_url = config.get("api_url") or Config.get("OPENAI_API_URL")
         model = config.get("model") or Config.get("OPENAI_MODEL", "llama3")
         api_key = Config.get_api_key_for_endpoint(api_url)
-    specs = specs_for(agent.autonomy_tier)
+    specs = specs_for(agent.autonomy_tier, agent=agent)
 
     now = datetime.utcnow()
     run = AgentRun(
@@ -215,7 +216,16 @@ def run_once(
     nudged = False
     rejected_streak = 0
     started = time.monotonic()
-    ctx = ToolContext(agent=agent, run=run, user_username=username)
+    run_deadline = Deadline.after(max(1, _int_budget(config, "max_run_seconds")))
+    ctx = ToolContext(
+        agent=agent,
+        run=run,
+        user_username=username,
+        llm_api_url=api_url,
+        llm_api_key=api_key,
+        llm_model=model,
+        deadline=run_deadline,
+    )
     client = LLMClient()
 
     def accumulate(chunk: dict | None) -> None:

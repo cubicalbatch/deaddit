@@ -9,19 +9,44 @@ from __future__ import annotations
 
 from typing import Literal
 
+from flask import current_app
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
 
 from deaddit.agents.registry import (
+    POST_TOOL_NAMES,
     AutonomyTier,
     RateClass,
     Tool,
     ToolContext,
+    image_posts_config,
     register,
 )
 from deaddit.dynamics.votes import cast_vote
 from deaddit.extensions import db
-from deaddit.models import Comment, Post, Subdeaddit, ToolCall
-from deaddit.services.content import ContentValidationError, create_comment, create_post
+from deaddit.images.client import generate as generate_image
+from deaddit.images.storage import (
+    MediaStorageError,
+    delete_variants,
+    download_image,
+    media_root,
+    store_variants,
+)
+from deaddit.images.types import Deadline, ImageProviderError
+from deaddit.models import Comment, ImageProvider, Post, Subdeaddit, ToolCall
+from deaddit.services.content import (
+    ContentValidationError,
+    PendingPostImage,
+    create_comment,
+    create_image_post,
+    create_post,
+    preflight_image_post,
+)
+
+#: Upper bound on how long a single image-generation attempt may run,
+#: independent of (and capped by) whatever remains of the run's overall
+#: deadline (ToolContext.deadline).
+_IMAGE_GENERATION_SECONDS = 90.0
 
 
 def _provenance(ctx: ToolContext) -> str:
@@ -35,11 +60,25 @@ class CreatePostArgs(BaseModel):
     post_type: str | None = None
 
 
+def _posts_created_this_run(ctx: ToolContext) -> int:
+    """Count successful create_post/create_image_post calls in this run.
+
+    Both post tools draw from the same one-post-per-run budget (plan 4B):
+    an image-post failure must not leave create_post as an unthrottled
+    fallback, and vice versa.
+    """
+    if ctx.run is None:
+        return 0
+    return ToolCall.query.filter(
+        ToolCall.run_id == ctx.run.id,
+        ToolCall.name.in_(POST_TOOL_NAMES),
+        ToolCall.ok.is_(True),
+    ).count()
+
+
 def _create_post(ctx: ToolContext, params: CreatePostArgs) -> dict:
     if ctx.run is not None:
-        posts_this_run = ToolCall.query.filter_by(
-            run_id=ctx.run.id, name="create_post", ok=True
-        ).count()
+        posts_this_run = _posts_created_this_run(ctx)
         if posts_this_run >= 1:
             return {
                 "ok": False,
@@ -70,6 +109,134 @@ def _create_post(ctx: ToolContext, params: CreatePostArgs) -> dict:
         "title": post.title,
         "subdeaddit": post.subdeaddit_name,
         "hint": "Post created successfully. Call finish to conclude your visit unless you have other pending actions.",
+    }
+
+
+class CreateImagePostArgs(BaseModel):
+    community: str = Field(min_length=1, max_length=50)
+    title: str = Field(min_length=1, max_length=300)
+    content: str | None = Field(default=None, max_length=20000)
+    image_prompt: str = Field(min_length=1, max_length=4000)
+    alt_text: str = Field(min_length=1, max_length=300)
+    post_type: str | None = Field(default=None, max_length=50)
+
+
+def _create_image_post(ctx: ToolContext, params: CreateImagePostArgs) -> dict:
+    """Preflight -> generate -> store -> publish, cleaning up on every failure.
+
+    Authorization against the agent's ``image_posts`` configuration already
+    happened in the executor (independent of whether this tool was even
+    offered to the model) - this handler only resolves which provider/model
+    to use. No database transaction is held open across generation, download,
+    or storage (plan 4B); the only writes are the final content-service call.
+    """
+    if ctx.run is not None and _posts_created_this_run(ctx) >= 1:
+        return {
+            "ok": False,
+            "error": "you have already created a post during this visit (maximum 1 post per session)",
+            "hint": "you can read or comment on other posts, vote, or call finish to end your visit",
+        }
+
+    if db.session.get(Subdeaddit, params.community) is None:
+        return {
+            "ok": False,
+            "error": f"subdeaddit '{params.community}' does not exist",
+            "hint": "use search with type='subdeaddit' to find existing communities",
+        }
+
+    try:
+        preflight_image_post(
+            user=ctx.user_username, subdeaddit=params.community, title=params.title
+        )
+    except ContentValidationError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    cfg = image_posts_config(ctx.agent)
+    provider = (
+        db.session.get(ImageProvider, cfg["provider_id"])
+        if cfg["provider_id"]
+        else None
+    )
+    if provider is None:
+        return {
+            "ok": False,
+            "error": "no image provider is configured for this agent",
+        }
+    model_id = cfg["model"] or provider.default_model
+    if not model_id:
+        return {
+            "ok": False,
+            "error": "no image model is configured for this agent's provider",
+        }
+
+    if ctx.deadline is not None:
+        remaining = ctx.deadline.remaining()
+        if remaining <= 0:
+            return {
+                "ok": False,
+                "error": "not enough time remaining in this run to generate an image",
+            }
+        budget = min(remaining, _IMAGE_GENERATION_SECONDS)
+    else:
+        budget = _IMAGE_GENERATION_SECONDS
+    deadline = Deadline.after(budget)
+
+    try:
+        generation = generate_image(provider, model_id, params.image_prompt, deadline)
+    except ImageProviderError as exc:
+        return {"ok": False, "error": f"image generation failed: {exc}"}
+
+    root = media_root(current_app)
+    try:
+        if generation.image_bytes is not None:
+            data = generation.image_bytes
+        else:
+            data = download_image(generation.image_url).data
+        stored = store_variants(data, root)
+    except MediaStorageError as exc:
+        return {"ok": False, "error": f"image storage failed: {exc}"}
+
+    pending = PendingPostImage(
+        original_path=stored.original_path,
+        thumbnail_path=stored.thumbnail_path,
+        mime_type=stored.mime_type,
+        byte_size=stored.original_size,
+        width=stored.width,
+        height=stored.height,
+        alt_text=params.alt_text,
+        source_prompt=params.image_prompt,
+        provider_snapshot=provider.name,
+        model_snapshot=model_id,
+        provider_id=provider.id,
+        request_snapshot=generation.request_id,
+    )
+
+    try:
+        post = create_image_post(
+            title=params.title,
+            content=params.content,
+            user=ctx.user_username,
+            subdeaddit=params.community,
+            image=pending,
+            post_type=params.post_type,
+            model=_provenance(ctx),
+        )
+    except ContentValidationError as exc:
+        delete_variants(root, stored.original_path, stored.thumbnail_path)
+        return {"ok": False, "error": str(exc)}
+    except SQLAlchemyError:
+        delete_variants(root, stored.original_path, stored.thumbnail_path)
+        return {
+            "ok": False,
+            "error": "failed to save the image post; please try again",
+        }
+
+    return {
+        "ok": True,
+        "post_id": post.id,
+        "title": post.title,
+        "subdeaddit": post.subdeaddit_name,
+        "hint": "Image post created successfully. Call finish to conclude your visit unless you have other pending actions.",
     }
 
 
@@ -194,6 +361,25 @@ register(
         ),
         parameters=CreatePostArgs,
         handler=_create_post,
+        min_tier=AutonomyTier.REGULAR,
+        rate_class=RateClass.WRITE,
+    ),
+)
+register(
+    Tool(
+        name="create_image_post",
+        description=(
+            "Publish a new image post to a subdeaddit (counts toward the same "
+            "1-per-session post limit as create_post; only offered when your "
+            "image-post configuration is enabled). The community must exist; "
+            "search first if unsure. Body text is optional - the image carries "
+            "the post. Write a detailed image_prompt describing exactly what "
+            "the generated image should depict, and a separate, concise "
+            "alt_text describing the image for anyone who cannot see it; "
+            "alt_text is shown publicly, image_prompt is not."
+        ),
+        parameters=CreateImagePostArgs,
+        handler=_create_image_post,
         min_tier=AutonomyTier.REGULAR,
         rate_class=RateClass.WRITE,
     ),

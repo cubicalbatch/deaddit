@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from deaddit.agents.loop import NUDGE_MESSAGE, is_runtime_enabled, run_once
 from deaddit.llm.errors import PermanentLLMError
-from deaddit.models import Agent, AgentRun, AgentTurn, Post, ToolCall
+from deaddit.models import Agent, AgentRun, AgentTurn, ImageProvider, Post, ToolCall
 
 ALL_TOOL_NAMES = {
     "browse_feed",
@@ -357,3 +357,117 @@ def test_browse_feed_empty_and_sparse_hints(seeded_db, db_session):
     assert res_pop["ok"] is True
     assert len(res_pop["posts"]) == 2
     assert "create_post" in res_pop.get("hint", "")
+
+
+# ---------------------------------------------------------------------------
+# Image-post gating and ToolContext plumbing (plan 4B)
+
+
+def _make_image_provider(db_session, **overrides):
+    fields = {
+        "name": "Fal",
+        "provider_type": "fal",
+        "credential_env": "FALAI_API_KEY",
+        "default_model": "fal-ai/flux-1/schnell",
+        "is_enabled": True,
+    }
+    fields.update(overrides)
+    provider = ImageProvider(**fields)
+    db_session.add(provider)
+    db_session.commit()
+    return provider
+
+
+def test_loop_offers_both_post_tools_under_optional_policy(
+    seeded_db, db_session, fake_llm
+):
+    provider = _make_image_provider(db_session)
+    _make_agent(
+        db_session,
+        "bob",
+        config={
+            "image_posts": {
+                "enabled": True,
+                "provider_id": provider.id,
+                "policy": "optional",
+            }
+        },
+    )
+    fake_llm.enqueue(_tool_response([_tool_call("c1", "finish", {"summary": "done"})]))
+
+    run_once("bob")
+
+    wire_tools = {
+        t["function"]["name"] for t in fake_llm.requests[0]["payload"]["tools"]
+    }
+    assert "create_image_post" in wire_tools
+    assert "create_post" in wire_tools
+
+
+def test_loop_omits_create_post_under_image_only_policy(
+    seeded_db, db_session, fake_llm
+):
+    provider = _make_image_provider(db_session)
+    _make_agent(
+        db_session,
+        "bob",
+        config={
+            "image_posts": {
+                "enabled": True,
+                "provider_id": provider.id,
+                "policy": "image_only",
+            }
+        },
+    )
+    fake_llm.enqueue(_tool_response([_tool_call("c1", "finish", {"summary": "done"})]))
+
+    run_once("bob")
+
+    wire_tools = {
+        t["function"]["name"] for t in fake_llm.requests[0]["payload"]["tools"]
+    }
+    assert "create_image_post" in wire_tools
+    assert "create_post" not in wire_tools
+
+
+def test_loop_omits_create_image_post_when_disabled(seeded_db, db_session, fake_llm):
+    _make_agent(db_session, "bob")  # default config: no image_posts key
+    fake_llm.enqueue(_tool_response([_tool_call("c1", "finish", {"summary": "done"})]))
+
+    run_once("bob")
+
+    wire_tools = {
+        t["function"]["name"] for t in fake_llm.requests[0]["payload"]["tools"]
+    }
+    assert wire_tools == ALL_TOOL_NAMES
+    assert "create_image_post" not in wire_tools
+
+
+def test_tool_context_carries_effective_llm_config_and_deadline(
+    seeded_db, db_session, fake_llm, monkeypatch
+):
+    import deaddit.agents.loop as loop_module
+
+    captured: dict = {}
+    original_execute = loop_module.execute
+
+    def _capture(name, raw_arguments, ctx):
+        captured["ctx"] = ctx
+        return original_execute(name, raw_arguments, ctx)
+
+    monkeypatch.setattr(loop_module, "execute", _capture)
+    _make_agent(db_session, "bob")
+    fake_llm.enqueue(_tool_response([_tool_call("c1", "finish", {"summary": "done"})]))
+
+    run_once("bob")
+
+    ctx = captured["ctx"]
+    assert ctx.llm_model
+    assert ctx.llm_api_url
+    assert ctx.deadline is not None
+    assert ctx.deadline.remaining() > 0
+    # The key is available to the handler in-memory but this asserts nothing
+    # about persistence: ToolCall rows never carry ctx fields at all.
+    stored_call = ToolCall.query.order_by(ToolCall.id.desc()).first()
+    assert "llm_api_key" not in json.dumps(stored_call.arguments, default=str)
+    assert "llm_api_key" not in json.dumps(stored_call.result, default=str)

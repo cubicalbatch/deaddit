@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
+    "POST_TOOL_NAMES",
     "TOOL_REGISTRY",
     "AutonomyTier",
     "RateClass",
@@ -17,6 +18,7 @@ __all__ = [
     "ToolContext",
     "all_tools",
     "get",
+    "image_posts_config",
     "register",
     "specs_for",
     "tools_for",

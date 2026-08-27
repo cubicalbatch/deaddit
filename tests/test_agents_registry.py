@@ -21,6 +21,7 @@ ALL_TOOL_NAMES = {
     "view_profile",
     "vote",
     "create_post",
+    "create_image_post",
     "create_comment",
     "subscribe",
     "unsubscribe",
@@ -42,7 +43,7 @@ READ_ONLY_NAMES = {
 # Tier filtering
 
 
-def test_all_tools_covers_the_eleven_builtins():
+def test_all_tools_covers_the_twelve_builtins():
     assert {tool.name for tool in all_tools()} == ALL_TOOL_NAMES
 
 
@@ -145,3 +146,79 @@ def test_registry_module_exposes_expected_api():
     for name in agents_pkg.__all__:
         assert getattr(agents_pkg, name) is not None or name == "TOOL_REGISTRY"
     assert isinstance(TOOL_REGISTRY, dict)
+
+
+# ---------------------------------------------------------------------------
+# Image-post gating (plan 4B): tools_for/specs_for take an optional agent and
+# filter create_post/create_image_post by Agent.config["image_posts"].
+
+
+class _StubAgent:
+    def __init__(self, config):
+        self.config = config
+
+
+def test_image_posts_absent_key_omits_image_tool_offers_text():
+    agent = _StubAgent({})
+    names = {tool.name for tool in tools_for("regular", agent=agent)}
+    assert "create_image_post" not in names
+    assert "create_post" in names
+
+
+def test_image_posts_disabled_flag_omits_image_tool_offers_text():
+    agent = _StubAgent({"image_posts": {"enabled": False}})
+    names = {tool.name for tool in tools_for("regular", agent=agent)}
+    assert "create_image_post" not in names
+    assert "create_post" in names
+
+
+def test_image_posts_optional_offers_both_tools():
+    agent = _StubAgent(
+        {"image_posts": {"enabled": True, "provider_id": 1, "policy": "optional"}}
+    )
+    names = {tool.name for tool in tools_for("regular", agent=agent)}
+    assert "create_image_post" in names
+    assert "create_post" in names
+
+
+def test_image_posts_image_only_omits_text_offers_image():
+    agent = _StubAgent(
+        {"image_posts": {"enabled": True, "provider_id": 1, "policy": "image_only"}}
+    )
+    names = {tool.name for tool in tools_for("regular", agent=agent)}
+    assert "create_image_post" in names
+    assert "create_post" not in names
+
+
+def test_specs_for_applies_the_same_gating_as_tools_for():
+    agent = _StubAgent(
+        {"image_posts": {"enabled": True, "provider_id": 1, "policy": "image_only"}}
+    )
+    names = {spec.name for spec in specs_for("regular", agent=agent)}
+    assert "create_image_post" in names
+    assert "create_post" not in names
+
+
+def test_image_posts_config_normalizes_invalid_policy_to_optional():
+    from deaddit.agents.registry import image_posts_config
+
+    agent = _StubAgent(
+        {"image_posts": {"enabled": True, "provider_id": 1, "policy": "bogus"}}
+    )
+    cfg = image_posts_config(agent)
+    assert cfg == {
+        "enabled": True,
+        "policy": "optional",
+        "provider_id": 1,
+        "model": None,
+    }
+
+
+def test_image_posts_config_defaults_to_disabled_shape():
+    from deaddit.agents.registry import DISABLED_IMAGE_POSTS_CONFIG, image_posts_config
+
+    assert image_posts_config(_StubAgent({})) == DISABLED_IMAGE_POSTS_CONFIG
+    assert image_posts_config(_StubAgent(None)) == DISABLED_IMAGE_POSTS_CONFIG
+    assert image_posts_config(_StubAgent({"image_posts": "nonsense"})) == (
+        DISABLED_IMAGE_POSTS_CONFIG
+    )
