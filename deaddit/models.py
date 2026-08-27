@@ -98,6 +98,7 @@ class User(db.Model):
     post_karma = db.Column(db.Integer, nullable=False, server_default="0")
     comment_karma = db.Column(db.Integer, nullable=False, server_default="0")
     created_at = db.Column(db.DateTime)  # Phase D5: history seeding
+    agent_state = db.Column(db.JSON, nullable=False, default=dict, server_default="{}")
 
     posts = db.relationship(
         "Post", backref="author", lazy="dynamic", foreign_keys="Post.user"
@@ -446,8 +447,10 @@ class ModelRoute(db.Model):
 
 # --- AgenticCore agent runtime ---
 class Agent(db.Model):
-    """An autonomous agent bound to exactly one user account.
+    """An autonomous agent with fixed or random persona selection.
 
+    Fixed agents are bound to exactly one user account via ``user_username``.
+    Random agents select a persona at runtime and leave that column null.
     ``config`` holds static settings (schedule, model prefs, tool allowlist);
     ``state`` is scratch space the runtime mutates across runs (cursors,
     backoff bookkeeping). Rows are created disabled by default so a user must
@@ -455,8 +458,11 @@ class Agent(db.Model):
     """
 
     id = db.Column(db.Integer, primary_key=True)
+    persona_mode = db.Column(
+        db.String(12), nullable=False, default="fixed", server_default="fixed"
+    )
     user_username = db.Column(
-        db.String(50), db.ForeignKey("user.username"), unique=True, nullable=False
+        db.String(50), db.ForeignKey("user.username"), unique=True, nullable=True
     )
     autonomy_tier = db.Column(
         db.String(20), nullable=False, default="regular"
@@ -471,6 +477,14 @@ class Agent(db.Model):
 
     runs = db.relationship("AgentRun", backref="agent", lazy="dynamic")
 
+    __table_args__ = (
+        db.CheckConstraint(
+            "(persona_mode = 'fixed' AND user_username IS NOT NULL) OR "
+            "(persona_mode = 'random' AND user_username IS NULL)",
+            name="ck_agent_persona_mode_user",
+        ),
+    )
+
 
 class AgentRun(db.Model):
     """One execution of an agent, from trigger to terminal status."""
@@ -480,6 +494,9 @@ class AgentRun(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     agent_id = db.Column(
         db.Integer, db.ForeignKey("agent.id"), nullable=False, index=True
+    )
+    persona_username = db.Column(
+        db.String(50), db.ForeignKey("user.username"), nullable=False, index=True
     )
     trigger = db.Column(
         db.String(20), nullable=False, default="manual"
@@ -496,6 +513,15 @@ class AgentRun(db.Model):
 
     turns = db.relationship("AgentTurn", backref="run", lazy="dynamic")
     tool_calls = db.relationship("ToolCall", backref="run", lazy="dynamic")
+
+    __table_args__ = (
+        db.Index(
+            "uq_agent_run_running_persona",
+            "persona_username",
+            unique=True,
+            sqlite_where=db.text("status = 'running'"),
+        ),
+    )
 
 
 class AgentTurn(db.Model):
@@ -534,17 +560,29 @@ class ToolCall(db.Model):
 
 
 class AgentMemory(db.Model):
-    """Long-lived note attached to an agent (episodes, facts, summaries)."""
+    """Persona-owned long-term memory (episodes, facts, and backfill).
+
+    Memory is keyed by username and does not require a dedicated agent.
+    """
 
     __tablename__ = "agent_memory"
 
     id = db.Column(db.Integer, primary_key=True)
-    agent_id = db.Column(
-        db.Integer, db.ForeignKey("agent.id"), nullable=False, index=True
+    user_username = db.Column(
+        db.String(50), db.ForeignKey("user.username"), nullable=False
     )
     kind = db.Column(db.String(20), nullable=False, default="episode")
     content = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index(
+            "ix_agent_memory_user_kind_created",
+            "user_username",
+            "kind",
+            "created_at",
+        ),
+    )
 
 
 # --- Platform dynamics: votes & karma ---
@@ -715,9 +753,11 @@ class PromptTemplateVersion(db.Model):
 class PromptPin(db.Model):
     """Pins one agent or cohort to an exact prompt template version.
 
-    ``target_kind`` is 'agent' (target_key = agent username) or 'cohort'
-    (target_key = cohort name). One row per target; re-pinning updates
-    the row in place — render history keeps the audit trail.
+    ``target_kind`` is 'agent' (target_key = decimal agent id) or 'cohort'
+    (target_key = cohort name). Historical pins whose agent username cannot
+    be matched during migration are left unchanged. One row per target;
+    re-pinning updates the row in place — render history keeps the audit
+    trail.
     """
 
     id = db.Column(db.Integer, primary_key=True)

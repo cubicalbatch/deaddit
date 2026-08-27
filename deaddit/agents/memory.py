@@ -212,7 +212,13 @@ def summarize_run(agent: Agent, run: AgentRun) -> None:
             if calls
             else "Woke up, looked around, and finished without taking any tool actions."
         )
-        db.session.add(AgentMemory(agent_id=agent.id, kind="episode", content=content))
+        db.session.add(
+            AgentMemory(
+                user_username=run.persona_username,
+                kind="episode",
+                content=content,
+            )
+        )
     except Exception:
         logger.exception(
             "Episode summarization failed for run %s; ignoring.",
@@ -256,15 +262,18 @@ def backfill_persona_history(
 ) -> int:
     """Convert a user's pre-agent Post/Comment history into memory episodes.
 
-    One-time per agent: returns 0 immediately when backfill rows already
-    exist. Each chronological chunk becomes one kind='backfill' row, using
-    the LLM when reachable and a deterministic extractive summary otherwise.
-    Returns the number of rows inserted.
+    One-time per persona: returns 0 immediately when backfill rows already
+    exist. A User is required, but no dedicated Agent is needed. Each
+    chronological chunk becomes one kind='backfill' row, using the LLM when
+    reachable and a deterministic extractive summary otherwise. Returns the
+    number of rows inserted.
     """
-    agent = Agent.query.filter_by(user_username=user_username).first()
-    if agent is None:
-        raise ValueError(f"No agent registered for user '{user_username}'")
-    existing = AgentMemory.query.filter_by(agent_id=agent.id, kind="backfill").count()
+    user = User.query.filter_by(username=user_username).first()
+    if user is None:
+        raise ValueError(f"No such user '{user_username}'")
+    existing = AgentMemory.query.filter_by(
+        user_username=user_username, kind="backfill"
+    ).count()
     if existing:
         return 0
 
@@ -300,7 +309,7 @@ def backfill_persona_history(
             paragraph = _extractive_summary(chunk)
         db.session.add(
             AgentMemory(
-                agent_id=agent.id,
+                user_username=user_username,
                 kind="backfill",
                 content=f"{BACKFILL_PREFIX} [{index}/{len(chunks)}] {paragraph}",
             )
@@ -401,13 +410,13 @@ def _extractive_summary(chunk: list[dict]) -> str:
 
 def _memory_block(agent: Agent) -> str:
     backfills = (
-        AgentMemory.query.filter_by(agent_id=agent.id, kind="backfill")
+        AgentMemory.query.filter_by(user_username=agent.user_username, kind="backfill")
         .order_by(AgentMemory.id.asc())
         .limit(3)
         .all()
     )
     episodes = (
-        AgentMemory.query.filter_by(agent_id=agent.id, kind="episode")
+        AgentMemory.query.filter_by(user_username=agent.user_username, kind="episode")
         .order_by(AgentMemory.id.desc())
         .limit(5)
         .all()

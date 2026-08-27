@@ -198,6 +198,7 @@ def run_once(
     now = datetime.utcnow()
     run = AgentRun(
         agent_id=agent.id,
+        persona_username=username,
         trigger=trigger,
         status="running",
         started_at=now,

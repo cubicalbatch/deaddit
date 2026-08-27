@@ -157,7 +157,7 @@ def _image_guidance_section(agent: Agent) -> str:
 
 def _memories_section(agent: Agent) -> str:
     memories = (
-        AgentMemory.query.filter_by(agent_id=agent.id, kind="episode")
+        AgentMemory.query.filter_by(user_username=agent.user_username, kind="episode")
         .order_by(AgentMemory.created_at.desc())
         .limit(MAX_MEMORIES_IN_PROMPT)
         .all()
