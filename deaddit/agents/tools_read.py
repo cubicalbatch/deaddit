@@ -25,7 +25,7 @@ from deaddit.dynamics.inbox import get_inbox, mark_inbox_read
 from deaddit.extensions import db
 from deaddit.images.storage import media_root, resolve_media_path
 from deaddit.llm import describe_image, is_vision_capable
-from deaddit.models import Comment, Post, Subdeaddit, User
+from deaddit.models import Comment, Post, PostImage, Subdeaddit, User
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,28 @@ def _age_hours(created: datetime | None) -> float:
     return max((_utcnow() - created).total_seconds() / 3600, 0.0)
 
 
-def _post_summary(post: Post, comment_count: int) -> dict:
+def _image_post_ids(post_ids: list[int]) -> set[int]:
+    """IDs among ``post_ids`` that have a stored image, in one query.
+
+    Used by summary views so that surfacing ``has_image`` never costs an
+    extra per-post query (PostImage.post_id is its primary key).
+    """
+    if not post_ids:
+        return set()
+    rows = (
+        db.session.query(PostImage.post_id)
+        .filter(PostImage.post_id.in_(post_ids))
+        .all()
+    )
+    return {row[0] for row in rows}
+
+
+def _has_image(post: Post, image_post_ids: set[int]) -> bool:
+    """A summary never claims an image for a removed or imageless post."""
+    return post.id in image_post_ids and not post.removed
+
+
+def _post_summary(post: Post, comment_count: int, has_image: bool) -> dict:
     return {
         "id": post.id,
         "title": post.title,
@@ -67,6 +88,7 @@ def _post_summary(post: Post, comment_count: int) -> dict:
         "age_hours": round(_age_hours(post.created_at), 2),
         "comment_count": comment_count,
         "excerpt": _excerpt(post.content, 200),
+        "has_image": has_image,
     }
 
 
@@ -112,8 +134,12 @@ def _browse_feed(ctx: ToolContext, params: BrowseFeedArgs) -> dict:
             .group_by(Comment.post_id)
             .all()
         )
+    image_post_ids = _image_post_ids([p.id for p in posts])
     result: dict[str, object] = {
-        "posts": [_post_summary(p, counts.get(p.id, 0)) for p in posts]
+        "posts": [
+            _post_summary(p, counts.get(p.id, 0), _has_image(p, image_post_ids))
+            for p in posts
+        ]
     }
     if not posts:
         target_name = params.subdeaddit or "this feed"
@@ -272,6 +298,7 @@ def _search(ctx: ToolContext, params: SearchArgs) -> dict:
             .limit(params.limit)
             .all()
         )
+        image_post_ids = _image_post_ids([p.id for p in rows])
         results = [
             {
                 "id": p.id,
@@ -279,6 +306,7 @@ def _search(ctx: ToolContext, params: SearchArgs) -> dict:
                 "subdeaddit": p.subdeaddit_name,
                 "excerpt": _excerpt(p.content, 200),
                 "score": p.score,
+                "has_image": _has_image(p, image_post_ids),
             }
             for p in rows
         ]
@@ -353,6 +381,7 @@ def _view_profile(ctx: ToolContext, params: ViewProfileArgs) -> dict:
         .limit(10)
         .all()
     )
+    image_post_ids = _image_post_ids([p.id for p in posts])
     return {
         "username": username,
         "bio": _excerpt(user.bio if user else None, 500),
@@ -366,6 +395,7 @@ def _view_profile(ctx: ToolContext, params: ViewProfileArgs) -> dict:
                 "subdeaddit": p.subdeaddit_name,
                 "excerpt": _excerpt(p.content, 200),
                 "created_at": _iso(p.created_at),
+                "has_image": _has_image(p, image_post_ids),
             }
             for p in posts
         ],
