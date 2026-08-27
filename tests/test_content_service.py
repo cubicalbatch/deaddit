@@ -6,17 +6,38 @@ import json
 from datetime import datetime
 
 import pytest
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from deaddit.models import Comment, Post, Subdeaddit, User
+from deaddit.dynamics.moderation import ban_user
+from deaddit.models import Comment, Post, PostImage, Subdeaddit, User
 from deaddit.services import content as content_service
 from deaddit.services.content import (
     ContentValidationError,
+    PendingPostImage,
     create_comment,
+    create_image_post,
     create_post,
     create_subdeaddit,
     create_user,
+    preflight_image_post,
 )
+
+
+def _pending_image(**overrides) -> PendingPostImage:
+    fields = {
+        "original_path": "originals/one.png",
+        "thumbnail_path": "thumbnails/one.png",
+        "mime_type": "image/png",
+        "byte_size": 1024,
+        "width": 512,
+        "height": 512,
+        "alt_text": "A useful description",
+        "source_prompt": "A detailed private prompt",
+        "provider_snapshot": "Example Provider",
+        "model_snapshot": "example-model",
+    }
+    fields.update(overrides)
+    return PendingPostImage(**fields)
 
 
 @pytest.fixture()
@@ -90,6 +111,232 @@ def test_create_post_empty_fields_message(seeded_db, kwargs_title, cache_spy):
         )
     assert str(exc.value) == "Invalid post data"
     assert Post.query.count() == len(seeded_db["posts"])
+
+
+# ---------------------------------------------------------------------------
+# preflight_image_post / create_image_post
+
+
+def test_preflight_image_post_accepts_blank_content_contract(seeded_db):
+    # Preflight takes no content argument at all: title/user/subdeaddit only.
+    preflight_image_post(user="alice", subdeaddit="testsub", title="A title")
+
+
+def test_preflight_image_post_rejects_empty_title(seeded_db):
+    with pytest.raises(ContentValidationError) as exc:
+        preflight_image_post(user="alice", subdeaddit="testsub", title="")
+    assert str(exc.value) == "Invalid post data"
+
+
+def test_preflight_image_post_unknown_user_message(seeded_db):
+    with pytest.raises(ContentValidationError) as exc:
+        preflight_image_post(user="ghost", subdeaddit="testsub", title="T")
+    assert str(exc.value) == "User 'ghost' does not exist"
+
+
+def test_preflight_image_post_unknown_subdeaddit_message(seeded_db):
+    with pytest.raises(ContentValidationError) as exc:
+        preflight_image_post(user="alice", subdeaddit="nope", title="T")
+    assert str(exc.value) == "Subdeaddit 'nope' does not exist"
+
+
+def test_preflight_image_post_rejects_banned_user(seeded_db):
+    ban_user("alice", "spamming")
+    with pytest.raises(ContentValidationError) as exc:
+        preflight_image_post(user="alice", subdeaddit="testsub", title="T")
+    assert str(exc.value) == "User 'alice' is banned"
+
+
+def test_create_image_post_persists_post_and_image_with_blank_content(
+    seeded_db, db_session, cache_spy
+):
+    post = create_image_post(
+        title="A picture",
+        content=None,
+        user="alice",
+        subdeaddit="testsub",
+        image=_pending_image(alt_text="A cat on a windowsill"),
+        model="agent:alice",
+    )
+
+    fetched = Post.query.filter_by(id=post.id).one()
+    assert fetched.title == "A picture"
+    assert fetched.content is None
+    image = PostImage.query.filter_by(post_id=post.id).one()
+    assert image.original_path == "originals/one.png"
+    assert image.thumbnail_path == "thumbnails/one.png"
+    assert image.alt_text == "A cat on a windowsill"
+    assert image.source_prompt == "A detailed private prompt"
+    assert image.provider_snapshot == "Example Provider"
+    assert image.model_snapshot == "example-model"
+    assert image.provider_id is None
+    assert cache_spy == ["clear"]
+
+
+def test_create_image_post_persists_empty_string_content_as_none(seeded_db, db_session):
+    post = create_image_post(
+        title="A picture",
+        content="",
+        user="alice",
+        subdeaddit="testsub",
+        image=_pending_image(),
+    )
+    assert Post.query.get(post.id).content is None
+
+
+def test_create_image_post_accepts_optional_body_text(seeded_db, db_session):
+    post = create_image_post(
+        title="A picture with words",
+        content="Found this on my walk today.",
+        user="alice",
+        subdeaddit="testsub",
+        image=_pending_image(),
+    )
+    assert Post.query.get(post.id).content == "Found this on my walk today."
+
+
+def test_create_image_post_rejects_empty_title(seeded_db):
+    with pytest.raises(ContentValidationError) as exc:
+        create_image_post(
+            title="",
+            content=None,
+            user="alice",
+            subdeaddit="testsub",
+            image=_pending_image(),
+        )
+    assert str(exc.value) == "Invalid post data"
+    assert Post.query.count() == len(seeded_db["posts"])
+    assert PostImage.query.count() == 0
+
+
+def test_create_image_post_unknown_user_message(seeded_db):
+    with pytest.raises(ContentValidationError) as exc:
+        create_image_post(
+            title="T",
+            content=None,
+            user="ghost",
+            subdeaddit="testsub",
+            image=_pending_image(),
+        )
+    assert str(exc.value) == "User 'ghost' does not exist"
+    assert PostImage.query.count() == 0
+
+
+def test_create_image_post_unknown_subdeaddit_message(seeded_db):
+    with pytest.raises(ContentValidationError) as exc:
+        create_image_post(
+            title="T",
+            content=None,
+            user="alice",
+            subdeaddit="nope",
+            image=_pending_image(),
+        )
+    assert str(exc.value) == "Subdeaddit 'nope' does not exist"
+    assert PostImage.query.count() == 0
+
+
+def test_create_image_post_rechecks_ban_established_after_preflight(seeded_db):
+    # Simulate the gap between preflight (before generation) and the final
+    # create call (after generation/storage): state can change in between.
+    preflight_image_post(user="bob", subdeaddit="testsub", title="T")
+    ban_user("bob", "caught spamming mid-generation")
+
+    with pytest.raises(ContentValidationError) as exc:
+        create_image_post(
+            title="T",
+            content=None,
+            user="bob",
+            subdeaddit="testsub",
+            image=_pending_image(),
+        )
+    assert str(exc.value) == "User 'bob' is banned"
+    assert PostImage.query.count() == 0
+
+
+def test_create_image_post_rechecks_rate_limit_established_after_preflight(
+    seeded_db, monkeypatch
+):
+    preflight_image_post(user="alice", subdeaddit="testsub", title="T")
+    monkeypatch.setitem(
+        content_service._RATE_LIMITS, "post", ("rate_limit_posts_per_hour", 0)
+    )
+
+    with pytest.raises(ContentValidationError) as exc:
+        create_image_post(
+            title="T",
+            content=None,
+            user="alice",
+            subdeaddit="testsub",
+            image=_pending_image(),
+        )
+    assert str(exc.value) == "rate_limited"
+    assert PostImage.query.count() == 0
+
+
+def test_create_image_post_runs_hooks_exactly_once(seeded_db, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        content_service.notifications,
+        "notify_post_created",
+        lambda post: calls.append(("notify", post.id)),
+    )
+    monkeypatch.setattr(
+        content_service.activity,
+        "record_event",
+        lambda **kwargs: calls.append(("activity", kwargs)),
+    )
+    monkeypatch.setattr(
+        content_service.degeneracy,
+        "detect_repetition_for_post",
+        lambda post: calls.append(("degeneracy", post.id)),
+    )
+    cleared = []
+    monkeypatch.setattr(
+        content_service, "_clear_read_caches", lambda: cleared.append("clear")
+    )
+
+    post = create_image_post(
+        title="A picture",
+        content=None,
+        user="alice",
+        subdeaddit="testsub",
+        image=_pending_image(),
+    )
+
+    assert cleared == ["clear"]
+    assert calls == [
+        ("notify", post.id),
+        ("activity", {"event_type": "post", "username": "alice", "post_id": post.id}),
+        ("degeneracy", post.id),
+    ]
+
+
+def test_create_image_post_db_failure_leaves_no_post_or_image_and_no_hooks(
+    seeded_db, monkeypatch
+):
+    hook_calls = []
+    monkeypatch.setattr(
+        content_service, "_run_post_hooks", lambda post: hook_calls.append(post.id)
+    )
+
+    def _boom():
+        raise SQLAlchemyError("boom")
+
+    monkeypatch.setattr(content_service.db.session, "commit", _boom)
+
+    posts_before = Post.query.count()
+    with pytest.raises(SQLAlchemyError):
+        create_image_post(
+            title="A picture",
+            content=None,
+            user="alice",
+            subdeaddit="testsub",
+            image=_pending_image(),
+        )
+
+    assert Post.query.count() == posts_before
+    assert PostImage.query.count() == 0
+    assert hook_calls == []
 
 
 # ---------------------------------------------------------------------------

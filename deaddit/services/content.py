@@ -13,6 +13,7 @@ creates one.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import cache
 
@@ -21,9 +22,15 @@ from sqlalchemy.exc import SQLAlchemyError
 from deaddit.dynamics import activity, degeneracy, moderation, notifications
 from deaddit.extensions import cache as flask_cache
 from deaddit.extensions import db
-from deaddit.models import Comment, Post, Setting, Subdeaddit, User
+from deaddit.models import Comment, Post, PostImage, Setting, Subdeaddit, User
 
-__all__ = ["ContentValidationError", "get_available_models"]
+__all__ = [
+    "ContentValidationError",
+    "PendingPostImage",
+    "get_available_models",
+    "preflight_image_post",
+    "create_image_post",
+]
 
 
 class ContentValidationError(ValueError):
@@ -87,6 +94,61 @@ def _commit() -> None:
         raise
 
 
+def _validate_post_fields(
+    title: str, content: str | None, *, require_content: bool
+) -> None:
+    """Reject a missing title, or missing content when content is required.
+
+    ``require_content=True`` reproduces the original text-post contract
+    exactly (empty title or content -> ``"Invalid post data"``).
+    ``require_content=False`` is the image-post contract: content may be
+    blank or ``None`` because the image itself carries the post.
+    """
+    if not title or (require_content and not content):
+        raise ContentValidationError("Invalid post data")
+
+
+def _validate_post_preflight(
+    *,
+    title: str,
+    content: str | None,
+    user: str,
+    subdeaddit: str,
+    require_content: bool,
+) -> None:
+    """Every check a post must pass before it may be written.
+
+    Shared by text posts (:func:`create_post`) and image posts
+    (:func:`preflight_image_post` / :func:`create_image_post`) so both
+    contracts reject unknown users/communities, active bans, and an
+    exceeded post rate limit identically. Order matters: field validation
+    first (cheap, no queries), then existence, then ban, then rate limit —
+    matching the original ``create_post`` behavior byte-for-byte.
+    """
+    _validate_post_fields(title, content, require_content=require_content)
+    if not User.query.filter_by(username=user).first():
+        raise ContentValidationError(f"User '{user}' does not exist")
+    if not Subdeaddit.query.filter_by(name=subdeaddit).first():
+        raise ContentValidationError(f"Subdeaddit '{subdeaddit}' does not exist")
+    if moderation.active_ban_for(user, subdeaddit) is not None:
+        raise ContentValidationError(f"User '{user}' is banned")
+    _check_rate_limit(user, "post")
+
+
+def _run_post_hooks(post: Post) -> None:
+    """Cache/notification/activity/degeneracy side effects, run exactly once.
+
+    Callers must invoke this exactly once, and only after the post (and,
+    for image posts, its ``PostImage``) has been committed. Extracted so
+    every post-creation path — text or image — shares one hook-once
+    implementation instead of duplicating the call sequence.
+    """
+    _clear_read_caches()
+    notifications.notify_post_created(post)
+    activity.record_event(event_type="post", username=post.user, post_id=post.id)
+    degeneracy.detect_repetition_for_post(post)
+
+
 def create_post(
     *,
     title: str,
@@ -98,21 +160,20 @@ def create_post(
     post_type: str | None = None,
     created_at: datetime | None = None,
 ) -> Post:
-    """Create and persist a :class:`~deaddit.models.Post`.
+    """Create and persist a text :class:`~deaddit.models.Post`.
 
     Raises:
-        ContentValidationError: on an empty title/content, unknown author, or
-            unknown subdeaddit.
+        ContentValidationError: on an empty title/content, unknown author,
+            unknown subdeaddit, an active ban, or an exceeded post rate
+            limit.
     """
-    if not title or not content:
-        raise ContentValidationError("Invalid post data")
-    if not User.query.filter_by(username=user).first():
-        raise ContentValidationError(f"User '{user}' does not exist")
-    if not Subdeaddit.query.filter_by(name=subdeaddit).first():
-        raise ContentValidationError(f"Subdeaddit '{subdeaddit}' does not exist")
-    if moderation.active_ban_for(user, subdeaddit) is not None:
-        raise ContentValidationError(f"User '{user}' is banned")
-    _check_rate_limit(user, "post")
+    _validate_post_preflight(
+        title=title,
+        content=content,
+        user=user,
+        subdeaddit=subdeaddit,
+        require_content=True,
+    )
 
     post = Post(
         title=title,
@@ -127,10 +188,147 @@ def create_post(
         post.created_at = created_at
     db.session.add(post)
     _commit()
-    _clear_read_caches()
-    notifications.notify_post_created(post)
-    activity.record_event(event_type="post", username=user, post_id=post.id)
-    degeneracy.detect_repetition_for_post(post)
+    _run_post_hooks(post)
+    return post
+
+
+@dataclass(frozen=True)
+class PendingPostImage:
+    """A validated, already-stored image ready to attach to a new post.
+
+    Every field mirrors a :class:`~deaddit.models.PostImage` column. The
+    caller — the image-publication orchestration layer (plan phase 4B),
+    not this service — is responsible for generating, downloading,
+    decoding, and atomically storing the original/thumbnail files
+    (:mod:`deaddit.images.storage`) *before* constructing this dataclass
+    and calling :func:`create_image_post`. This service performs no file
+    I/O: it only writes the database rows that reference the given paths.
+
+    On any failure inside :func:`create_image_post` (validation or
+    database), no Post/PostImage row is created and the files on disk are
+    left untouched — removing them is the orchestration layer's job.
+    """
+
+    original_path: str
+    thumbnail_path: str
+    mime_type: str
+    byte_size: int
+    width: int
+    height: int
+    alt_text: str
+    source_prompt: str
+    provider_snapshot: str
+    model_snapshot: str
+    provider_id: int | None = None
+    request_snapshot: str | None = None
+
+
+def preflight_image_post(*, user: str, subdeaddit: str, title: str) -> None:
+    """Validate everything that must hold before an image is generated.
+
+    Call this first, before spending any provider cost on image
+    generation. It runs the same checks as :func:`create_post` minus the
+    content requirement: a non-empty title, a known user and subdeaddit,
+    no active ban, and an unexceeded post rate limit.
+
+    This check is advisory for cost avoidance only — it does not reserve
+    a rate-limit slot or lock anything. Generation and storage can take
+    long enough for state to change (a new ban lands, the rate-limit
+    window fills, the community is deleted), so :func:`create_image_post`
+    independently re-runs every one of these checks immediately before it
+    commits.
+
+    Raises:
+        ContentValidationError: on an empty title, unknown author, unknown
+            subdeaddit, an active ban, or an exceeded post rate limit.
+    """
+    _validate_post_preflight(
+        title=title,
+        content=None,
+        user=user,
+        subdeaddit=subdeaddit,
+        require_content=False,
+    )
+
+
+def create_image_post(
+    *,
+    title: str,
+    content: str | None,
+    user: str,
+    subdeaddit: str,
+    image: PendingPostImage,
+    score: int = 0,
+    model: str = "unknown",
+    post_type: str | None = None,
+    created_at: datetime | None = None,
+) -> Post:
+    """Atomically create a Post and its PostImage; run hooks exactly once.
+
+    Call this only after :func:`preflight_image_post` has succeeded and
+    the image has already been generated and stored on disk as a
+    :class:`PendingPostImage`. This function re-validates every
+    preflight condition itself immediately before commit — see
+    :func:`preflight_image_post` for why that recheck matters — so it
+    never trusts a preflight result that may be stale.
+
+    ``content`` may be blank or ``None``: image posts are not required to
+    carry body text, unlike :func:`create_post`. Passing an ``image`` is
+    what makes blank content acceptable; there is no way to call this
+    function without one.
+
+    Both rows are written in the same database transaction: a failure
+    committing either one leaves neither behind. On any failure, this
+    function does not touch the filesystem — removing the original and
+    thumbnail files referenced by ``image`` is the caller's
+    responsibility (the image-publication orchestration layer owns
+    filesystem rollback, not the content service).
+
+    Raises:
+        ContentValidationError: same conditions as
+            :func:`preflight_image_post`, re-checked at commit time.
+    """
+    _validate_post_preflight(
+        title=title,
+        content=None,
+        user=user,
+        subdeaddit=subdeaddit,
+        require_content=False,
+    )
+
+    post = Post(
+        title=title,
+        content=content or None,
+        score=score,
+        user=user,
+        subdeaddit_name=subdeaddit,
+        model=model,
+        post_type=post_type,
+    )
+    if created_at is not None:
+        post.created_at = created_at
+    db.session.add(post)
+    db.session.flush()  # assign post.id for the PostImage FK below
+
+    db.session.add(
+        PostImage(
+            post_id=post.id,
+            original_path=image.original_path,
+            thumbnail_path=image.thumbnail_path,
+            mime_type=image.mime_type,
+            byte_size=image.byte_size,
+            width=image.width,
+            height=image.height,
+            alt_text=image.alt_text,
+            source_prompt=image.source_prompt,
+            provider_id=image.provider_id,
+            provider_snapshot=image.provider_snapshot,
+            model_snapshot=image.model_snapshot,
+            request_snapshot=image.request_snapshot,
+        )
+    )
+    _commit()
+    _run_post_hooks(post)
     return post
 
 
