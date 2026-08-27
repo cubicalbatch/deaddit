@@ -263,6 +263,7 @@ def test_create_cohort_creates_disabled_rows_inside_guardrails(
         config = row.config
         assert row.is_enabled is False  # decision 1: nothing runs by default
         assert row.status == "idle"
+        assert row.persona_mode == "fixed"
         assert row.autonomy_tier == entry["tier"]
         assert config["api_url"] == ENDPOINT["api_url"]
         assert config["model"] == ENDPOINT["model"]

@@ -83,6 +83,7 @@ class TestPersonaGeneratorService:
         a1 = Agent.query.filter_by(user_username="coffeecoder").first()
         assert a1 is not None
         assert a1.autonomy_tier == "power_user"
+        assert a1.persona_mode == "fixed"
         assert a1.is_enabled is True
         assert a1.status == "idle"
         assert a1.next_run_at is not None
@@ -95,6 +96,7 @@ class TestPersonaGeneratorService:
         a2 = Agent.query.filter_by(user_username="sarah_diy").first()
         assert a2 is not None
         assert a2.autonomy_tier == "power_user"
+        assert a2.persona_mode == "fixed"
         assert a2.is_enabled is True
 
     def test_generate_personas_without_agent_creation(self, app, fake_llm):

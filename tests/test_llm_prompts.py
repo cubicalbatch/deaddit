@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import json
 
 import pytest
 
@@ -179,19 +180,49 @@ class TestPinResolution:
         assert pin.version_number == 1
 
     def test_agent_pin_beats_cohort_pin(self, app, db_session):
-        create_template("pt", "template")
-        create_version("pt", "template v2")
+        create_template("pt", DEFAULT_BODY)
+        create_version("pt", DEFAULT_BODY + "\nversion2")
         set_pin("cohort", "parity", "pt", 1)
         agent = self._agent(db_session, "special", cohort="parity")
+        user = User.query.filter_by(username="special").one()
         key = str(agent.id)
         set_pin("agent", key, "pt", 2)
         pin = resolve_pin("agent", key)
         assert pin.target_kind == "agent"
         assert pin.version_number == 2
-        text, version_row = render_pinned(
-            "agent", key, {"unused": None} if False else {}
+
+        from deaddit.models import Setting
+
+        db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
+        db_session.commit()
+        assert build_system_prompt(agent, user) == render(
+            DEFAULT_BODY + "\nversion2", system_prompt_variables(agent, user)
         )
-        assert text == "template v2"
+
+    def test_random_agent_pin_renders_for_selected_user(self, app, db_session):
+        user = User(username="selected_random")
+        db_session.add(user)
+        db_session.flush()
+        agent = Agent(
+            persona_mode="random",
+            user_username=None,
+            autonomy_tier="regular",
+            config={},
+            state={},
+        )
+        db_session.add(agent)
+        create_template("random", DEFAULT_BODY)
+        key = str(agent.id)
+        set_pin("agent", key, "random", 1)
+
+        from deaddit.models import Setting
+
+        db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
+        db_session.commit()
+        pin = resolve_pin("agent", key)
+        assert build_system_prompt(agent, user) == render(
+            DEFAULT_BODY, system_prompt_variables(agent, user)
+        )
 
     def test_clear_pin_falls_back_to_cohort(self, app, db_session):
         create_template("cpt", "b")
@@ -205,41 +236,47 @@ class TestPinResolution:
 
     def test_set_pin_rejects_unknown_template(self, app, db_session):
         from deaddit.llm.prompts import PromptError
-
+        agent = self._agent(db_session, "unknown_template")
         with pytest.raises(PromptError):
-            set_pin("agent", "x", "no-such-template", 1)
-
-
-# --- render audit ---------------------------------------------------------
-
+            set_pin("agent", str(agent.id), "no-such-template", 1)
 
 class TestRenderAudit:
-    def test_render_pinned_writes_joinable_audit_row(self, app, db_session):
-        create_template("aud", "Hello {who}")
-        set_pin("agent", "audited", "aud", 1)
+    def test_build_system_prompt_writes_numeric_agent_audit_row(
+        self, app, db_session
+    ):
+        version = create_template("aud", DEFAULT_BODY)
         user = User(username="audited")
         db_session.add(user)
         db_session.flush()
-        db_session.add(Agent(user_username="audited", autonomy_tier="regular"))
-        db_session.commit()
-
-        text, version_row = render_pinned(
-            "agent", "audited", {"who": "World"}, subject_key="audited"
+        agent = Agent(
+            user_username=user.username,
+            autonomy_tier="regular",
+            config={},
+            state={},
         )
+        db_session.add(agent)
+        db_session.flush()
+        key = str(agent.id)
+        set_pin("agent", key, "aud", version.version)
+
+        from deaddit.models import Setting
+
+        db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
+        db_session.commit()
+        text = build_system_prompt(agent, user)
+
         row = PromptRenderAudit.query.one()
-        assert row.template_version_id == version_row.id
-        assert row.template_id == version_row.template_id
+        assert row.template_version_id == version.id
+        assert row.template_id == version.template_id
         assert row.subject_kind == "agent"
-        assert row.subject_key == "audited"
+        assert row.subject_key == key
+        assert row.subject_key != user.username
         assert row.rendered_sha256 == _sha(text)
 
         # stored variables reproduce the exact bytes (golden-render proof)
-        import json
-
-        replay = render(version_row.body, json.loads(row.variables_json))
+        replay = render(version.body, json.loads(row.variables_json))
         assert replay == text
         assert _sha(replay) == row.rendered_sha256
-
 
 # --- parity freeze: live-prompt byte stability -----------------------------
 

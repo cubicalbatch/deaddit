@@ -11,7 +11,7 @@ import pytest
 from deaddit.config import Config
 from deaddit.extensions import db
 from deaddit.llm.prompts import create_template, create_version, set_pin
-from deaddit.models import PromptTemplateVersion
+from deaddit.models import Agent, PromptTemplateVersion, User
 
 LIST = "/admin/api/prompts"
 PINS = "/admin/api/pins"
@@ -30,6 +30,22 @@ def _seed_templates(app):
         create_version("alpha", "A2 {x}")
 
 
+
+def _seed_agent(app, username="pin_owner"):
+    with app.app_context():
+        user = User(username=username)
+        db.session.add(user)
+        db.session.flush()
+        agent = Agent(
+            user_username=user.username,
+            autonomy_tier="regular",
+            config={},
+            state={},
+        )
+        db.session.add(agent)
+        db.session.commit()
+
+
 class TestPromptsApi:
     def test_requires_admin(self, app, client, monkeypatch):
         _seed_templates(app)
@@ -43,16 +59,16 @@ class TestPromptsApi:
 
     def test_list_shows_versions_and_pins(self, app, authed_client):
         _seed_templates(app)
+        agent_id = _seed_agent(app)
         with app.app_context():
-            set_pin("agent", "someone", "alpha", 2)
+            set_pin("agent", str(agent_id), "alpha", 2)
         resp = authed_client.get(LIST)
         assert resp.status_code == 200
         rows = resp.get_json()
         alpha = next(r for r in rows if r["name"] == "alpha")
         assert alpha["versions"] == [1, 2]
         assert alpha["latest_version"] == 2
-        assert alpha["pinned_by"] == ["agent:someone"]
-
+        assert alpha["pinned_by"] == [f"agent:{agent_id}"]
     def test_detail_lists_immutable_versions(self, app, authed_client):
         _seed_templates(app)
         resp = authed_client.get(f"{LIST}/alpha")
@@ -127,10 +143,15 @@ class TestPinsApi:
 
     def test_clear_pin(self, app, authed_client):
         _seed_templates(app)
+        agent_id = _seed_agent(app, "clearable")
         with app.app_context():
-            set_pin("agent", "temp", "alpha", 1)
-        assert authed_client.delete(f"{PINS}/agent/temp").status_code == 200
-        assert authed_client.delete(f"{PINS}/agent/temp").status_code == 404
+            set_pin("agent", str(agent_id), "alpha", 1)
+        assert (
+            authed_client.delete(f"{PINS}/agent/{agent_id}").status_code == 200
+        )
+        assert (
+            authed_client.delete(f"{PINS}/agent/{agent_id}").status_code == 404
+        )
 
 
 class TestRenderAuditApi:
@@ -138,14 +159,17 @@ class TestRenderAuditApi:
         _seed_templates(app)
         from deaddit.llm.prompts import render_pinned
 
+        agent_id = _seed_agent(app, "audited")
+        key = str(agent_id)
         with app.app_context():
-            set_pin("agent", "aud", "alpha", 1)
-            render_pinned("agent", "aud", {"x": "1"})
+            set_pin("agent", key, "alpha", 1)
+            render_pinned("agent", key, {"x": "1"})
             db.session.commit()
         resp = authed_client.get("/admin/api/prompt-renders?limit=10")
         assert resp.status_code == 200
         rows = resp.get_json()
         assert len(rows) == 1
         assert rows[0]["subject_kind"] == "agent"
-        assert rows[0]["subject_key"] == "aud"
+        assert rows[0]["subject_key"] == key
+        assert rows[0]["subject_key"] != "audited"
         assert len(rows[0]["rendered_sha256"]) == 64
