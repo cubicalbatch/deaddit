@@ -160,10 +160,10 @@ cython_debug/
 .vscode/*
 .env_*
 personal/
-.aider*
 .claude/
 .ruff_cache/
 CLAUDE.md
+AGENTS.md
 building/
 # SQLite databases (live data lives in instance/, never committed)
 *.db
