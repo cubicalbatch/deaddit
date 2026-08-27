@@ -7,6 +7,7 @@ import click
 from deaddit import create_app
 from deaddit.agents.cli import agent
 from deaddit.dynamics import seeding
+from deaddit.images.cli import images
 
 
 @click.group()
@@ -15,6 +16,7 @@ def cli() -> None:
 
 
 cli.add_command(agent)
+cli.add_command(images)
 
 
 @click.group()

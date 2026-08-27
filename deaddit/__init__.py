@@ -78,6 +78,13 @@ def create_app(config: Any = None) -> Flask:
     # Import websocket handlers so their @socketio.on decorators register
     from . import websocket  # noqa: F401
 
+    # Wire the real fal.ai/Runware adapters into the image-provider dispatch
+    # registry. This performs no I/O; tests never call it, registering fakes
+    # (or nothing) instead so no test reaches a live transport.
+    from .images.providers import register_default_adapters
+
+    register_default_adapters()
+
     with app.app_context():
         # Seed default settings; schema is owned by Alembic migrations
         # (see migrations/). Also available as `flask init-db`.
