@@ -333,6 +333,7 @@ def generate_personas(
                     "model": model,
                 }
                 agent = Agent(
+                    persona_mode="fixed",
                     user_username=user.username,
                     autonomy_tier=tier,
                     is_enabled=True,
