@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 
 from deaddit.extensions import db
 
@@ -812,3 +813,126 @@ class DegeneracyFlag(db.Model):
     metric = db.Column(db.Float)  # max Jaccard / Gini / voter-overlap
     detail = db.Column(db.Text)  # JSON context we assemble ourselves
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+# --- Image posts (Phase 1) ---
+class ImageProvider(db.Model):
+    """Configured image provider and its cached model listings."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    provider_type = db.Column(db.String(20), nullable=False)
+    credential_env = db.Column(db.String(100), nullable=False)
+    default_model = db.Column(db.String(200))
+    is_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    models = db.relationship(
+        "ImageModel", back_populates="provider", cascade="all, delete-orphan"
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "provider_type": self.provider_type,
+            "credential_env": self.credential_env,
+            "default_model": self.default_model,
+            "is_enabled": self.is_enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class ImageModel(db.Model):
+    """Cached model listing and compatibility metadata for an image provider."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    provider_id = db.Column(
+        db.Integer,
+        db.ForeignKey("image_provider.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    model_identifier = db.Column(db.String(200), nullable=False)
+    display_name = db.Column(db.String(200))
+    category = db.Column(db.String(50))
+    provider_metadata = db.Column(db.JSON)
+    compatibility_verdict = db.Column(db.String(20))
+    compatibility_reason = db.Column(db.Text)
+    last_fetched = db.Column(db.DateTime)
+    is_active = db.Column(db.Boolean, default=True)
+
+    provider = db.relationship("ImageProvider", back_populates="models")
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "provider_id",
+            "model_identifier",
+            name="uq_image_model_provider_identifier",
+        ),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "provider_id": self.provider_id,
+            "model_identifier": self.model_identifier,
+            "display_name": self.display_name,
+            "category": self.category,
+            "provider_metadata": self.provider_metadata,
+            "compatibility_verdict": self.compatibility_verdict,
+            "compatibility_reason": self.compatibility_reason,
+            "last_fetched": self.last_fetched.isoformat()
+            if self.last_fetched
+            else None,
+            "is_active": self.is_active,
+        }
+
+
+class PostImage(db.Model):
+    """Stored image variants and private generation provenance for a post."""
+
+    post_id = db.Column(
+        db.Integer, db.ForeignKey("post.id"), primary_key=True, nullable=False
+    )
+    original_path = db.Column(db.String(300), nullable=False)
+    thumbnail_path = db.Column(db.String(300), nullable=False)
+    mime_type = db.Column(db.String(50), nullable=False)
+    byte_size = db.Column(db.Integer, nullable=False)
+    width = db.Column(db.Integer, nullable=False)
+    height = db.Column(db.Integer, nullable=False)
+    alt_text = db.Column(db.String(500), nullable=False)
+    source_prompt = db.Column(db.Text, nullable=False)
+    provider_id = db.Column(
+        db.Integer,
+        db.ForeignKey("image_provider.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    provider_snapshot = db.Column(db.String(100), nullable=False)
+    model_snapshot = db.Column(db.String(200), nullable=False)
+    request_snapshot = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    provider = db.relationship(
+        "ImageProvider",
+        backref=db.backref("post_images", passive_deletes=True),
+    )
+
+    def to_dict(self):
+        return {
+            "original_url": Path(self.original_path).name,
+            "thumbnail_url": Path(self.thumbnail_path).name,
+            "mime_type": self.mime_type,
+            "width": self.width,
+            "height": self.height,
+            "alt_text": self.alt_text,
+        }
+
+
+Post.image = db.relationship(
+    "PostImage", backref="post", uselist=False, cascade="all, delete-orphan"
+)
