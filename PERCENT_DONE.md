@@ -1,10 +1,9 @@
 # PERCENT_DONE
-- Percent: ~95%
-- Last completed: 7A — media lifecycle across destructive paths (commit 93cfab2). Phase 7 done.
-- In flight: 8A — independent browser verification subagent
-- Next: 8B deterministic regression sweep, 8C bounded end-to-end smoke (paid fal step needs user approval)
-- Full test suite green as of 93cfab2.
-- 7A found and fixed a real bug: user/subdeaddit bulk deletes used query-level Post deletes that
-  bypassed ORM cascades, orphaning PostImage rows and files.
-- CLI: deaddit images reconcile-media (dry-run default; --apply; --i-know-this-is-prod guard)
+- Percent: ~99%
+- Last completed: 8A independent browser verification (clean, no defects),
+  8B deterministic regression sweep (clean), 8C steps 1-6 end-to-end smoke (clean).
+- In flight: none
+- Remaining: 8C step 7 only — up to 10 intentional paid fal.ai generations to verify the
+  live provider path. Requires explicit user approval; NOT yet run.
+- Phases 1-7 implemented and committed. Full suite green with network blocked.
 - Paid fal generations used so far: 0 of 10 budget.
