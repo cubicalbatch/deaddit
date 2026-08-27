@@ -11,6 +11,8 @@ service/agent tests never dispatch to a real provider.
 
 from __future__ import annotations
 
+import json
+
 import deaddit.llm.transport as _llm_transport
 
 
@@ -196,3 +198,67 @@ class FakeImageAdapter:
             }
         )
         return self._pop(self._generate_queue, "generate")
+
+
+class FakeHTTPResponse:
+    """A minimal requests.Response stand-in for real-adapter HTTP tests.
+
+    ``json_body`` is returned verbatim by ``.json()`` unless
+    ``malformed_json`` is set, in which case ``.json()`` raises ValueError
+    the way a truncated/non-JSON body would.
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        json_body=None,
+        *,
+        text: str | None = None,
+        malformed_json: bool = False,
+    ) -> None:
+        self.status_code = status_code
+        self._json_body = json_body
+        self._malformed_json = malformed_json
+        if text is not None:
+            self.text = text
+        elif json_body is not None:
+            self.text = json.dumps(json_body)
+        else:
+            self.text = ""
+
+    def json(self):
+        if self._malformed_json:
+            raise ValueError("invalid JSON body")
+        return self._json_body
+
+
+class FakeHTTPTransport:
+    """Deterministic stand-in for ``requests.request(method, url, **kwargs)``.
+
+    Queue FakeHTTPResponse instances or exceptions in call order; each call
+    records its method/url/kwargs and pops the next queued item, raising it
+    if it is an exception. An empty queue is a test bug, not a silent
+    no-op, so it raises AssertionError immediately.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self._queue: list = []
+
+    def enqueue(self, response) -> None:
+        self._queue.append(response)
+
+    def enqueue_error(self, exc: Exception) -> None:
+        self._queue.append(exc)
+
+    def __call__(self, method: str, url: str, **kwargs):
+        self.calls.append({"method": method, "url": url, **kwargs})
+        if not self._queue:
+            raise AssertionError(
+                "FakeHTTPTransport queue is empty: enqueue a response before "
+                "calling code that dispatches an HTTP request"
+            )
+        item = self._queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
