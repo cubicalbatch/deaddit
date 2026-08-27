@@ -460,6 +460,7 @@ def ensure_tools_allowed(
     api_url: str,
     model_name: str,
     *,
+    api_key: str | None = None,
     request_id: str | None = None,
     auto_probe: bool = False,
 ) -> None:
@@ -472,7 +473,7 @@ def ensure_tools_allowed(
     """
     cap = get_capability(api_url, model_name)
     if cap is None and auto_probe:
-        cap = probe_endpoint(api_url, model_name)
+        cap = probe_endpoint(api_url, model_name, api_key=api_key)
     if cap is None or cap.supports_tools:
         return
     raise CapabilityError(

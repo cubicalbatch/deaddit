@@ -4,10 +4,28 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
+import pytest
+
+import deaddit.agents.loop as loop_module
+from deaddit.agents.executor import execute
 from deaddit.agents.loop import NUDGE_MESSAGE, is_runtime_enabled, run_once
+from deaddit.agents.prompts import build_system_prompt
+from deaddit.agents.registry import ToolContext
+from deaddit.images.types import ImageGenerationResult
 from deaddit.llm.errors import PermanentLLMError
-from deaddit.models import Agent, AgentRun, AgentTurn, ImageProvider, Post, ToolCall
+from deaddit.models import (
+    Agent,
+    AgentMemory,
+    AgentRun,
+    AgentTurn,
+    ImageProvider,
+    Notification,
+    Post,
+    ToolCall,
+    User,
+)
 
 ALL_TOOL_NAMES = {
     "browse_feed",
@@ -52,6 +70,38 @@ def _make_agent(db_session, username, *, enabled=True, config=None):
     db_session.add(agent)
     db_session.commit()
     return agent
+
+
+def _make_random_agent(db_session, *, config=None):
+    agent = Agent(
+        persona_mode="random",
+        user_username=None,
+        autonomy_tier="regular",
+        is_enabled=True,
+        status="idle",
+        config=config or {},
+        state={},
+        consecutive_failures=0,
+    )
+    db_session.add(agent)
+    db_session.commit()
+    return agent
+
+
+def _rig_selection(monkeypatch, *picks):
+    assert picks
+    iterator = iter(picks)
+    last = picks[-1]
+
+    def pick(agent):
+        del agent
+        return next(iterator, last)
+
+    monkeypatch.setattr(loop_module, "_select_persona", pick)
+
+
+def _finish(summary="done"):
+    return _tool_response([_tool_call("finish", "finish", {"summary": summary})])
 
 
 # ---------------------------------------------------------------------------
@@ -539,3 +589,467 @@ def test_tool_context_carries_effective_llm_config_and_deadline(
     stored_call = ToolCall.query.order_by(ToolCall.id.desc()).first()
     assert "llm_api_key" not in json.dumps(stored_call.arguments, default=str)
     assert "llm_api_key" not in json.dumps(stored_call.result, default=str)
+
+
+# ---------------------------------------------------------------------------
+# Random persona mode
+
+
+def test_fixed_agent_run_persists_persona(seeded_db, db_session, fake_llm):
+    agent = _make_agent(db_session, "bob")
+    fake_llm.enqueue(_finish())
+
+    run = run_once(agent.id)
+
+    assert run.persona_username == "bob"
+    assert run.agent_id == agent.id
+
+
+def test_random_agent_resolves_persona_once_and_acts_as_it(
+    seeded_db, db_session, fake_llm
+):
+    agent = _make_random_agent(db_session)
+    fake_llm.enqueue(
+        _tool_response(
+            [
+                _tool_call(
+                    "create",
+                    "create_post",
+                    {
+                        "subdeaddit": "testsub",
+                        "title": "A fresh random-persona post",
+                        "content": "A useful and distinctive contribution.",
+                    },
+                )
+            ]
+        )
+    )
+    fake_llm.enqueue(_finish())
+
+    run = run_once(agent.id)
+
+    persona = run.persona_username
+    assert persona in {"alice", "bob"}
+    assert fake_llm.requests[0]["payload"]["messages"][0]["content"].startswith(
+        f"You are {persona},"
+    )
+    post = Post.query.order_by(Post.id.desc()).first()
+    assert post.user == persona
+    assert post.model == f"agent:{persona}"
+    assert run.agent_id == agent.id
+
+
+def test_two_random_runs_pick_different_personas(seeded_db, db_session, fake_llm):
+    agent = _make_random_agent(db_session)
+    fake_llm.enqueue(_finish("first"))
+    fake_llm.enqueue(_finish("second"))
+
+    run_one = run_once(agent.id)
+    run_two = run_once(agent.id)
+
+    assert run_one.persona_username in {"alice", "bob"}
+    assert run_two.persona_username in {"alice", "bob"}
+    assert run_one.persona_username != run_two.persona_username
+
+
+def test_single_member_pool_reuses_only_member(seeded_db, db_session, fake_llm):
+    fixed = _make_agent(db_session, "alice")
+    random_agent = _make_random_agent(db_session)
+    fake_llm.enqueue(_finish("fixed"))
+    fake_llm.enqueue(_finish("random"))
+
+    fixed_run = run_once(fixed.id)
+    random_run = run_once(random_agent.id)
+
+    assert fixed_run.persona_username == "alice"
+    assert random_run.persona_username == "bob"
+
+
+def test_pool_excludes_fixed_and_currently_running_personas(
+    seeded_db, db_session, fake_llm
+):
+    fixed = _make_agent(db_session, "alice")
+    random_agent = _make_random_agent(db_session)
+    running = AgentRun(
+        agent_id=fixed.id,
+        persona_username="bob",
+        trigger="manual",
+        status="running",
+        started_at=datetime.utcnow(),
+    )
+    db_session.add(running)
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="No eligible persona"):
+        run_once(random_agent.id)
+
+    running.status = "completed"
+    db_session.commit()
+    fake_llm.enqueue(_finish())
+    run = run_once(random_agent.id)
+
+    assert run.persona_username == "bob"
+
+
+def test_empty_pool_manual_rejects_without_strike(seeded_db, db_session):
+    fixed = _make_agent(db_session, "alice")
+    random_agent = _make_random_agent(db_session)
+    db_session.add(
+        AgentRun(
+            agent_id=fixed.id,
+            persona_username="bob",
+            trigger="manual",
+            status="running",
+            started_at=datetime.utcnow(),
+        )
+    )
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="No eligible persona"):
+        run_once(random_agent.id)
+
+    db_session.refresh(random_agent)
+    assert random_agent.consecutive_failures == 0
+    assert random_agent.next_run_at is None
+    assert random_agent.status == "idle"
+    assert AgentRun.query.filter_by(agent_id=random_agent.id).count() == 0
+
+
+def test_empty_pool_scheduled_backs_off_without_strike(seeded_db, db_session):
+    fixed = _make_agent(db_session, "alice")
+    random_agent = _make_random_agent(db_session)
+    db_session.add(
+        AgentRun(
+            agent_id=fixed.id,
+            persona_username="bob",
+            trigger="manual",
+            status="running",
+            started_at=datetime.utcnow(),
+        )
+    )
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="No eligible persona"):
+        run_once(random_agent.id, trigger="schedule")
+
+    db_session.refresh(random_agent)
+    delta = (random_agent.next_run_at - datetime.utcnow()).total_seconds()
+    assert random_agent.consecutive_failures == 0
+    assert random_agent.status == "error"
+    assert 270 <= delta <= 330
+    assert AgentRun.query.filter_by(agent_id=random_agent.id).count() == 0
+
+
+def test_reservation_retries_after_unique_conflict(seeded_db, db_session, monkeypatch):
+    random_agent = _make_random_agent(db_session)
+    db_session.add(
+        AgentRun(
+            agent_id=random_agent.id,
+            persona_username="alice",
+            trigger="manual",
+            status="running",
+            started_at=datetime.utcnow(),
+        )
+    )
+    db_session.commit()
+    _rig_selection(monkeypatch, "alice", "bob")
+
+    run = loop_module.reserve_persona_run(random_agent, trigger="manual")
+
+    assert run.persona_username == "bob"
+
+
+def test_reservation_conflict_retries_exhausted(seeded_db, db_session, monkeypatch):
+    random_agent = _make_random_agent(db_session)
+    db_session.add(
+        AgentRun(
+            agent_id=random_agent.id,
+            persona_username="alice",
+            trigger="manual",
+            status="running",
+            started_at=datetime.utcnow(),
+        )
+    )
+    db_session.commit()
+    _rig_selection(monkeypatch, "alice")
+
+    with pytest.raises(ValueError, match="attempts"):
+        loop_module.reserve_persona_run(random_agent, trigger="manual")
+
+
+def test_episode_memory_follows_persona_across_runs_and_agents(
+    seeded_db, db_session, fake_llm, monkeypatch
+):
+    agent_a = _make_random_agent(db_session)
+    _rig_selection(monkeypatch, "alice", "bob")
+    fake_llm.enqueue(
+        _tool_response(
+            [
+                _tool_call(
+                    "create",
+                    "create_post",
+                    {
+                        "subdeaddit": "testsub",
+                        "title": "An episode-memory post",
+                        "content": "A distinctive episode for Alice.",
+                    },
+                )
+            ]
+        )
+    )
+    fake_llm.enqueue(_finish("alice visit"))
+    run_once(agent_a.id)
+    fake_llm.enqueue(_finish("bob visit"))
+    run_two = run_once(agent_a.id)
+
+    alice_memory = AgentMemory.query.filter_by(
+        user_username="alice", kind="episode"
+    ).all()
+    assert any("Created 1 post" in row.content for row in alice_memory)
+    bob_kickoff = fake_llm.requests[-1]["payload"]["messages"][1]["content"]
+    assert "Created 1 post" not in bob_kickoff
+    assert "alice" not in bob_kickoff.lower()
+
+    agent_b = _make_random_agent(db_session)
+    _rig_selection(monkeypatch, "alice")
+    fake_llm.enqueue(_finish("shared memory"))
+    run_once(agent_b.id)
+    alice_kickoff = fake_llm.requests[-1]["payload"]["messages"][1]["content"]
+
+    assert run_two.persona_username == "bob"
+    assert "Created 1 post" in alice_kickoff
+
+
+def test_lazy_backfill_on_first_random_selection(
+    seeded_db, db_session, fake_llm, monkeypatch
+):
+    agent = _make_random_agent(db_session, config={"backfill_memory": True})
+    _rig_selection(monkeypatch, "alice", "alice")
+    fake_llm.enqueue(_finish("first"))
+    fake_llm.enqueue(_finish("second"))
+
+    run_once(agent.id)
+    backfills = AgentMemory.query.filter_by(
+        user_username="alice", kind="backfill"
+    ).all()
+    assert len(backfills) == 1
+    first_kickoff = fake_llm.requests[0]["payload"]["messages"][1]["content"]
+    assert "Your memory:" in first_kickoff
+    assert "History (before becoming an agent):" in first_kickoff
+
+    run_once(agent.id)
+    assert (
+        AgentMemory.query.filter_by(user_username="alice", kind="backfill").count() == 1
+    )
+    assert len(fake_llm.requests) == 2
+
+    control = _make_random_agent(db_session)
+    _rig_selection(monkeypatch, "bob")
+    fake_llm.enqueue(_finish("control"))
+    run_once(control.id)
+    assert (
+        AgentMemory.query.filter_by(user_username="bob", kind="backfill").count() == 0
+    )
+
+
+def test_inbox_reads_use_selected_persona(seeded_db, db_session, fake_llm, monkeypatch):
+    random_agent = _make_random_agent(db_session)
+    alice_notification = Notification(
+        recipient="alice",
+        kind="reply",
+        actor="bob",
+        post_id=seeded_db["posts"][0].id,
+        created_at=datetime.utcnow(),
+    )
+    bob_notification = Notification(
+        recipient="bob",
+        kind="reply",
+        actor="alice",
+        post_id=seeded_db["posts"][0].id,
+        created_at=datetime.utcnow(),
+    )
+    db_session.add_all([alice_notification, bob_notification])
+    db_session.commit()
+    _rig_selection(monkeypatch, "alice")
+    fake_llm.enqueue(_tool_response([_tool_call("inbox", "view_inbox", {})]))
+    fake_llm.enqueue(_finish())
+
+    run_once(random_agent.id)
+
+    db_session.refresh(alice_notification)
+    db_session.refresh(bob_notification)
+    assert alice_notification.read_at is not None
+    assert bob_notification.read_at is None
+
+
+def test_duplicate_suppression_scoped_to_persona(seeded_db, db_session):
+    agent = _make_random_agent(db_session)
+
+    run_one = AgentRun(
+        agent_id=agent.id,
+        persona_username="alice",
+        trigger="manual",
+        status="completed",
+        started_at=datetime.utcnow(),
+    )
+    db_session.add(run_one)
+    db_session.commit()
+    ctx_one = ToolContext(agent=agent, run=run_one, user_username="alice")
+    first = execute(
+        "create_post",
+        {
+            "subdeaddit": "testsub",
+            "title": "A clearly original persona note",
+            "content": "A vivid and unique body for Alice's first note.",
+        },
+        ctx_one,
+    )
+    assert first["ok"] is True
+
+    run_two = AgentRun(
+        agent_id=agent.id,
+        persona_username="alice",
+        trigger="manual",
+        status="completed",
+        started_at=datetime.utcnow(),
+    )
+    db_session.add(run_two)
+    db_session.commit()
+    ctx_two = ToolContext(agent=agent, run=run_two, user_username="alice")
+    duplicate = execute(
+        "create_post",
+        {
+            "subdeaddit": "testsub",
+            "title": "A clearly original persona note",
+            "content": "A vivid and unique body for Alice's first note.",
+        },
+        ctx_two,
+    )
+    assert duplicate["ok"] is False
+    assert "similar" in duplicate["error"].lower()
+
+    run_three = AgentRun(
+        agent_id=agent.id,
+        persona_username="bob",
+        trigger="manual",
+        status="completed",
+        started_at=datetime.utcnow(),
+    )
+    db_session.add(run_three)
+    db_session.commit()
+    ctx_three = ToolContext(agent=agent, run=run_three, user_username="bob")
+    separate = execute(
+        "create_post",
+        {
+            "subdeaddit": "askdeaddit",
+            "title": "Bob's unrelated question",
+            "content": "A vivid and unique body for Alice's first note.",
+        },
+        ctx_three,
+    )
+    assert separate["ok"] is True
+
+
+def test_subscriptions_stored_on_selected_user_agent_state(seeded_db, db_session):
+    agent = _make_random_agent(db_session)
+    run = AgentRun(
+        agent_id=agent.id,
+        persona_username="alice",
+        trigger="manual",
+        status="completed",
+        started_at=datetime.utcnow(),
+    )
+    db_session.add(run)
+    db_session.commit()
+    ctx = ToolContext(agent=agent, run=run, user_username="alice")
+
+    subscribed = execute("subscribe", {"subdeaddit": "testsub"}, ctx)
+    assert subscribed["ok"] is True
+    alice = db_session.get(User, "alice")
+    bob = db_session.get(User, "bob")
+    assert alice.agent_state["subscriptions"] == ["testsub"]
+    assert agent.state == {}
+    assert bob.agent_state == {}
+
+    feed = execute("browse_feed", {}, ctx)
+    assert feed["ok"] is True
+    assert feed["posts"]
+    assert {post["subdeaddit"] for post in feed["posts"]} == {"testsub"}
+    assert all(post["subdeaddit"] != "askdeaddit" for post in feed["posts"])
+
+    assert "subscribed to: testsub" in build_system_prompt(agent, alice)
+
+    unsubscribed = execute("unsubscribe", {"subdeaddit": "testsub"}, ctx)
+    assert unsubscribed["ok"] is True
+    db_session.refresh(alice)
+    assert alice.agent_state["subscriptions"] == []
+
+
+def test_image_post_provenance_uses_selected_persona(
+    seeded_db, db_session, monkeypatch
+):
+    from deaddit.agents import tools_write
+
+    provider = _make_image_provider(db_session)
+    agent = _make_random_agent(
+        db_session,
+        config={
+            "image_posts": {
+                "enabled": True,
+                "provider_id": provider.id,
+                "policy": "optional",
+            }
+        },
+    )
+    run = AgentRun(
+        agent_id=agent.id,
+        persona_username="alice",
+        trigger="manual",
+        status="completed",
+        started_at=datetime.utcnow(),
+    )
+    db_session.add(run)
+    db_session.commit()
+    ctx = ToolContext(agent=agent, run=run, user_username="alice")
+    monkeypatch.setattr(
+        tools_write,
+        "generate_image",
+        lambda *args: ImageGenerationResult(
+            request_id="req-1",
+            image_url=None,
+            image_bytes=b"png",
+            mime_type="image/png",
+            width=1,
+            height=1,
+        ),
+    )
+    monkeypatch.setattr(
+        tools_write,
+        "store_variants",
+        lambda *args: SimpleNamespace(
+            original_path="o.png",
+            thumbnail_path="t.png",
+            mime_type="image/png",
+            original_size=4,
+            width=1,
+            height=1,
+        ),
+    )
+    monkeypatch.setattr(tools_write, "delete_variants", lambda *args: None)
+
+    result = execute(
+        "create_image_post",
+        {
+            "community": "testsub",
+            "title": "A persona image",
+            "image_prompt": "A bright, calm landscape",
+            "alt_text": "A bright landscape",
+        },
+        ctx,
+    )
+
+    assert result["ok"] is True
+    post = Post.query.order_by(Post.id.desc()).first()
+    assert post.user == "alice"
+    assert post.model == "agent:alice"
+    assert post.image is not None

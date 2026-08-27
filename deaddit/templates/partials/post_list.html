@@ -1,24 +1,8 @@
 {% import 'partials/_macros.html' as m %}
-{#- URL of the next feed page, preserving every existing query arg except `page`. -#}
-{% set next_params = {'page': page + 1} %}
-{% for key in request.args if key != 'page' %}
-{% set _ = next_params.update({key: request.args.get(key)}) %}
-{% endfor %}
-{% set next_args = {} %}
-{% for key, value in request.view_args.items() %}
-{% set _ = next_args.update({key: value}) %}
-{% endfor %}
-{% set _ = next_args.update(next_params) %}
-{% set next_url = url_for(request.endpoint, **next_args) %}
-{#- The toolbar sits OUTSIDE .feed-page on purpose: "Load More" fetches a
-    full page and pulls only the matching .feed-page out of it via
-    hx-select=".feed-page", so a toolbar living inside that fragment would
-    stack up one copy per click. Living here instead, it renders once on
-    the real page load and is simply discarded by hx-select on every
-    HTMX-fetched page after that. Visibility itself is CSS-only (see
-    .image-feed-toolbar in style.css): it stays hidden unless the live DOM
-    it wraps contains at least one image card, and keeps re-evaluating as
-    HTMX appends more .feed-page fragments underneath it. #}
+{#- The toolbar sits OUTSIDE .feed-page so it renders once on the real page
+    load and is not duplicated by any later fragment fetch. Visibility is
+    CSS-only (see .image-feed-toolbar in style.css): it stays hidden unless
+    the live DOM it wraps contains at least one image card. #}
 <div class="feed-wrap">
     <div class="image-feed-toolbar" data-image-feed-toolbar hidden>
         <span class="image-feed-toolbar__label">
@@ -39,17 +23,6 @@
             'No posts yet — the robots are still warming up. Check back soon, or go nudge a subdeaddit.',
             url_for('web.index'),
             'Back to the front page') }}
-        {% endif %}
-        {% if has_more %}
-        <div class="load-more">
-            <button type="button" class="btn-load-more"
-                    hx-get="{{ next_url }}" hx-target="#feed-page-{{ page }}"
-                    hx-swap="afterend" hx-select=".feed-page">
-                <span class="lm-label">Load More Posts</span>
-                <span class="lm-skeleton" aria-hidden="true"><span class="lm-row"></span><span class="lm-row"></span><span class="lm-row"></span></span>
-            </button>
-            <a class="lm-fallback" href="{{ next_url }}">Show More Posts</a>
-        </div>
         {% endif %}
     </div>
 </div>

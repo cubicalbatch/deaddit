@@ -11,6 +11,8 @@ import threading
 import time
 from datetime import datetime, timedelta
 
+import pytest
+
 import deaddit.runtime.wakes as wakes
 from deaddit.extensions import db
 from deaddit.models import Agent, AgentRun, AgentTurn, Setting, User
@@ -22,6 +24,22 @@ def _make_agent(db_session, username, *, enabled=True, config=None):
         user_username=username,
         autonomy_tier="regular",
         is_enabled=enabled,
+        status="idle",
+        config=config or {},
+        state={},
+        consecutive_failures=0,
+    )
+    db_session.add(agent)
+    db_session.commit()
+    return agent
+
+
+def _make_random_agent(db_session, *, config=None):
+    agent = Agent(
+        persona_mode="random",
+        user_username=None,
+        autonomy_tier="regular",
+        is_enabled=True,
         status="idle",
         config=config or {},
         state={},
@@ -245,10 +263,10 @@ def test_global_semaphore_bounds_concurrent_wakes(
 # Poll tick: per-agent daily request ceiling
 
 
-def _seed_today_turns(db_session, agent, count):
+def _seed_today_turns(db_session, agent, count, *, persona_username=None):
     run = AgentRun(
         agent_id=agent.id,
-        persona_username=agent.user_username,
+        persona_username=persona_username or agent.user_username,
         trigger="schedule",
         status="completed",
         started_at=datetime.utcnow(),
@@ -356,3 +374,213 @@ def test_poll_tick_self_heals_killed_run_after_grace(seeded_db, db_session, app)
 
     assert run.status == "interrupted"
     assert agent.status == "idle"
+
+
+# ---------------------------------------------------------------------------
+# Random-agent scheduling
+
+
+def test_random_agent_is_armed_by_recover(seeded_db, db_session, app):
+    _set_flag("true")
+    enabled = _make_random_agent(db_session)
+    disabled = _make_random_agent(db_session)
+    disabled.is_enabled = False
+    db_session.commit()
+
+    scheduler = WakeScheduler(app)
+    before = datetime.utcnow()
+    _, armed = scheduler.recover()
+
+    assert armed == 1
+    db_session.refresh(enabled)
+    db_session.refresh(disabled)
+    assert enabled.next_run_at is not None
+    assert abs((enabled.next_run_at - before).total_seconds()) < 120
+    assert disabled.next_run_at is None
+
+
+def test_worker_dispatches_agent_ids_not_usernames(
+    seeded_db, db_session, app, monkeypatch
+):
+    _set_flag("true")
+    random_agent = _make_random_agent(db_session)
+    fixed_agent = _make_agent(db_session, "bob")
+    now = datetime.utcnow()
+    random_agent.next_run_at = now - timedelta(seconds=10)
+    fixed_agent.next_run_at = now - timedelta(seconds=10)
+    db_session.commit()
+
+    calls: list[tuple[int, str]] = []
+    lock = threading.Lock()
+
+    def fake_run_once(agent_id, *, trigger="schedule"):
+        with lock:
+            calls.append((agent_id, trigger))
+
+    monkeypatch.setattr(wakes, "run_once", fake_run_once)
+    scheduler = WakeScheduler(app)
+    scheduler._poll_once()
+
+    assert _wait_until(lambda: len(calls) == 2)
+    scheduler._executor.shutdown(wait=True)
+    assert {agent_id for agent_id, _ in calls} == {
+        random_agent.id,
+        fixed_agent.id,
+    }
+    assert all(trigger == "schedule" for _, trigger in calls)
+    assert all(isinstance(agent_id, int) for agent_id, _ in calls)
+    scheduler.stop(wait=False)
+
+
+def test_random_agent_ceiling_deferral(seeded_db, db_session, app, monkeypatch):
+    _set_flag("true")
+    agent = _make_random_agent(db_session, config={"daily_request_ceiling": 2})
+    agent.next_run_at = datetime.utcnow() - timedelta(seconds=5)
+    db_session.commit()
+    _seed_today_turns(db_session, agent, 2, persona_username="alice")
+
+    calls: list[int] = []
+    monkeypatch.setattr(
+        wakes,
+        "run_once",
+        lambda agent_id, *, trigger="schedule": calls.append(agent_id),
+    )
+    scheduler = WakeScheduler(app)
+    scheduler._poll_once()
+    scheduler._executor.shutdown(wait=True)
+
+    assert calls == []
+    db_session.refresh(agent)
+    delta = (agent.next_run_at - datetime.utcnow()).total_seconds()
+    assert CEILING_DEFER_SECONDS - 30 <= delta <= CEILING_DEFER_SECONDS
+    scheduler.stop(wait=False)
+
+
+def test_stale_run_recovery_retains_persona_and_releases_reservation(
+    seeded_db, db_session, app
+):
+    _set_flag("true")
+    agent = _make_random_agent(db_session, config={"max_run_seconds": 300})
+    agent.status = "running"
+    run = AgentRun(
+        agent_id=agent.id,
+        persona_username="alice",
+        trigger="schedule",
+        status="running",
+        started_at=datetime.utcnow() - timedelta(seconds=361),
+    )
+    db_session.add(run)
+    db_session.commit()
+
+    scheduler = WakeScheduler(app)
+    scheduler._poll_once()
+
+    assert run.status == "interrupted"
+    assert run.persona_username == "alice"
+    assert agent.status == "idle"
+    replacement = AgentRun(
+        agent_id=agent.id,
+        persona_username="alice",
+        trigger="manual",
+        status="running",
+        started_at=datetime.utcnow(),
+    )
+    db_session.add(replacement)
+    db_session.commit()
+    scheduler.stop(wait=False)
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [ValueError, RuntimeError],
+    ids=["value-error", "runtime-error"],
+)
+def test_failed_wake_backs_off_random_agent_without_strike(
+    seeded_db, db_session, app, monkeypatch, error_type
+):
+    _set_flag("true")
+    agent = _make_random_agent(db_session)
+    agent.next_run_at = datetime.utcnow() - timedelta(seconds=5)
+    db_session.commit()
+    calls: list[int] = []
+
+    def fail(agent_id, *, trigger="schedule"):
+        calls.append(agent_id)
+        raise error_type(f"No eligible persona available for random agent {agent_id}")
+
+    monkeypatch.setattr(wakes, "run_once", fail)
+    scheduler = WakeScheduler(app)
+    scheduler._poll_once()
+    assert _wait_until(lambda: calls == [agent.id])
+    scheduler._executor.shutdown(wait=True)
+    scheduler = WakeScheduler(app)
+    scheduler._poll_once()
+    # End the poller's read transaction before the worker commits backoff.
+    db_session.commit()
+
+    def backed_off():
+        db_session.expire_all()
+        row = db_session.get(Agent, agent.id)
+        return (
+            row is not None
+            and row.next_run_at is not None
+            and row.next_run_at > datetime.utcnow()
+        )
+
+    assert _wait_until(backed_off)
+    scheduler._executor.shutdown(wait=True)
+    db_session.refresh(agent)
+    delta = (agent.next_run_at - datetime.utcnow()).total_seconds()
+    assert 270 <= delta <= 330
+    assert agent.consecutive_failures == 0
+    scheduler.stop(wait=False)
+
+
+def test_random_agent_respects_concurrency_bound(
+    seeded_db, db_session, app, monkeypatch
+):
+    _set_flag("true")
+    Setting.set_value("AGENT_MAX_CONCURRENT_RUNS", "1")
+    random_agent = _make_random_agent(db_session)
+    fixed_agent = _make_agent(db_session, "bob")
+    now = datetime.utcnow()
+    random_agent.next_run_at = now - timedelta(seconds=20)
+    fixed_agent.next_run_at = now - timedelta(seconds=10)
+    db_session.commit()
+
+    gate = threading.Event()
+    lock = threading.Lock()
+    state = {"active": 0, "peak": 0, "ran": []}
+
+    def blocking_run_once(agent_id, *, trigger="schedule"):
+        assert trigger == "schedule"
+        with lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+            state["ran"].append(agent_id)
+        gate.wait(timeout=10)
+        with lock:
+            state["active"] -= 1
+
+    monkeypatch.setattr(wakes, "run_once", blocking_run_once)
+    scheduler = WakeScheduler(app)
+    scheduler._poll_once()
+    assert _wait_until(lambda: state["ran"] == [random_agent.id])
+    assert state["peak"] == 1
+
+    scheduler._poll_once()
+    assert state["ran"] == [random_agent.id]
+
+    gate.set()
+    scheduler._executor.shutdown(wait=True)
+    scheduler._executor = None
+    scheduler._pool_size = 0
+    random_agent.next_run_at = datetime.utcnow() + timedelta(hours=1)
+    db_session.commit()
+    scheduler._poll_once()
+    assert _wait_until(lambda: state["ran"] == [random_agent.id, fixed_agent.id])
+    scheduler._executor.shutdown(wait=True)
+
+    assert sorted(state["ran"]) == sorted([random_agent.id, fixed_agent.id])
+    assert state["peak"] == 1
+    scheduler.stop(wait=False)

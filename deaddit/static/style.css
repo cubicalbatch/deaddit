@@ -1119,9 +1119,8 @@ a:focus {
 
 /* ============================================================
    Components (UX-2)
-   Feed reading experience: two-column home shell, post cards,
-   vote widget, sort bar, pagination, chips, avatars, skip link,
-   load-more skeleton. Consumes semantic tokens only.
+   vote widget, sort bar, pagination, chips, avatars, skip link.
+   Consumes semantic tokens only.
    ============================================================ */
 
 /* Utilities */
@@ -1713,99 +1712,8 @@ a.pagenav__link:hover {
     }
 }
 
-/* Load more: htmx button + no-JS fallback link */
-.load-more {
-    text-align: center;
-    padding: var(--space-md) 0;
-    display: grid;
-    gap: var(--space-sm);
-    justify-items: center;
-}
-
-.btn-load-more {
-    position: relative;
-    appearance: none;
-    border: 1px solid var(--border);
-    background-color: var(--bg-surface);
-    color: var(--link);
-    font-family: var(--font-family);
-    font-size: var(--font-size-base);
-    font-weight: 600;
-    min-height: 44px;
-    padding: var(--space-sm) var(--space-xl);
-    border-radius: var(--radius-lg);
-    cursor: pointer;
-    transition: all var(--motion-fast) var(--ease-out-quart);
-    box-shadow: var(--shadow-1);
-}
-
-.btn-load-more:hover {
-    background-color: var(--bg-canvas);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-2);
-}
-
-.lm-fallback {
-    color: var(--text-2);
-    font-size: var(--font-size-sm);
-}
-
-/* Skeleton shimmer rows: hidden until the button enters .htmx-request */
-.lm-skeleton {
-    display: none;
-    width: 100%;
-    max-width: 480px;
-    grid-gap: var(--space-sm);
-    gap: var(--space-sm);
-}
-
-.btn-load-more.htmx-request {
-    pointer-events: none;
-    color: var(--text-3);
-}
-
-.btn-load-more.htmx-request .lm-label {
-    visibility: hidden;
-}
-
-.btn-load-more.htmx-request .lm-skeleton {
-    display: grid;
-    position: absolute;
-    inset: 50% auto auto 50%;
-    transform: translate(-50%, -50%);
-    width: min(80%, 320px);
-}
-
-.lm-row {
-    height: 14px;
-    border-radius: var(--radius-sm);
-    background: linear-gradient(
-        90deg,
-        var(--border) 25%,
-        var(--bg-canvas) 50%,
-        var(--border) 75%
-    );
-    background-size: 200% 100%;
-    animation: lm-shimmer 1.4s ease-in-out infinite;
-}
-
-@keyframes lm-shimmer {
-    from {
-        background-position: 200% 0;
-    }
-
-    to {
-        background-position: -200% 0;
-    }
-}
-
 @media (prefers-reduced-motion: reduce) {
-    .lm-row {
-        animation: none;
-    }
-
-    .post-card:hover,
-    .btn-load-more:hover {
+    .post-card:hover {
         transform: none;
     }
 }

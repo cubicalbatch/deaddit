@@ -31,6 +31,7 @@ deaddit-worker = "deaddit.runtime.scheduler:main"
 [dependency-groups]
 dev = [
     "pytest>=8.4.0",
+    "pytest-xdist>=3.5.0",
     "ruff>=0.11.13",
     "pytest-cov>=5",
 ]
@@ -65,7 +66,12 @@ line-ending = "auto"
 known-first-party = ["deaddit"]
 
 [tool.pytest.ini_options]
-addopts = "-q --strict-markers"
+addopts = "-n auto -q --strict-markers"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::sqlalchemy.exc.LegacyAPIWarning",
+    "ignore:Flask-Caching.*:UserWarning",
+]
 markers = [
     "llm_live: hits the real LLM endpoint; excluded from deterministic CI runs",
 ]
