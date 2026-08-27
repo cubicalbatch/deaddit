@@ -1,8 +1,8 @@
 """Agent wake scheduling for the dedicated worker process.
 
-Polls the ``agent`` table for due agents and launches
-:func:`deaddit.agents.loop.run_once` under global-concurrency and
-per-agent daily-request budgets. Also performs boot recovery: stale
+Polls the ``agent`` table for due agents, dispatching by primary-key agent id,
+and launches persona-bearing :func:`deaddit.agents.loop.run_once` runs under
+global-concurrency and per-agent daily-request budgets. Also performs boot recovery:
 ``running`` runs are marked interrupted and enabled agents with no
 scheduled wake are armed.
 
@@ -259,24 +259,37 @@ class WakeScheduler:
         """Run one scheduled visit; release the slot afterwards."""
         try:
             with self.app.app_context():
-                run_once(agent_id, trigger="schedule")
+                run = run_once(agent_id, trigger="schedule")
+                logger.info(
+                    "Agent %s run %s finished as persona '%s' (%s)",
+                    agent_id,
+                    run.id,
+                    run.persona_username,
+                    run.status,
+                )
+        except ValueError as exc:
+            logger.info("Scheduled wake for agent %s rejected: %s", agent_id, exc)
+            self._backoff_agent(agent_id)
         except Exception:
             logger.exception("Scheduled wake for agent %s failed", agent_id)
-            try:
-                with self.app.app_context():
-                    agent = db.session.get(Agent, agent_id)
-                    if agent is not None:
-                        agent.next_run_at = datetime.utcnow() + timedelta(
-                            seconds=FAILURE_BACKOFF_SECONDS
-                        )
-                        db.session.commit()
-            except Exception:
-                logger.exception(
-                    "Failed to back off agent %s after failed wake",
-                    agent_id,
-                )
-                db.session.rollback()
+            self._backoff_agent(agent_id)
         finally:
             semaphore = self._semaphore
             if semaphore is not None:
                 semaphore.release()
+
+    def _backoff_agent(self, agent_id: int) -> None:
+        try:
+            with self.app.app_context():
+                agent = db.session.get(Agent, agent_id)
+                if agent is not None:
+                    agent.next_run_at = datetime.utcnow() + timedelta(
+                        seconds=FAILURE_BACKOFF_SECONDS
+                    )
+                    db.session.commit()
+        except Exception:
+            logger.exception(
+                "Failed to back off agent %s after failed wake",
+                agent_id,
+            )
+            db.session.rollback()
