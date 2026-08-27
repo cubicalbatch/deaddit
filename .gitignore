@@ -168,3 +168,6 @@ building/
 # SQLite databases (live data lives in instance/, never committed)
 *.db
 
+
+# Refactor working docs (kept locally, not version-controlled)
+refactor/
