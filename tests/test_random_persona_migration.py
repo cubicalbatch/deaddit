@@ -90,13 +90,17 @@ def _downgrade(runner, revision: str) -> None:
     assert result.exit_code == 0, result.output
 
 
-def _script_heads() -> list[str]:
+def _script_directory() -> ScriptDirectory:
     config = Config()
     config.set_main_option(
         "script_location",
         str(Path(deaddit.__file__).resolve().parent.parent / "migrations"),
     )
-    return ScriptDirectory.from_config(config).get_heads()
+    return ScriptDirectory.from_config(config)
+
+
+def _script_heads() -> list[str]:
+    return _script_directory().get_heads()
 
 
 def _seed_pre_feature_rows(db_path) -> None:
@@ -631,4 +635,14 @@ def test_backfill_history_uses_user_key_and_extractive_fallback(
 
 
 def test_random_persona_revision_is_single_head():
-    assert _script_heads() == [_REVISION]
+    """``_REVISION`` sits in the ancestry of the sole head.
+
+    Later migrations (e.g. the 2.1 ``generated_website`` table) chain past
+    this revision rather than branch from it, so this asserts ancestry
+    membership instead of exact head equality - see the same pattern in
+    test_d4_migration.py's ``_d4_in_chain``.
+    """
+    heads = _script_heads()
+    assert len(heads) == 1, f"branched alembic heads: {heads}"
+    ancestry = {rev.revision for rev in _script_directory().walk_revisions()}
+    assert _REVISION in ancestry, f"{_REVISION} not in ancestry of sole head {heads}"

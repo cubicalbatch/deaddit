@@ -1002,3 +1002,85 @@ class PostImage(db.Model):
 Post.image = db.relationship(
     "PostImage", backref="post", uselist=False, cascade="all, delete-orphan"
 )
+
+
+class GeneratedWebsite(db.Model):
+    """The stored HTML file and private generation provenance for a website post.
+
+    One row per link post produced by the ``create_website`` agent tool (see
+    ``aidocs/CREATE_WEBSITE_TOOL_PLAN.md``, "Data model and migration").
+    ``public_path`` is the normalized, user-facing ``hostname/page-name.html``
+    served under ``/out/``; ``storage_path`` is the opaque ``pages/<uuid>.html``
+    location on disk, never derived from request input. Every field besides
+    ``hostname``, ``page_name``, and the derived public URL is private
+    generation provenance - see :meth:`to_public_dict`, which is the only
+    sanctioned public/API-facing view of this model.
+    """
+
+    __tablename__ = "generated_website"
+
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(
+        db.Integer,
+        db.ForeignKey("post.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    public_path = db.Column(db.String(400), nullable=False, unique=True, index=True)
+    storage_path = db.Column(db.String(300), nullable=False, unique=True)
+    hostname = db.Column(db.String(253), nullable=False)
+    page_name = db.Column(db.String(160), nullable=False)
+    source_description = db.Column(db.Text, nullable=False)
+    byte_size = db.Column(db.Integer, nullable=False)
+    sha256 = db.Column(db.String(64), nullable=False)
+    agent_id = db.Column(
+        db.Integer,
+        db.ForeignKey("agent.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    creator_username_snapshot = db.Column(db.String(50), nullable=False)
+    agent_run_id = db.Column(
+        db.Integer,
+        db.ForeignKey("agent_run.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Effective endpoint URL only - never a key or authorization value. Keep
+    # it that way; see AGENTS.md "Secrets" and the spec's explicit invariant.
+    api_url_snapshot = db.Column(db.String(255), nullable=False)
+    model_snapshot = db.Column(db.String(120), nullable=False)
+    request_id = db.Column(db.String(32), nullable=True)
+    prompt_tokens = db.Column(db.Integer, nullable=True)
+    completion_tokens = db.Column(db.Integer, nullable=True)
+    total_tokens = db.Column(db.Integer, nullable=True)
+    finish_reason = db.Column(db.String(40), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    agent = db.relationship(
+        "Agent", backref=db.backref("generated_websites", passive_deletes=True)
+    )
+    agent_run = db.relationship(
+        "AgentRun", backref=db.backref("generated_websites", passive_deletes=True)
+    )
+
+    def to_public_dict(self):
+        """The sanctioned public/API-facing view: no provenance, ever.
+
+        Only ``url``, ``hostname``, and ``page_name`` are safe to return from
+        a public route or API payload. Do not add ``source_description``,
+        ``api_url_snapshot``, ``model_snapshot``, ``request_id``, token
+        counts, ``finish_reason``, or ``storage_path`` here - those are
+        private provenance and leaking them here would defeat Phase 4's
+        redaction work.
+        """
+        return {
+            "url": f"/out/{self.public_path}",
+            "hostname": self.hostname,
+            "page_name": self.page_name,
+        }
+
+
+Post.website = db.relationship(
+    "GeneratedWebsite", backref="post", uselist=False, cascade="all, delete-orphan"
+)
