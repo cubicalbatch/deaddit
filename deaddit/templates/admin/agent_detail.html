@@ -135,6 +135,22 @@
                         </div>
                     </div>
 
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="edit-website-enabled-switch" role="switch">
+                        <label class="form-check-label small fw-bold" for="edit-website-enabled-switch">Website Posts Enabled (requires a non-lurker tier)</label>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-4">
+                            <label for="edit-website-policy-select" class="form-label small mb-1 fw-bold">Website Policy</label>
+                            <select id="edit-website-policy-select" class="form-select form-select-sm">
+                                <option value="optional" selected>optional</option>
+                                <option value="website_only">website_only</option>
+                            </select>
+                            <div class="form-text small">Website generation reuses the agent's own LLM provider/model and can consume 32K+ completion tokens per site.</div>
+                            <span id="edit-website-conflict-feedback" class="small text-danger"></span>
+                        </div>
+                    </div>
+
                     <div class="d-flex align-items-center gap-2 mt-3">
                         <button type="submit" id="save-agent-btn" class="btn btn-primary btn-sm">
                             <i class="bi bi-check-lg"></i> Save Changes
@@ -331,6 +347,12 @@
         document.getElementById("edit-image-model").value = imgCfg.model || "";
         document.getElementById("edit-image-policy-select").value = imgCfg.policy || "optional";
         syncImageProviderSelection();
+
+        const webCfg = (agent.config && agent.config.website_posts) || {};
+        document.getElementById("edit-website-enabled-switch").checked = Boolean(webCfg.enabled);
+        document.getElementById("edit-website-policy-select").value = webCfg.policy || "optional";
+        syncWebsiteControls();
+        syncPolicyConflict();
 
         document.getElementById("config-pre").textContent = JSON.stringify(agent.config, null, 2);
         document.getElementById("state-pre").textContent = JSON.stringify(agent.state, null, 2);
@@ -857,12 +879,52 @@
         refreshEditImageModelSuggestions(this.value);
     });
 
+
+    const websiteConflictMessage =
+        "image_only and website_only cannot be combined — pick one forced policy";
+
+    function syncWebsiteControls() {
+        const isLurker = document.getElementById("edit-tier-select").value === "lurker";
+        const websiteSwitch = document.getElementById("edit-website-enabled-switch");
+        const websitePolicy = document.getElementById("edit-website-policy-select");
+        websiteSwitch.disabled = isLurker;
+        websitePolicy.disabled = isLurker;
+        if (isLurker) websiteSwitch.checked = false;
+    }
+
+    function syncPolicyConflict() {
+        const conflict = document.getElementById("edit-image-enabled-switch").checked
+            && document.getElementById("edit-website-enabled-switch").checked
+            && document.getElementById("edit-image-policy-select").value === "image_only"
+            && document.getElementById("edit-website-policy-select").value === "website_only";
+        const feedback = document.getElementById("edit-website-conflict-feedback");
+        feedback.textContent = conflict ? websiteConflictMessage : "";
+        return !conflict;
+    }
+
+    document.getElementById("edit-tier-select").addEventListener("change", () => {
+        syncWebsiteControls();
+        syncPolicyConflict();
+    });
+    [
+        "edit-image-enabled-switch",
+        "edit-website-enabled-switch",
+        "edit-image-policy-select",
+        "edit-website-policy-select",
+    ].forEach((id) => {
+        document.getElementById(id).addEventListener("change", syncPolicyConflict);
+    });
     // Edit form submission
     document.getElementById("edit-agent-form").addEventListener("submit", async (event) => {
         event.preventDefault();
         if (!agent) return;
         const saveBtn = document.getElementById("save-agent-btn");
         const feedback = document.getElementById("edit-feedback");
+        if (!syncPolicyConflict()) {
+            feedback.textContent = websiteConflictMessage;
+            feedback.className = "small text-danger ms-2";
+            return;
+        }
         saveBtn.disabled = true;
         feedback.textContent = "Saving changes…";
         feedback.className = "small text-muted ms-2";
@@ -893,11 +955,19 @@
         if (imageEnabled) {
             const imgProviderId = document.getElementById("edit-image-provider-select").value;
             if (imgProviderId) imagePosts.provider_id = Number(imgProviderId);
+
             const imgModel = document.getElementById("edit-image-model").value.trim();
             if (imgModel) imagePosts.model = imgModel;
             imagePosts.policy = document.getElementById("edit-image-policy-select").value;
         }
         payload.image_posts = imagePosts;
+
+        const websiteEnabled = document.getElementById("edit-website-enabled-switch").checked;
+        const websitePosts = { enabled: websiteEnabled };
+        if (websiteEnabled) {
+            websitePosts.policy = document.getElementById("edit-website-policy-select").value;
+        }
+        payload.website_posts = websitePosts;
 
         try {
             const data = await api("/admin/api/agents/" + agent.id, {

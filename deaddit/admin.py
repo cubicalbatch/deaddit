@@ -2849,6 +2849,7 @@ _AGENTIC_TIERS = ("lurker", "regular", "power_user")
 # means disabled), so disabling an agent always pops the key rather than
 # storing some {"enabled": false, ...} variant.
 _IMAGE_POST_POLICIES = ("optional", "image_only")
+_WEBSITE_POST_POLICIES = ("optional", "website_only")
 _UNSET = object()
 
 
@@ -2985,6 +2986,57 @@ def _resolve_image_posts(raw, tier):
         "model": model,
         "policy": policy,
     }, None
+
+
+def _resolve_website_posts(raw, tier):
+    """Validate a requested ``website_posts`` payload into its stored shape.
+
+    ``raw`` is the value the caller supplied for the "website_posts" key, or
+    ``_UNSET`` if the caller did not touch it at all (existing config, if
+    any, is preserved by callers in that case). Returns
+    ``(value, error_response)``:
+
+    - ``(_UNSET, None)`` when the caller did not request a change.
+    - ``(None, None)`` when the caller asked to disable: callers must pop
+      the "website_posts" key from the stored config.
+    - ``(dict, None)`` with the fully-resolved config to store.
+    - ``(None, (response, 400))`` on any validation failure.
+    """
+    if raw is _UNSET:
+        return _UNSET, None
+    if not isinstance(raw, dict):
+        return None, (
+            jsonify({"success": False, "error": "website_posts must be an object"}),
+            400,
+        )
+
+    if not raw.get("enabled"):
+        return None, None
+
+    if tier == "lurker":
+        return None, (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "website posts cannot be enabled for a lurker agent",
+                }
+            ),
+            400,
+        )
+
+    policy = raw.get("policy") or "optional"
+    if policy not in _WEBSITE_POST_POLICIES:
+        return None, (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"website_posts.policy must be one of {list(_WEBSITE_POST_POLICIES)}",
+                }
+            ),
+            400,
+        )
+
+    return {"enabled": True, "policy": policy}, None
 
 
 def _agent_display_label(agent):
@@ -3351,6 +3403,37 @@ def api_create_agent():
     if image_posts not in (_UNSET, None):
         config["image_posts"] = image_posts
 
+    website_posts, website_posts_error = _resolve_website_posts(
+        payload.get("website_posts", _UNSET), tier
+    )
+    if website_posts_error:
+        return website_posts_error
+    if website_posts not in (_UNSET, None):
+        config["website_posts"] = website_posts
+
+    image_config = config.get("image_posts")
+    website_config = config.get("website_posts")
+    if (
+        isinstance(image_config, dict)
+        and isinstance(website_config, dict)
+        and image_config.get("enabled")
+        and image_config.get("policy") == "image_only"
+        and website_config.get("enabled")
+        and website_config.get("policy") == "website_only"
+    ):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": (
+                        "image_only and website_only policies cannot be combined; "
+                        "choose one forced post policy"
+                    ),
+                }
+            ),
+            400,
+        )
+
     # Owner decision 2: probe at cohort creation so a tool-less endpoint/model
     # is rejected before any agent exists.
     try:
@@ -3624,6 +3707,19 @@ def api_update_agent(agent_id):
     elif image_posts is not _UNSET:
         config["image_posts"] = image_posts
 
+    website_posts_raw = payload.get(
+        "website_posts", cfg_in.get("website_posts", _UNSET)
+    )
+    website_posts, website_posts_error = _resolve_website_posts(
+        website_posts_raw, agent.autonomy_tier
+    )
+    if website_posts_error:
+        return website_posts_error
+    if website_posts is None and website_posts_raw is not _UNSET:
+        config.pop("website_posts", None)
+    elif website_posts is not _UNSET:
+        config["website_posts"] = website_posts
+
     # A tier change to lurker must not leave an already-enabled image
     # configuration in place, even when this request never touches
     # "image_posts" itself.
@@ -3635,6 +3731,45 @@ def api_update_agent(agent_id):
                 {
                     "success": False,
                     "error": "image posts cannot be enabled for a lurker agent",
+                }
+            ),
+            400,
+        )
+
+    # A tier change to lurker must not leave an already-enabled website
+    # configuration in place, even when this request never touches
+    # "website_posts" itself.
+    if agent.autonomy_tier == "lurker" and (config.get("website_posts") or {}).get(
+        "enabled"
+    ):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "website posts cannot be enabled for a lurker agent",
+                }
+            ),
+            400,
+        )
+
+    image_config = config.get("image_posts")
+    website_config = config.get("website_posts")
+    if (
+        isinstance(image_config, dict)
+        and isinstance(website_config, dict)
+        and image_config.get("enabled")
+        and image_config.get("policy") == "image_only"
+        and website_config.get("enabled")
+        and website_config.get("policy") == "website_only"
+    ):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": (
+                        "image_only and website_only policies cannot be combined; "
+                        "choose one forced post policy"
+                    ),
                 }
             ),
             400,

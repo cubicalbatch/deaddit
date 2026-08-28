@@ -146,6 +146,22 @@
             </div>
 
             <div class="col-12">
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="website-enabled-check" role="switch">
+                    <label class="form-check-label fw-bold" for="website-enabled-check">Enable website posts (requires a non-lurker tier)</label>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <label for="website-policy-select" class="form-label">Website Policy</label>
+                <select id="website-policy-select" class="form-select">
+                    <option value="optional" selected>optional</option>
+                    <option value="website_only">website_only</option>
+                </select>
+                <div class="form-text">Website generation reuses the agent's own LLM provider/model and can consume 32K+ completion tokens per site.</div>
+                <span id="website-conflict-feedback" class="small text-danger"></span>
+            </div>
+
+            <div class="col-12">
                 <button type="submit" id="create-submit" class="btn btn-primary btn-sm">
                     <i class="bi bi-plus-lg"></i> Create Agent
                 </button>
@@ -433,6 +449,43 @@
         refreshImageModelSuggestions(this.value);
     });
 
+    const websiteConflictMessage =
+        "image_only and website_only cannot be combined — pick one forced policy";
+
+    function syncWebsiteControls() {
+        const isLurker = document.getElementById("tier-select").value === "lurker";
+        const websiteSwitch = document.getElementById("website-enabled-check");
+        const websitePolicy = document.getElementById("website-policy-select");
+        websiteSwitch.disabled = isLurker;
+        websitePolicy.disabled = isLurker;
+        if (isLurker) websiteSwitch.checked = false;
+    }
+
+    function syncPolicyConflict() {
+        const conflict = document.getElementById("image-enabled-check").checked
+            && document.getElementById("website-enabled-check").checked
+            && document.getElementById("image-policy-select").value === "image_only"
+            && document.getElementById("website-policy-select").value === "website_only";
+        const feedback = document.getElementById("website-conflict-feedback");
+        feedback.textContent = conflict ? websiteConflictMessage : "";
+        return !conflict;
+    }
+
+    document.getElementById("tier-select").addEventListener("change", () => {
+        syncWebsiteControls();
+        syncPolicyConflict();
+    });
+    [
+        "image-enabled-check",
+        "website-enabled-check",
+        "image-policy-select",
+        "website-policy-select",
+    ].forEach((id) => {
+        document.getElementById(id).addEventListener("change", syncPolicyConflict);
+    });
+    syncWebsiteControls();
+    syncPolicyConflict();
+
     function actionsCell(agent) {
         const cell = el("td");
         const toggleBtn = el("button", "btn btn-sm " + (agent.is_enabled ? "btn-outline-warning" : "btn-outline-success"),
@@ -528,6 +581,11 @@
             feedback.classList.add("text-danger");
             return;
         }
+        if (!syncPolicyConflict()) {
+            feedback.textContent = websiteConflictMessage;
+            feedback.classList.add("text-danger");
+            return;
+        }
         const isRandom = selectedValue === "__random__";
         submit.disabled = true;
         feedback.textContent = isRandom
@@ -565,6 +623,13 @@
             imagePosts.policy = document.getElementById("image-policy-select").value;
         }
         payload.image_posts = imagePosts;
+
+        const websiteEnabled = document.getElementById("website-enabled-check").checked;
+        const websitePosts = { enabled: websiteEnabled };
+        if (websiteEnabled) {
+            websitePosts.policy = document.getElementById("website-policy-select").value;
+        }
+        payload.website_posts = websitePosts;
         try {
             const data = await api("{{ url_for('admin.api_create_agent') }}", {method: "POST", body: JSON.stringify(payload)});
             const displayLabel = data.agent.display_label ||
