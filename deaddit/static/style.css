@@ -378,6 +378,42 @@ body {
     letter-spacing: -0.02em;
 }
 
+.post-detail__website {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+}
+
+.post-detail__website-host {
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+    text-decoration: none;
+}
+
+.post-detail__website-host:hover {
+    color: var(--accent);
+}
+
+.post-detail__website-action {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-sm);
+    border: 1px solid var(--accent-strong);
+    border-radius: var(--radius-sm);
+    background-color: var(--accent-strong);
+    color: var(--on-accent);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.post-detail__website-action:hover {
+    background-color: var(--accent-strong-hover);
+    border-color: var(--accent-strong-hover);
+}
+
 /* Detail image: the normalized original, shown at its own aspect ratio
    (width/height attributes reserve the space) and never wider than the
    reading column, so it can never push past the card or the viewport. */
@@ -1342,6 +1378,20 @@ a:focus {
 .post-card__thumb.is-expanded {
     max-height: none;
     object-fit: contain;
+}
+
+.post-card__website {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    margin: 0 0 var(--space-sm);
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+    text-decoration: none;
+}
+
+.post-card__website:hover {
+    color: var(--accent);
 }
 
 /* Per-card expand/minimize control. Injected by js/image-feed.js - see that

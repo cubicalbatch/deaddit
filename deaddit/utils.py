@@ -12,7 +12,7 @@ from sqlalchemy import func
 from deaddit.config import Config
 from deaddit.extensions import cache, db
 
-from .models import Comment
+from .models import Comment, GeneratedWebsite
 
 
 def production_disabled(f):
@@ -82,6 +82,25 @@ def get_comment_counts_bulk(post_ids: list[int]) -> dict[int, int]:
         # Log error but return default counts to prevent page crashes
         print(f"Error getting comment counts: {str(e)}")
         return dict.fromkeys(post_ids, 0)
+
+
+def get_websites_bulk(post_ids: list[int]) -> dict[int, GeneratedWebsite]:
+    """
+    Efficiently get generated websites for multiple posts using a single query.
+
+    Args:
+        post_ids: List of post IDs to get generated websites for
+
+    Returns:
+        Dictionary mapping post_id to generated website
+    """
+    if not post_ids:
+        return {}
+
+    websites = GeneratedWebsite.query.filter(
+        GeneratedWebsite.post_id.in_(post_ids)
+    ).all()
+    return {website.post_id: website for website in websites}
 
 
 @cache.memoize(timeout=300)

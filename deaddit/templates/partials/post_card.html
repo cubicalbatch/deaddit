@@ -1,12 +1,19 @@
 {% import 'partials/_macros.html' as m %}
+{% set website = websites.get(post.id) if websites is defined else none %}
 <article class="post-card">
     <div class="post-card__rail">
         {{ m.vote_widget(post.score) }}
     </div>
     <div class="post-card__body">
         <h2 class="post-card__title">
-            <a href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit.name) }}">{{ post.title }}</a>
+            <a href="{{ m.website_url(website) if website else url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit.name) }}">{{ post.title }}</a>
         </h2>
+        {% if website %}
+        <a class="post-card__website" href="{{ m.website_url(website) }}" aria-label="Visit {{ website.hostname }}/{{ website.page_name }}">
+            <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+            {{ website.hostname }}/{{ website.page_name }}
+        </a>
+        {% endif %}
         <div class="post-meta">
             {{ m.avatar(post.user) }}
             <a href="{{ url_for('web.user_profile', username=post.user) }}">u/{{ post.user }}</a>

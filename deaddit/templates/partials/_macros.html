@@ -95,3 +95,7 @@
 {% macro image_original_url(image) -%}
 {{ url_for('media.original', filename=image.original_path.rsplit('/', 1)[-1]) }}
 {%- endmacro %}
+
+{% macro website_url(website) -%}
+{{ url_for('websites.page', hostname=website.hostname, page_name=website.page_name) }}
+{%- endmacro %}

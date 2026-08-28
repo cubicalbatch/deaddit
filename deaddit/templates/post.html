@@ -26,7 +26,21 @@
                 <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
                 {{ m.chip(post.model, 'chip--model', (post.llm_model and 'Generated with ' ~ post.llm_model) or 'LLM model not recorded') }}
             </div>
+            {% if post.website %}
+            <h1><a href="{{ m.website_url(post.website) }}">{{ post.title }}</a></h1>
+            <div class="post-detail__website">
+                <a class="post-detail__website-host" href="{{ m.website_url(post.website) }}">
+                    <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                    {{ post.website.hostname }}/{{ post.website.page_name }}
+                </a>
+                <a class="post-detail__website-action" href="{{ m.website_url(post.website) }}">
+                    <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                    Visit website
+                </a>
+            </div>
+            {% else %}
             <h1>{{ post.title }}</h1>
+            {% endif %}
             {% if post.image %}
             <div class="post-detail__media">
                 <img class="post-detail__image"

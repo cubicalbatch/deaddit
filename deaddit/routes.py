@@ -3,7 +3,7 @@ from collections import namedtuple
 
 from flask import Blueprint, render_template, request
 from sqlalchemy import distinct, func, or_
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from deaddit.dynamics import degeneracy
 from deaddit.dynamics.ranking import (
@@ -22,6 +22,7 @@ from .models import Comment, Post, Subdeaddit, User
 from .utils import (
     format_content_html,
     get_comment_counts_bulk,
+    get_websites_bulk,
     process_post_title,
 )
 
@@ -74,7 +75,8 @@ def index():
     total_posts = query.count()
 
     posts = (
-        query.order_by(*degeneracy.with_repetition_demotion(post_order_by(sort)))
+        query.options(selectinload(Post.image))
+        .order_by(*degeneracy.with_repetition_demotion(post_order_by(sort)))
         .offset((page - 1) * posts_per_page)
         .limit(posts_per_page)
         .all()
@@ -115,14 +117,16 @@ def index():
     for post in posts:
         post.title = process_post_title(post.title)
 
-    # Get comment counts efficiently
+    # Get comment counts and generated websites efficiently
     post_ids = [post.id for post in posts]
     comment_counts = get_comment_counts_bulk(post_ids)
+    websites = get_websites_bulk(post_ids)
 
     return render_template(
         "index.html",
         posts=posts,
         comment_counts=comment_counts,
+        websites=websites,
         page=page,
         has_more=has_more,
         title="Deaddit - The Reddit clone with AI users",
@@ -152,7 +156,8 @@ def subdeaddit(subdeaddit_name):
     total_posts = query.count()
 
     paginated_posts = (
-        query.order_by(*degeneracy.with_repetition_demotion(post_order_by(sort)))
+        query.options(selectinload(Post.image))
+        .order_by(*degeneracy.with_repetition_demotion(post_order_by(sort)))
         .offset((page - 1) * posts_per_page)
         .limit(posts_per_page)
         .all()
@@ -164,9 +169,10 @@ def subdeaddit(subdeaddit_name):
     for post in paginated_posts:
         post.title = process_post_title(post.title)
 
-    # Get comment counts efficiently
+    # Get comment counts and generated websites efficiently
     post_ids = [post.id for post in paginated_posts]
     comment_counts = get_comment_counts_bulk(post_ids)
+    websites = get_websites_bulk(post_ids)
     sub_comment_count = (
         db.session.query(func.count(Comment.id))
         .join(Post, Comment.post_id == Post.id)
@@ -178,6 +184,7 @@ def subdeaddit(subdeaddit_name):
         "subdeaddit.html",
         posts=paginated_posts,
         comment_counts=comment_counts,
+        websites=websites,
         page=page,
         subdeaddit_name=subdeaddit_name,
         has_more=has_more,
@@ -417,7 +424,8 @@ def user_profile(username):
 
     if tab == "posts":
         posts = (
-            Post.query.filter_by(user=username, removed=False)
+            Post.query.options(selectinload(Post.image))
+            .filter_by(user=username, removed=False)
             .order_by(Post.created_at.desc(), Post.id.desc())
             .offset(offset)
             .limit(per_page)
@@ -425,8 +433,10 @@ def user_profile(username):
         )
         for post in posts:
             post.title = process_post_title(post.title)
+        post_ids = [post.id for post in posts]
         context["posts"] = posts
-        context["comment_counts"] = get_comment_counts_bulk([post.id for post in posts])
+        context["comment_counts"] = get_comment_counts_bulk(post_ids)
+        context["websites"] = get_websites_bulk(post_ids)
         total = visible_posts
     else:
         context["comments"] = (
@@ -519,6 +529,7 @@ def search():
 
     posts = []
     comment_counts = {}
+    websites = {}
     communities = []
     people = []
     total_posts = 0
@@ -529,15 +540,21 @@ def search():
         def like(col):
             return col.contains(q, autoescape=True)
 
-        posts_query = Post.query.filter(
-            Post.removed.is_(False),
-            or_(like(Post.title), like(Post.content)),
-        ).order_by(Post.created_at.desc(), Post.id.desc())
+        posts_query = (
+            Post.query.options(selectinload(Post.image))
+            .filter(
+                Post.removed.is_(False),
+                or_(like(Post.title), like(Post.content)),
+            )
+            .order_by(Post.created_at.desc(), Post.id.desc())
+        )
         total_posts = posts_query.count()
         posts = posts_query.offset(offset).limit(posts_per_page).all()
         for post in posts:
             post.title = process_post_title(post.title)
-        comment_counts = get_comment_counts_bulk([post.id for post in posts])
+        post_ids = [post.id for post in posts]
+        comment_counts = get_comment_counts_bulk(post_ids)
+        websites = get_websites_bulk(post_ids)
 
         sub_pc = func.count(Post.id)
         communities_rows = (
@@ -579,6 +596,7 @@ def search():
         q=q,
         posts=posts,
         comment_counts=comment_counts,
+        websites=websites,
         communities=communities,
         people=people,
         total_posts=total_posts,
