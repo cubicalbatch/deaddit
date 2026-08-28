@@ -2315,6 +2315,8 @@ def api_create_image_provider():
         api_key=api_key,
         credential_env=credential_env,
         is_enabled=is_enabled,
+        is_default=ImageProvider.query.count() == 0
+        or bool(payload.get("is_default", False)),
     )
 
     if default_model:
@@ -2335,6 +2337,8 @@ def api_create_image_provider():
             )
         provider.default_model = default_model
 
+    if provider.is_default:
+        ImageProvider.query.update({"is_default": False})
     db.session.add(provider)
     db.session.commit()
     return jsonify(
@@ -2525,6 +2529,24 @@ def api_update_image_provider(provider_id):
                 )
             provider.default_model = model_id
 
+    if "is_default" in payload:
+        new_default = bool(payload.get("is_default"))
+        if new_default:
+            for other in ImageProvider.query.all():
+                other.is_default = other.id == provider.id
+        elif ImageProvider.query.count() == 1:
+            provider.is_default = True
+        else:
+            provider.is_default = False
+            if not ImageProvider.query.filter(
+                ImageProvider.id != provider.id, ImageProvider.is_default.is_(True)
+            ).first():
+                other = ImageProvider.query.filter(
+                    ImageProvider.id != provider.id
+                ).first()
+                if other:
+                    other.is_default = True
+
     provider.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify({"success": True, "provider": _image_provider_payload(provider)})
@@ -2562,9 +2584,28 @@ def api_delete_image_provider(provider_id):
             400,
         )
 
+    was_default = provider.is_default
     db.session.delete(provider)
     db.session.commit()
+    if was_default:
+        remaining = ImageProvider.query.order_by(ImageProvider.id.asc()).first()
+        if remaining:
+            remaining.is_default = True
+            db.session.commit()
     return jsonify({"success": True, "message": "Image provider deleted successfully"})
+
+
+@admin_bp.route("/api/image-providers/<int:provider_id>/set-default", methods=["POST"])
+@production_disabled
+@admin_required
+def api_set_default_image_provider(provider_id):
+    """Set specified image provider as default."""
+    provider = db.session.get(ImageProvider, provider_id)
+    if not provider:
+        return jsonify({"success": False, "error": "Image provider not found"}), 404
+
+    ImageProvider.set_default(provider.id)
+    return jsonify({"success": True, "provider": _image_provider_payload(provider)})
 
 
 @admin_bp.route("/api/image-providers/<int:provider_id>/models", methods=["GET"])
@@ -2947,26 +2988,25 @@ def _resolve_image_posts(raw, tier):
         )
 
     provider_id = raw.get("provider_id")
-    try:
-        provider_id_int = int(provider_id)
-    except (TypeError, ValueError):
-        provider_id_int = None
-    if not provider_id_int:
-        return None, (
-            jsonify(
-                {
-                    "success": False,
-                    "error": "image_posts.provider_id is required to enable image posts",
-                }
-            ),
-            400,
+    use_default = provider_id is None or provider_id == ""
+    if use_default:
+        provider = ImageProvider.get_default()
+        provider_id_int = provider.id if provider else None
+    else:
+        try:
+            provider_id_int = int(provider_id)
+        except (TypeError, ValueError):
+            provider_id_int = None
+        provider = (
+            db.session.get(ImageProvider, provider_id_int) if provider_id_int else None
         )
-    provider = db.session.get(ImageProvider, provider_id_int)
     if provider is None:
-        return None, (
-            jsonify({"success": False, "error": "Image provider not found"}),
-            400,
+        error = (
+            "no default image provider is configured"
+            if use_default
+            else "Image provider not found"
         )
+        return None, (jsonify({"success": False, "error": error}), 400)
     if not provider.is_enabled:
         return None, (
             jsonify(
@@ -3039,7 +3079,7 @@ def _resolve_image_posts(raw, tier):
 
     return {
         "enabled": True,
-        "provider_id": provider.id,
+        "provider_id": None if use_default else provider.id,
         "model": model,
         "policy": policy,
     }, None

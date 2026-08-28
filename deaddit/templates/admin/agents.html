@@ -277,8 +277,15 @@
         try {
             const data = await api("{{ url_for('admin.api_persona_candidates') }}");
             select.innerHTML = "";
+            const randomOption = el("option", "", "Random — choose an unmanaged persona each run");
+            randomOption.value = "__random__";
+            randomOption.selected = true;
+            select.appendChild(randomOption);
             if (!data.candidates.length) {
-                select.appendChild(el("option", "", "No candidate personas")).value = "";
+                const noCandidatesOption = el("option", "", "No candidate personas");
+                noCandidatesOption.value = "";
+                noCandidatesOption.disabled = true;
+                select.appendChild(noCandidatesOption);
             } else {
                 select.appendChild(el("option", "", "Choose a persona…")).value = "";
                 data.candidates.forEach((candidate) => {
@@ -289,9 +296,6 @@
                     select.appendChild(el("option", "", label)).value = candidate.username;
                 });
             }
-            const randomOption = el("option", "", "Random — choose an unmanaged persona each run");
-            randomOption.value = "__random__";
-            select.appendChild(randomOption);
             updateBackfillLabel();
         } catch (err) {
             select.innerHTML = "";
@@ -401,7 +405,18 @@
             const data = await api("/admin/api/image-providers");
             imageProvidersList = data.providers || [];
             select.innerHTML = "";
-            select.appendChild(el("option", "", "(none)")).value = "";
+            const defaultProvider = imageProvidersList.find(p => p.is_default)
+                || imageProvidersList[0];
+            const defaultLabel = defaultProvider
+                ? "Default (" + defaultProvider.name + ")"
+                : "Default (no provider configured)";
+            const defaultOption = el("option", "", defaultLabel);
+            defaultOption.value = "__default__";
+            defaultOption.selected = true;
+            select.appendChild(defaultOption);
+            const noneOption = el("option", "", "(none)");
+            noneOption.value = "";
+            select.appendChild(noneOption);
             imageProvidersList.forEach((p) => {
                 let label = p.name;
                 if (!p.is_enabled) label += " (disabled)";
@@ -410,11 +425,15 @@
                 opt.value = p.id;
                 select.appendChild(opt);
             });
-            updateImageModelHint(null);
+            updateImageModelHint(defaultProvider || null);
         } catch (err) {
             select.innerHTML = "<option>Error loading image providers</option>";
             console.error("Failed to load image providers:", err);
         }
+    }
+
+    function defaultImageProvider() {
+        return imageProvidersList.find(p => p.is_default) || imageProvidersList[0] || null;
     }
 
     function updateImageModelHint(provider) {
@@ -444,9 +463,11 @@
     document.getElementById("image-provider-select").addEventListener("change", function () {
         // Refresh suggestions and the default-model hint only - never
         // silently overwrite whatever the admin already typed as an override.
-        const provider = imageProvidersList.find(p => p.id === Number(this.value));
+        const provider = this.value === "__default__"
+            ? defaultImageProvider()
+            : imageProvidersList.find(p => p.id === Number(this.value));
         updateImageModelHint(provider || null);
-        refreshImageModelSuggestions(this.value);
+        refreshImageModelSuggestions(provider ? provider.id : null);
     });
 
     const websiteConflictMessage =
@@ -617,7 +638,9 @@
         const imagePosts = { enabled: imageEnabled };
         if (imageEnabled) {
             const imgProviderId = document.getElementById("image-provider-select").value;
-            if (imgProviderId) imagePosts.provider_id = Number(imgProviderId);
+            if (imgProviderId && imgProviderId !== "__default__") {
+                imagePosts.provider_id = Number(imgProviderId);
+            }
             const imgModel = document.getElementById("image-model-input").value.trim();
             if (imgModel) imagePosts.model = imgModel;
             imagePosts.policy = document.getElementById("image-policy-select").value;

@@ -477,6 +477,9 @@ def create_website_post(
     the description or any credential) so Phase 5's reconciliation CLI can
     sweep it later; the failure is never surfaced to the caller/agent.
 
+    After commit and post hooks, a best-effort screenshot is attached; capture
+    failures leave the committed post website-only.
+
     Raises:
         ContentValidationError: same conditions as
             :func:`preflight_website_post`, re-checked at commit time.
@@ -536,6 +539,18 @@ def create_website_post(
         raise
 
     _run_post_hooks(post)
+    # Import lazily like _cleanup_stored_website to avoid import cycles; use a
+    # module attribute so tests can monkeypatch the attachment seam. The
+    # attachment is contractually non-raising, so capture failures cannot
+    # roll back the committed post.
+    from deaddit.websites import screenshot as website_screenshot
+
+    website_screenshot.attach_website_screenshot(
+        post_id=post.id,
+        storage_path=website.storage_path,
+        hostname=website.hostname,
+        page_name=website.page_name,
+    )
     return post
 
 

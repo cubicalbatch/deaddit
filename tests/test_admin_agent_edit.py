@@ -366,3 +366,25 @@ def test_admin_agents_page_renders_edit_action(seeded_db, admin_client, db_sessi
     assert "Registered Agents" in html
     assert "Edit" in html
     assert "/admin/agents/__ID__" in html
+
+
+def test_admin_agents_page_defaults_to_random_persona(seeded_db, admin_client):
+    html = admin_client.get("/admin/agents").get_data(as_text=True)
+
+    random_option = 'const randomOption = el("option", "", "Random — choose an unmanaged persona each run");'
+    assert random_option in html
+    assert "randomOption.selected = true;" in html
+    assert "noCandidatesOption.disabled = true;" in html
+    assert 'const isRandom = selectedValue === "__random__";' in html
+    assert 'persona_mode: isRandom ? "random" : "fixed"' in html
+    assert "if (!isRandom) payload.username = selectedValue;" in html
+
+    random_position = html.index(random_option)
+    candidates_branch = html.index("if (!data.candidates.length)", random_position)
+    placeholder = html.index(
+        'select.appendChild(el("option", "", "Choose a persona…")).value = "";',
+        random_position,
+    )
+    assert random_position < candidates_branch
+    assert random_position < placeholder
+    assert html.index("updateBackfillLabel();", random_position) > random_position

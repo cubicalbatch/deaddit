@@ -182,10 +182,11 @@ def _create_image_post(ctx: ToolContext, params: CreateImagePostArgs) -> dict:
         return {"ok": False, "error": str(exc)}
 
     cfg = image_posts_config(ctx.agent)
+    provider_id = cfg.get("provider_id")
     provider = (
-        db.session.get(ImageProvider, cfg["provider_id"])
-        if cfg["provider_id"]
-        else None
+        db.session.get(ImageProvider, provider_id)
+        if provider_id
+        else ImageProvider.get_default()
     )
     if provider is None:
         return {

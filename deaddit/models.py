@@ -913,6 +913,7 @@ class ImageProvider(db.Model):
     credential_env = db.Column(db.String(100), nullable=False)
     default_model = db.Column(db.String(200))
     is_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    is_default = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -933,9 +934,35 @@ class ImageProvider(db.Model):
             "credential_env": self.credential_env,
             "default_model": self.default_model,
             "is_enabled": self.is_enabled,
+            "is_default": self.is_default,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+    @classmethod
+    def get_default(cls):
+        """Get the default provider, or the first provider if none marked default."""
+        provider = cls.query.filter_by(is_default=True).first()
+        if provider is None:
+            provider = cls.query.order_by(cls.id.asc()).first()
+            if provider is not None and not provider.is_default:
+                provider.is_default = True
+                db.session.commit()
+        return provider
+
+    @classmethod
+    def set_default(cls, provider_id: int):
+        """Mark provider_id as default and unmark all others."""
+        providers = cls.query.all()
+        target = None
+        for provider in providers:
+            if provider.id == provider_id:
+                provider.is_default = True
+                target = provider
+            else:
+                provider.is_default = False
+        db.session.commit()
+        return target
 
 
 class ImageModel(db.Model):

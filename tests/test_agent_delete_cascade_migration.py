@@ -12,7 +12,7 @@ from alembic.script import ScriptDirectory
 import deaddit
 from deaddit import create_app
 
-_REVISION = "2b7c9e4d1f06"
+_REVISION = "c5e7a9b1d3f6"
 _PRE_FEATURE_HEAD = "01fe7be10643"
 
 

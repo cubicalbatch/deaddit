@@ -26,7 +26,7 @@
                 </p>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0" id="providers-table">
-                        <thead class="table-light">
+                        <thead>
                             <tr>
                                 <th style="width: 130px;">Default</th>
                                 <th>Name</th>
@@ -167,8 +167,9 @@
                 </p>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0" id="image-providers-table">
-                        <thead class="table-light">
+                        <thead>
                             <tr>
+                                <th style="width: 130px;">Default</th>
                                 <th style="width: 90px;">Enabled</th>
                                 <th>Name</th>
                                 <th>Type</th>
@@ -180,7 +181,7 @@
                         </thead>
                         <tbody id="image-providers-tbody">
                             <tr>
-                                <td colspan="7" class="text-center text-muted py-3">
+                                <td colspan="8" class="text-center text-muted py-3">
                                     <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
                                     Loading image providers...
                                 </td>
@@ -560,7 +561,7 @@
                 const count = p.model_count || 0;
                 tdModels.innerHTML = `
                     <div class="d-flex align-items-center gap-1">
-                        <span class="badge bg-light text-dark border">${count} models</span>
+                        <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">${count} models</span>
                         <button type="button" class="btn btn-sm btn-outline-primary py-0 px-1 refresh-models-row-btn" data-id="${p.id}" title="Refresh model list from endpoint">
                             <i class="bi bi-arrow-clockwise"></i>
                         </button>
@@ -933,21 +934,27 @@
             }
             emptyAlert.style.display = 'none';
 
-            imageProvidersData.forEach(p => {
-                const tr = document.createElement('tr');
+                imageProvidersData.forEach(p => {
+                    const tr = document.createElement('tr');
 
-                const tdEnabled = document.createElement('td');
-                tdEnabled.innerHTML = p.is_enabled
-                    ? '<span class="badge bg-success">Enabled</span>'
-                    : '<span class="badge bg-secondary">Disabled</span>';
-                tr.appendChild(tdEnabled);
+                    const tdDefault = document.createElement('td');
+                    tdDefault.innerHTML = p.is_default
+                        ? '<span class="badge bg-success"><i class="bi bi-star-fill me-1"></i>Default</span>'
+                        : `<button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2 set-image-default-btn" data-id="${p.id}" title="Set as default provider"><i class="bi bi-star me-1"></i>Make Default</button>`;
+                    tr.appendChild(tdDefault);
+
+                    const tdEnabled = document.createElement('td');
+                    tdEnabled.innerHTML = p.is_enabled
+                        ? '<span class="badge bg-success">Enabled</span>'
+                        : '<span class="badge bg-secondary">Disabled</span>';
+                    tr.appendChild(tdEnabled);
 
                 const tdName = document.createElement('td');
                 tdName.innerHTML = `<strong>${esc(p.name)}</strong>`;
                 tr.appendChild(tdName);
 
                 const tdType = document.createElement('td');
-                tdType.innerHTML = `<span class="badge bg-light text-dark border">${esc(p.provider_type)}</span>`;
+                tdType.innerHTML = `<span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">${esc(p.provider_type)}</span>`;
                 tr.appendChild(tdType);
 
                 const tdCred = document.createElement('td');
@@ -970,7 +977,7 @@
                 tr.appendChild(tdModel);
 
                 const tdCount = document.createElement('td');
-                tdCount.innerHTML = `<span class="badge bg-light text-dark border">${p.cached_model_count || 0} cached</span>`;
+                tdCount.innerHTML = `<span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">${p.cached_model_count || 0} cached</span>`;
                 tr.appendChild(tdCount);
 
                 const tdActions = document.createElement('td');
@@ -993,11 +1000,31 @@
 
             wireImageProviderTableButtons();
         } catch (err) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-danger text-center py-3">Error loading image providers: ${esc(err.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" class="text-danger text-center py-3">Error loading image providers: ${esc(err.message)}</td></tr>`;
         }
     }
 
     function wireImageProviderTableButtons() {
+        document.querySelectorAll('.set-image-default-btn').forEach(btn => {
+            btn.addEventListener('click', async function () {
+                const id = this.getAttribute('data-id');
+                const done = busy(this, '');
+                try {
+                    const res = await postJson(`/admin/api/image-providers/${id}/set-default`, {});
+                    if (res.success) {
+                        showAlert('<i class="bi bi-check-circle me-1"></i> Default image provider updated', 'alert-success');
+                        await loadImageProviders();
+                    } else {
+                        showAlert('<i class="bi bi-x-circle me-1"></i> ' + (res.error || res.message), 'alert-danger');
+                    }
+                } catch (err) {
+                    showAlert('<i class="bi bi-x-circle me-1"></i> ' + err.message, 'alert-danger');
+                } finally {
+                    done();
+                }
+            });
+        });
+
         document.querySelectorAll('.test-image-provider-btn').forEach(btn => {
             btn.addEventListener('click', async function () {
                 const id = this.getAttribute('data-id');

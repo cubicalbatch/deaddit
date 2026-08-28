@@ -289,3 +289,32 @@ main {
     color: var(--text-1);
     border: 1px solid var(--border);
 }
+
+/* Table headers: harmonize standard Bootstrap tables with admin token typography */
+.table thead th {
+    color: var(--text-2);
+    font-size: var(--font-size-xs, 0.8125rem);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    border-bottom-color: var(--border);
+}
+
+/* Dark mode overrides for Bootstrap light utility classes to prevent glaring white surfaces */
+[data-theme="dark"] .table-light {
+    --bs-table-bg: var(--bg-surface);
+    --bs-table-color: var(--text-2);
+    --bs-table-border-color: var(--border);
+    background-color: var(--bg-surface);
+    color: var(--text-2);
+}
+
+[data-theme="dark"] .bg-light {
+    background-color: var(--bg-surface) !important;
+    color: var(--text-1) !important;
+}
+
+[data-theme="dark"] .text-dark {
+    color: var(--text-1) !important;
+}
+

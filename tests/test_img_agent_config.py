@@ -158,7 +158,16 @@ def test_image_posts_config_round_trip_and_validation(
     rejected_create(
         {"enabled": True, "provider_id": provider.id}, "lurker", autonomy_tier="lurker"
     )
-    rejected_create({"enabled": True}, "provider_id")
+    defaulted = admin_client.post(
+        "/admin/api/agents",
+        json={
+            "username": "bob",
+            "backfill_memory": False,
+            "image_posts": {"enabled": True},
+        },
+    )
+    assert defaulted.status_code == 201
+    assert defaulted.get_json()["agent"]["config"]["image_posts"]["provider_id"] is None
     rejected_create({"enabled": True, "provider_id": 999999}, "not found")
     rejected_create(
         {"enabled": True, "provider_id": provider.id, "policy": "always"}, "policy"

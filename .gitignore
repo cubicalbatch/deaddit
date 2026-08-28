@@ -171,3 +171,5 @@ building/
 
 # Refactor working docs (kept locally, not version-controlled)
 refactor/
+PERCENT_DONE.md
+.playwright-mcp/

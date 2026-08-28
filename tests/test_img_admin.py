@@ -52,6 +52,30 @@ def _provider(name="Fal", provider_type="fal", credential_env="FALAI_API_KEY", *
     return provider
 
 
+def test_image_provider_default_lifecycle_and_payload(admin_client, app, fake_fal):
+    with app.app_context():
+        first = _provider(name="First")
+        second = _provider(name="Second")
+
+        assert ImageProvider.get_default() is first
+        db.session.refresh(first)
+        assert first.is_default is True
+        assert second.is_default is False
+
+        selected = admin_client.post(f"{PROVIDERS}/{second.id}/set-default")
+        assert selected.status_code == 200
+        assert selected.get_json()["provider"]["is_default"] is True
+        db.session.refresh(first)
+        assert first.is_default is False
+
+        payload = admin_client.get(PROVIDERS).get_json()["providers"]
+        assert {row["is_default"] for row in payload} == {False, True}
+
+        deleted = admin_client.delete(f"{PROVIDERS}/{second.id}")
+        assert deleted.status_code == 200
+        assert first.is_default is True
+
+
 def test_provider_crud_round_trip_never_exposes_the_credential(
     admin_client, app, fake_fal
 ):
@@ -65,6 +89,7 @@ def test_provider_crud_round_trip_never_exposes_the_credential(
         assert provider["credential_env"] == "FALAI_API_KEY"
         assert provider["default_model"] is None
         assert provider["credential_set"] is True
+        assert provider["is_default"] is True
 
         # A second account on the same provider type can name its own variable.
         second = admin_client.post(
@@ -77,6 +102,7 @@ def test_provider_crud_round_trip_never_exposes_the_credential(
         )
         assert second.status_code == 201
         assert second.get_json()["provider"]["credential_env"] == "FALAI_API_KEY_2"
+        assert second.get_json()["provider"]["is_default"] is False
 
         # Setting a default model validates it against the provider first.
         fake_fal.enqueue_validate(ModelValidation(compatible=True))

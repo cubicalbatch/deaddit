@@ -158,6 +158,26 @@ def _files_exist(app, paths: _ImagePaths) -> bool:
     ).is_file()
 
 
+def _media_link(body: str, *, href: str, label: str) -> str:
+    marker = '<a class="post-card__media-link"'
+    start = body.index(marker)
+    opening_end = body.index(">", start)
+    opening = body[start:opening_end]
+    assert f'href="{href}"' in opening
+    assert f'aria-label="{label}"' in opening
+    end = body.index("</a>", opening_end)
+    return body[start:end]
+
+
+def _assert_media_link(
+    body: str, *, href: str, label: str, thumbnail_url: str, original_url: str
+) -> None:
+    media_link = _media_link(body, href=href, label=label)
+    assert 'class="post-card__thumb"' in media_link
+    assert f'src="{thumbnail_url}"' in media_link
+    assert f'data-original-src="{original_url}"' in media_link
+
+
 def test_media_routes_serve_only_files_owned_by_a_live_post(app, client, db_session):
     paths = _make_image_post(app, db_session)
     image = PostImage.query.one()
@@ -247,6 +267,13 @@ def test_public_json_and_html_show_images_without_leaking_private_metadata(
     # All four shared feed surfaces render through post_list/post_card.
     for url in ("/", "/d/testsub", "/user/alice", "/search?q=photo"):
         html = client.get(url).get_data(as_text=True)
+        _assert_media_link(
+            html,
+            href=f"/d/testsub/{paths.post_id}",
+            label="Open post",
+            thumbnail_url=f"/media/images/thumbnail/{thumbnail_name}",
+            original_url=f"/media/images/original/{original_name}",
+        )
         assert 'class="post-card__thumb"' in html, url
         assert f"/media/images/thumbnail/{thumbnail_name}" in html, url
         # Explicit dimensions are the layout-shift guard.

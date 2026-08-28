@@ -264,6 +264,30 @@ def test_image_post_succeeds_and_gating_is_enforced_independently_of_tool_offeri
     assert Post.query.count() == 2 and PostImage.query.count() == 1
 
 
+def test_image_post_null_provider_uses_current_default(app, db_session, fake_adapter):
+    provider = _make_provider(db_session, is_default=True)
+    agent = _make_agent(
+        db_session,
+        config={
+            "image_posts": {
+                "enabled": True,
+                "provider_id": None,
+                "policy": "optional",
+            }
+        },
+    )
+    fake_adapter.enqueue_generate(_generation())
+
+    result = execute(
+        "create_image_post",
+        IMAGE_ARGS,
+        _ctx(agent, _new_run(db_session, agent)),
+    )
+
+    assert result["ok"] is True
+    assert fake_adapter.generate_calls[0]["provider"] is provider
+
+
 def test_image_post_failures_leave_no_post_no_files_and_share_the_post_budget(
     app, db_session, fake_adapter, monkeypatch
 ):

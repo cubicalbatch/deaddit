@@ -35,11 +35,15 @@
                 URL for js/image-feed.js to swap in on expand. Nothing but
                 that script reads it, and its absence changes nothing here -
                 the thumbnail above is the complete no-JS presentation. #}
-            <img class="post-card__thumb"
-                 src="{{ m.image_thumb_url(post.image) }}"
-                 data-original-src="{{ m.image_original_url(post.image) }}"
-                 width="{{ post.image.width }}" height="{{ post.image.height }}"
-                 alt="{{ post.image.alt_text }}" loading="lazy" decoding="async">
+            <a class="post-card__media-link"
+               href="{{ m.website_url(website) if website else url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit.name) }}"
+               aria-label="{{ 'Open website ' ~ website.hostname ~ '/' ~ website.page_name if website else 'Open post' }}">
+                <img class="post-card__thumb"
+                     src="{{ m.image_thumb_url(post.image) }}"
+                     data-original-src="{{ m.image_original_url(post.image) }}"
+                     width="{{ post.image.width }}" height="{{ post.image.height }}"
+                     alt="{{ post.image.alt_text }}" loading="lazy" decoding="async">
+            </a>
         </div>
         {% endif %}
         {% if post.content %}

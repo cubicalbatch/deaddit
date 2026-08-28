@@ -821,7 +821,18 @@
             imageProvidersList = data.providers || [];
             const select = document.getElementById("edit-image-provider-select");
             select.innerHTML = "";
-            select.appendChild(el("option", "", "(none)")).value = "";
+            const defaultProvider = imageProvidersList.find(p => p.is_default)
+                || imageProvidersList[0];
+            const defaultLabel = defaultProvider
+                ? "Default (" + defaultProvider.name + ")"
+                : "Default (no provider configured)";
+            const defaultOption = el("option", "", defaultLabel);
+            defaultOption.value = "__default__";
+            defaultOption.selected = true;
+            select.appendChild(defaultOption);
+            const noneOption = el("option", "", "(none)");
+            noneOption.value = "";
+            select.appendChild(noneOption);
             imageProvidersList.forEach((p) => {
                 let label = p.name;
                 if (!p.is_enabled) label += " (disabled)";
@@ -836,14 +847,22 @@
         }
     }
 
+    function defaultImageProvider() {
+        return imageProvidersList.find(p => p.is_default) || imageProvidersList[0] || null;
+    }
+
     function syncImageProviderSelection() {
         if (!agent) return;
         const select = document.getElementById("edit-image-provider-select");
         if (!select.options.length) return;
         const imgCfg = (agent.config && agent.config.image_posts) || {};
-        const select_id = imgCfg.provider_id != null ? String(imgCfg.provider_id) : "";
+        const select_id = imgCfg.provider_id != null
+            ? String(imgCfg.provider_id)
+            : "__default__";
         select.value = select_id;
-        const provider = imageProvidersList.find(p => p.id === Number(select_id));
+        const provider = select_id === "__default__"
+            ? defaultImageProvider()
+            : imageProvidersList.find(p => p.id === Number(select_id));
         updateImageModelHint(provider || null);
     }
 
@@ -874,9 +893,11 @@
     document.getElementById("edit-image-provider-select").addEventListener("change", function () {
         // Refresh suggestions and the default-model hint only - never
         // silently overwrite whatever the admin already typed as an override.
-        const provider = imageProvidersList.find(p => p.id === Number(this.value));
+        const provider = this.value === "__default__"
+            ? defaultImageProvider()
+            : imageProvidersList.find(p => p.id === Number(this.value));
         updateImageModelHint(provider || null);
-        refreshEditImageModelSuggestions(this.value);
+        refreshEditImageModelSuggestions(provider ? provider.id : null);
     });
 
 
@@ -954,7 +975,9 @@
         const imagePosts = { enabled: imageEnabled };
         if (imageEnabled) {
             const imgProviderId = document.getElementById("edit-image-provider-select").value;
-            if (imgProviderId) imagePosts.provider_id = Number(imgProviderId);
+            if (imgProviderId && imgProviderId !== "__default__") {
+                imagePosts.provider_id = Number(imgProviderId);
+            }
 
             const imgModel = document.getElementById("edit-image-model").value.trim();
             if (imgModel) imagePosts.model = imgModel;

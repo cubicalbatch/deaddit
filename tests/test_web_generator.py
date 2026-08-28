@@ -75,6 +75,16 @@ def _generate(fake_llm, **overrides):
     return generate_website_html(**kwargs)
 
 
+def _assert_navigation_bar(result_html: str, source_html: str) -> None:
+    """The trusted bar is inserted once without otherwise rewriting output."""
+    marker = 'data-deaddit-navigation="true"'
+    body_open_end = source_html.index(">", source_html.index("<body")) + 1
+    assert result_html.count(marker) == 1
+    assert result_html.count('href="/"') == 1
+    assert result_html.startswith(source_html[:body_open_end])
+    assert result_html.endswith(source_html[body_open_end:])
+
+
 class TestRequestShape:
     def test_uses_exact_caller_endpoint_model_key(self, app, fake_llm):
         with app.app_context():
@@ -164,11 +174,21 @@ class TestSuccessPath:
             result = _generate(fake_llm)
 
         assert isinstance(result, WebsiteGenerationResult)
-        assert result.html == VALID_HTML
+        _assert_navigation_bar(result.html, VALID_HTML)
         assert result.finish_reason == "stop"
         assert result.api_url == API_URL
         assert result.model == MODEL
         assert result.request_id
+
+    def test_navigation_bar_handles_body_attributes(self, app, fake_llm):
+        html = VALID_HTML.replace(
+            "<body>", '<body class="night-mode" data-page="aurora">'
+        )
+        with app.app_context():
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            result = _generate(fake_llm)
+
+        _assert_navigation_bar(result.html, html)
 
 
 class TestFailureLeavesNoPublishableResult:
@@ -299,7 +319,7 @@ class TestAnchorHrefException:
             fake_llm.enqueue_content(html, finish_reason="stop")
             result = _generate(fake_llm)
 
-        assert result.html == html
+        _assert_navigation_bar(result.html, html)
 
     @pytest.mark.parametrize(
         "snippet",
@@ -376,7 +396,7 @@ class TestAnchorHrefException:
             fake_llm.enqueue_content(VALID_HTML, finish_reason="stop")
             result = _generate(fake_llm)
 
-        assert result.html == VALID_HTML
+        _assert_navigation_bar(result.html, VALID_HTML)
 
 
 class TestCarriedDefectsC1AndC2:
@@ -423,7 +443,7 @@ class TestCarriedDefectsC1AndC2:
             fake_llm.enqueue_content(html, finish_reason="stop")
             result = _generate(fake_llm)
 
-        assert result.html == html
+        _assert_navigation_bar(result.html, html)
 
     @pytest.mark.parametrize(
         "snippet",
@@ -469,7 +489,7 @@ class TestCarriedDefectsC1AndC2:
             fake_llm.enqueue_content(html, finish_reason="stop")
             result = _generate(fake_llm)
 
-        assert result.html == html
+        _assert_navigation_bar(result.html, html)
 
     def test_anchor_href_still_accepted_alongside_c1_c2_fixes(self, app, fake_llm):
         # The 1.T <a href> exception must survive C1/C2 intact: a plain
@@ -484,7 +504,7 @@ class TestCarriedDefectsC1AndC2:
             fake_llm.enqueue_content(html, finish_reason="stop")
             result = _generate(fake_llm)
 
-        assert result.html == html
+        _assert_navigation_bar(result.html, html)
 
     def test_area_href_still_rejected_alongside_c1_c2_fixes(self, app, fake_llm):
         # And the narrow scope of that exception must also survive: a
@@ -564,6 +584,9 @@ class TestConcurrentPathAllocationNeverRegenerates:
 
         stored = store_website(result.html, tmp_path)
         assert (tmp_path / stored.storage_path).is_file()
+        stored_html = (tmp_path / stored.storage_path).read_text(encoding="utf-8")
+        assert stored_html == result.html
+        _assert_navigation_bar(stored_html, VALID_HTML)
 
         # The retry re-ran path allocation and storage only - the
         # already-generated HTML was reused verbatim, and the LLM was never

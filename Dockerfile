@@ -1,6 +1,10 @@
 FROM python:3.13-slim
 
 WORKDIR /app
+# Headless renderer for website-post screenshots; see deaddit/websites/screenshot.py.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends chromium fonts-liberation fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install from the uv lockfile (single source of truth; requirements.txt deleted)
 COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /uvx /bin/
