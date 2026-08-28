@@ -173,6 +173,9 @@ _BANNED_TAGS = frozenset(
 )
 
 #: Attributes checked for a disallowed (non-inline) resource reference.
+#: ``href`` stays in this list because it still applies to non-anchor
+#: elements (e.g. a stray ``<area href>``); the anchor exception below is
+#: narrower than dropping ``href`` from this list entirely.
 _RESOURCE_ATTRS = ("src", "href", "poster", "data", "action", "formaction")
 
 #: URI prefixes that stay on the page or are otherwise not a network
@@ -221,6 +224,17 @@ class _WebsiteHTMLValidator(HTMLParser):
 
         for attr_name in _RESOURCE_ATTRS:
             if attr_name not in attr_map:
+                continue
+            if tag == "a" and attr_name == "href":
+                # Resolved spec interpretation (WEBSITE_TOOL_EXECUTION.md):
+                # an <a href> loads nothing - it only navigates - and the
+                # Phase 4 CSP sandbox grants neither allow-top-navigation
+                # nor allow-popups, so following one is already inert.
+                # Rejecting a whole 32K-token document over a plain nav
+                # link buys no security. This exception is deliberately
+                # narrow: every other resource attribute (including href
+                # on non-anchor elements such as <area>) is still checked
+                # below.
                 continue
             value = attr_map[attr_name].strip().lower()
             if not value or value.startswith(_ALLOWED_URI_PREFIXES):

@@ -21,7 +21,11 @@ from deaddit.websites.generator import (
     WebsiteGenerationTruncatedError,
     generate_website_html,
 )
-from deaddit.websites.storage import WebsiteGenerationSettings
+from deaddit.websites.storage import (
+    WebsiteGenerationSettings,
+    allocate_public_path,
+    store_website,
+)
 
 VALID_HTML = """<!doctype html>
 <html lang="en">
@@ -255,7 +259,7 @@ class TestFailureLeavesNoPublishableResult:
             "<form><input></form>",
             '<img src="https://example.com/pic.png" alt="">',
             '<video src="https://example.com/movie.mp4"></video>',
-            '<a href="https://example.com">offsite</a>',
+            '<area href="https://example.com" alt="offsite" shape="rect">',
         ],
     )
     def test_active_or_external_elements_are_rejected(self, app, fake_llm, snippet):
@@ -266,6 +270,113 @@ class TestFailureLeavesNoPublishableResult:
             fake_llm.enqueue_content(html, finish_reason="stop")
             with pytest.raises(WebsiteGenerationInvalidHTMLError):
                 _generate(fake_llm)
+
+
+class TestAnchorHrefException:
+    """Locks in the resolved spec interpretation (WEBSITE_TOOL_EXECUTION.md,
+    "Resolved spec interpretations"): <a href> accepts any value because it
+    only navigates - loading nothing - and the Phase 4 CSP sandbox grants
+    neither allow-top-navigation nor allow-popups, so following one is
+    already inert. Every other resource attribute, including href on a
+    non-anchor element, is unaffected by this narrow exception.
+    """
+
+    @pytest.mark.parametrize(
+        "snippet",
+        [
+            '<nav><a href="/about">About</a></nav>',
+            '<a href="https://nasa.gov">NASA</a>',
+            '<a href="//example.com/path">protocol-relative</a>',
+            '<a href="javascript:void(0)">no-op</a>',
+            '<a href="mailto:hello@example.com">email us</a>',
+        ],
+    )
+    def test_anchor_href_accepts_any_value(self, app, fake_llm, snippet):
+        with app.app_context():
+            html = VALID_HTML.replace(
+                "<h1>Aurora Map</h1>", f"<h1>Aurora Map</h1>{snippet}"
+            )
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            result = _generate(fake_llm)
+
+        assert result.html == html
+
+    @pytest.mark.parametrize(
+        "snippet",
+        [
+            # href on a non-anchor element is still checked: the ruling
+            # narrows only the <a> case.
+            '<area href="https://example.com" alt="offsite" shape="rect">',
+        ],
+    )
+    def test_non_anchor_href_still_rejected(self, app, fake_llm, snippet):
+        with app.app_context():
+            html = VALID_HTML.replace(
+                "<h1>Aurora Map</h1>", f"<h1>Aurora Map</h1>{snippet}"
+            )
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            with pytest.raises(WebsiteGenerationInvalidHTMLError):
+                _generate(fake_llm)
+
+    @pytest.mark.parametrize(
+        "snippet",
+        [
+            # An <a> with an *external* src-style attribute (not href) must
+            # still be rejected - the exception is only for href, so nobody
+            # can widen it by copying the anchor case onto other attributes.
+            '<a href="/about" data="https://example.com/x">about</a>',
+        ],
+    )
+    def test_anchor_non_href_resource_attrs_still_rejected(
+        self, app, fake_llm, snippet
+    ):
+        with app.app_context():
+            html = VALID_HTML.replace(
+                "<h1>Aurora Map</h1>", f"<h1>Aurora Map</h1>{snippet}"
+            )
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            with pytest.raises(WebsiteGenerationInvalidHTMLError):
+                _generate(fake_llm)
+
+    def test_external_stylesheet_still_rejected(self, app, fake_llm):
+        with app.app_context():
+            html = VALID_HTML.replace(
+                "<h1>Aurora Map</h1>",
+                '<h1>Aurora Map</h1><link rel="stylesheet" '
+                'href="https://cdn.example.com/site.css">',
+            )
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            with pytest.raises(WebsiteGenerationInvalidHTMLError):
+                _generate(fake_llm)
+
+    def test_external_image_src_still_rejected(self, app, fake_llm):
+        with app.app_context():
+            html = VALID_HTML.replace(
+                "<h1>Aurora Map</h1>",
+                '<h1>Aurora Map</h1><img src="https://example.com/pic.png" alt="">',
+            )
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            with pytest.raises(WebsiteGenerationInvalidHTMLError):
+                _generate(fake_llm)
+
+    def test_iframe_still_rejected(self, app, fake_llm):
+        with app.app_context():
+            html = VALID_HTML.replace(
+                "<h1>Aurora Map</h1>",
+                '<h1>Aurora Map</h1><iframe src="https://example.com"></iframe>',
+            )
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            with pytest.raises(WebsiteGenerationInvalidHTMLError):
+                _generate(fake_llm)
+
+    def test_data_uri_and_inline_svg_still_pass(self, app, fake_llm):
+        # VALID_HTML already contains a data: <img src> and an inline <svg>;
+        # this asserts the baseline fixture itself still passes unmodified.
+        with app.app_context():
+            fake_llm.enqueue_content(VALID_HTML, finish_reason="stop")
+            result = _generate(fake_llm)
+
+        assert result.html == VALID_HTML
 
 
 class TestSecretHandling:
@@ -292,3 +403,48 @@ class TestSecretHandling:
 
         for record in caplog.records:
             assert API_KEY not in record.getMessage()
+
+
+class TestConcurrentPathAllocationNeverRegenerates:
+    """Binds generator.py and storage.py together to lock in a spec
+    invariant that neither module enforces on its own: "rely on the unique
+    DB constraint for the race case and retry only path allocation/storage,
+    never the billed LLM generation" (CREATE_WEBSITE_TOOL_PLAN.md, "Storage
+    and URL design").
+
+    generate_website_html() and allocate_public_path()/store_website() are
+    structurally decoupled - storage.py never imports the LLM client - so a
+    losing public_path race can only ever trigger a second *storage*
+    attempt, never a second billed generation call. This test exercises one
+    real generation plus a simulated losing race end to end and asserts
+    fake_llm recorded exactly one request throughout.
+    """
+
+    def test_losing_race_retries_storage_only_not_generation(
+        self, app, fake_llm, tmp_path
+    ):
+        with app.app_context():
+            fake_llm.enqueue_content(VALID_HTML, finish_reason="stop")
+            result = _generate(fake_llm)
+
+        assert len(fake_llm.requests) == 1
+
+        # Simulate another writer having just claimed the pretty path
+        # between this agent's preflight check and its actual write - a
+        # losing race on the unique public_path constraint.
+        already_taken = {"www.fake-observatory.com/aurora-map.html"}
+        allocated = allocate_public_path(
+            "www.fake-observatory.com",
+            "aurora-map.html",
+            is_public_path_taken=already_taken.__contains__,
+        )
+        assert allocated.public_path != "www.fake-observatory.com/aurora-map.html"
+        assert allocated.public_path.startswith("www.fake-observatory.com/aurora-map-")
+
+        stored = store_website(result.html, tmp_path)
+        assert (tmp_path / stored.storage_path).is_file()
+
+        # The retry re-ran path allocation and storage only - the
+        # already-generated HTML was reused verbatim, and the LLM was never
+        # invoked a second time.
+        assert len(fake_llm.requests) == 1
