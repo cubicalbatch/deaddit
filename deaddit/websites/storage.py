@@ -4,11 +4,11 @@ Agent-supplied hostname and page-name hints are normalized into a safe,
 DNS-like ASCII hostname and a cosmetic page filename; neither is ever used
 to name a file on disk. Stored HTML is written to a scratch ``tmp/``
 directory, flushed, and atomically replaced into ``pages/`` under an opaque
-UUID name that is never derived from request input. Every stored path is
-re-resolved through a single traversal-proof function - which never follows
-a symlink out of the configured root - before any filesystem operation
-touches it, mirroring :mod:`deaddit.images.storage`'s ``resolve_media_path``
-shape.
+UUID name that is never derived from request input. Stored paths are
+re-resolved through a single traversal-proof function before normal filesystem
+operations touch them, mirroring :mod:`deaddit.images.storage`'s
+``resolve_media_path`` shape. Reconciliation removes orphan symlinks
+lexically, without following their targets.
 """
 
 from __future__ import annotations
@@ -503,7 +503,14 @@ def reconcile_websites(
 
     if apply:
         for relative in orphaned_files:
-            resolve_website_path(root, relative).unlink(missing_ok=True)
+            # The orphan scan deliberately includes symlinks.  Unlink those
+            # lexically, without resolving their targets, so an escaped link
+            # is removed safely rather than rejected by the traversal guard.
+            candidate = root / relative
+            if candidate.is_symlink():
+                candidate.unlink(missing_ok=True)
+            else:
+                resolve_website_path(root, relative).unlink(missing_ok=True)
 
     return ReconcileReport(
         orphaned_files=orphaned_files,
