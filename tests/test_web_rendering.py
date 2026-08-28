@@ -228,13 +228,25 @@ def test_website_without_body_and_text_posts_keep_existing_discussion_behavior(
         hostname="www.no-body.example",
         page_name="index.html",
     )
-    text_post_id = _make_text_post(db_session, title="Text-only post token")
+
+    for path in (
+        "/",
+        "/d/testsub",
+        "/user/alice?tab=posts",
+        "/search?q=No+body+website+token",
+    ):
+        response = client.get(path)
+        body = response.get_data(as_text=True)
+        _assert_listing(response, website, body)
+        assert "post-card__preview" not in body
 
     detail = client.get(website.discussion_url)
     detail_body = detail.get_data(as_text=True)
     assert detail.status_code == 200
     assert "No body website token" in detail_body
     assert "post-body" not in detail_body
+
+    text_post_id = _make_text_post(db_session, title="Text-only post token")
 
     for path in (
         "/",

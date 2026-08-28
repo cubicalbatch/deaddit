@@ -136,6 +136,10 @@ def test_public_and_admin_website_payloads_redact_provenance(
     assert public_detail.status_code == 200
     assert public_detail.get_json()["website"] == expected_website
 
+    public_text_detail = client.get(f"/api/post/{text_post.id}")
+    assert public_text_detail.status_code == 200
+    assert public_text_detail.get_json()["website"] is None
+
     admin_listing = admin_client.get("/admin/api/posts")
     assert admin_listing.status_code == 200
     admin_entries = {entry["id"]: entry for entry in admin_listing.get_json()["posts"]}
@@ -145,6 +149,10 @@ def test_public_and_admin_website_payloads_redact_provenance(
     admin_detail = admin_client.get(f"/admin/api/posts/{post_id}")
     assert admin_detail.status_code == 200
     assert admin_detail.get_json()["website"] == expected_website
+
+    admin_text_detail = admin_client.get(f"/admin/api/posts/{text_post.id}")
+    assert admin_text_detail.status_code == 200
+    assert admin_text_detail.get_json()["website"] is None
 
     storage_uuid = Path(storage_path).stem
     responses = [

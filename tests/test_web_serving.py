@@ -15,13 +15,19 @@ import pytest
 from deaddit import create_app
 from deaddit import db as _db
 from deaddit.models import GeneratedWebsite, Post, Subdeaddit, User
-from deaddit.websites.serving import (
-    CONTENT_SECURITY_POLICY,
-    PERMISSIONS_POLICY,
-    REFERRER_POLICY,
-    X_CONTENT_TYPE_OPTIONS,
-)
 from deaddit.websites.storage import store_website
+
+_EXPECTED_CONTENT_SECURITY_POLICY = (
+    "default-src 'none'; base-uri 'none'; connect-src 'none'; "
+    "form-action 'none'; frame-ancestors 'none'; img-src data:; "
+    "font-src data:; media-src data:; object-src 'none'; worker-src 'none'; "
+    "style-src 'unsafe-inline'; script-src 'unsafe-inline'; sandbox allow-scripts"
+)
+_EXPECTED_X_CONTENT_TYPE_OPTIONS = "nosniff"
+_EXPECTED_REFERRER_POLICY = "no-referrer"
+_EXPECTED_PERMISSIONS_POLICY = (
+    "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+)
 
 
 @dataclass(frozen=True)
@@ -105,7 +111,10 @@ def _make_website_post(
 
 
 def test_public_page_serves_exact_bytes_with_security_headers(app, client, db_session):
-    html = "<html><body>snowman: ☃</body></html>"
+    html = (
+        "<html><body>snowman: ☃"
+        "<script>document.body.dataset.ready = 'yes';</script></body></html>"
+    )
     paths = _make_website_post(app, db_session, html=html)
 
     response = client.get(f"/out/{paths.public_path}")
@@ -114,18 +123,26 @@ def test_public_page_serves_exact_bytes_with_security_headers(app, client, db_se
     assert response.data == html.encode("utf-8")
     assert response.headers["Content-Type"] == "text/html; charset=utf-8"
     assert response.headers["Cache-Control"] == "public, max-age=300"
-    assert response.headers["Content-Security-Policy"] == CONTENT_SECURITY_POLICY
-    assert response.headers["X-Content-Type-Options"] == X_CONTENT_TYPE_OPTIONS
-    assert response.headers["Referrer-Policy"] == REFERRER_POLICY
-    assert response.headers["Permissions-Policy"] == PERMISSIONS_POLICY
+    assert (
+        response.headers["Content-Security-Policy"] == _EXPECTED_CONTENT_SECURITY_POLICY
+    )
+    assert (
+        response.headers["X-Content-Type-Options"] == _EXPECTED_X_CONTENT_TYPE_OPTIONS
+    )
+    assert response.headers["Referrer-Policy"] == _EXPECTED_REFERRER_POLICY
+    assert response.headers["Permissions-Policy"] == _EXPECTED_PERMISSIONS_POLICY
 
     csp = response.headers["Content-Security-Policy"]
     assert "sandbox allow-scripts" in csp
     assert "allow-same-origin" not in csp
+    assert "connect-src 'none'" in csp
+    assert "form-action 'none'" in csp
+    assert "frame-ancestors 'none'" in csp
     for token in (
         "allow-forms",
         "allow-popups",
         "allow-top-navigation",
+        "allow-top-navigation-by-user-activation",
         "allow-downloads",
         "allow-storage-access-by-user-activation",
     ):
