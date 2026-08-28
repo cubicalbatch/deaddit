@@ -462,7 +462,10 @@ class Agent(db.Model):
         db.String(12), nullable=False, default="fixed", server_default="fixed"
     )
     user_username = db.Column(
-        db.String(50), db.ForeignKey("user.username"), unique=True, nullable=True
+        db.String(50),
+        db.ForeignKey("user.username", ondelete="CASCADE"),
+        unique=True,
+        nullable=True,
     )
     autonomy_tier = db.Column(
         db.String(20), nullable=False, default="regular"
@@ -475,7 +478,9 @@ class Agent(db.Model):
     next_run_at = db.Column(db.DateTime)
     consecutive_failures = db.Column(db.Integer, nullable=False, default=0)
 
-    runs = db.relationship("AgentRun", backref="agent", lazy="dynamic")
+    runs = db.relationship(
+        "AgentRun", backref="agent", lazy="dynamic", passive_deletes=True
+    )
 
     __table_args__ = (
         db.CheckConstraint(
@@ -493,10 +498,16 @@ class AgentRun(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     agent_id = db.Column(
-        db.Integer, db.ForeignKey("agent.id"), nullable=False, index=True
+        db.Integer,
+        db.ForeignKey("agent.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     persona_username = db.Column(
-        db.String(50), db.ForeignKey("user.username"), nullable=False, index=True
+        db.String(50),
+        db.ForeignKey("user.username", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     trigger = db.Column(
         db.String(20), nullable=False, default="manual"
@@ -511,8 +522,12 @@ class AgentRun(db.Model):
     token_usage = db.Column(db.JSON)  # {'prompt': n, 'completion': n, 'total': n}
     error_message = db.Column(db.Text)
 
-    turns = db.relationship("AgentTurn", backref="run", lazy="dynamic")
-    tool_calls = db.relationship("ToolCall", backref="run", lazy="dynamic")
+    turns = db.relationship(
+        "AgentTurn", backref="run", lazy="dynamic", passive_deletes=True
+    )
+    tool_calls = db.relationship(
+        "ToolCall", backref="run", lazy="dynamic", passive_deletes=True
+    )
 
     __table_args__ = (
         db.Index(
@@ -531,7 +546,10 @@ class AgentTurn(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     run_id = db.Column(
-        db.Integer, db.ForeignKey("agent_run.id"), nullable=False, index=True
+        db.Integer,
+        db.ForeignKey("agent_run.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     seq = db.Column(db.Integer, nullable=False)  # 0-based order within the run
     request_messages = db.Column(db.JSON, nullable=False)
@@ -546,9 +564,14 @@ class ToolCall(db.Model):
     __tablename__ = "tool_call"
 
     id = db.Column(db.Integer, primary_key=True)
-    turn_id = db.Column(db.Integer, db.ForeignKey("agent_turn.id"), nullable=True)
+    turn_id = db.Column(
+        db.Integer, db.ForeignKey("agent_turn.id", ondelete="CASCADE"), nullable=True
+    )
     run_id = db.Column(
-        db.Integer, db.ForeignKey("agent_run.id"), nullable=False, index=True
+        db.Integer,
+        db.ForeignKey("agent_run.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     name = db.Column(db.String(100), nullable=False)
     arguments = db.Column(db.JSON)
@@ -569,7 +592,9 @@ class AgentMemory(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_username = db.Column(
-        db.String(50), db.ForeignKey("user.username"), nullable=False
+        db.String(50),
+        db.ForeignKey("user.username", ondelete="CASCADE"),
+        nullable=False,
     )
     kind = db.Column(db.String(20), nullable=False, default="episode")
     content = db.Column(db.Text, nullable=False)

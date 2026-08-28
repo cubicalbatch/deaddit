@@ -68,6 +68,7 @@ from deaddit.services.content import (
 )
 from deaddit.settings import SecretNotPersistable
 from deaddit.utils import production_disabled
+from deaddit.websites import service as website_service
 
 logger = logging.getLogger(__name__)
 
@@ -530,6 +531,7 @@ def api_delete_user(username):
         posts_count = len(post_ids)
         comments_count = Comment.query.filter_by(user=username).count()
         media_paths = media_service.media_paths_for_posts(post_ids)
+        website_paths = website_service.website_paths_for_posts(post_ids)
 
         # Delete associated content (cascade should handle this, but being explicit)
         Comment.query.filter_by(user=username).delete()
@@ -537,6 +539,8 @@ def api_delete_user(username):
             # A bulk Query.delete() bypasses ORM cascades, so post_image rows
             # (no DB-level ON DELETE CASCADE on post_id) must be dropped here
             # explicitly or they would dangle once their post is gone.
+            # GeneratedWebsite rows use DB-level ON DELETE CASCADE; this
+            # snapshot preserves their files for post-commit cleanup.
             PostImage.query.filter(PostImage.post_id.in_(post_ids)).delete(
                 synchronize_session=False
             )
@@ -545,6 +549,7 @@ def api_delete_user(username):
         db.session.delete(user)
         db.session.commit()
         media_service.delete_media_files(current_app, media_paths)
+        website_service.delete_website_files(current_app, website_paths)
 
         return jsonify(
             {
@@ -576,6 +581,7 @@ def api_bulk_delete_users():
         total_posts = 0
         total_comments = 0
         media_paths = []
+        website_paths = []
 
         for username in usernames:
             user = User.query.get(username)
@@ -588,6 +594,7 @@ def api_bulk_delete_users():
                 ]
                 comments_count = Comment.query.filter_by(user=username).count()
                 media_paths.extend(media_service.media_paths_for_posts(post_ids))
+                website_paths.extend(website_service.website_paths_for_posts(post_ids))
 
                 Comment.query.filter_by(user=username).delete()
                 if post_ids:
@@ -605,6 +612,7 @@ def api_bulk_delete_users():
 
         db.session.commit()
         media_service.delete_media_files(current_app, media_paths)
+        website_service.delete_website_files(current_app, website_paths)
 
         return jsonify(
             {
@@ -722,6 +730,7 @@ def api_delete_subdeaddit(name):
             Comment.query.join(Post).filter(Post.subdeaddit_name == name).count()
         )
         media_paths = media_service.media_paths_for_posts(post_ids)
+        website_paths = website_service.website_paths_for_posts(post_ids)
 
         # Delete associated content
         # First get comment IDs to delete (can't use join().delete())
@@ -735,6 +744,8 @@ def api_delete_subdeaddit(name):
         if post_ids:
             # Bulk Query.delete() bypasses ORM cascades, so post_image rows
             # must be dropped explicitly before their post rows disappear.
+            # GeneratedWebsite rows rely on DB-level ON DELETE CASCADE; this
+            # snapshot preserves their files for post-commit cleanup.
             PostImage.query.filter(PostImage.post_id.in_(post_ids)).delete(
                 synchronize_session=False
             )
@@ -743,6 +754,7 @@ def api_delete_subdeaddit(name):
         db.session.delete(subdeaddit)
         db.session.commit()
         media_service.delete_media_files(current_app, media_paths)
+        website_service.delete_website_files(current_app, website_paths)
 
         return jsonify(
             {
@@ -774,6 +786,7 @@ def api_bulk_delete_subdeaddits():
         total_posts = 0
         total_comments = 0
         media_paths = []
+        website_paths = []
 
         for name in names:
             subdeaddit = Subdeaddit.query.get(name)
@@ -790,6 +803,7 @@ def api_bulk_delete_subdeaddits():
                     .count()
                 )
                 media_paths.extend(media_service.media_paths_for_posts(post_ids))
+                website_paths.extend(website_service.website_paths_for_posts(post_ids))
 
                 # First get comment IDs to delete (can't use join().delete())
                 comment_ids = [
@@ -816,6 +830,7 @@ def api_bulk_delete_subdeaddits():
 
         db.session.commit()
         media_service.delete_media_files(current_app, media_paths)
+        website_service.delete_website_files(current_app, website_paths)
 
         return jsonify(
             {
@@ -928,6 +943,7 @@ def api_delete_post(post_id):
     try:
         comments_count = Comment.query.filter_by(post_id=post_id).count()
         media_paths = media_service.media_paths_for_posts([post_id])
+        website_paths = website_service.website_paths_for_posts([post_id])
 
         # Delete associated comments
         Comment.query.filter_by(post_id=post_id).delete()
@@ -935,6 +951,7 @@ def api_delete_post(post_id):
         db.session.delete(post)
         db.session.commit()
         media_service.delete_media_files(current_app, media_paths)
+        website_service.delete_website_files(current_app, website_paths)
 
         return jsonify(
             {"success": True, "deleted": {"post": post_id, "comments": comments_count}}
@@ -958,6 +975,7 @@ def api_bulk_delete_posts():
         deleted_count = 0
         total_comments = 0
         media_paths = media_service.media_paths_for_posts(post_ids)
+        website_paths = website_service.website_paths_for_posts(post_ids)
 
         for post_id in post_ids:
             post = Post.query.get(post_id)
@@ -972,6 +990,7 @@ def api_bulk_delete_posts():
 
         db.session.commit()
         media_service.delete_media_files(current_app, media_paths)
+        website_service.delete_website_files(current_app, website_paths)
 
         return jsonify(
             {

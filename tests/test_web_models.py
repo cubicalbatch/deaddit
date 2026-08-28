@@ -129,10 +129,9 @@ def test_website_rows_are_unique_per_post_and_outlive_agent_and_run(app, db_sess
         db_session.commit()
     db_session.rollback()
 
-    # Deleting the agent run unlinks it but keeps the provenance snapshot.
-    # (Deleted first: AgentRun.agent_id is itself NOT NULL, so deleting the
-    # agent while a run still references it is a pre-existing, out-of-scope
-    # constraint unrelated to GeneratedWebsite - order around it here.)
+    # Deleting the agent run unlinks it but keeps the provenance snapshot.  Keep
+    # this first to verify the website's independent ON DELETE SET NULL behavior;
+    # Agent deletion below also cascades any remaining runtime rows.
     db_session.delete(run)
     db_session.commit()
     remaining = db_session.get(GeneratedWebsite, website.id)
