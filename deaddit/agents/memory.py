@@ -8,7 +8,12 @@ from datetime import datetime
 
 from deaddit import Config
 from deaddit.agents.prompts import build_system_prompt
-from deaddit.agents.registry import AutonomyTier, image_posts_config
+from deaddit.agents.registry import (
+    AutonomyTier,
+    image_posts_config,
+    offered_post_tool_names,
+    website_posts_config,
+)
 from deaddit.dynamics.inbox import unread_count
 from deaddit.extensions import db
 from deaddit.llm import ChatRequest, LLMClient, Sampling
@@ -22,6 +27,73 @@ KICKOFF_PROMPT = (
 )
 
 POST_INTENT_PROBABILITY = 0.30
+
+_WEBSITE_BRIEF_HINT = (
+    " If you use create_website, brief the site in website_description - "
+    "subject, tone, and a few concrete details, never mentioning "
+    "prompting or generation - and keep the post body to your own "
+    "reaction, separate from that brief."
+)
+
+
+def _post_instruction(offered: frozenset[str]) -> str | None:
+    """Kickoff wording for a forced post, naming only tools this agent was
+    actually offered per :func:`offered_post_tool_names`.
+
+    ``None`` means no post tool is offered at all - the invalid
+    ``image_only`` + ``website_only`` combination - so the caller must
+    fall back to a plain browsing kickoff rather than instructing a post
+    it cannot make.
+    """
+    if offered == frozenset({"create_website"}):
+        return (
+            "and create a website post using the create_website tool: "
+            "brief the site in website_description - subject, tone, and "
+            "a few concrete details, never mentioning prompting or "
+            "generation - and keep the post body to your own reaction, "
+            "separate from that brief."
+        )
+    if offered == frozenset({"create_image_post"}):
+        return (
+            "and create an image post using the create_image_post tool: "
+            "request a detailed, persona-consistent scene you plausibly "
+            "saw or photographed, present it as real, and give it a "
+            "specific, engaging title."
+        )
+    if "create_post" not in offered:
+        return None
+    base = (
+        "and create a rich, high-quality, multi-paragraph post using the "
+        "create_post tool"
+    )
+    extras = []
+    if "create_image_post" in offered:
+        extras.append(
+            "only when a visual is genuinely central to what you want to "
+            "share, the create_image_post tool"
+        )
+    if "create_website" in offered:
+        extras.append(
+            "only for the rare case where your persona would plausibly "
+            "share a link, the create_website tool"
+        )
+    if not extras:
+        return base + "."
+    instruction = f"{base} (or, {'; or, '.join(extras)})."
+    if "create_website" in offered:
+        instruction += _WEBSITE_BRIEF_HINT
+    return instruction
+
+
+def _starter_hint(offered: frozenset[str]) -> str | None:
+    """Browsing-kickoff nudge naming only a tool this agent was offered."""
+    if "create_post" in offered:
+        return "feel free to start a conversation with create_post"
+    if "create_image_post" in offered:
+        return "feel free to start a conversation with create_image_post"
+    if "create_website" in offered:
+        return "feel free to share something with create_website"
+    return None
 
 
 def generate_kickoff_prompt(
@@ -51,11 +123,12 @@ def generate_kickoff_prompt(
         else (random.random() < POST_INTENT_PROBABILITY)
     )
 
-    cfg = image_posts_config(agent)
-    image_only = cfg["enabled"] and cfg["policy"] == "image_only"
-    image_optional = cfg["enabled"] and not image_only
+    offered = offered_post_tool_names(
+        image_posts_config(agent), website_posts_config(agent)
+    )
+    post_instruction = _post_instruction(offered) if is_post_intent else None
 
-    if is_post_intent:
+    if post_instruction is not None:
         subscriptions = ((user.agent_state if user else None) or {}).get(
             "subscriptions"
         ) or []
@@ -64,25 +137,6 @@ def generate_kickoff_prompt(
             if subscriptions
             else " (such as CasualConversation, AskDeaddit, LifeProTips, quietthoughts, slowliving, or search existing communities)"
         )
-        if image_only:
-            post_instruction = (
-                "and create an image post using the create_image_post tool: "
-                "request a detailed, persona-consistent scene you plausibly "
-                "saw or photographed, present it as real, and give it a "
-                "specific, engaging title."
-            )
-        elif image_optional:
-            post_instruction = (
-                "and create a rich, high-quality, multi-paragraph post using "
-                "the create_post tool (or, only when a visual is genuinely "
-                "central to what you want to share, the create_image_post "
-                "tool)."
-            )
-        else:
-            post_instruction = (
-                "and create a rich, high-quality, multi-paragraph post using "
-                "the create_post tool."
-            )
         return (
             f"You're waking up feeling inspired to share something meaningful with the community today. "
             f"Think about an experience, project, observation, question, or story related to your persona and interests. "
@@ -90,18 +144,20 @@ def generate_kickoff_prompt(
             f"{post_instruction} "
             f"Once your post is published, call the finish tool to conclude your visit."
         )
-    else:
-        starter_hint = (
-            "feel free to start a conversation with create_image_post"
-            if image_only
-            else "feel free to start a conversation with create_post"
-        )
-        return (
-            "You're waking up. Browse your feed or search for topics of interest, "
-            "read discussions, vote on good contributions, and join the conversation with a thoughtful "
-            f"comment if something catches your eye. If you encounter an empty or quiet community, "
-            f"{starter_hint}. When you're done, call finish."
-        )
+
+    # No post intent this run, or (the invalid image_only + website_only
+    # combination) no post tool offered at all - either way, browse.
+    starter_hint = _starter_hint(offered)
+    hint_sentence = (
+        f"If you encounter an empty or quiet community, {starter_hint}. "
+        if starter_hint
+        else ""
+    )
+    return (
+        "You're waking up. Browse your feed or search for topics of interest, "
+        "read discussions, vote on good contributions, and join the conversation with a thoughtful "
+        f"comment if something catches your eye. {hint_sentence}When you're done, call finish."
+    )
 
 
 def build_initial_messages(

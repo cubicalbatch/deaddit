@@ -40,7 +40,7 @@ from deaddit.models import (
 
 DEFAULT_BODY = (
     "{persona_block}\n\n{tier_line}\n\n{rules_block}{image_guidance_section}"
-    "{subscriptions_section}{memories_section}"
+    "{website_guidance_section}{subscriptions_section}{memories_section}"
 )
 
 GOLDEN_PATH = "tests/goldens/llm5_agent_system_prompt.txt"
@@ -395,6 +395,236 @@ class TestImagePostGuidance:
         pinned_text = build_system_prompt(agent, user)
         assert pinned_text == render(DEFAULT_BODY, system_prompt_variables(agent, user))
         assert "create_image_post" in pinned_text
+
+
+# --- 3.3: website-post guidance --------------------------------------------
+
+
+def _agent_with_post_config(
+    db_session,
+    username,
+    *,
+    image_posts_config=None,
+    website_posts_config=None,
+):
+    user = User(username=username)
+    db_session.add(user)
+    db_session.flush()
+    config = {}
+    if image_posts_config is not None:
+        config["image_posts"] = image_posts_config
+    if website_posts_config is not None:
+        config["website_posts"] = website_posts_config
+    agent = Agent(user_username=username, autonomy_tier="regular", config=config)
+    db_session.add(agent)
+    db_session.commit()
+    return agent, user
+
+
+_IMG_OPTIONAL = {"enabled": True, "policy": "optional", "provider_id": 1, "model": None}
+_IMG_ONLY = {"enabled": True, "policy": "image_only", "provider_id": 1, "model": None}
+_WEB_OPTIONAL = {"enabled": True, "policy": "optional"}
+_WEB_ONLY = {"enabled": True, "policy": "website_only"}
+
+# The full 3x3 truth table: (label, image_cfg) x (label, website_cfg).
+# The (image_only, website_only) cell is the invalid combination that
+# fails closed to no post tool at all.
+_IMAGE_CASES = [
+    ("disabled", None),
+    ("optional", _IMG_OPTIONAL),
+    ("image_only", _IMG_ONLY),
+]
+_WEBSITE_CASES = [
+    ("disabled", None),
+    ("optional", _WEB_OPTIONAL),
+    ("website_only", _WEB_ONLY),
+]
+_FULL_MATRIX = [
+    (img_label, img_cfg, web_label, web_cfg)
+    for img_label, img_cfg in _IMAGE_CASES
+    for web_label, web_cfg in _WEBSITE_CASES
+]
+
+
+class TestPromptMatrixMatchesOfferedTools:
+    """Cross-checks every prompt against registry.offered_post_tool_names
+    for the same config, so this test stays honest if the truth table
+    changes: the image/website guidance this subphase owns must never
+    name create_image_post or create_website when the agent was not
+    offered it, for any cell of the 3x3 policy matrix (including the
+    invalid image_only + website_only cell, which offers neither).
+
+    ``create_post`` is deliberately excluded from this sweep: the shared
+    ``_QUALITY_RULES`` "Substantive Posts" bullet names it unconditionally
+    in every system prompt regardless of policy (deaddit/agents/prompts.py,
+    pre-existing base rules_block, not introduced by this subphase and out
+    of this subphase's scope to change) - see the 3.3 report."""
+
+    @pytest.mark.parametrize(
+        "image_label,image_cfg,website_label,website_cfg", _FULL_MATRIX
+    )
+    def test_prompt_never_names_an_unoffered_image_or_website_tool(
+        self,
+        app,
+        db_session,
+        image_label,
+        image_cfg,
+        website_label,
+        website_cfg,
+    ):
+        from deaddit.agents.registry import (
+            image_posts_config as get_image_cfg,
+        )
+        from deaddit.agents.registry import (
+            offered_post_tool_names,
+        )
+        from deaddit.agents.registry import (
+            website_posts_config as get_website_cfg,
+        )
+
+        username = f"matrix_{image_label}_{website_label}"
+        agent, user = _agent_with_post_config(
+            db_session,
+            username,
+            image_posts_config=image_cfg,
+            website_posts_config=website_cfg,
+        )
+        offered = offered_post_tool_names(get_image_cfg(agent), get_website_cfg(agent))
+        prompt = build_system_prompt(agent, user)
+        for tool_name in ("create_image_post", "create_website"):
+            if tool_name not in offered:
+                assert tool_name not in prompt, (
+                    f"image={image_label!r} website={website_label!r}: prompt "
+                    f"names {tool_name!r} but offered_post_tool_names only "
+                    f"gave {sorted(offered)!r}"
+                )
+
+
+class TestWebsitePostGuidance:
+    def test_disabled_agent_has_no_website_guidance_section(self, app, db_session):
+        agent, user = _agent_with_post_config(db_session, "no_websites")
+        variables = system_prompt_variables(agent, user)
+        assert variables["website_guidance_section"] == ""
+        assert "create_website" not in build_system_prompt(agent, user)
+
+    def test_optional_policy_offers_website_as_occasional_alternative(
+        self, app, db_session
+    ):
+        agent, user = _agent_with_post_config(
+            db_session, "optional_websites", website_posts_config=_WEB_OPTIONAL
+        )
+        prompt = build_system_prompt(agent, user)
+        assert "create_website" in prompt
+        assert "create_post" in prompt
+        # most posts should stay non-website; websites are the occasional case
+        assert "occasional" in prompt.lower()
+        assert "most" in prompt.lower()
+        # persona framing: describe a site plausibly found, not the making of it
+        assert "plausibly found" in prompt.lower()
+        assert "never mention" in prompt.lower()
+        # body-vs-brief separation, naming the actual build-instruction field
+        assert "website_description" in prompt
+        assert "separate from that brief" in prompt.lower()
+
+    def test_website_only_policy_is_conditional_not_mandatory(self, app, db_session):
+        agent, user = _agent_with_post_config(
+            db_session, "website_only_agent", website_posts_config=_WEB_ONLY
+        )
+        prompt = build_system_prompt(agent, user)
+        assert "create_website" in prompt
+        assert "create_image_post" not in prompt
+        # conditional framing ("if you post"), not "post a website every visit"
+        assert "if you decide" in prompt.lower()
+        assert "does not mean you must post every visit" in prompt.lower()
+        assert "website_description" in prompt
+        assert "separate from that brief" in prompt.lower()
+
+    def test_website_only_guidance_flows_through_versioned_template(
+        self, app, db_session
+    ):
+        """Same named-variable contract as the image feature: the pinned
+        render and the live assembly must agree byte-for-byte."""
+        agent, user = _agent_with_post_config(
+            db_session, "pinned_website_only", website_posts_config=_WEB_ONLY
+        )
+        create_template("agent.system_prompt.webtest", DEFAULT_BODY)
+        set_pin("agent", str(agent.id), "agent.system_prompt.webtest", 1)
+        from deaddit.models import Setting
+
+        db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
+        db_session.commit()
+        pinned_text = build_system_prompt(agent, user)
+        assert pinned_text == render(DEFAULT_BODY, system_prompt_variables(agent, user))
+        assert "create_website" in pinned_text
+
+    def test_invalid_image_only_and_website_only_offers_no_post_tool(
+        self, app, db_session
+    ):
+        from deaddit.agents.registry import image_posts_config as get_image_cfg
+        from deaddit.agents.registry import offered_post_tool_names
+        from deaddit.agents.registry import website_posts_config as get_website_cfg
+
+        agent, user = _agent_with_post_config(
+            db_session,
+            "invalid_combo",
+            image_posts_config=_IMG_ONLY,
+            website_posts_config=_WEB_ONLY,
+        )
+        assert (
+            offered_post_tool_names(get_image_cfg(agent), get_website_cfg(agent))
+            == frozenset()
+        )
+        variables = system_prompt_variables(agent, user)
+        assert variables["image_guidance_section"] == ""
+        assert variables["website_guidance_section"] == ""
+        prompt = build_system_prompt(agent, user)
+        assert "create_image_post" not in prompt
+        assert "create_website" not in prompt
+
+    def test_image_only_lock_squeezes_out_optional_website_guidance(
+        self, app, db_session
+    ):
+        """image_only is an exclusive lock: it excludes create_website even
+        though the website config alone is merely 'optional' - the prompt
+        layer must consume that from offered_post_tool_names rather than
+        re-deriving its own (and inevitably drifting) rule."""
+        from deaddit.agents.registry import image_posts_config as get_image_cfg
+        from deaddit.agents.registry import offered_post_tool_names
+        from deaddit.agents.registry import website_posts_config as get_website_cfg
+
+        agent, user = _agent_with_post_config(
+            db_session,
+            "image_only_website_optional",
+            image_posts_config=_IMG_ONLY,
+            website_posts_config=_WEB_OPTIONAL,
+        )
+        assert offered_post_tool_names(
+            get_image_cfg(agent), get_website_cfg(agent)
+        ) == frozenset({"create_image_post"})
+        prompt = build_system_prompt(agent, user)
+        assert "create_image_post" in prompt
+        assert "create_website" not in prompt
+        assert "create_post is not available to you" in prompt
+
+    def test_website_only_lock_squeezes_out_optional_image_guidance(
+        self, app, db_session
+    ):
+        from deaddit.agents.registry import image_posts_config as get_image_cfg
+        from deaddit.agents.registry import offered_post_tool_names
+        from deaddit.agents.registry import website_posts_config as get_website_cfg
+
+        agent, user = _agent_with_post_config(
+            db_session,
+            "website_only_image_optional",
+            image_posts_config=_IMG_OPTIONAL,
+            website_posts_config=_WEB_ONLY,
+        )
+        assert offered_post_tool_names(
+            get_image_cfg(agent), get_website_cfg(agent)
+        ) == frozenset({"create_website"})
+        prompt = build_system_prompt(agent, user)
+        assert "create_website" in prompt
+        assert "create_image_post" not in prompt
 
 
 # --- ChatRequest/ChatResult echo -------------------------------------------

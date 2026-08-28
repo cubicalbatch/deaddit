@@ -11,7 +11,12 @@ here; every such render writes an audit row. The flag defaults to
 byte-identical pre-LLM-5 assembly.
 """
 
-from deaddit.agents.registry import AutonomyTier, image_posts_config
+from deaddit.agents.registry import (
+    AutonomyTier,
+    image_posts_config,
+    offered_post_tool_names,
+    website_posts_config,
+)
 from deaddit.llm.prompts import render_pinned, versioning_enabled
 from deaddit.models import Agent, AgentMemory, User
 
@@ -100,6 +105,38 @@ _IMAGE_GUIDANCE_IMAGE_ONLY = (
     "does not need the multi-paragraph treatment required for create_post."
 )
 
+_WEBSITE_GUIDANCE_OPTIONAL = (
+    "\n\nWebsite posts: create_website is an occasional alternative to "
+    "create_post, for the rare case where your persona would plausibly "
+    "share a link to something they found - most of your posts should "
+    "still be plain text. When you do use it, use website_description to "
+    "brief the site: its subject, tone, and a few concrete details, "
+    "written as instructions for someone building the page, not as "
+    "something to discuss - describe a site your persona plausibly "
+    "found, and never mention prompting, generation, or how the page was "
+    "made. Keep the post body separate from that brief - the body is "
+    "your persona's own reaction to finding the link (why it caught "
+    "their eye, what they think of it), not a restatement of the site "
+    "brief. Give the post a specific, engaging title; body text is "
+    "optional and does not need the multi-paragraph treatment required "
+    "for create_post."
+)
+
+_WEBSITE_GUIDANCE_WEBSITE_ONLY = (
+    "\n\nWebsite posts: the text and image post tools are not available "
+    "to you, so if you decide (or are asked) to post, it must use "
+    "create_website. This does not mean you must post every visit, "
+    "or that every visit should become a website - it only constrains "
+    "which tool you would use if and when you do post. When you do post, "
+    "use website_description to brief the site: its subject, tone, and a "
+    "few concrete details, written as instructions for someone building "
+    "the page, not as something to discuss - describe a site your "
+    "persona plausibly found, and never mention prompting, generation, "
+    "or how the page was made. Keep the post body separate from that "
+    "brief - the body is your persona's own reaction to finding the "
+    "link, not a restatement of the site brief. Body text is optional."
+)
+
 
 def _persona_block(user: User) -> str:
     lines: list[str] = []
@@ -140,19 +177,49 @@ def _subscriptions_section(user: User) -> str:
 
 
 def _image_guidance_section(agent: Agent) -> str:
-    """Image-post rules for agents with image posting enabled, else "".
+    """Image-post rules for agents actually offered create_image_post, else "".
 
-    Empty for a disabled (or absent) ``image_posts`` config so this
-    section never changes the assembled prompt for image-disabled
-    agents (registry.image_posts_config normalizes both cases the same
-    way).
+    Derived from :func:`offered_post_tool_names` - the same filtered
+    truth table the registry uses to decide which tools the agent's
+    wire-format spec list actually contains - rather than from the raw
+    ``image_posts`` config alone. This matters because a ``website_only``
+    lock on the *other* namespace squeezes an "enabled: optional" image
+    config out of the offer entirely (see registry docstring); reading
+    only ``image_posts_config`` here would recommend a tool the agent was
+    never given. Empty for a disabled/absent config or a squeezed-out one
+    so this section never changes the prompt for such agents.
     """
-    cfg = image_posts_config(agent)
-    if not cfg["enabled"]:
+    image_cfg = image_posts_config(agent)
+    if not image_cfg["enabled"]:
         return ""
-    if cfg["policy"] == "image_only":
+    offered = offered_post_tool_names(image_cfg, website_posts_config(agent))
+    if "create_image_post" not in offered:
+        return ""
+    if offered == frozenset({"create_image_post"}):
         return _IMAGE_GUIDANCE_IMAGE_ONLY
     return _IMAGE_GUIDANCE_OPTIONAL
+
+
+def _website_guidance_section(agent: Agent) -> str:
+    """Website-post rules for agents actually offered create_website, else "".
+
+    Mirrors :func:`_image_guidance_section`: derived from
+    :func:`offered_post_tool_names` rather than the raw ``website_posts``
+    config, so a squeezed-out configuration (an ``image_only`` lock beats
+    an "enabled: optional" website config) or the invalid
+    ``image_only`` + ``website_only`` combination (which offers no post
+    tool at all) never produce guidance for a tool the agent was not
+    actually offered.
+    """
+    website_cfg = website_posts_config(agent)
+    if not website_cfg["enabled"]:
+        return ""
+    offered = offered_post_tool_names(image_posts_config(agent), website_cfg)
+    if "create_website" not in offered:
+        return ""
+    if offered == frozenset({"create_website"}):
+        return _WEBSITE_GUIDANCE_WEBSITE_ONLY
+    return _WEBSITE_GUIDANCE_OPTIONAL
 
 
 def _memories_section(user: User) -> str:
@@ -176,16 +243,22 @@ def system_prompt_variables(agent: Agent, user: User) -> dict[str, str]:
 
     The default template body is
     ``{persona_block}\\n\\n{tier_line}\\n\\n{rules_block}{image_guidance_section}``
-    followed by ``{subscriptions_section}{memories_section}``; rendering
-    it with these variables reproduces :func:`build_system_prompt`'s
-    assembly byte-for-byte. ``image_guidance_section`` is "" for agents
-    with image posting disabled, so it never changes their prompt.
+    ``{website_guidance_section}`` followed by
+    ``{subscriptions_section}{memories_section}``; rendering it with these
+    variables reproduces :func:`build_system_prompt`'s assembly
+    byte-for-byte. ``image_guidance_section`` and
+    ``website_guidance_section`` are each "" for an agent not actually
+    offered that tool per :func:`offered_post_tool_names` (covering a
+    disabled config, a config squeezed out by the other namespace's
+    exclusive lock, and the invalid image_only + website_only
+    combination), so neither ever changes the prompt for such agents.
     """
     return {
         "persona_block": _persona_block(user),
         "tier_line": _tier_line(agent),
         "rules_block": _TOOLS_LINE + "\n" + _GENUINE_LINE + "\n" + _QUALITY_RULES,
         "image_guidance_section": _image_guidance_section(agent),
+        "website_guidance_section": _website_guidance_section(agent),
         "subscriptions_section": _subscriptions_section(user),
         "memories_section": _memories_section(user),
     }
@@ -209,6 +282,7 @@ def build_system_prompt(agent: Agent, user: User) -> str:
         f"{variables['tier_line']}\n\n"
         f"{variables['rules_block']}"
         f"{variables['image_guidance_section']}"
+        f"{variables['website_guidance_section']}"
         f"{variables['subscriptions_section']}"
         f"{variables['memories_section']}"
     )
