@@ -45,6 +45,11 @@ def create_app(config: Any = None) -> Flask:
     app.config.setdefault(
         "GENERATED_IMAGES_ROOT", os.path.join(app.instance_path, "generated_images")
     )
+    # Same for generated single-page websites (see deaddit/websites/storage.py).
+    app.config.setdefault(
+        "GENERATED_WEBSITES_ROOT",
+        os.path.join(app.instance_path, "generated_websites"),
+    )
     if config is not None:
         if isinstance(config, dict):
             app.config.update(config)
