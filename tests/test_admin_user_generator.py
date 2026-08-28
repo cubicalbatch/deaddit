@@ -234,6 +234,18 @@ class TestAdminUserGeneratorAPI:
         assert len(data["users"]) == 1
         assert len(data["agents"]) == 0
 
+    def test_api_generate_defaults_to_personas_only(self, admin_client, fake_llm):
+        """Omitting auto_create_agent must NOT enroll agents (admin UI default)."""
+        fake_llm.enqueue_content(SAMPLE_PERSONAS_JSON)
+
+        resp = admin_client.post("/admin/api/users/generate", json={"count": 1})
+        assert resp.status_code == 201
+        data = resp.get_json()
+        assert data["success"] is True
+        assert len(data["users"]) == 1
+        assert data["agents"] == []
+        assert Agent.query.count() == 0
+
     def test_generate_personas_batches_over_ten(self, app, fake_llm):
         # Enqueue two batches of 2 personas each
         fake_llm.enqueue_content(SAMPLE_PERSONAS_JSON)

@@ -329,3 +329,73 @@ def test_random_agent_image_posts_round_trip(
     assert agent.persona_mode == "random"
     assert agent.user_username is None
     assert agent.config["image_posts"] == image_config
+
+
+def test_bulk_image_and_website_toggles(seeded_db, admin_client, db_session, fake_fal):
+    _make_provider(db_session)
+    regular = _make_agent(db_session, "alice")
+    lurker = _make_agent(db_session, "bob", tier="lurker")
+
+    body = admin_client.post(
+        "/admin/api/agents/bulk",
+        json={"action": "enable_image", "agent_ids": [regular.id, lurker.id]},
+    ).get_json()
+    assert body["affected"] == [regular.id]
+    errors = {s["id"]: s["error"] for s in body["skipped"]}
+    assert "lurker" in errors[lurker.id]
+    db_session.refresh(regular)
+    assert regular.config["image_posts"]["enabled"] is True
+    assert regular.config["image_posts"]["provider_id"] is None  # default-backed
+    assert regular.config["image_posts"]["policy"] == "optional"
+
+    # Enabling twice is reported as a skip, never a clobbering rewrite.
+    body = admin_client.post(
+        "/admin/api/agents/bulk",
+        json={"action": "enable_image", "agent_ids": [regular.id]},
+    ).get_json()
+    assert body["affected"] == []
+    assert body["skipped"][0]["error"] == "already enabled"
+
+    # Disabling pops the key entirely (canonical disabled shape).
+    body = admin_client.post(
+        "/admin/api/agents/bulk",
+        json={"action": "disable_image", "agent_ids": [regular.id, lurker.id]},
+    ).get_json()
+    assert body["affected"] == [regular.id]
+    assert body["skipped"][0]["error"] == "already disabled"
+    db_session.refresh(regular)
+    assert "image_posts" not in regular.config
+
+    # Website toggles mirror the flow without provider machinery.
+    body = admin_client.post(
+        "/admin/api/agents/bulk",
+        json={"action": "enable_website", "agent_ids": [regular.id, lurker.id]},
+    ).get_json()
+    assert body["affected"] == [regular.id]
+    errors = {s["id"]: s["error"] for s in body["skipped"]}
+    assert "lurker" in errors[lurker.id]
+    db_session.refresh(regular)
+    assert regular.config["website_posts"] == {"enabled": True, "policy": "optional"}
+
+    body = admin_client.post(
+        "/admin/api/agents/bulk",
+        json={"action": "disable_website", "agent_ids": [regular.id]},
+    ).get_json()
+    assert body["affected"] == [regular.id]
+    db_session.refresh(regular)
+    assert "website_posts" not in regular.config
+
+
+def test_bulk_enable_image_without_default_provider_skips(
+    seeded_db, admin_client, db_session
+):
+    agent = _make_agent(db_session, "alice")
+
+    body = admin_client.post(
+        "/admin/api/agents/bulk",
+        json={"action": "enable_image", "agent_ids": [agent.id]},
+    ).get_json()
+    assert body["affected"] == []
+    assert "no default image provider" in body["skipped"][0]["error"]
+    db_session.refresh(agent)
+    assert "image_posts" not in agent.config

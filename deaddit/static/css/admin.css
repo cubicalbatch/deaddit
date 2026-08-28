@@ -314,6 +314,10 @@ main {
     color: var(--text-1) !important;
 }
 
+[data-theme="dark"] .bg-body-tertiary {
+    background-color: var(--bg-elevated) !important;
+}
+
 [data-theme="dark"] .text-dark {
     color: var(--text-1) !important;
 }

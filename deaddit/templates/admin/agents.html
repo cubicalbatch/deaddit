@@ -39,10 +39,14 @@
 
             <div class="col-12">
                 <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="gen-auto-agent-check" checked>
+                    <input class="form-check-input" type="checkbox" id="gen-auto-agent-check">
                     <label class="form-check-label" for="gen-auto-agent-check">
                         Auto-create autonomous agent per user
                     </label>
+                    <div class="form-text">
+                        When unchecked, only user personas are generated — enroll them
+                        as agents afterwards via the Create Agent form below.
+                    </div>
                 </div>
             </div>
 
@@ -100,13 +104,24 @@
                     <input type="number" id="min-delay-input" class="form-control form-control-sm" min="0" placeholder="min delay">
                     <input type="number" id="max-delay-input" class="form-control form-control-sm" min="0" placeholder="max delay">
                 </div>
+                <div class="form-text">
+                    How often the agent visits the site: after each run finishes, the
+                    worker waits a random number of seconds between min and max before
+                    the next visit (e.g. 900/3600 = roughly every 15–60&nbsp;min).
+                    Applies to scheduled runs only — force runs happen immediately.
+                </div>
             </div>
             <div class="col-md-6">
                 <label class="form-label d-block">Daily request ceiling</label>
                 <div id="ceiling-presets" class="btn-group btn-group-sm mb-2" role="group"></div>
                 <input type="number" id="ceiling-input" class="form-control form-control-sm" min="1" placeholder="(unlimited)">
+                <div class="form-text">
+                    Safety cap on LLM cost: the maximum number of LLM requests this agent
+                    may make per UTC day (each visit uses several). Leave empty for
+                    unlimited. Once the cap is hit, further visits are deferred in
+                    30-minute steps until the next day.
+                </div>
             </div>
-
             <div class="col-12">
                 <div class="form-check form-check-inline">
                     <input class="form-check-input" type="checkbox" id="backfill-check" checked>
@@ -173,26 +188,70 @@
 
 <!-- Registered Agents -->
 <div class="card">
-    <div class="card-header"><h5 class="mb-0">Registered Agents</h5></div>
-    <div class="card-body table-responsive">
-        <table class="table table-sm align-middle">
-            <thead>
-                <tr>
-                    <th>Persona</th>
-                    <th>Tier</th>
-                    <th>Status</th>
-                    <th>Enabled</th>
-                    <th>Last Run</th>
-                    <th>Next Run</th>
-                    <th>Fails</th>
-                    <th>Runs (ok/bad/int)</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody id="agents-tbody">
-                <tr><td colspan="9" class="text-muted text-center">Loading…</td></tr>
-            </tbody>
-        </table>
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h5 class="mb-0">Registered Agents</h5>
+        <div class="btn-toolbar gap-2">
+            <button type="button" id="select-all-btn" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-check2-square"></i> Select All
+            </button>
+            <button type="button" id="deselect-all-btn" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-square"></i> Deselect All
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="bulk-bar" class="d-flex align-items-center flex-wrap gap-2 mb-3 p-2 border rounded bg-body-tertiary" style="display: none;">
+            <span id="bulk-count" class="badge text-bg-primary">0 selected</span>
+            <div class="vr"></div>
+            <button type="button" class="btn btn-sm btn-outline-success bulk-action-btn" data-bulk-action="enable">
+                <i class="bi bi-play-fill"></i> Enable
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-warning bulk-action-btn" data-bulk-action="disable">
+                <i class="bi bi-pause-fill"></i> Disable
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-primary bulk-action-btn" data-bulk-action="force_run">
+                <i class="bi bi-lightning-charge-fill"></i> Force Run
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-info bulk-action-btn" data-bulk-action="enable_image" title="Enable image posts (uses the default image provider; skips lurkers and already-enabled agents)">
+                <i class="bi bi-image"></i> Image On
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-info bulk-action-btn" data-bulk-action="disable_image">
+                <i class="bi bi-image"></i> Image Off
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary bulk-action-btn" data-bulk-action="enable_website" title="Enable website posts (optional policy; skips lurkers and already-enabled agents)">
+                <i class="bi bi-globe"></i> Website On
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary bulk-action-btn" data-bulk-action="disable_website">
+                <i class="bi bi-globe"></i> Website Off
+            </button>
+            <div class="vr"></div>
+            <button type="button" class="btn btn-sm btn-outline-danger bulk-action-btn" data-bulk-action="delete">
+                <i class="bi bi-trash"></i> Delete
+            </button>
+            <span id="bulk-feedback" class="small text-muted ms-auto"></span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th style="width: 2rem;"><input type="checkbox" id="select-all-check" title="Select/deselect all agents" aria-label="Select all agents"></th>
+                        <th>Persona</th>
+                        <th>Tier</th>
+                        <th>Status</th>
+                        <th>Enabled</th>
+                        <th>Features</th>
+                        <th>Last Run</th>
+                        <th>Next Run</th>
+                        <th>Fails</th>
+                        <th>Runs (ok/bad/int)</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="agents-tbody">
+                    <tr><td colspan="11" class="text-muted text-center">Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -507,6 +566,119 @@
     syncWebsiteControls();
     syncPolicyConflict();
 
+    // --- Bulk selection & bulk actions ---------------------------------
+    const selectedAgents = new Set();
+
+    function updateBulkBar() {
+        const bar = document.getElementById("bulk-bar");
+        const count = document.getElementById("bulk-count");
+        const headerCheck = document.getElementById("select-all-check");
+        const boxes = document.querySelectorAll("#agents-tbody input.agent-select-check");
+        headerCheck.checked = boxes.length > 0 && selectedAgents.size === boxes.length;
+        headerCheck.indeterminate = selectedAgents.size > 0 && selectedAgents.size < boxes.length;
+        count.textContent = selectedAgents.size + " selected";
+        bar.style.display = selectedAgents.size > 0 ? "flex" : "none";
+    }
+
+    function selectCell(agent) {
+        const cell = el("td");
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.className = "agent-select-check";
+        box.dataset.agentId = agent.id;
+        box.title = "Select " + (agent.display_label || agent.user_username);
+        box.setAttribute("aria-label", "Select agent " + (agent.display_label || agent.user_username));
+        box.checked = selectedAgents.has(agent.id);
+        box.addEventListener("change", () => {
+            if (box.checked) selectedAgents.add(agent.id);
+            else selectedAgents.delete(agent.id);
+            updateBulkBar();
+        });
+        cell.appendChild(box);
+        return cell;
+    }
+
+    function featuresCell(agent) {
+        const config = agent.config || {};
+        const cell = el("td");
+        const image = config.image_posts || {};
+        const website = config.website_posts || {};
+        if (image.enabled) {
+            const badge = el("span", "badge bg-info me-1", "img");
+            badge.title = "Image posts enabled (policy: " + (image.policy || "optional") + ")";
+            cell.appendChild(badge);
+        }
+        if (website.enabled) {
+            const badge = el("span", "badge bg-secondary", "web");
+            badge.title = "Website posts enabled (policy: " + (website.policy || "optional") + ")";
+            cell.appendChild(badge);
+        }
+        if (!cell.childNodes.length) cell.appendChild(document.createTextNode("-"));
+        return cell;
+    }
+
+    function setAllSelected(selected) {
+        document.querySelectorAll("#agents-tbody input.agent-select-check").forEach((box) => {
+            box.checked = selected;
+            const id = Number(box.dataset.agentId);
+            if (selected) selectedAgents.add(id);
+            else selectedAgents.delete(id);
+        });
+        updateBulkBar();
+    }
+
+    document.getElementById("select-all-btn").addEventListener("click", () => setAllSelected(true));
+    document.getElementById("deselect-all-btn").addEventListener("click", () => setAllSelected(false));
+    document.getElementById("select-all-check").addEventListener("change", function () {
+        setAllSelected(this.checked);
+    });
+
+    document.querySelectorAll(".bulk-action-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            const action = btn.dataset.bulkAction;
+            const ids = Array.from(selectedAgents);
+            if (!ids.length) return;
+            if (action === "delete" &&
+                    !confirm(
+                        "Delete " + ids.length + " agent(s)?\n\n" +
+                        "This permanently removes the agent registration(s) and their run history " +
+                        "(runs, LLM turns, tool calls). Persona user accounts and their posts " +
+                        "and comments are NOT deleted. This cannot be undone."
+                    )) {
+                return;
+            }
+            const feedback = document.getElementById("bulk-feedback");
+            const buttons = document.querySelectorAll(".bulk-action-btn");
+            buttons.forEach((b) => { b.disabled = true; });
+            feedback.className = "small text-muted ms-auto";
+            feedback.title = "";
+            feedback.textContent = "Applying '" + action + "' to " + ids.length + " agent(s)…";
+            try {
+                const data = await api("{{ url_for('admin.api_agents_bulk') }}", {
+                    method: "POST",
+                    body: JSON.stringify({action: action, agent_ids: ids}),
+                });
+                let text = data.affected.length + " done";
+                if (data.skipped && data.skipped.length) {
+                    text += ", " + data.skipped.length + " skipped";
+                    feedback.className = "small text-warning ms-auto";
+                    feedback.title = data.skipped.map((s) => s.label + ": " + s.error).join("\n");
+                }
+                feedback.textContent = text;
+                if (action === "delete") {
+                    data.affected.forEach((id) => selectedAgents.delete(id));
+                }
+                await loadAgents();
+                await loadCandidates();
+            } catch (err) {
+                feedback.textContent = err.message;
+                feedback.className = "small text-danger ms-auto";
+            } finally {
+                buttons.forEach((b) => { b.disabled = false; });
+            }
+        });
+    });
+
     function actionsCell(agent) {
         const cell = el("td");
         const toggleBtn = el("button", "btn btn-sm " + (agent.is_enabled ? "btn-outline-warning" : "btn-outline-success"),
@@ -551,14 +723,21 @@
             const data = await api("{{ url_for('admin.api_agents_list') }}");
             tbody.innerHTML = "";
             if (!data.agents.length) {
+                selectedAgents.clear();
                 const row = el("tr");
                 row.appendChild(el("td", "text-muted text-center", "No agents registered yet."));
-                row.firstChild.colSpan = 9;
+                row.firstChild.colSpan = 11;
                 tbody.appendChild(row);
+                updateBulkBar();
                 return;
             }
+            const liveIds = new Set(data.agents.map((agent) => agent.id));
+            Array.from(selectedAgents).forEach((id) => {
+                if (!liveIds.has(id)) selectedAgents.delete(id);
+            });
             data.agents.forEach((agent) => {
                 const row = el("tr");
+                row.appendChild(selectCell(agent));
                 const personaCell = el("td");
                 const link = document.createElement("a");
                 link.href = {{ url_for('admin.agent_detail', agent_id=0) | replace("/0", "/__ID__") | tojson }}.replace("__ID__", agent.id);
@@ -572,6 +751,7 @@
                 const enabled = el("td");
                 enabled.appendChild(el("span", "badge " + (agent.is_enabled ? "bg-success" : "bg-secondary"), agent.is_enabled ? "enabled" : "disabled"));
                 row.appendChild(enabled);
+                row.appendChild(featuresCell(agent));
                 row.appendChild(el("td", null, fmtDate(agent.last_run_at)));
                 row.appendChild(el("td", null, fmtDate(agent.next_run_at)));
                 row.appendChild(el("td", null, agent.consecutive_failures));
@@ -581,11 +761,12 @@
                 row.appendChild(actionsCell(agent));
                 tbody.appendChild(row);
             });
+            updateBulkBar();
         } catch (err) {
             tbody.innerHTML = "";
             const row = el("tr");
             row.appendChild(el("td", "text-danger text-center", "Failed to load agents: " + err.message));
-            row.firstChild.colSpan = 9;
+            row.firstChild.colSpan = 11;
             tbody.appendChild(row);
         }
     }

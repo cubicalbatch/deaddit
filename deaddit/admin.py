@@ -7,6 +7,7 @@ import base64
 import logging
 import os
 import re
+import threading
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -4066,6 +4067,210 @@ def api_agents_pause_all():
     return jsonify({"paused": len(enabled)})
 
 
+_BULK_AGENT_ACTIONS = frozenset(
+    {
+        "enable",
+        "disable",
+        "force_run",
+        "enable_image",
+        "disable_image",
+        "enable_website",
+        "disable_website",
+        "delete",
+    }
+)
+
+
+def _bulk_force_run_worker(app, agent_ids):
+    """Run each selected agent once, sequentially, on a daemon thread.
+
+    A synchronous loop would hold the HTTP worker for minutes per agent
+    (gunicorn timeout is 120s), so the endpoint validates the batch and
+    hands the ids here. Each agent gets its own app context - and therefore
+    its own session - so one agent's failure or stale identity map never
+    poisons the rest.
+    """
+    from deaddit.agents.loop import run_once
+    from deaddit.models import Agent
+
+    for agent_id in agent_ids:
+        try:
+            with app.app_context():
+                agent = db.session.get(Agent, agent_id)
+                if agent is None:
+                    continue
+                if agent.status == "running":
+                    logger.info("Bulk force-run skipped agent %s: running", agent_id)
+                    continue
+                run_once(agent_id, trigger="manual")
+        except Exception:
+            logger.exception("Bulk force-run of agent %s failed", agent_id)
+
+
+def _bulk_flag_posts(agent, key, enable, resolver):
+    """Flip one agent's ``image_posts``/``website_posts`` flag in place.
+
+    Returns an error string when the agent cannot be flipped (lurker tier,
+    missing default image provider, already in the requested state, ...).
+    Disabling pops the key entirely - the canonical disabled shape is an
+    absent key; enabling resolves a fresh default-backed config only for
+    agents that are currently disabled, so existing provider/model/policy
+    overrides of enabled agents are never clobbered.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    config = dict(agent.config or {})
+    if enable:
+        if config.get(key, {}).get("enabled"):
+            return "already enabled"
+        resolved, error_response = resolver(
+            {"enabled": True, "policy": "optional"}, agent.autonomy_tier
+        )
+        if error_response is not None:
+            return error_response[0].get_json().get("error", "invalid config")
+        config[key] = resolved
+    else:
+        if key not in config:
+            return "already disabled"
+        config.pop(key, None)
+    agent.config = config
+    flag_modified(agent, "config")
+    return None
+
+
+@admin_bp.route("/api/agents/bulk", methods=["POST"])
+@production_disabled
+@admin_required
+def api_agents_bulk():
+    """Apply one action to a selected set of agents.
+
+    Flag actions (enable/disable, image/website toggles, delete) are plain
+    DB updates committed once. ``force_run`` validates the batch, skips
+    agents that are already running, and queues the rest on a daemon
+    thread that runs them sequentially via run_once(trigger="manual").
+    Per-agent failures (e.g. enabling images on a lurker) are reported as
+    ``skipped`` entries and never abort the rest of the batch.
+    """
+    from deaddit.models import Agent
+
+    payload = request.get_json(silent=True) or {}
+    action = payload.get("action")
+    if action not in _BULK_AGENT_ACTIONS:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"action must be one of {sorted(_BULK_AGENT_ACTIONS)}",
+                }
+            ),
+            400,
+        )
+
+    raw_ids = payload.get("agent_ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return (
+            jsonify({"success": False, "error": "agent_ids must be a non-empty list"}),
+            400,
+        )
+    agent_ids = []
+    for value in raw_ids:
+        parsed = _as_int(value)
+        if parsed is None:
+            return (
+                jsonify({"success": False, "error": "agent_ids must contain integers"}),
+                400,
+            )
+        if parsed not in agent_ids:
+            agent_ids.append(parsed)
+
+    agents = {a.id: a for a in Agent.query.filter(Agent.id.in_(agent_ids))}
+    skipped = [
+        {"id": agent_id, "label": str(agent_id), "error": "agent not found"}
+        for agent_id in agent_ids
+        if agent_id not in agents
+    ]
+    affected = []
+    errors = []
+
+    for agent_id in agent_ids:
+        agent = agents.get(agent_id)
+        if agent is None:
+            continue
+        label = _agent_display_label(agent)
+        error = None
+        if action == "enable":
+            if agent.is_enabled:
+                error = "already enabled"
+            else:
+                # Mirror the toggle endpoint: enabling clears strikes and
+                # wakes the agent on the next scheduler poll.
+                agent.is_enabled = True
+                agent.consecutive_failures = 0
+                agent.next_run_at = datetime.utcnow()
+        elif action == "disable":
+            if not agent.is_enabled:
+                error = "already disabled"
+            else:
+                agent.is_enabled = False
+                agent.next_run_at = None
+                agent.status = "idle"
+        elif action == "force_run":
+            if agent.status == "running":
+                error = "already has a run in progress"
+        elif action == "enable_image":
+            error = _bulk_flag_posts(agent, "image_posts", True, _resolve_image_posts)
+        elif action == "disable_image":
+            error = _bulk_flag_posts(agent, "image_posts", False, _resolve_image_posts)
+        elif action == "enable_website":
+            error = _bulk_flag_posts(
+                agent, "website_posts", True, _resolve_website_posts
+            )
+        elif action == "disable_website":
+            error = _bulk_flag_posts(
+                agent, "website_posts", False, _resolve_website_posts
+            )
+        elif action == "delete":
+            if agent.status == "running":
+                error = "run in progress; wait for it to finish"
+            else:
+                # FKs cascade at the DB level: runs/turns/tool_calls go with
+                # the agent, generated-website references are nulled, and the
+                # persona user account itself is kept.
+                db.session.delete(agent)
+        if error is None:
+            affected.append(agent_id)
+        else:
+            errors.append({"id": agent_id, "label": label, "error": error})
+
+    if action == "force_run":
+        if affected:
+            app = current_app._get_current_object()
+            threading.Thread(
+                target=_bulk_force_run_worker,
+                args=(app, list(affected)),
+                daemon=True,
+                name="bulk-force-run",
+            ).start()
+        return jsonify(
+            {
+                "success": True,
+                "action": action,
+                "affected": affected,
+                "skipped": skipped + errors,
+            }
+        )
+
+    db.session.commit()
+    return jsonify(
+        {
+            "success": True,
+            "action": action,
+            "affected": affected,
+            "skipped": skipped + errors,
+        }
+    )
+
+
 @admin_bp.route("/api/users/generate", methods=["POST"])
 @production_disabled
 @admin_required
@@ -4103,7 +4308,7 @@ def api_generate_users():
     if tier not in _AGENTIC_TIERS:
         return jsonify({"success": False, "error": f"Unknown tier '{tier}'"}), 400
 
-    auto_create_agent = payload.get("auto_create_agent", True)
+    auto_create_agent = payload.get("auto_create_agent", False)
     if isinstance(auto_create_agent, str):
         auto_create_agent = auto_create_agent.lower() in ("true", "1", "yes")
     else:

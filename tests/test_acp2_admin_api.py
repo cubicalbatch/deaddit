@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+import deaddit.admin as admin_module
 import deaddit.llm.capabilities as capabilities
 from deaddit.agents.memory import (
     BACKFILL_PREFIX,
@@ -560,7 +561,140 @@ def test_pause_all_clears_wakes_and_sets_idle(seeded_db, admin_client, db_sessio
         db.session.refresh(agent)
         assert agent.is_enabled is False
         assert agent.next_run_at is None
+
+
+# ---------------------------------------------------------------------------
+# Bulk selection actions (POST /admin/api/agents/bulk)
+
+
+def test_bulk_enable_and_disable_report_skips(seeded_db, admin_client, db_session):
+    off = _make_agent(db_session, "alice")
+    on = _make_agent(db_session, "bob", enabled=True)
+
+    body = admin_client.post(
+        "/admin/api/agents/bulk",
+        json={"action": "enable", "agent_ids": [off.id, on.id]},
+    ).get_json()
+    assert body["success"] is True
+    assert body["affected"] == [off.id]
+    assert [s["id"] for s in body["skipped"]] == [on.id]
+    assert body["skipped"][0]["error"] == "already enabled"
+    db_session.refresh(off)
+    db_session.refresh(on)
+    assert off.is_enabled is True
+    assert off.next_run_at is not None
+    assert off.consecutive_failures == 0
+    assert on.is_enabled is True
+
+    body = admin_client.post(
+        "/admin/api/agents/bulk",
+        json={"action": "disable", "agent_ids": [off.id, on.id]},
+    ).get_json()
+    assert body["affected"] == [off.id, on.id]
+    assert body["skipped"] == []
+    for agent in (off, on):
+        db_session.refresh(agent)
+        assert agent.is_enabled is False
+        assert agent.next_run_at is None
         assert agent.status == "idle"
+
+
+def test_bulk_delete_cascades_runs_and_keeps_persona(
+    seeded_db, admin_client, db_session
+):
+    agent = _make_agent(db_session, "alice", enabled=True)
+    run = AgentRun(
+        agent_id=agent.id,
+        persona_username="alice",
+        trigger="manual",
+        status="completed",
+    )
+    db_session.add(run)
+    db_session.flush()
+    turn = AgentTurn(run_id=run.id, seq=0, request_messages=[], response_message={})
+    db_session.add(turn)
+    db_session.flush()
+    db_session.add(
+        ToolCall(run_id=run.id, turn_id=turn.id, name="vote", arguments={}, result={})
+    )
+    busy = _make_agent(db_session, "bob", enabled=True)
+    busy.status = "running"
+    db_session.commit()
+
+    body = admin_client.post(
+        "/admin/api/agents/bulk",
+        json={"action": "delete", "agent_ids": [agent.id, busy.id]},
+    ).get_json()
+    assert body["affected"] == [agent.id]
+    assert [s["id"] for s in body["skipped"]] == [busy.id]
+    assert "run in progress" in body["skipped"][0]["error"]
+
+    db_session.expire_all()
+    assert db_session.get(Agent, agent.id) is None
+    assert db_session.query(AgentRun).count() == 0
+    assert db_session.query(AgentTurn).count() == 0
+    assert db_session.query(ToolCall).count() == 0
+    assert db_session.get(User, "alice") is not None  # persona account survives
+    assert db_session.get(Agent, busy.id) is not None  # running agent untouched
+
+
+def test_bulk_force_run_queues_idle_and_skips_running(
+    seeded_db, admin_client, db_session, monkeypatch
+):
+    idle = _make_agent(db_session, "alice")
+    busy = _make_agent(db_session, "bob")
+    busy.status = "running"
+    db_session.commit()
+
+    captured = []
+    monkeypatch.setattr(
+        admin_module, "_bulk_force_run_worker", lambda app, ids: captured.append(ids)
+    )
+
+    body = admin_client.post(
+        "/admin/api/agents/bulk",
+        json={"action": "force_run", "agent_ids": [idle.id, busy.id, 9999]},
+    ).get_json()
+    assert body["affected"] == [idle.id]
+    assert {s["id"] for s in body["skipped"]} == {busy.id, 9999}
+    errors = {s["id"]: s["error"] for s in body["skipped"]}
+    assert "run in progress" in errors[busy.id]
+    assert errors[9999] == "agent not found"
+    assert captured == [[idle.id]]
+
+
+def test_bulk_force_run_worker_runs_each_agent_sequentially(
+    app, seeded_db, db_session, fake_llm, monkeypatch
+):
+    monkeypatch.setattr(capabilities, "ensure_tools_allowed", _noop_tools_allowed)
+    one = _make_agent(db_session, "alice", config={"min_delay": 0, "max_delay": 0})
+    two = _make_agent(db_session, "bob", config={"min_delay": 0, "max_delay": 0})
+    # Two turns per visit: the first reply triggers a nudge, the second finishes.
+    for _ in range(2):
+        fake_llm.enqueue_content("Just looking around.")
+        fake_llm.enqueue_content("Done, finishing.")
+
+    admin_module._bulk_force_run_worker(app, [one.id, two.id, 9999])
+
+    statuses = {r.agent_id: r.status for r in db_session.query(AgentRun).all()}
+    assert statuses == {one.id: "completed", two.id: "completed"}
+
+
+def test_bulk_action_validation_errors(seeded_db, admin_client):
+    unknown = admin_client.post(
+        "/admin/api/agents/bulk", json={"action": "detonate", "agent_ids": [1]}
+    )
+    assert unknown.status_code == 400
+    assert "action must be one of" in unknown.get_json()["error"]
+
+    for bad_payload in (
+        {"action": "enable", "agent_ids": []},
+        {"action": "enable"},
+        {"action": "enable", "agent_ids": "1,2"},
+        {"action": "enable", "agent_ids": ["one"]},
+    ):
+        resp = admin_client.post("/admin/api/agents/bulk", json=bad_payload)
+        assert resp.status_code == 400
 
 
 # ---------------------------------------------------------------------------
