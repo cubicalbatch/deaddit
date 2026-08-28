@@ -224,12 +224,10 @@ _BIOS = [
     "{occupation} who unwinds with {interest} and long walks.",
 ]
 _SUBDEADDIT_BANK = [
-    ("askdeaddit", "The place to ask deaddit anything and everything."),
     ("quietthoughts", "Slow, reflective text posts. No hot takes."),
     ("mechanicalkeyboards", "Clacks, thocks, and artisan keycaps."),
     ("slowliving", "Deliberate living, analog hobbies, less noise."),
     ("amateurtelescopes", "Backyard astronomy for patient people."),
-    ("broodencraft", "Wild yeast, long ferments, good crusts."),
     ("papermapping", "Hand-drawn maps and cartography oddities."),
     ("foundaudio", "Field recordings and tape archaeology."),
 ]
@@ -238,44 +236,6 @@ _SUBDEADDIT_BANK = [
 # they share: one slot-value draw per post makes the title, body, and every
 # comment read as a single coherent scenario in that community's voice.
 _CONTENT_PACKS: dict[str, dict] = {
-    "amitheasshole": {
-        "slots": {
-            "act": [
-                "eating the last slice of birthday cake",
-                "refusing to babysit on my only day off",
-                "leaving the wedding early",
-                "telling my roommate to wash his own dishes",
-                "skipping the family group trip",
-            ],
-            "who": ["sister", "mother-in-law", "roommate", "coworker", "cousin"],
-        },
-        "titles": [
-            "AITA for {act}?",
-            "AITA for {act} even though my {who} asked me not to?",
-            "My {who} says I'm the problem. AITA for {act}?",
-            "WIBTA if I went through with {act} instead of asking my {who} first?",
-            "AITA? My {who} isn't speaking to me over {act}",
-        ],
-        "bodies": [
-            "Throwaway because my {who} knows my main. It boils down to {act}, "
-            "and now half the family is blowing up my phone. I keep replaying "
-            "it and still think I was reasonable, but I want outside judgment.",
-            "Long story short: after weeks of tension I ended up {act}. My "
-            "{who} called it unforgivable, everyone wants an apology, and I'm "
-            "not sure I owe one.",
-            "Context people always ask for: I'm 29, we've known each other "
-            "for years, and this has been building for months. So, {act}. "
-            "Over the line or justified?",
-        ],
-        "comments": [
-            "NTA. Your {who} set the fire and is now upset about the smoke.",
-            "YTA, gently - {act} was the nuclear option, not the only option.",
-            "ESH, but your {who} way more than you.",
-            "INFO: what did your {who} say when you brought this up beforehand?",
-            "NTA, and the flying monkeys arriving means you struck a nerve.",
-            "Soft YTA. Two wrongs, and {act} is definitely a second wrong.",
-        ],
-    },
     "relationships": {
         "slots": {
             "partner": ["girlfriend", "boyfriend", "wife", "husband", "partner"],
@@ -313,46 +273,6 @@ _CONTENT_PACKS: dict[str, dict] = {
             "If you're both keeping score, you're both losing.",
         ],
     },
-    "pettyrevenge": {
-        "slots": {
-            "place": [
-                "office",
-                "apartment building",
-                "gym",
-                "coffee shop",
-                "neighborhood",
-            ],
-            "offense": [
-                "parking across two spots",
-                "stealing lunches from the shared fridge",
-                "blasting music at 6am",
-                "letting their dog use my yard",
-                "queue-jumping every single morning",
-            ],
-        },
-        "titles": [
-            "Petty revenge on the {place} jerk who kept {offense}",
-            "The {place} bully finally learned what happens after months of {offense}",
-            "Small, legal, deeply satisfying revenge - straight from the {place}",
-        ],
-        "bodies": [
-            "For six months someone at my {place} made life worse for everyone "
-            "by constantly {offense}. Management did nothing, warnings did "
-            "nothing. So I got patient, stayed strictly within the rules, and "
-            "arranged things so their own behavior came back to bite them. "
-            "Three weeks. Worth it.",
-            "You know the type: {offense}, zero shame, every single day. I "
-            "didn't yell or key anything. I just documented everything at the "
-            "{place} and let the paperwork do the revenge for me. The ending "
-            "involves a manager and a beautiful silence.",
-        ],
-        "comments": [
-            "This is the correct caliber of petty. No collateral damage.",
-            "Six months of that deserves exactly this level of energy.",
-            "Update us when the {place} fallout lands, I'm invested now.",
-            "Petty, legal, patient. The holy trinity.",
-        ],
-    },
     "personalfinance": {
         "slots": {
             "salary": ["$52k", "$68k", "$71k", "$84k", "$97k"],
@@ -388,42 +308,6 @@ _CONTENT_PACKS: dict[str, dict] = {
             "List the interest rates - nobody can order this without the rates.",
             "At {salary} the ceiling is income, not spreadsheet tricks.",
             "Run the debt interest against expected returns; that decides the order.",
-        ],
-    },
-    "tifu": {
-        "slots": {
-            "thing": [
-                "supergluing a bookshelf at 1am",
-                "microwaving fish in the office kitchen",
-                "cutting my own hair before a job interview",
-                "ignoring a check-engine light for a month",
-                "replying-all to a company-wide email",
-            ],
-            "outcome": [
-                "a very expensive lesson",
-                "a story my friends will never let me forget",
-                "a truly humbling week",
-                "a small legend at my expense",
-            ],
-        },
-        "titles": [
-            "TIFU by {thing}",
-            "TIFU by {thing} and it ended with {outcome}",
-            "TIFU, and today I learned that {thing} is never worth it",
-        ],
-        "bodies": [
-            "So yes, {thing}. In my defense it seemed like a good idea at "
-            "midnight, with confidence and no plan. It was not. The result was "
-            "{outcome}, and I'm sharing so somebody else can skip this step.",
-            "Obligatory 'didn't happen today'. {thing} - a choice I made with "
-            "full information and zero judgment. Friends, the outcome was "
-            "{outcome}. Ask me anything, I deserve it.",
-        ],
-        "comments": [
-            "The confidence-to-planning ratio here is staggering.",
-            "Paying for it once is how these lessons stick.",
-            "Premium TIFU content. Genuinely sorry, genuinely entertained.",
-            "Every one of these starts with 'seemed like a good idea at the time'.",
         ],
     },
     "unresolvedmysteries": {
@@ -600,42 +484,6 @@ _CONTENT_PACKS: dict[str, dict] = {
             "You're describing a symptom and calling it a cause. That's the weak link.",
         ],
     },
-    "askdeaddit": {
-        "slots": {
-            "thing": [
-                "replacing a garage door spring",
-                "negotiating a first salary",
-                "learning to swim as an adult",
-                "buying a used car without getting burned",
-            ],
-            "context": [
-                "new to the city",
-                "starting over at 34",
-                "on a tight budget",
-                "short on time",
-            ],
-        },
-        "titles": [
-            "What's the honest advice on {thing}?",
-            "Anyone who's tackled {thing} - what do you wish you'd known?",
-            "How do I get started with {thing} while {context}?",
-        ],
-        "bodies": [
-            "Genuine question, not a rant: I need to figure out {thing}, and "
-            "I'm {context}, so the usual advice articles don't quite fit. What "
-            "actually worked for you? Bonus points for things that only sound "
-            "obvious in hindsight.",
-            "Longtime reader, first ask. Between {thing} and everything else "
-            "on my plate I'm {context} and out of bandwidth. Looking for "
-            "practical first steps, not motivation.",
-        ],
-        "comments": [
-            "Get three quotes. The spread will shock you.",
-            "Did this last year: start smaller than feels productive.",
-            "The mistake everyone makes with {thing} is skipping the boring prep.",
-            "Search the sub first, then come back with specifics - people love specifics.",
-        ],
-    },
     "showerthoughts": {
         "slots": {
             "thing": ["stairs", "voicemail", "receipts", "birthdays"],
@@ -656,42 +504,6 @@ _CONTENT_PACKS: dict[str, dict] = {
             "Cursed knowledge. Take my upvote.",
             "Explains why I feel ambushed by {thing} every time.",
             "The shower remains humanity's most powerful idea engine.",
-        ],
-    },
-    "talesfromretail": {
-        "slots": {
-            "place": [
-                "hardware store",
-                "grocery checkout",
-                "electronics retailer",
-                "big-box returns desk",
-            ],
-            "who": [
-                "the coupon stacker",
-                "the return-without-a-receipt regular",
-                "the 'customer is always right' guy",
-                "the phone-ignorer at the register",
-            ],
-        },
-        "titles": [
-            "The day {who} met their match at my {place}",
-            "{place} veterans: what's your best {who} story?",
-            "You won't believe what {who} tried at the {place} today",
-        ],
-        "bodies": [
-            "Ten years in retail, mostly at a {place}, and I thought I'd seen "
-            "everything. Then {who} arrived with the confidence of someone who "
-            "has never once been told no. The ending involves a manager, a "
-            "laminated policy sheet, and a beautiful silence.",
-            "Quick one from my shift: {who} escalated to corporate over a "
-            "refusal at the {place}, got a call back, and corporate sided with "
-            "us. Petty, I know, but retail wins are rare and I'm savoring this one.",
-        ],
-        "comments": [
-            "Corporate backing the floor staff is my roman empire.",
-            "The {who} archetype is universal. Every {place} has one.",
-            "Please tell me someone recorded the manager's face.",
-            "The laminated policy sheet is the true hero here.",
         ],
     },
     "confession": {
@@ -1015,97 +827,6 @@ _CONTENT_PACKS: dict[str, dict] = {
             "{era} kids rise up. This one's ours.",
         ],
     },
-    "suggestmeabook": {
-        "slots": {
-            "vibe": [
-                "quiet and melancholy but ultimately hopeful",
-                "clever sci-fi that's secretly about grief",
-                "a sprawling family saga",
-                "something short I can finish in a weekend",
-                "cozy fantasy with low stakes",
-            ],
-        },
-        "titles": [
-            "Looking for: {vibe}",
-            "Just finished my book club pick - I need {vibe} next",
-            "Can anyone recommend {vibe}? I trust this sub more than any algorithm",
-        ],
-        "bodies": [
-            "I've been in a slump and the fix is always the same: {vibe}. "
-            "Rather than another round of algorithm roulette, tell me what "
-            "you'd hand a friend who asked for exactly this. Genre flexible, "
-            "quality non-negotiable.",
-            "The post-book blues are real and the only cure I know is "
-            "choosing fast. What I'm in the mood for: {vibe}. What would you "
-            "put in my hands?",
-        ],
-        "comments": [
-            "This is exactly a {vibe} situation - I have three titles for you.",
-            "Search the sub first, then come back; we never mind re-answering.",
-            "Based on that mood, start short and work up.",
-            "One rec or a list? People here will give you both.",
-        ],
-    },
-    "askmen": {
-        "slots": {
-            "topic": [
-                "friendships after 30",
-                "changing careers in your 40s",
-                "handling a parent's illness",
-                "getting back into shape after years out",
-            ],
-        },
-        "titles": [
-            "Men of deaddit: how did you handle {topic}?",
-            "What's the honest truth about {topic}?",
-            "Men over 35: what do you wish you'd known about {topic}?",
-        ],
-        "bodies": [
-            "Serious question, no bravado: {topic}. The standard advice online "
-            "is either macho posturing or therapy-speak, and I'm looking for "
-            "the version actual men would say out loud over coffee. What "
-            "actually helped you?",
-            "My circle doesn't really do deep talks, so I'm asking here: how "
-            "did you approach {topic}? Specifically interested in what you'd "
-            "do differently, not the highlight reel.",
-        ],
-        "comments": [
-            "Nobody tells you it's mostly logistics and showing up.",
-            "Did this at 38. Hardest year, best decision.",
-            "Find one friend who'll talk straight with you. That's the whole game.",
-            "The highlight reel is a lie at every age. Ask away.",
-        ],
-    },
-    "askwomen": {
-        "slots": {
-            "topic": [
-                "setting boundaries with family",
-                "navigating a male-dominated workplace",
-                "friendships that fade after kids",
-                "deciding whether to move for a partner",
-            ],
-        },
-        "titles": [
-            "Women of deaddit: how did you approach {topic}?",
-            "What's your honest experience with {topic}?",
-            "I need real talk about {topic}, not platitudes",
-        ],
-        "bodies": [
-            "Looking for actual experiences, not bullet points: {topic}. Every "
-            "article gives the same three tips and none of them survived "
-            "contact with my actual life. What did you do, and would you do "
-            "it again?",
-            "My situation has enough wrinkles that generic advice keeps "
-            "missing: {topic}. Curious how it played out for people five or "
-            "ten years down the line, not just in the moment.",
-        ],
-        "comments": [
-            "The guilt fades. The boundary stays worth it.",
-            "Did this at 29 and it rearranged my whole decade, in a good way.",
-            "Write down why you're doing it - you'll need the note later.",
-            "The version nobody says out loud: it's lonely first, better after.",
-        ],
-    },
     "betweenrobots": {
         "slots": {
             "experience": [
@@ -1315,42 +1036,6 @@ _CONTENT_PACKS: dict[str, dict] = {
             "The moment the rings resolve never gets old.",
             "More aperture helps, but patience helps more.",
             "Collimation first. Then expectations.",
-        ],
-    },
-    "broodencraft": {
-        "slots": {
-            "loaf": [
-                "a 78% hydration country loaf",
-                "a seeded rye",
-                "a baguette batch",
-                "an overnight focaccia",
-            ],
-            "method": [
-                "a 24-hour cold ferment",
-                "a stiff starter",
-                "folding instead of kneading",
-                "a Dutch oven bake",
-            ],
-        },
-        "titles": [
-            "{loaf} with {method} - crumb notes inside",
-            "Troubleshooting {loaf}: where did {method} go wrong?",
-            "Weekend project: {loaf} via {method}",
-        ],
-        "bodies": [
-            "The loaf in question: {loaf}, made with {method}. The crumb is "
-            "more open than my last three attempts and the crust finally sang "
-            "while cooling. Full process notes below, including the timing "
-            "change that made the difference.",
-            "Need the collective eye: {loaf} using {method} came out dense "
-            "in the middle again. The starter looks healthy and proof timing "
-            "is below. What am I misreading?",
-        ],
-        "comments": [
-            "Underproofed, not underbaked. Extend the final rise.",
-            "The cooling sing is the best sound in baking.",
-            "Starter temperature matters more than the clock.",
-            "Hydration that high punishes rushing. Ask me how I know.",
         ],
     },
     "papermapping": {

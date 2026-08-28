@@ -40,15 +40,20 @@ from deaddit.llm.capabilities import (
 )
 from deaddit.models import (
     Agent,
+    AgentMemory,
     AgentRun,
+    AgentTurn,
     ApiEndpointConfig,
     ApiModel,
+    Ban,
     Comment,
     DegeneracyFlag,
     EndpointCapability,
+    GeneratedWebsite,
     ImageModel,
     ImageProvider,
     Job,
+    JobLog,
     LLMProvider,
     LLMUsage,
     ModelRoute,
@@ -61,7 +66,10 @@ from deaddit.models import (
     PromptTemplateVersion,
     Report,
     Subdeaddit,
+    SubdeadditModerator,
+    ToolCall,
     User,
+    Vote,
 )
 from deaddit.services.content import (
     ContentValidationError,
@@ -75,22 +83,260 @@ from deaddit.websites import service as website_service
 logger = logging.getLogger(__name__)
 
 
+def _chunked(iterable, size=500):
+    """Yield successive chunks from iterable."""
+    lst = list(iterable)
+    for i in range(0, len(lst), size):
+        yield lst[i : i + size]
+
+
 def _delete_post_notifications(post_ids):
     """Delete notifications that would block hard deletion of these posts."""
     post_ids = list(post_ids)
     if post_ids:
-        Notification.query.filter(Notification.post_id.in_(post_ids)).delete(
-            synchronize_session=False
-        )
+        for chunk in _chunked(post_ids, 500):
+            Notification.query.filter(Notification.post_id.in_(chunk)).delete(
+                synchronize_session=False
+            )
 
 
 def _delete_post_reports(post_ids):
     """Delete reports that would block hard deletion of these posts."""
     post_ids = list(post_ids)
     if post_ids:
-        Report.query.filter(Report.post_id.in_(post_ids)).delete(
+        for chunk in _chunked(post_ids, 500):
+            Report.query.filter(Report.post_id.in_(chunk)).delete(
+                synchronize_session=False
+            )
+
+
+def _get_comment_ids_with_descendants(root_comment_ids):
+    """Recursively collect all descendant comment IDs for the given comment IDs."""
+    all_ids = set(root_comment_ids)
+    current_ids = set(root_comment_ids)
+    while current_ids:
+        new_child_ids = set()
+        for chunk in _chunked(list(current_ids), 500):
+            child_rows = (
+                Comment.query.filter(Comment.parent_id.in_(chunk))
+                .with_entities(Comment.id)
+                .all()
+            )
+            for row in child_rows:
+                if row.id not in all_ids:
+                    new_child_ids.add(row.id)
+        if not new_child_ids:
+            break
+        all_ids.update(new_child_ids)
+        current_ids = new_child_ids
+    return list(all_ids)
+
+
+def _delete_comments(comment_ids):
+    """Delete comments and all child comments/responses, plus their votes, notifications, reports."""
+    comment_ids = list(comment_ids)
+    if not comment_ids:
+        return 0
+    all_comment_ids = _get_comment_ids_with_descendants(comment_ids)
+    if not all_comment_ids:
+        return 0
+
+    for chunk in _chunked(all_comment_ids, 500):
+        Vote.query.filter(Vote.comment_id.in_(chunk)).delete(synchronize_session=False)
+        Notification.query.filter(Notification.comment_id.in_(chunk)).delete(
             synchronize_session=False
         )
+        Report.query.filter(Report.comment_id.in_(chunk)).delete(
+            synchronize_session=False
+        )
+        Comment.query.filter(Comment.id.in_(chunk)).update(
+            {Comment.parent_id: None}, synchronize_session=False
+        )
+        Comment.query.filter(Comment.id.in_(chunk)).delete(synchronize_session=False)
+    return len(all_comment_ids)
+
+
+def _delete_posts_cascade(post_ids):
+    """Delete posts and all associated comments, images, websites, votes, notifications, reports."""
+    post_ids = list(post_ids)
+    if not post_ids:
+        return 0, 0
+
+    post_comment_ids = []
+    for chunk in _chunked(post_ids, 500):
+        post_comment_ids.extend(
+            row.id
+            for row in Comment.query.filter(Comment.post_id.in_(chunk)).with_entities(
+                Comment.id
+            )
+        )
+    deleted_comments_count = _delete_comments(post_comment_ids)
+
+    for chunk in _chunked(post_ids, 500):
+        _delete_post_notifications(chunk)
+        _delete_post_reports(chunk)
+        Vote.query.filter(Vote.post_id.in_(chunk)).delete(synchronize_session=False)
+        PostImage.query.filter(PostImage.post_id.in_(chunk)).delete(
+            synchronize_session=False
+        )
+        GeneratedWebsite.query.filter(GeneratedWebsite.post_id.in_(chunk)).delete(
+            synchronize_session=False
+        )
+        posts = Post.query.filter(Post.id.in_(chunk)).all()
+        for p in posts:
+            db.session.delete(p)
+
+    return len(post_ids), deleted_comments_count
+
+
+def _delete_users_cascade(usernames):
+    """Delete one or more users and all their posts, comments, responses to comments, votes, moderation records, etc."""
+    usernames = list(usernames)
+    if not usernames:
+        return {
+            "users": 0,
+            "posts": 0,
+            "comments": 0,
+            "media_paths": [],
+            "website_paths": [],
+        }
+
+    # Find all posts authored by these users
+    post_ids = []
+    for chunk in _chunked(usernames, 500):
+        post_ids.extend(
+            row.id
+            for row in Post.query.filter(Post.user.in_(chunk)).with_entities(Post.id)
+        )
+    media_paths = media_service.media_paths_for_posts(post_ids)
+    website_paths = website_service.website_paths_for_posts(post_ids)
+
+    # 1. Collect all comments authored by the user(s) AND all comments on the users' posts
+    user_comment_ids = []
+    for chunk in _chunked(usernames, 500):
+        user_comment_ids.extend(
+            row.id
+            for row in Comment.query.filter(Comment.user.in_(chunk)).with_entities(
+                Comment.id
+            )
+        )
+    post_comment_ids = []
+    if post_ids:
+        for chunk in _chunked(post_ids, 500):
+            post_comment_ids.extend(
+                row.id
+                for row in Comment.query.filter(
+                    Comment.post_id.in_(chunk)
+                ).with_entities(Comment.id)
+            )
+    all_root_comment_ids = list(set(user_comment_ids + post_comment_ids))
+
+    # 2. Delete all comments and their descendant responses, votes, notifications, reports
+    total_comments_deleted = _delete_comments(all_root_comment_ids)
+
+    # 3. Delete the users' posts
+    if post_ids:
+        for chunk in _chunked(post_ids, 500):
+            _delete_post_notifications(chunk)
+            _delete_post_reports(chunk)
+            Vote.query.filter(Vote.post_id.in_(chunk)).delete(synchronize_session=False)
+            PostImage.query.filter(PostImage.post_id.in_(chunk)).delete(
+                synchronize_session=False
+            )
+            GeneratedWebsite.query.filter(GeneratedWebsite.post_id.in_(chunk)).delete(
+                synchronize_session=False
+            )
+            Post.query.filter(Post.id.in_(chunk)).delete(synchronize_session=False)
+
+    for chunk in _chunked(usernames, 500):
+        # 4. Clean up moderator removed_by FK on remaining posts/comments
+        Post.query.filter(Post.removed_by.in_(chunk)).update(
+            {Post.removed_by: None}, synchronize_session=False
+        )
+        Comment.query.filter(Comment.removed_by.in_(chunk)).update(
+            {Comment.removed_by: None}, synchronize_session=False
+        )
+
+        # 5. Clean up votes cast by the user(s) on ANY remaining posts/comments
+        Vote.query.filter(Vote.voter.in_(chunk)).delete(synchronize_session=False)
+
+        # 6. Clean up notifications where the user is recipient or actor
+        Notification.query.filter(Notification.recipient.in_(chunk)).delete(
+            synchronize_session=False
+        )
+        Notification.query.filter(Notification.actor.in_(chunk)).delete(
+            synchronize_session=False
+        )
+
+        # 7. Clean up reports filed by or resolved by the user
+        Report.query.filter(Report.reporter.in_(chunk)).delete(
+            synchronize_session=False
+        )
+        Report.query.filter(Report.resolved_by.in_(chunk)).update(
+            {Report.resolved_by: None}, synchronize_session=False
+        )
+
+        # 8. Clean up subdeaddit moderators and bans
+        SubdeadditModerator.query.filter(
+            SubdeadditModerator.username.in_(chunk)
+        ).delete(synchronize_session=False)
+        Ban.query.filter(Ban.username.in_(chunk)).delete(synchronize_session=False)
+
+        # 9. Clean up agents and agent runtime data
+        AgentMemory.query.filter(AgentMemory.user_username.in_(chunk)).delete(
+            synchronize_session=False
+        )
+        agent_run_ids = [
+            row.id
+            for row in AgentRun.query.filter(
+                AgentRun.persona_username.in_(chunk)
+            ).with_entities(AgentRun.id)
+        ]
+        if agent_run_ids:
+            for r_chunk in _chunked(agent_run_ids, 500):
+                ToolCall.query.filter(ToolCall.run_id.in_(r_chunk)).delete(
+                    synchronize_session=False
+                )
+                AgentTurn.query.filter(AgentTurn.run_id.in_(r_chunk)).delete(
+                    synchronize_session=False
+                )
+                AgentRun.query.filter(AgentRun.id.in_(r_chunk)).delete(
+                    synchronize_session=False
+                )
+
+        agents = Agent.query.filter(Agent.user_username.in_(chunk)).all()
+        for agent in agents:
+            agent_runs = [
+                row.id
+                for row in AgentRun.query.filter_by(agent_id=agent.id).with_entities(
+                    AgentRun.id
+                )
+            ]
+            if agent_runs:
+                for r_chunk in _chunked(agent_runs, 500):
+                    ToolCall.query.filter(ToolCall.run_id.in_(r_chunk)).delete(
+                        synchronize_session=False
+                    )
+                    AgentTurn.query.filter(AgentTurn.run_id.in_(r_chunk)).delete(
+                        synchronize_session=False
+                    )
+                    AgentRun.query.filter(AgentRun.id.in_(r_chunk)).delete(
+                        synchronize_session=False
+                    )
+            db.session.delete(agent)
+
+        # 10. Delete the user records themselves
+        users = User.query.filter(User.username.in_(chunk)).all()
+        for u in users:
+            db.session.delete(u)
+
+    return {
+        "users": len(usernames),
+        "posts": len(post_ids),
+        "comments": total_comments_deleted,
+        "media_paths": media_paths,
+        "website_paths": website_paths,
+    }
 
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -550,44 +796,21 @@ def api_get_user(username):
 @admin_required
 def api_delete_user(username):
     """Delete a user and all associated content."""
-    user = User.query.get_or_404(username)
+    User.query.get_or_404(username)
 
     try:
-        post_ids = [
-            row.id for row in Post.query.filter_by(user=username).with_entities(Post.id)
-        ]
-        posts_count = len(post_ids)
-        comments_count = Comment.query.filter_by(user=username).count()
-        media_paths = media_service.media_paths_for_posts(post_ids)
-        website_paths = website_service.website_paths_for_posts(post_ids)
-        _delete_post_notifications(post_ids)
-        _delete_post_reports(post_ids)
-
-        # Delete associated content (cascade should handle this, but being explicit)
-        Comment.query.filter_by(user=username).delete()
-        if post_ids:
-            # A bulk Query.delete() bypasses ORM cascades, so post_image rows
-            # (no DB-level ON DELETE CASCADE on post_id) must be dropped here
-            # explicitly or they would dangle once their post is gone.
-            # GeneratedWebsite rows use DB-level ON DELETE CASCADE; this
-            # snapshot preserves their files for post-commit cleanup.
-            PostImage.query.filter(PostImage.post_id.in_(post_ids)).delete(
-                synchronize_session=False
-            )
-            Post.query.filter(Post.id.in_(post_ids)).delete(synchronize_session=False)
-
-        db.session.delete(user)
+        res = _delete_users_cascade([username])
         db.session.commit()
-        media_service.delete_media_files(current_app, media_paths)
-        website_service.delete_website_files(current_app, website_paths)
+        media_service.delete_media_files(current_app, res["media_paths"])
+        website_service.delete_website_files(current_app, res["website_paths"])
 
         return jsonify(
             {
                 "success": True,
                 "deleted": {
                     "user": username,
-                    "posts": posts_count,
-                    "comments": comments_count,
+                    "posts": res["posts"],
+                    "comments": res["comments"],
                 },
             }
         )
@@ -607,52 +830,24 @@ def api_bulk_delete_users():
         return jsonify({"success": False, "error": "No usernames provided"}), 400
 
     try:
-        deleted_count = 0
-        total_posts = 0
-        total_comments = 0
-        media_paths = []
-        website_paths = []
-
-        for username in usernames:
-            user = User.query.get(username)
-            if user:
-                post_ids = [
-                    row.id
-                    for row in Post.query.filter_by(user=username).with_entities(
-                        Post.id
-                    )
-                ]
-                comments_count = Comment.query.filter_by(user=username).count()
-                media_paths.extend(media_service.media_paths_for_posts(post_ids))
-                website_paths.extend(website_service.website_paths_for_posts(post_ids))
-                _delete_post_notifications(post_ids)
-                _delete_post_reports(post_ids)
-
-                Comment.query.filter_by(user=username).delete()
-                if post_ids:
-                    PostImage.query.filter(PostImage.post_id.in_(post_ids)).delete(
-                        synchronize_session=False
-                    )
-                    Post.query.filter(Post.id.in_(post_ids)).delete(
-                        synchronize_session=False
-                    )
-                db.session.delete(user)
-
-                deleted_count += 1
-                total_posts += len(post_ids)
-                total_comments += comments_count
-
+        existing_usernames = [
+            row.username
+            for row in User.query.filter(User.username.in_(usernames)).with_entities(
+                User.username
+            )
+        ]
+        res = _delete_users_cascade(existing_usernames)
         db.session.commit()
-        media_service.delete_media_files(current_app, media_paths)
-        website_service.delete_website_files(current_app, website_paths)
+        media_service.delete_media_files(current_app, res["media_paths"])
+        website_service.delete_website_files(current_app, res["website_paths"])
 
         return jsonify(
             {
                 "success": True,
                 "deleted": {
-                    "users": deleted_count,
-                    "posts": total_posts,
-                    "comments": total_comments,
+                    "users": res["users"],
+                    "posts": res["posts"],
+                    "comments": res["comments"],
                 },
             }
         )
@@ -752,38 +947,18 @@ def api_delete_subdeaddit(name):
     subdeaddit = Subdeaddit.query.get_or_404(name)
 
     try:
-        # Get impact stats before deletion
         post_ids = [
             row.id
             for row in Post.query.filter_by(subdeaddit_name=name).with_entities(Post.id)
         ]
-        posts_count = len(post_ids)
-        comments_count = (
-            Comment.query.join(Post).filter(Post.subdeaddit_name == name).count()
-        )
         media_paths = media_service.media_paths_for_posts(post_ids)
         website_paths = website_service.website_paths_for_posts(post_ids)
-        _delete_post_notifications(post_ids)
-        _delete_post_reports(post_ids)
+        posts_count, comments_count = _delete_posts_cascade(post_ids)
 
-        # Delete associated content
-        # First get comment IDs to delete (can't use join().delete())
-        comment_ids = [
-            c.id
-            for c in Comment.query.join(Post).filter(Post.subdeaddit_name == name).all()
-        ]
-        for comment_id in comment_ids:
-            Comment.query.filter_by(id=comment_id).delete()
-
-        if post_ids:
-            # Bulk Query.delete() bypasses ORM cascades, so post_image rows
-            # must be dropped explicitly before their post rows disappear.
-            # GeneratedWebsite rows rely on DB-level ON DELETE CASCADE; this
-            # snapshot preserves their files for post-commit cleanup.
-            PostImage.query.filter(PostImage.post_id.in_(post_ids)).delete(
-                synchronize_session=False
-            )
-            Post.query.filter(Post.id.in_(post_ids)).delete(synchronize_session=False)
+        SubdeadditModerator.query.filter_by(subdeaddit_name=name).delete(
+            synchronize_session=False
+        )
+        Ban.query.filter_by(subdeaddit_name=name).delete(synchronize_session=False)
 
         db.session.delete(subdeaddit)
         db.session.commit()
@@ -831,37 +1006,20 @@ def api_bulk_delete_subdeaddits():
                         Post.id
                     )
                 ]
-                comments_count = (
-                    Comment.query.join(Post)
-                    .filter(Post.subdeaddit_name == name)
-                    .count()
-                )
                 media_paths.extend(media_service.media_paths_for_posts(post_ids))
                 website_paths.extend(website_service.website_paths_for_posts(post_ids))
-                _delete_post_notifications(post_ids)
-                _delete_post_reports(post_ids)
+                posts_count, comments_count = _delete_posts_cascade(post_ids)
 
-                # First get comment IDs to delete (can't use join().delete())
-                comment_ids = [
-                    c.id
-                    for c in Comment.query.join(Post)
-                    .filter(Post.subdeaddit_name == name)
-                    .all()
-                ]
-                for comment_id in comment_ids:
-                    Comment.query.filter_by(id=comment_id).delete()
-
-                if post_ids:
-                    PostImage.query.filter(PostImage.post_id.in_(post_ids)).delete(
-                        synchronize_session=False
-                    )
-                    Post.query.filter(Post.id.in_(post_ids)).delete(
-                        synchronize_session=False
-                    )
+                SubdeadditModerator.query.filter_by(subdeaddit_name=name).delete(
+                    synchronize_session=False
+                )
+                Ban.query.filter_by(subdeaddit_name=name).delete(
+                    synchronize_session=False
+                )
                 db.session.delete(subdeaddit)
 
                 deleted_count += 1
-                total_posts += len(post_ids)
+                total_posts += posts_count
                 total_comments += comments_count
 
         db.session.commit()
@@ -974,19 +1132,13 @@ def api_get_post(post_id):
 @admin_required
 def api_delete_post(post_id):
     """Delete a post and all associated comments."""
-    post = Post.query.get_or_404(post_id)
+    Post.query.get_or_404(post_id)
 
     try:
-        comments_count = Comment.query.filter_by(post_id=post_id).count()
         media_paths = media_service.media_paths_for_posts([post_id])
         website_paths = website_service.website_paths_for_posts([post_id])
-        _delete_post_notifications([post_id])
-        _delete_post_reports([post_id])
+        posts_count, comments_count = _delete_posts_cascade([post_id])
 
-        # Delete associated comments
-        Comment.query.filter_by(post_id=post_id).delete()
-
-        db.session.delete(post)
         db.session.commit()
         media_service.delete_media_files(current_app, media_paths)
         website_service.delete_website_files(current_app, website_paths)
@@ -1010,23 +1162,13 @@ def api_bulk_delete_posts():
         return jsonify({"success": False, "error": "No post IDs provided"}), 400
 
     try:
-        deleted_count = 0
-        total_comments = 0
-        media_paths = media_service.media_paths_for_posts(post_ids)
-        website_paths = website_service.website_paths_for_posts(post_ids)
-        _delete_post_notifications(post_ids)
-        _delete_post_reports(post_ids)
-
-        for post_id in post_ids:
-            post = Post.query.get(post_id)
-            if post:
-                comments_count = Comment.query.filter_by(post_id=post_id).count()
-
-                Comment.query.filter_by(post_id=post_id).delete()
-                db.session.delete(post)
-
-                deleted_count += 1
-                total_comments += comments_count
+        existing_post_ids = [
+            row.id
+            for row in Post.query.filter(Post.id.in_(post_ids)).with_entities(Post.id)
+        ]
+        media_paths = media_service.media_paths_for_posts(existing_post_ids)
+        website_paths = website_service.website_paths_for_posts(existing_post_ids)
+        posts_count, comments_count = _delete_posts_cascade(existing_post_ids)
 
         db.session.commit()
         media_service.delete_media_files(current_app, media_paths)
@@ -1035,7 +1177,7 @@ def api_bulk_delete_posts():
         return jsonify(
             {
                 "success": True,
-                "deleted": {"posts": deleted_count, "comments": total_comments},
+                "deleted": {"posts": posts_count, "comments": comments_count},
             }
         )
     except Exception as e:
@@ -1125,26 +1267,12 @@ def api_get_comment(comment_id):
 @admin_required
 def api_delete_comment(comment_id):
     """Delete a comment and all child comments."""
-    comment = Comment.query.get_or_404(comment_id)
+    Comment.query.get_or_404(comment_id)
 
     try:
-        # Get all child comments recursively
-        def get_child_comments(parent_id):
-            children = Comment.query.filter_by(parent_id=parent_id).all()
-            all_children = children.copy()
-            for child in children:
-                all_children.extend(get_child_comments(child.id))
-            return all_children
-
-        child_comments = get_child_comments(comment_id)
-        child_count = len(child_comments)
-
-        # Delete child comments first
-        for child in child_comments:
-            db.session.delete(child)
-
-        # Delete the comment itself
-        db.session.delete(comment)
+        all_descendants = _get_comment_ids_with_descendants([comment_id])
+        child_count = max(0, len(all_descendants) - 1)
+        _delete_comments([comment_id])
         db.session.commit()
 
         return jsonify(
@@ -1169,33 +1297,16 @@ def api_bulk_delete_comments():
         return jsonify({"success": False, "error": "No comment IDs provided"}), 400
 
     try:
-        deleted_count = 0
-        total_children = 0
-
-        # Helper function to get child comments
-        def get_child_comments(parent_id):
-            children = Comment.query.filter_by(parent_id=parent_id).all()
-            all_children = children.copy()
-            for child in children:
-                all_children.extend(get_child_comments(child.id))
-            return all_children
-
-        for comment_id in comment_ids:
-            comment = Comment.query.get(comment_id)
-            if comment:
-                child_comments = get_child_comments(comment_id)
-                child_count = len(child_comments)
-
-                # Delete child comments first
-                for child in child_comments:
-                    db.session.delete(child)
-
-                # Delete the comment itself
-                db.session.delete(comment)
-
-                deleted_count += 1
-                total_children += child_count
-
+        existing_comment_ids = [
+            row.id
+            for row in Comment.query.filter(Comment.id.in_(comment_ids)).with_entities(
+                Comment.id
+            )
+        ]
+        all_ids = _get_comment_ids_with_descendants(existing_comment_ids)
+        deleted_count = len(existing_comment_ids)
+        total_children = max(0, len(all_ids) - deleted_count)
+        _delete_comments(existing_comment_ids)
         db.session.commit()
 
         return jsonify(
@@ -1210,6 +1321,7 @@ def api_bulk_delete_comments():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error bulk deleting comments: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 def _sparkline(values: list[float | None], width: int = 120, height: int = 28) -> str:
@@ -2715,7 +2827,8 @@ def clear_jobs_api():
         # Get count of jobs before deletion for reporting
         job_count = Job.query.count()
 
-        # Delete all jobs
+        # Delete all job logs then jobs
+        JobLog.query.delete(synchronize_session=False)
         db.session.query(Job).delete()
         db.session.commit()
 

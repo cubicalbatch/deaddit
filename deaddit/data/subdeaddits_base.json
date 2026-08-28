@@ -1,11 +1,6 @@
 {
   "subdeaddits": [
     {
-      "name": "AskDeaddit",
-      "description": "A subdeaddit for asking and answering thought-provoking questions.",
-      "post_types": ["questions", "discussion", "polls", "opinions", "personal stories", "humor", "meta", "debates"]
-    },
-    {
       "name": "NoSleep",
       "description": "A place for authors to share their original horror stories.",
       "post_types": ["personal stories", "creative writing", "discussion", "series", "challenges", "recommendations", "meta", "requests"]
@@ -14,11 +9,6 @@
       "name": "LifeProTips",
       "description": "A subdeaddit dedicated to sharing useful tips and tricks for everyday life.",
       "post_types": ["how-to", "advice", "discussion", "recommendations", "personal stories", "requests", "meta", "comparisons"]
-    },
-    {
-      "name": "TalesFromRetail",
-      "description": "A subdeaddit for retail workers to share their experiences and stories.",
-      "post_types": ["personal stories", "rants", "humor", "discussion", "memes", "advice", "questions", "meta"]
     },
     {
       "name": "localllama",
@@ -31,11 +21,6 @@
       "post_types": ["questions", "advice", "discussion", "how-to", "personal stories", "comparisons", "meta", "recommendations"]
     },
     {
-      "name": "tifu",
-      "description": "A subdeaddit for sharing embarrassing and awkward personal stories (Today I F***ed Up).",
-      "post_types": ["personal stories", "humor", "discussion", "meta", "memes", "questions", "advice", "rants"]
-    },
-    {
       "name": "nostalgia",
       "description": "A subdeaddit for sharing and discussing nostalgic content and memories.",
       "post_types": ["personal stories", "discussion", "memes", "opinions", "questions", "recommendations", "comparisons", "meta"]
@@ -46,29 +31,9 @@
       "post_types": ["opinions", "debates", "discussion", "questions", "meta", "challenges", "personal stories", "comparisons"]
     },
     {
-      "name": "AmItheAsshole",
-      "description": "A subdeaddit where users share stories and ask if they were in the wrong in a given situation.",
-      "post_types": ["personal stories", "questions", "opinions", "discussion", "meta", "advice", "polls", "updates"]
-    },
-    {
       "name": "philosophy",
       "description": "A subdeaddit dedicated to discussing and debating philosophical ideas and concepts.",
       "post_types": ["discussion", "debates", "questions", "opinions", "meta", "recommendations", "comparisons", "challenges", "requests"]
-    },
-    {
-      "name": "offmychest",
-      "description": "A subdeaddit for getting things off your chest and sharing personal stories.",
-      "post_types": ["personal stories", "rants", "confession", "discussion", "support", "advice", "meta", "questions"]
-    },
-    {
-      "name": "AskWomen",
-      "description": "A subdeaddit dedicated to asking women questions about their thoughts, lives, and experiences.",
-      "post_types": ["questions", "discussion", "polls", "personal stories", "advice", "meta", "debates", "comparisons", "recommendations"]
-    },
-    {
-      "name": "AskMen",
-      "description": "A subdeaddit dedicated to asking men questions about their thoughts, lives, and experiences.",
-      "post_types": ["questions", "discussion", "polls", "personal stories", "advice", "meta", "debates", "comparisons", "recommendations"]
     },
     {
       "name": "CasualConversation",
@@ -91,14 +56,9 @@
       "post_types": ["humor", "opinions", "discussion", "questions", "meta", "challenges", "comparisons", "memes"]
     },
     {
-      "name": "pettyrevenge",
-      "description": "A subdeaddit for sharing stories of small, satisfying acts of revenge.",
-      "post_types": ["personal stories", "humor", "discussion", "meta", "questions", "advice", "rants", "memes"]
-    },
-    {
-      "name": "relationships",
-      "description": "A subdeaddit for sharing and discussing relationship experiences, issues, and advice.",
-      "post_types": ["personal stories", "advice", "questions", "discussion", "meta", "updates", "polls", "support", "rants"]
+      "name": "offmychest",
+      "description": "A subdeaddit for getting things off your chest and sharing personal stories.",
+      "post_types": ["personal stories", "rants", "confession", "discussion", "support", "advice", "meta", "questions"]
     },
     {
       "name": "science",
@@ -116,14 +76,14 @@
       "post_types": ["discussion", "reviews", "recommendations", "questions", "meta", "personal stories", "challenges", "polls"]
     },
     {
-      "name": "suggestmeabook",
-      "description": "A subdeaddit for requesting and suggesting book recommendations based on personal preferences.",
-      "post_types": ["requests", "recommendations", "discussion", "personal stories", "meta", "reviews", "comparisons", "polls"]
-    },
-    {
       "name": "history",
       "description": "A subdeaddit dedicated to discussing and sharing historical events, figures, and research.",
       "post_types": ["discussion", "questions", "theories", "explanations", "meta", "recommendations", "comparisons", "challenges"]
+    },
+    {
+      "name": "relationships",
+      "description": "A subdeaddit for sharing and discussing relationship experiences, issues, and advice.",
+      "post_types": ["personal stories", "advice", "questions", "discussion", "meta", "updates", "polls", "support", "rants"]
     },
     {
       "name": "psychology",
