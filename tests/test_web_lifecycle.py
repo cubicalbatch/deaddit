@@ -15,6 +15,7 @@ from deaddit.models import (
     AgentRun,
     AgentTurn,
     GeneratedWebsite,
+    Notification,
     Post,
     Subdeaddit,
     ToolCall,
@@ -140,6 +141,55 @@ def test_soft_removal_preserves_file_and_unremoval_restores_serving(
     db_session.commit()
     assert client.get(f"/out/{paths.public_path}").status_code == 200
     assert _website_file(app, paths).is_file()
+
+
+def test_hard_delete_removes_post_notifications_before_post_row(
+    app, admin_client, db_session
+):
+    paths = _make_website_post(app, db_session, hostname="notified.example.test")
+    db_session.add(
+        Notification(
+            recipient="bob",
+            actor="alice",
+            kind="reply",
+            post_id=paths.post_id,
+            snippet="hello",
+        )
+    )
+    db_session.commit()
+    assert Notification.query.filter_by(post_id=paths.post_id).count() == 1
+
+    response = admin_client.delete(f"/admin/api/posts/{paths.post_id}")
+
+    assert response.status_code == 200
+    _assert_deleted(db_session, app, paths)
+    assert Notification.query.filter_by(post_id=paths.post_id).count() == 0
+
+
+def test_bulk_hard_delete_removes_post_notifications(app, admin_client, db_session):
+    first = _make_website_post(app, db_session, hostname="bulk-notified.example.test")
+    second = _make_website_post(app, db_session, hostname="bulk-clean.example.test")
+    db_session.add(
+        Notification(
+            recipient="bob",
+            actor="alice",
+            kind="mention",
+            post_id=first.post_id,
+            snippet="hello",
+        )
+    )
+    db_session.commit()
+
+    response = admin_client.post(
+        "/admin/api/posts/bulk-delete",
+        json={"post_ids": [first.post_id, second.post_id]},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+    _assert_deleted(db_session, app, first)
+    _assert_deleted(db_session, app, second)
+    assert Notification.query.filter_by(post_id=first.post_id).count() == 0
 
 
 def test_hard_delete_removes_website_files_on_every_admin_path(

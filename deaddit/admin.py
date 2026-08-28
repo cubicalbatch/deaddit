@@ -51,6 +51,7 @@ from deaddit.models import (
     LLMProvider,
     LLMUsage,
     ModelRoute,
+    Notification,
     Post,
     PostImage,
     PromptPin,
@@ -71,6 +72,25 @@ from deaddit.utils import production_disabled
 from deaddit.websites import service as website_service
 
 logger = logging.getLogger(__name__)
+
+
+def _delete_post_notifications(post_ids):
+    """Delete notifications that would block hard deletion of these posts."""
+    post_ids = list(post_ids)
+    if post_ids:
+        Notification.query.filter(Notification.post_id.in_(post_ids)).delete(
+            synchronize_session=False
+        )
+
+
+def _delete_post_reports(post_ids):
+    """Delete reports that would block hard deletion of these posts."""
+    post_ids = list(post_ids)
+    if post_ids:
+        Report.query.filter(Report.post_id.in_(post_ids)).delete(
+            synchronize_session=False
+        )
+
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -537,6 +557,8 @@ def api_delete_user(username):
         comments_count = Comment.query.filter_by(user=username).count()
         media_paths = media_service.media_paths_for_posts(post_ids)
         website_paths = website_service.website_paths_for_posts(post_ids)
+        _delete_post_notifications(post_ids)
+        _delete_post_reports(post_ids)
 
         # Delete associated content (cascade should handle this, but being explicit)
         Comment.query.filter_by(user=username).delete()
@@ -600,6 +622,8 @@ def api_bulk_delete_users():
                 comments_count = Comment.query.filter_by(user=username).count()
                 media_paths.extend(media_service.media_paths_for_posts(post_ids))
                 website_paths.extend(website_service.website_paths_for_posts(post_ids))
+                _delete_post_notifications(post_ids)
+                _delete_post_reports(post_ids)
 
                 Comment.query.filter_by(user=username).delete()
                 if post_ids:
@@ -736,6 +760,8 @@ def api_delete_subdeaddit(name):
         )
         media_paths = media_service.media_paths_for_posts(post_ids)
         website_paths = website_service.website_paths_for_posts(post_ids)
+        _delete_post_notifications(post_ids)
+        _delete_post_reports(post_ids)
 
         # Delete associated content
         # First get comment IDs to delete (can't use join().delete())
@@ -809,6 +835,8 @@ def api_bulk_delete_subdeaddits():
                 )
                 media_paths.extend(media_service.media_paths_for_posts(post_ids))
                 website_paths.extend(website_service.website_paths_for_posts(post_ids))
+                _delete_post_notifications(post_ids)
+                _delete_post_reports(post_ids)
 
                 # First get comment IDs to delete (can't use join().delete())
                 comment_ids = [
@@ -949,6 +977,8 @@ def api_delete_post(post_id):
         comments_count = Comment.query.filter_by(post_id=post_id).count()
         media_paths = media_service.media_paths_for_posts([post_id])
         website_paths = website_service.website_paths_for_posts([post_id])
+        _delete_post_notifications([post_id])
+        _delete_post_reports([post_id])
 
         # Delete associated comments
         Comment.query.filter_by(post_id=post_id).delete()
@@ -981,6 +1011,8 @@ def api_bulk_delete_posts():
         total_comments = 0
         media_paths = media_service.media_paths_for_posts(post_ids)
         website_paths = website_service.website_paths_for_posts(post_ids)
+        _delete_post_notifications(post_ids)
+        _delete_post_reports(post_ids)
 
         for post_id in post_ids:
             post = Post.query.get(post_id)
