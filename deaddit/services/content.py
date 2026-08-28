@@ -13,24 +13,39 @@ creates one.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import cache
 
+from flask import current_app
 from sqlalchemy.exc import SQLAlchemyError
 
 from deaddit.dynamics import activity, degeneracy, moderation, notifications
 from deaddit.extensions import cache as flask_cache
 from deaddit.extensions import db
-from deaddit.models import Comment, Post, PostImage, Setting, Subdeaddit, User
+from deaddit.models import (
+    Comment,
+    GeneratedWebsite,
+    Post,
+    PostImage,
+    Setting,
+    Subdeaddit,
+    User,
+)
 
 __all__ = [
     "ContentValidationError",
     "PendingPostImage",
+    "PendingGeneratedWebsite",
     "get_available_models",
     "preflight_image_post",
     "create_image_post",
+    "preflight_website_post",
+    "create_website_post",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 class ContentValidationError(ValueError):
@@ -332,6 +347,194 @@ def create_image_post(
         )
     )
     _commit()
+    _run_post_hooks(post)
+    return post
+
+
+@dataclass(frozen=True)
+class PendingGeneratedWebsite:
+    """A validated, already-stored generated website ready to attach to a post.
+
+    Every field mirrors a :class:`~deaddit.models.GeneratedWebsite` column
+    except ``post_id`` (assigned internally once the post is flushed) and
+    ``created_at`` (a database default). The caller - the website-publication
+    orchestration layer (plan phase 3.2), not this service - is responsible
+    for generating the HTML, normalizing/allocating ``public_path``/
+    ``hostname``/``page_name``, and atomically storing the file
+    (:mod:`deaddit.websites.storage`) *before* constructing this dataclass
+    and calling :func:`create_website_post`. This service performs no
+    generation and no HTML validation: it only writes the database rows
+    that reference the given, already-stored path.
+
+    Unlike :class:`PendingPostImage`, failure cleanup for the stored file
+    *is* this service's responsibility (see :func:`create_website_post`)
+    rather than the caller's - that split is an explicit spec requirement
+    for the website flow, not an inconsistency with the image flow.
+    """
+
+    storage_path: str
+    byte_size: int
+    sha256: str
+    public_path: str
+    hostname: str
+    page_name: str
+    source_description: str
+    creator_username_snapshot: str
+    api_url_snapshot: str
+    model_snapshot: str
+    agent_id: int | None = None
+    agent_run_id: int | None = None
+    request_id: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    finish_reason: str | None = None
+
+
+def preflight_website_post(*, user: str, subdeaddit: str, title: str) -> None:
+    """Validate everything that must hold before a website is generated.
+
+    Call this first, before spending any provider cost generating HTML.
+    Runs the same checks as :func:`preflight_image_post`: a non-empty
+    title, a known user and subdeaddit, no active ban, and an unexceeded
+    post rate limit.
+
+    This check is advisory for cost avoidance only - it does not reserve a
+    rate-limit slot or lock anything. Generation and storage can take long
+    enough for state to change (a new ban lands, the rate-limit window
+    fills, the community is deleted), so :func:`create_website_post`
+    independently re-runs every one of these checks immediately before it
+    commits.
+
+    Raises:
+        ContentValidationError: on an empty title, unknown author, unknown
+            subdeaddit, an active ban, or an exceeded post rate limit.
+    """
+    _validate_post_preflight(
+        title=title,
+        content=None,
+        user=user,
+        subdeaddit=subdeaddit,
+        require_content=False,
+    )
+
+
+def _cleanup_stored_website(storage_path: str) -> None:
+    """Best-effort removal of an already-stored website file after a failed publish.
+
+    Called only from :func:`create_website_post` when validation or the
+    database commit fails after the file was already written to disk. Logs
+    only the opaque ``storage_path`` if removal itself fails - never the
+    source description, endpoint, or any credential - so it is safe for
+    Phase 5's reconciliation CLI to sweep the orphaned file later without
+    this becoming a secret or content leak in the logs.
+    """
+    from deaddit.websites.storage import delete_website, website_root
+
+    try:
+        delete_website(website_root(current_app), storage_path)
+    except Exception:
+        logger.warning(
+            "website cleanup failed to remove stored file: storage_path=%r",
+            storage_path,
+            exc_info=True,
+        )
+
+
+def create_website_post(
+    *,
+    title: str,
+    content: str | None,
+    user: str,
+    subdeaddit: str,
+    website: PendingGeneratedWebsite,
+    score: int = 0,
+    model: str = "unknown",
+    llm_model: str | None = None,
+    post_type: str | None = None,
+    created_at: datetime | None = None,
+) -> Post:
+    """Atomically create a Post and its GeneratedWebsite; run hooks exactly once.
+
+    Call this only after :func:`preflight_website_post` has succeeded and
+    the website HTML has already been generated and stored on disk as a
+    :class:`PendingGeneratedWebsite`. This function re-validates every
+    preflight condition itself immediately before commit - see
+    :func:`preflight_website_post` for why that recheck matters - so it
+    never trusts a preflight result that may be stale.
+
+    ``content`` may be blank or ``None``: website posts are not required to
+    carry body text, unlike :func:`create_post`, matching the image-post
+    contract.
+
+    Both rows are written in the same database transaction: a failure
+    committing either one leaves neither behind. Unlike
+    :func:`create_image_post`, this function *does* own filesystem
+    rollback: on any validation or database failure it deletes the
+    already-stored HTML file referenced by ``website.storage_path`` before
+    re-raising, so a failed call leaves no post, no row, and no file. If
+    that deletion itself fails, the opaque storage path is logged (never
+    the description or any credential) so Phase 5's reconciliation CLI can
+    sweep it later; the failure is never surfaced to the caller/agent.
+
+    Raises:
+        ContentValidationError: same conditions as
+            :func:`preflight_website_post`, re-checked at commit time.
+        sqlalchemy.exc.SQLAlchemyError: on a commit failure, e.g. a
+            ``public_path``/``storage_path`` uniqueness collision.
+    """
+    try:
+        _validate_post_preflight(
+            title=title,
+            content=None,
+            user=user,
+            subdeaddit=subdeaddit,
+            require_content=False,
+        )
+
+        post = Post(
+            title=title,
+            content=content or None,
+            score=score,
+            user=user,
+            subdeaddit_name=subdeaddit,
+            model=model,
+            llm_model=llm_model,
+            post_type=post_type,
+        )
+        if created_at is not None:
+            post.created_at = created_at
+        db.session.add(post)
+        db.session.flush()  # assign post.id for the GeneratedWebsite FK below
+
+        db.session.add(
+            GeneratedWebsite(
+                post_id=post.id,
+                public_path=website.public_path,
+                storage_path=website.storage_path,
+                hostname=website.hostname,
+                page_name=website.page_name,
+                source_description=website.source_description,
+                byte_size=website.byte_size,
+                sha256=website.sha256,
+                agent_id=website.agent_id,
+                creator_username_snapshot=website.creator_username_snapshot,
+                agent_run_id=website.agent_run_id,
+                api_url_snapshot=website.api_url_snapshot,
+                model_snapshot=website.model_snapshot,
+                request_id=website.request_id,
+                prompt_tokens=website.prompt_tokens,
+                completion_tokens=website.completion_tokens,
+                total_tokens=website.total_tokens,
+                finish_reason=website.finish_reason,
+            )
+        )
+        _commit()
+    except (ContentValidationError, SQLAlchemyError):
+        db.session.rollback()
+        _cleanup_stored_website(website.storage_path)
+        raise
+
     _run_post_hooks(post)
     return post
 
