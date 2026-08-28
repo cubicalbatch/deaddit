@@ -245,7 +245,13 @@ def test_both_admin_forms_expose_website_controls(seeded_db, admin_client, db_se
         "website-conflict-feedback",
     ):
         assert field in create_form
-    assert "32K+ completion tokens per site" in create_form
+    assert "syncWebsiteControls" in create_form
+    assert "syncPolicyConflict" in create_form
+    assert "websiteConflictMessage" in create_form
+    assert "pick one forced policy" in create_form
+    api_form = admin_client.get(f"/admin/api/agents/{agent.id}")
+    assert api_form.status_code == 200
+    assert "website_posts" not in api_form.get_json()["config"]
 
     edit_form = admin_client.get(f"/admin/agents/{agent.id}").get_data(as_text=True)
     for field in (
@@ -254,4 +260,7 @@ def test_both_admin_forms_expose_website_controls(seeded_db, admin_client, db_se
         "edit-website-conflict-feedback",
     ):
         assert field in edit_form
-    assert "32K+ completion tokens per site" in edit_form
+    assert "syncWebsiteControls" in edit_form
+    assert "syncPolicyConflict" in edit_form
+    assert "websiteConflictMessage" in edit_form
+    assert "pick one forced policy" in edit_form

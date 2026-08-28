@@ -249,12 +249,21 @@ def test_website_post_succeeds_and_gating_is_enforced_independently_of_tool_offe
     )
 
     assert result["ok"] is True
+    assert set(result) == {
+        "ok",
+        "post_id",
+        "title",
+        "subdeaddit",
+        "website_url",
+        "hostname",
+        "hint",
+    }
     assert result["post_id"]
     assert result["title"] == WEBSITE_ARGS["title"]
     assert result["subdeaddit"] == "testsub"
     assert result["hostname"] == "www.fake-observatory.com"
     assert result["website_url"] == "/out/www.fake-observatory.com/aurora-map.html"
-    assert "hint" in result
+    assert result["hint"]
 
     assert Post.query.count() == 1
     website = GeneratedWebsite.query.one()
@@ -266,7 +275,12 @@ def test_website_post_succeeds_and_gating_is_enforced_independently_of_tool_offe
     assert website.agent_run_id == run.id
     assert website.api_url_snapshot == API_URL
     assert website.model_snapshot == MODEL
+    assert website.request_id
+    assert website.prompt_tokens == 1
+    assert website.completion_tokens == 1
+    assert website.total_tokens == 2
     assert website.finish_reason == "stop"
+    assert API_KEY not in repr(website)
 
     root = Path(app.config["GENERATED_WEBSITES_ROOT"])
     assert (root / website.storage_path).is_file()
@@ -497,3 +511,284 @@ def test_website_post_duplicate_guardrail_blocks_before_generation(
     # The duplicate guardrail runs in the executor before dispatch, so no
     # second (billed) generation attempt is made.
     assert len(fake_llm.requests) == 1
+
+
+@pytest.mark.parametrize(
+    ("image_cfg", "website_cfg", "expected"),
+    [
+        ({}, {}, {"create_post"}),
+        (
+            {"enabled": True, "policy": "optional"},
+            {},
+            {"create_post", "create_image_post"},
+        ),
+        (
+            {},
+            {"enabled": True, "policy": "optional"},
+            {"create_post", "create_website"},
+        ),
+        (
+            {"enabled": True, "policy": "optional"},
+            {"enabled": True, "policy": "optional"},
+            {"create_post", "create_image_post", "create_website"},
+        ),
+        ({"enabled": True, "policy": "image_only"}, {}, {"create_image_post"}),
+        (
+            {"enabled": True, "policy": "image_only"},
+            {"enabled": True, "policy": "optional"},
+            {"create_image_post"},
+        ),
+        ({}, {"enabled": True, "policy": "website_only"}, {"create_website"}),
+        (
+            {"enabled": True, "policy": "optional"},
+            {"enabled": True, "policy": "website_only"},
+            {"create_website"},
+        ),
+        (
+            {"enabled": True, "policy": "image_only"},
+            {"enabled": True, "policy": "website_only"},
+            set(),
+        ),
+    ],
+)
+def test_post_policy_truth_table_matches_direct_helper_and_wire_specs(
+    image_cfg, website_cfg, expected
+):
+    """The direct policy helper and both registry surfaces must agree."""
+    from deaddit.agents.registry import (
+        image_posts_config,
+        offered_post_tool_names,
+        specs_for,
+        tools_for,
+        website_posts_config,
+    )
+
+    config = {}
+    if image_cfg:
+        config["image_posts"] = {"provider_id": 1, **image_cfg}
+    if website_cfg:
+        config["website_posts"] = website_cfg
+    agent = type("AgentStub", (), {"config": config})()
+    normalized_image = image_posts_config(agent)
+    normalized_website = website_posts_config(agent)
+    assert (
+        set(offered_post_tool_names(normalized_image, normalized_website)) == expected
+    )
+
+    post_names = {"create_post", "create_image_post", "create_website"}
+    assert {
+        tool.name for tool in tools_for("regular", agent=agent)
+    } & post_names == expected
+    assert {
+        spec.name for spec in specs_for("regular", agent=agent)
+    } & post_names == expected
+
+
+def test_create_website_wire_schema_and_registration_match_contract():
+    from deaddit.agents.registry import AutonomyTier, RateClass, get
+
+    tool = get("create_website")
+    assert tool.min_tier is AutonomyTier.REGULAR
+    assert tool.rate_class is RateClass.WRITE
+    wire = {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters.model_json_schema(),
+        },
+    }
+    function = wire["function"]
+    assert function["name"] == "create_website"
+    assert "concrete" in function["description"].lower()
+    assert "thorough" in function["description"].lower()
+    properties = function["parameters"]["properties"]
+    assert set(properties) == {
+        "community",
+        "title",
+        "content",
+        "website_description",
+        "hostname_hint",
+        "page_name_hint",
+        "post_type",
+    }
+    assert properties["community"]["minLength"] == 1
+    assert properties["community"]["maxLength"] == 50
+    assert properties["title"]["minLength"] == 1
+    assert properties["title"]["maxLength"] == 300
+    assert properties["content"]["anyOf"][0]["maxLength"] == 20000
+    assert properties["website_description"]["minLength"] == 100
+    assert properties["website_description"]["maxLength"] == 12000
+    assert properties["hostname_hint"]["minLength"] == 3
+    assert properties["hostname_hint"]["maxLength"] == 253
+    assert properties["page_name_hint"]["minLength"] == 1
+    assert properties["page_name_hint"]["maxLength"] == 120
+    assert properties["post_type"]["anyOf"][0]["maxLength"] == 50
+    assert set(function["parameters"]["required"]) == {
+        "community",
+        "title",
+        "website_description",
+        "hostname_hint",
+        "page_name_hint",
+    }
+
+
+def test_forged_conflicting_website_call_is_one_safe_audit_rejection(
+    app, db_session, fake_llm
+):
+    disabled_agent = _make_agent(db_session, config={}, user_username="bob")
+    disabled_run = _new_run(db_session, disabled_agent)
+    disabled = execute(
+        "create_website", WEBSITE_ARGS, _ctx(disabled_agent, disabled_run)
+    )
+    assert disabled["ok"] is False
+    assert "not enabled" in disabled["error"]
+    assert fake_llm.requests == []
+    disabled_rows = ToolCall.query.filter_by(run_id=disabled_run.id).all()
+    assert len(disabled_rows) == 1
+    assert disabled_rows[0].name == "create_website"
+    assert disabled_rows[0].ok is False
+    assert disabled_rows[0].error == disabled["error"]
+
+    agent = _make_agent(
+        db_session,
+        config={
+            "image_posts": {
+                "enabled": True,
+                "provider_id": 1,
+                "policy": "image_only",
+            },
+            "website_posts": {"enabled": True, "policy": "website_only"},
+        },
+    )
+    run = _new_run(db_session, agent)
+    result = execute("create_website", WEBSITE_ARGS, _ctx(agent, run))
+
+    assert result["ok"] is False
+    assert "website posts" in result["error"]
+    assert API_KEY not in str(result)
+    assert "<html" not in str(result).lower()
+    assert fake_llm.requests == []
+    rows = ToolCall.query.filter_by(run_id=run.id).all()
+    assert len(rows) == 1
+    assert rows[0].name == "create_website"
+    assert rows[0].ok is False
+    assert rows[0].error == result["error"]
+    assert API_KEY not in str(rows[0].result)
+    assert "<html" not in str(rows[0].result).lower()
+
+
+def test_create_website_hourly_cap_checks_two_prior_shared_posts(
+    app, db_session, fake_llm
+):
+    from deaddit.agents import executor as executor_module
+
+    assert "create_website" in executor_module.RATE_CAPS
+    assert "create_website" in executor_module._RATE_CAP_MESSAGES
+    agent = _website_agent(db_session)
+    for index in range(2):
+        result = execute(
+            "create_post",
+            {
+                "subdeaddit": "testsub",
+                "title": f"Unique hourly headline {index} zyx",
+                "content": f"Independent body {index} qwv",
+            },
+            _ctx(agent, _new_run(db_session, agent)),
+        )
+        assert result["ok"] is True
+
+    fake_llm.enqueue_content(VALID_HTML, finish_reason="stop")
+    capped = execute(
+        "create_website",
+        {**WEBSITE_ARGS, "title": "A third independent hourly headline"},
+        _ctx(agent, _new_run(db_session, agent), deadline=Deadline.after(120)),
+    )
+    assert capped["ok"] is False
+    assert "recently" in capped["error"]
+    assert fake_llm.requests == []
+
+
+def test_shared_one_post_run_budget_blocks_website_after_text_post(
+    app, db_session, fake_llm
+):
+    agent = _website_agent(db_session)
+    run = _new_run(db_session, agent)
+    text = execute(
+        "create_post",
+        {
+            "subdeaddit": "testsub",
+            "title": "A standalone text post",
+            "content": "A standalone body about trail maps.",
+        },
+        _ctx(agent, run),
+    )
+    assert text["ok"] is True
+    blocked = execute(
+        "create_website",
+        WEBSITE_ARGS,
+        _ctx(agent, run, deadline=Deadline.after(120)),
+    )
+    assert blocked["ok"] is False
+    assert "already created a post" in blocked["error"]
+    assert fake_llm.requests == []
+    assert len(ToolCall.query.filter_by(run_id=run.id).all()) == 2
+
+
+def test_website_duplicate_is_suppressed_after_text_post_before_generation(
+    app, db_session, fake_llm
+):
+    agent = _website_agent(db_session)
+    title = "A shared normalized title for duplicate detection"
+    content = "A shared normalized body for duplicate detection."
+    text = execute(
+        "create_post",
+        {"subdeaddit": "testsub", "title": title, "content": content},
+        _ctx(agent, _new_run(db_session, agent)),
+    )
+    assert text["ok"] is True
+    duplicate = execute(
+        "create_website",
+        {
+            **WEBSITE_ARGS,
+            "title": title,
+            "content": content,
+        },
+        _ctx(agent, _new_run(db_session, agent), deadline=Deadline.after(120)),
+    )
+    assert duplicate["ok"] is False
+    assert "too similar" in duplicate["error"]
+    assert fake_llm.requests == []
+
+
+def test_website_loop_detection_is_applied_by_executor(
+    app, db_session, fake_llm, monkeypatch
+):
+    from dataclasses import replace
+
+    from deaddit.agents import executor as executor_module
+    from deaddit.agents import registry as registry_module
+    from deaddit.agents.registry import get
+
+    agent = _website_agent(db_session)
+    run = _new_run(db_session, agent)
+    tool = get("create_website")
+    monkeypatch.setattr(executor_module, "_check_duplicate", lambda *args: None)
+    monkeypatch.setattr(executor_module, "_check_rate_cap", lambda *args: None)
+    monkeypatch.setitem(
+        registry_module.TOOL_REGISTRY,
+        "create_website",
+        replace(
+            tool, handler=lambda _ctx, _params: {"ok": True, "marker": "loop-test"}
+        ),
+    )
+    first = execute("create_website", WEBSITE_ARGS, _ctx(agent, run))
+    second = execute("create_website", WEBSITE_ARGS, _ctx(agent, run))
+    third = execute("create_website", WEBSITE_ARGS, _ctx(agent, run))
+    assert first == {"ok": True, "marker": "loop-test"}
+    assert second["ok"] is True
+    assert second["warning"] == "you are repeating the same action; vary your behaviour"
+    assert third["ok"] is False
+    assert third["force_finish"] is True
+    assert "repeating the same action" in third["error"]
+    assert fake_llm.requests == []
