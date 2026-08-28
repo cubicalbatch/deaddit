@@ -32,11 +32,21 @@ SYSTEM_PROMPT = (
     "with no markdown codeblocks or conversational filler."
 )
 
+USERNAME_STYLE_RULES = (
+    "lowercase; only letters, digits, underscores; 4-20 characters; "
+    "must NOT describe the user's personality (never two trait-words like "
+    "chill_dude, cozy_ghost, quiet_thinker); no real people's names."
+)
+
 USER_PROMPT_TEMPLATE = (
     "Generate {count} unique human-like user personas for the forum.{topic_section}"
     "{troll_section}\n\n"
+    "Each persona is assigned a username style. The username for Persona N "
+    "must follow Persona N's style:\n"
+    "{style_assignments}\n\n"
+    f"Username rules: {USERNAME_STYLE_RULES}\n\n"
     "Each persona object must have the following fields:\n"
-    '- "username": string (creative username, alphanumeric with underscores, 3-25 characters)\n'
+    '- "username": string following the style assigned to that persona\n'
     '- "bio": string (authentic personal bio, 1-3 sentences)\n'
     '- "age": integer (realistic age, between 18 and 75)\n'
     '- "gender": string ("Male" or "Female")\n'
@@ -71,9 +81,54 @@ TROLL_SECTION = (
     "reasonable one, not a caricature.\n"
 )
 
+USERNAME_STYLE_CARDS: list[tuple[str, str]] = [
+    (
+        "phrase",
+        "a short humorous phrase handle, e.g. pm_me_your_turtle, i_hate_mondays, legally_a_bird",
+    ),
+    (
+        "mashup",
+        "two completely unrelated words mashed together, e.g. toaster_falcon, gravel_piano, sasquatch_ledger",
+    ),
+    (
+        "wordplay",
+        "a pun or wordplay on a familiar phrase, e.g. ctrl_alt_defeat, thai_tanic, lug_wrench_romantic",
+    ),
+    (
+        "imperative",
+        "an imperative verb + noun, e.g. adopt_a_duck, fear_the_soup, recycle_your_dad",
+    ),
+    (
+        "evocative",
+        "a single evocative word + 2-4 digit number, e.g. moonlit_4821, harbor_77, verdigris_302",
+    ),
+]
+
+USERNAME_STYLE_RULES = (
+    "lowercase; only letters, digits, underscores; 4-20 characters; "
+    "must NOT describe the user's personality (never two trait-words like "
+    "chill_dude, cozy_ghost, quiet_thinker); no real people's names."
+)
+
 
 class PersonaGenerationError(Exception):
     """Raised when persona generation or parsing fails."""
+
+
+def _assign_styles(n: int) -> list[str]:
+    """Assign a random username style directive to each persona in a batch."""
+    return random.choices([d for _, d in USERNAME_STYLE_CARDS], k=n)
+
+
+def _apply_casing(name: str) -> str:
+    """Post-treat a resolved username: 50% snake_case, 25% PascalCase, 25% camelCase."""
+    r = random.random()
+    if r < 0.25:  # PascalCase
+        return "".join(p.capitalize() for p in name.split("_"))
+    if r < 0.5:  # camelCase
+        parts = name.split("_")
+        return parts[0] + "".join(p.capitalize() for p in parts[1:])
+    return name  # snake_case, unchanged
 
 
 def _extract_json(raw: str) -> list[dict]:
@@ -144,12 +199,14 @@ def _sanitize_persona(item: dict, seen_usernames: set[str]) -> dict:
     candidate = clean_username
     suffix = 1
     while (
-        candidate in seen_usernames
-        or User.query.filter_by(username=candidate).first() is not None
+        candidate.lower() in seen_usernames
+        or User.query.filter(db.func.lower(User.username) == candidate.lower()).first()
+        is not None
     ):
         candidate = f"{clean_username[:35]}_{suffix}"
         suffix += 1
-    seen_usernames.add(candidate)
+    candidate = _apply_casing(candidate)
+    seen_usernames.add(candidate.lower())
 
     try:
         age = int(item.get("age", 25))
@@ -329,6 +386,10 @@ def generate_personas(
             count=batch_target,
             topic_section=topic_section,
             troll_section=TROLL_SECTION if is_troll else "",
+            style_assignments="\n".join(
+                f"Persona {i + 1} username style: {style}"
+                for i, style in enumerate(_assign_styles(batch_target))
+            ),
         )
 
         req = ChatRequest(
@@ -337,7 +398,7 @@ def generate_personas(
             model=model,
             api_url=api_url,
             api_key=api_key,
-            sampling=Sampling(max_tokens=4096, temperature=0.8),
+            sampling=Sampling(max_tokens=16384, temperature=0.8),
         )
 
         result = client.complete(req)

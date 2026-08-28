@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import random
+import re
 
 import pytest
 
@@ -65,9 +67,11 @@ class TestPersonaGeneratorService:
         assert len(result["users"]) == 2
         assert len(result["agents"]) == 2
 
+        # Casing post-treatment may alter the LLM username; use stored values
+        name1, name2 = (u["username"] for u in result["users"])
+
         # Verify DB persistence of users
-        u1 = User.query.filter_by(username="coffeecoder").first()
-        assert u1 is not None
+        u1 = User.query.filter(db.func.lower(User.username) == name1.lower()).first()
         assert u1.age == 29
         assert u1.gender == "Male"
         assert u1.occupation == "Software Architect"
@@ -75,14 +79,14 @@ class TestPersonaGeneratorService:
         assert u1.get_interests() == ["specialty coffee", "rust", "rock climbing"]
         assert u1.get_personality_traits() == ["analytical", "methodical", "curious"]
 
-        u2 = User.query.filter_by(username="sarah_diy").first()
-        assert u2 is not None
+        u2 = User.query.filter(db.func.lower(User.username) == name2.lower()).first()
         assert u2.gender == "Female"
         assert u2.age == 34
 
         # Verify Agent auto-enrollment with default config requirements
-        a1 = Agent.query.filter_by(user_username="coffeecoder").first()
-        assert a1 is not None
+        a1 = Agent.query.filter(
+            db.func.lower(Agent.user_username) == name1.lower()
+        ).first()
         assert a1.autonomy_tier == "power_user"
         assert a1.persona_mode == "fixed"
         assert a1.is_enabled is True
@@ -94,8 +98,9 @@ class TestPersonaGeneratorService:
         assert "api_url" in a1.config
         assert "model" in a1.config
 
-        a2 = Agent.query.filter_by(user_username="sarah_diy").first()
-        assert a2 is not None
+        a2 = Agent.query.filter(
+            db.func.lower(Agent.user_username) == name2.lower()
+        ).first()
         assert a2.autonomy_tier == "power_user"
         assert a2.persona_mode == "fixed"
         assert a2.is_enabled is True
@@ -111,9 +116,15 @@ class TestPersonaGeneratorService:
         assert len(result["users"]) == 1
         assert len(result["agents"]) == 0
 
-        u1 = User.query.filter_by(username="coffeecoder").first()
+        name1 = result["users"][0]["username"]
+        u1 = User.query.filter(db.func.lower(User.username) == name1.lower()).first()
         assert u1 is not None
-        assert Agent.query.filter_by(user_username="coffeecoder").first() is None
+        assert (
+            Agent.query.filter(
+                db.func.lower(Agent.user_username) == name1.lower()
+            ).first()
+            is None
+        )
 
     def test_generate_personas_handles_codeblock_wrapping(self, app, fake_llm):
         wrapped = f"```json\n{SAMPLE_PERSONAS_JSON}\n```"
@@ -142,10 +153,14 @@ class TestPersonaGeneratorService:
         result = generate_personas(
             count=2, auto_create_agent=True, troll_mode="no_troll"
         )
-        # Should generate a non-colliding username
         usernames = [u["username"] for u in result["users"]]
-        assert "coffeecoder" not in usernames
-        assert any(u.startswith("coffeecoder_") for u in usernames)
+        # Case-insensitive: suffixed username, never a case-variant collision
+        # Casing is applied after suffixing, so the underscore may be
+        # absorbed by PascalCase/camelCase (e.g. Coffeecoder1)
+        assert any(
+            u.lower().startswith("coffeecoder") and u.lower() != "coffeecoder"
+            for u in usernames
+        )
 
     def test_count_and_tier_validation_limits(self, app):
         with pytest.raises(ValueError, match="between 1 and 500"):
@@ -161,6 +176,98 @@ class TestPersonaGeneratorService:
         fake_llm.enqueue_content("Sorry, I cannot help with this request.")
         with pytest.raises(PersonaGenerationError):
             generate_personas(count=1)
+
+    def test_username_style_assignments_in_prompt(self, app, fake_llm, monkeypatch):
+        from deaddit.services import persona_generator as pg
+
+        fake_llm.enqueue_content(SAMPLE_PERSONAS_JSON)
+
+        # Freeze the style draw so the two personas demonstrably get
+        # different cards (the real draw is uniform and may repeat)
+        cards = iter([pg.USERNAME_STYLE_CARDS[0], pg.USERNAME_STYLE_CARDS[1]])
+        monkeypatch.setattr(
+            pg.random,
+            "choices",
+            lambda seq, k: [next(c[1] for c in cards if c[1] in seq) for _ in range(k)],
+        )
+        generate_personas(count=2, auto_create_agent=False, troll_mode="no_troll")
+
+        prompt = fake_llm.requests[-1]["payload"]["messages"][1]["content"]
+        assert "Persona 1 username style:" in prompt
+        assert "Persona 2 username style:" in prompt
+        styles = re.findall(r"Persona \d username style: (.+)", prompt)
+        assert len(styles) == 2
+        assert styles[0] == pg.USERNAME_STYLE_CARDS[0][1]
+        assert styles[1] == pg.USERNAME_STYLE_CARDS[1][1]
+        # Anti-pattern ban is present
+        assert "chill_dude" in prompt
+        assert pg.USERNAME_STYLE_RULES in prompt
+
+    def test_persona_generation_max_tokens(self, app, fake_llm):
+        fake_llm.enqueue_content(SAMPLE_PERSONAS_JSON)
+        generate_personas(count=1, auto_create_agent=False, troll_mode="no_troll")
+        assert fake_llm.requests[-1]["payload"]["max_tokens"] == 16384
+
+    def test_apply_casing_branches(self, monkeypatch):
+        from deaddit.services.persona_generator import _apply_casing
+
+        monkeypatch.setattr(random, "random", lambda: 0.1)
+        assert _apply_casing("pm_me_your_taco") == "PmMeYourTaco"
+        monkeypatch.setattr(random, "random", lambda: 0.3)
+        assert _apply_casing("pm_me_your_taco") == "pmMeYourTaco"
+        monkeypatch.setattr(random, "random", lambda: 0.9)
+        assert _apply_casing("pm_me_your_taco") == "pm_me_your_taco"
+
+    def test_case_insensitive_dedupe_against_db(self, app, fake_llm):
+        existing = User(
+            username="coffeecoder",
+            bio="Original coffee coder",
+            age=40,
+            gender="Male",
+        )
+        db.session.add(existing)
+        db.session.commit()
+
+        variant = json.loads(SAMPLE_PERSONAS_JSON)
+        variant[0]["username"] = "CoffeeCoder"
+        fake_llm.enqueue_content(json.dumps(variant))
+
+        result = generate_personas(
+            count=1, auto_create_agent=False, troll_mode="no_troll"
+        )
+        created = result["users"][0]["username"]
+        assert created.lower() != "coffeecoder"
+        # Casing may absorb the underscore (e.g. Coffeecoder1)
+        assert created.lower().startswith("coffeecoder")
+
+
+@pytest.mark.llm_live
+class TestUsernameDiversityLive:
+    """Hits the configured LLM endpoint; excluded from deterministic runs."""
+
+    def test_username_diversity_across_batches(self, app):
+        from deaddit.services.persona_generator import generate_personas
+
+        all_names: list[str] = []
+        for _ in range(3):
+            result = generate_personas(
+                count=10, auto_create_agent=False, troll_mode="no_troll"
+            )
+            all_names.extend(u["username"] for u in result["users"])
+
+        lowers = [n.lower() for n in all_names]
+        assert len(set(lowers)) >= 0.9 * len(lowers)
+
+        def shape(n: str) -> str:
+            if any(c.isdigit() for c in n):
+                return "digits"
+            if n != n.lower():
+                return "mixed"
+            if n.count("_") >= 2:
+                return "phrase"
+            return "simple"
+
+        assert len({shape(n) for n in all_names}) >= 3
 
 
 class TestAdminUserGeneratorAPI:

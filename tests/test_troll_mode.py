@@ -16,6 +16,7 @@ from deaddit.services.content import create_user
 from deaddit.services.persona_generator import (
     TROLL_SECTION,
     USER_PROMPT_TEMPLATE,
+    _assign_styles,
     _user_to_dict,
     generate_personas,
 )
@@ -35,7 +36,7 @@ def admin_client(client):
 
 
 class TestPersonaGeneratorTrollMode:
-    def test_chance_extremes_and_legacy_prompt_parity(self, app, fake_llm):
+    def test_chance_extremes_and_legacy_prompt_parity(self, app, fake_llm, monkeypatch):
         Config.set("TROLL_USER_CHANCE", "1.0")
         fake_llm.enqueue_content(_one_response("all_troll"))
         result = generate_personas(count=1, auto_create_agent=False)
@@ -43,13 +44,17 @@ class TestPersonaGeneratorTrollMode:
         assert (
             TROLL_SECTION in fake_llm.requests[0]["payload"]["messages"][1]["content"]
         )
-
         Config.set("TROLL_USER_CHANCE", "0.0")
+        # Freeze the style-card draw so the parity check is deterministic
+        monkeypatch.setattr(generator.random, "choices", lambda seq, k: [seq[0]] * k)
         fake_llm.enqueue_content(_one_response("all_normal"))
         generate_personas(count=1, auto_create_agent=False)
         prompt = fake_llm.requests[1]["payload"]["messages"][1]["content"]
         assert prompt == USER_PROMPT_TEMPLATE.format(
-            count=1, topic_section="", troll_section=""
+            count=1,
+            topic_section="",
+            troll_section="",
+            style_assignments="Persona 1 username style: " + _assign_styles(1)[0],
         )
         assert TROLL_SECTION not in prompt
 
@@ -72,8 +77,10 @@ class TestPersonaGeneratorTrollMode:
         self, app, fake_llm, monkeypatch
     ):
         Config.set("TROLL_USER_CHANCE", "0.5")
-        values = iter((0.05, 0.5))
-        monkeypatch.setattr(generator.random, "random", lambda: next(values))
+        # Two draws decide troll flags; casing post-treatment adds one
+        # random.random() call per created user
+        values = iter((0.05, 0.5, 0.9, 0.9))
+        monkeypatch.setattr(generator.random, "random", lambda: next(values, 0.9))
         fake_llm.enqueue_content(_one_response("mixed_troll"))
         fake_llm.enqueue_content(_one_response("mixed_normal"))
         result = generate_personas(count=2, auto_create_agent=False)
