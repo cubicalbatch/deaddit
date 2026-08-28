@@ -54,6 +54,7 @@ class Config:
         "WEBSITE_MAX_OUTPUT_TOKENS": "32768",
         "WEBSITE_GENERATION_TIMEOUT_SECONDS": "300",
         "WEBSITE_MAX_HTML_BYTES": "1048576",
+        "TROLL_USER_CHANCE": "0.1",
     }
 
     # Descriptions for each setting
@@ -78,6 +79,7 @@ class Config:
         "WEBSITE_MAX_OUTPUT_TOKENS": "Requested max output tokens for create_website HTML generation (floor 32768; a configured value below the floor is raised to it, not honored)",
         "WEBSITE_GENERATION_TIMEOUT_SECONDS": "Read timeout in seconds for the nested create_website HTML-generation request",
         "WEBSITE_MAX_HTML_BYTES": "Byte ceiling for one stored generated-website HTML document",
+        "TROLL_USER_CHANCE": "Probability (0-1) that a newly generated persona is a troll; applies only when troll_mode is 'chance'",
     }
 
     @classmethod

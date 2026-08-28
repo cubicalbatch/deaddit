@@ -59,6 +59,7 @@ class TestPersonaGeneratorService:
             topic_hint="makers and coders",
             auto_create_agent=True,
             tier="power_user",
+            troll_mode="no_troll",
         )
 
         assert len(result["users"]) == 2
@@ -105,8 +106,8 @@ class TestPersonaGeneratorService:
         result = generate_personas(
             count=1,
             auto_create_agent=False,
+            troll_mode="no_troll",
         )
-
         assert len(result["users"]) == 1
         assert len(result["agents"]) == 0
 
@@ -118,7 +119,9 @@ class TestPersonaGeneratorService:
         wrapped = f"```json\n{SAMPLE_PERSONAS_JSON}\n```"
         fake_llm.enqueue_content(wrapped)
 
-        result = generate_personas(count=2, auto_create_agent=True, tier="regular")
+        result = generate_personas(
+            count=2, auto_create_agent=True, tier="regular", troll_mode="no_troll"
+        )
         assert len(result["users"]) == 2
         assert len(result["agents"]) == 2
         assert result["agents"][0]["autonomy_tier"] == "regular"
@@ -136,7 +139,9 @@ class TestPersonaGeneratorService:
 
         fake_llm.enqueue_content(SAMPLE_PERSONAS_JSON)
 
-        result = generate_personas(count=2, auto_create_agent=True)
+        result = generate_personas(
+            count=2, auto_create_agent=True, troll_mode="no_troll"
+        )
         # Should generate a non-colliding username
         usernames = [u["username"] for u in result["users"]]
         assert "coffeecoder" not in usernames
@@ -199,6 +204,7 @@ class TestAdminUserGeneratorAPI:
             "auto_create_agent": True,
             "tier": "lurker",
             "topic_hint": "coffee lovers",
+            "troll_mode": "no_troll",
         }
         resp = admin_client.post("/admin/api/users/generate", json=payload)
         assert resp.status_code == 201
@@ -226,6 +232,7 @@ class TestAdminUserGeneratorAPI:
         payload = {
             "count": 1,
             "auto_create_agent": False,
+            "troll_mode": "no_troll",
         }
         resp = admin_client.post("/admin/api/users/generate", json=payload)
         assert resp.status_code == 201
@@ -238,7 +245,10 @@ class TestAdminUserGeneratorAPI:
         """Omitting auto_create_agent must NOT enroll agents (admin UI default)."""
         fake_llm.enqueue_content(SAMPLE_PERSONAS_JSON)
 
-        resp = admin_client.post("/admin/api/users/generate", json={"count": 1})
+        resp = admin_client.post(
+            "/admin/api/users/generate",
+            json={"count": 1, "troll_mode": "no_troll"},
+        )
         assert resp.status_code == 201
         data = resp.get_json()
         assert data["success"] is True
@@ -267,5 +277,7 @@ class TestAdminUserGeneratorAPI:
                 ]
             )
         )
-        result = generate_personas(count=3, auto_create_agent=False)
+        result = generate_personas(
+            count=3, auto_create_agent=False, troll_mode="no_troll"
+        )
         assert len(result["users"]) == 3

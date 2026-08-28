@@ -36,6 +36,20 @@
                     <option value="lurker">lurker</option>
                 </select>
             </div>
+            <div class="col-md-4">
+                <label for="gen-troll-mode-select" class="form-label">Troll Mode</label>
+                <select id="gen-troll-mode-select" class="form-select">
+                    <option value="chance" selected>chance (default)</option>
+                    <option value="troll">all trolls</option>
+                    <option value="no_troll">no trolls</option>
+                </select>
+                <div class="form-text">Trolls are negative, argumentative, and less constructive.</div>
+            </div>
+            <div class="col-md-2">
+                <label for="gen-troll-chance-input" class="form-label">Troll Chance (%)</label>
+                <input type="number" id="gen-troll-chance-input" class="form-control" min="0" max="100" step="1" value="{{ ((troll_chance|float) * 100)|round(0)|int }}">
+                <div class="form-text">Per-persona probability in chance mode.</div>
+            </div>
 
             <div class="col-12">
                 <div class="form-check">
@@ -857,6 +871,14 @@
         }
     });
 
+    const genTrollModeSelect = document.getElementById("gen-troll-mode-select");
+    const genTrollChanceInput = document.getElementById("gen-troll-chance-input");
+    const syncTrollChanceState = () => {
+        genTrollChanceInput.disabled = genTrollModeSelect.value !== "chance";
+    };
+    genTrollModeSelect.addEventListener("change", syncTrollChanceState);
+    syncTrollChanceState();
+
     document.getElementById("generate-personas-form").addEventListener("submit", async (event) => {
         event.preventDefault();
         const countInput = document.getElementById("gen-count-input");
@@ -884,9 +906,24 @@
             count: count,
             tier: tierSelect.value,
             auto_create_agent: autoAgentCheck.checked,
+            troll_mode: genTrollModeSelect.value,
         };
         const topicVal = topicInput.value.trim();
         if (topicVal) payload.topic_hint = topicVal;
+
+        if (genTrollModeSelect.value === "chance" && !genTrollChanceInput.disabled) {
+            const pct = parseFloat(genTrollChanceInput.value);
+            if (!isNaN(pct) && pct >= 0 && pct <= 100) {
+                try {
+                    await api("{{ url_for('admin.save_config_api') }}", {
+                        method: "POST",
+                        body: JSON.stringify({ troll_user_chance: (pct / 100).toFixed(2) }),
+                    });
+                } catch (err) {
+                    // Non-fatal: generation proceeds with the stored chance.
+                }
+            }
+        }
 
         try {
             const data = await api("{{ url_for('admin.api_generate_users') }}", {
@@ -911,7 +948,7 @@
                     html += '<div class="col-md-6 col-lg-4">';
                     html += '<div class="card p-2 border h-100 bg-body-tertiary" style="font-size: 0.85rem;">';
                     html += '<div class="d-flex justify-content-between align-items-start">';
-                    html += '<strong class="text-primary">' + esc(u.username) + '</strong>';
+                    html += '<strong class="text-primary">' + esc(u.username) + '</strong>' + (u.is_troll ? ' <span class="badge bg-danger">troll</span>' : '');
                     html += '<span class="badge bg-secondary">' + esc(u.gender) + ', ' + esc(u.age) + '</span>';
                     html += '</div>';
                     html += '<div class="text-muted small mt-1">' + esc(u.occupation) + ' &bull; ' + esc(u.education) + '</div>';

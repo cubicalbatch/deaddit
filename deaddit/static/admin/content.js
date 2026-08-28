@@ -252,7 +252,7 @@ class ContentManager {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td><input type="checkbox" class="item-checkbox" data-id="${user.username}" aria-label="Select user ${user.username}"></td>
-                <td>${user.username}</td>
+                <td>${user.is_troll ? `${user.username} <span class="badge bg-danger">troll</span>` : user.username}</td>
                 <td class="d-none d-md-table-cell">${user.age || ''}</td>
                 <td class="d-none d-lg-table-cell">${user.gender || ''}</td>
                 <td class="d-none d-lg-table-cell">${user.occupation || ''}</td>
@@ -287,6 +287,7 @@ class ContentManager {
             document.getElementById('editUserInterests').value = user.interests || '';
             document.getElementById('editUserPersonality').value = user.personality_traits || '';
             document.getElementById('editUserWritingStyle').value = user.writing_style || '';
+            document.getElementById('editUserTroll').checked = Boolean(user.is_troll);
 
             // Show modal
             new bootstrap.Modal(document.getElementById('editUserModal')).show();
@@ -306,7 +307,8 @@ class ContentManager {
             bio: document.getElementById('editUserBio').value,
             interests: document.getElementById('editUserInterests').value,
             personality_traits: document.getElementById('editUserPersonality').value,
-            writing_style: document.getElementById('editUserWritingStyle').value
+            writing_style: document.getElementById('editUserWritingStyle').value,
+            is_troll: document.getElementById('editUserTroll').checked
         };
 
         try {

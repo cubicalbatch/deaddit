@@ -94,6 +94,7 @@ class User(db.Model):
     education = db.Column(db.String(100))
     writing_style = db.Column(db.Text)
     personality_traits = db.Column(db.Text)
+    is_troll = db.Column(db.Boolean, nullable=False, default=False, server_default="0")
     model = db.Column(db.String(100))
     post_karma = db.Column(db.Integer, nullable=False, server_default="0")
     comment_karma = db.Column(db.Integer, nullable=False, server_default="0")

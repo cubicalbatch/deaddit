@@ -342,9 +342,10 @@ def test_upgrade_cascades_runtime_rows_and_downgrade_restores_schema(tmp_path):
         conn.close()
 
 
-def test_agent_cascade_revision_is_sole_head():
+def test_agent_cascade_revision_is_on_sole_head_chain():
     script = _script_directory()
     heads = script.get_heads()
-    assert heads == [_REVISION]
+    assert len(heads) == 1
     ancestry = {revision.revision for revision in script.walk_revisions()}
+    assert _REVISION in ancestry
     assert _PRE_FEATURE_HEAD in ancestry

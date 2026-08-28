@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 import uuid
 from datetime import datetime
@@ -32,7 +33,8 @@ SYSTEM_PROMPT = (
 )
 
 USER_PROMPT_TEMPLATE = (
-    "Generate {count} unique human-like user personas for the forum.{topic_section}\n\n"
+    "Generate {count} unique human-like user personas for the forum.{topic_section}"
+    "{troll_section}\n\n"
     "Each persona object must have the following fields:\n"
     '- "username": string (creative username, alphanumeric with underscores, 3-25 characters)\n'
     '- "bio": string (authentic personal bio, 1-3 sentences)\n'
@@ -57,6 +59,16 @@ USER_PROMPT_TEMPLATE = (
     '    "writing_style": "concise, lowercase, uses technical terms"\n'
     "  }}\n"
     "]"
+)
+
+TROLL_SECTION = (
+    "\nDesign these personas as trolls: argumentative, contrarian, and\n"
+    "negative. Each one picks fights in comments, dismisses mainstream\n"
+    "views, rarely concedes a point, and adds little constructive value -\n"
+    "while still being a realistic, believable person with a plausible\n"
+    "job, interests, and backstory. Their trollishness reads as an\n"
+    "exaggerated personality of someone convinced they are the only\n"
+    "reasonable one, not a caricature.\n"
 )
 
 
@@ -203,6 +215,7 @@ def _user_to_dict(user: User) -> dict[str, Any]:
         ),
         "writing_style": user.writing_style,
         "model": user.model,
+        "is_troll": bool(user.is_troll),
     }
 
 
@@ -233,6 +246,7 @@ def generate_personas(
     tier: str = "regular",
     api_url: str | None = None,
     model: str | None = None,
+    troll_mode: str = "chance",
 ) -> dict[str, Any]:
     """Generate human-like user personas using LLM, persist them and optionally create Agents.
 
@@ -241,8 +255,8 @@ def generate_personas(
         topic_hint: Optional thematic or topical prompt.
         auto_create_agent: If True, creates and activates an Agent for each user.
         tier: Autonomy tier for created agents ("regular", "power_user", "lurker").
-        api_url: Optional override LLM API endpoint URL.
         model: Optional override LLM model name.
+        troll_mode: Persona troll assignment mode ("chance", "troll", "no_troll").
 
     Returns:
         Dictionary containing `users` (list of user dicts) and `agents` (list of agent dicts).
@@ -253,6 +267,12 @@ def generate_personas(
     if tier not in ("lurker", "regular", "power_user"):
         raise ValueError(
             f"Invalid tier '{tier}'. Must be one of: lurker, regular, power_user"
+        )
+
+    if troll_mode not in ("chance", "troll", "no_troll"):
+        raise ValueError(
+            f"Invalid troll_mode '{troll_mode}'. Must be one of: "
+            "chance, troll, no_troll"
         )
 
     if not api_url or not model:
@@ -278,16 +298,37 @@ def generate_personas(
         else ""
     )
 
+    if troll_mode == "troll":
+        troll_flags = [True] * count
+    elif troll_mode == "no_troll":
+        troll_flags = [False] * count
+    else:
+        raw_chance = Config.get("TROLL_USER_CHANCE")
+        try:
+            chance = float(raw_chance or "0.1")
+            if not 0 <= chance <= 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid TROLL_USER_CHANCE %r; falling back to 0.1", raw_chance
+            )
+            chance = 0.1
+        chance = max(0.0, min(1.0, chance))
+        troll_flags = [random.random() < chance for _ in range(count)]
+
+    remaining_trolls = sum(troll_flags)
+    remaining_normals = count - remaining_trolls
+
     seen_usernames: set[str] = set()
     created_users: list[User] = []
     created_agents: list[Agent] = []
     client = LLMClient()
 
-    while len(created_users) < count:
-        batch_target = min(count - len(created_users), PERSONA_BATCH_SIZE)
+    def _request_batch(batch_target: int, is_troll: bool) -> tuple[int, bool]:
         user_prompt = USER_PROMPT_TEMPLATE.format(
             count=batch_target,
             topic_section=topic_section,
+            troll_section=TROLL_SECTION if is_troll else "",
         )
 
         req = ChatRequest(
@@ -303,11 +344,12 @@ def generate_personas(
         raw_personas = _extract_json(result.content)
         if not raw_personas:
             if created_users:
-                break
+                return 0, True
             raise PersonaGenerationError("LLM returned empty personas list")
 
+        batch_created = 0
         for raw_p in raw_personas:
-            if len(created_users) >= count:
+            if batch_created >= batch_target:
                 break
             p = _sanitize_persona(raw_p, seen_usernames)
             user = create_user(
@@ -321,8 +363,10 @@ def generate_personas(
                 writing_style=p["writing_style"],
                 personality_traits=p["personality_traits"],
                 model=model,
+                is_troll=is_troll,
             )
             created_users.append(user)
+            batch_created += 1
 
             if auto_create_agent:
                 agent_config = {
@@ -348,6 +392,24 @@ def generate_personas(
 
         if created_agents:
             db.session.commit()
+        return batch_created, False
+
+    while remaining_trolls + remaining_normals > 0:
+        if remaining_trolls:
+            batch_created, should_stop = _request_batch(
+                min(remaining_trolls, PERSONA_BATCH_SIZE), True
+            )
+            remaining_trolls -= batch_created
+            if should_stop:
+                break
+
+        if remaining_normals:
+            batch_created, should_stop = _request_batch(
+                min(remaining_normals, PERSONA_BATCH_SIZE), False
+            )
+            remaining_normals -= batch_created
+            if should_stop:
+                break
 
     return {
         "users": [_user_to_dict(u) for u in created_users],

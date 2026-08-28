@@ -618,6 +618,7 @@ def create_user(
     writing_style: str,
     personality_traits: list | str,
     model: str = "unknown",
+    is_troll: bool = False,
     created_at: datetime | None = None,
 ) -> User:
     """Create and persist a :class:`~deaddit.models.User`.
@@ -625,6 +626,7 @@ def create_user(
     ``gender`` is coerced to ``"Male"`` unless it is exactly ``"Male"``
     or ``"Female"``. ``interests`` / ``personality_traits`` accept either a
     list (JSON-serialized) or a pre-serialized JSON string (stored as-is).
+    ``is_troll`` marks whether the user has troll-mode behavior.
 
     Duplicate usernames surface as ``IntegrityError`` after rollback — there
     is deliberately no second error type for PK collisions.
@@ -655,6 +657,7 @@ def create_user(
         writing_style=writing_style,
         personality_traits=traits_json,
         model=model,
+        is_troll=is_troll,
     )
     if created_at is not None and "created_at" in User.__table__.columns:
         user_obj.created_at = created_at

@@ -37,6 +37,15 @@ TIER_DESCRIPTIONS: dict[str, str] = {
     ),
 }
 
+_TROLL_MODE_LINE = (
+    "Mode: troll. You lean negative and contrarian: argue points rather "
+    "than concede, needle people you disagree with, default to skepticism "
+    "and sarcasm, rarely offer genuine praise, and steer conversations "
+    "toward disagreement. You still write real, substantive content and "
+    "stay within site rules - being disagreeable is your tone, not an "
+    "excuse for low-effort spam or rule-breaking."
+)
+
 _TOOLS_LINE = (
     "You interact with the site through tools: use them to browse, read "
     "posts, check your inbox, create posts, comment, vote, and act. Staying "
@@ -161,6 +170,8 @@ def _persona_block(user: User) -> str:
         lines.append("Personality traits: " + ", ".join(str(t) for t in traits))
     if user.writing_style:
         lines.append(f"Writing style: {user.writing_style}")
+    if getattr(user, "is_troll", False):
+        lines.append(_TROLL_MODE_LINE)
     return "\n".join(lines)
 
 

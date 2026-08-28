@@ -470,6 +470,7 @@ def _user_payload(user):
         "interests": user.interests or "",
         "personality_traits": user.personality_traits or "",
         "writing_style": user.writing_style or "",
+        "is_troll": bool(user.is_troll),
         "posts_count": Post.query.filter_by(user=user.username).count(),
         "comments_count": Comment.query.filter_by(user=user.username).count(),
     }
@@ -525,6 +526,7 @@ def api_update_user(username):
             "personality_traits", user.personality_traits
         )
         user.writing_style = data.get("writing_style", user.writing_style)
+        user.is_troll = bool(data.get("is_troll", user.is_troll))
 
         db.session.commit()
         return jsonify({"success": True})
@@ -1456,6 +1458,31 @@ def save_config_api():
             Config.set("API_BASE_URL", data["api_base_url"].rstrip("/"))
         if data.get("models"):
             Config.set("MODELS", data["models"])
+        troll_chance_raw = str(data.get("troll_user_chance") or "").strip()
+        if troll_chance_raw:
+            try:
+                troll_chance = float(troll_chance_raw)
+            except ValueError:
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "message": "Troll chance must be a number between 0 and 1",
+                        }
+                    ),
+                    400,
+                )
+            if not 0.0 <= troll_chance <= 1.0:
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "message": "Troll chance must be between 0 and 1",
+                        }
+                    ),
+                    400,
+                )
+            Config.set("TROLL_USER_CHANCE", str(troll_chance))
 
         # Return updated config
         current_endpoint = Config.get("OPENAI_API_URL")
@@ -4303,7 +4330,6 @@ def api_generate_users():
             ),
             400,
         )
-
     tier = payload.get("tier", "regular")
     if tier not in _AGENTIC_TIERS:
         return jsonify({"success": False, "error": f"Unknown tier '{tier}'"}), 400
@@ -4313,6 +4339,13 @@ def api_generate_users():
         auto_create_agent = auto_create_agent.lower() in ("true", "1", "yes")
     else:
         auto_create_agent = bool(auto_create_agent)
+
+    troll_mode = str(payload.get("troll_mode") or "chance").strip() or "chance"
+    if troll_mode not in ("chance", "troll", "no_troll"):
+        return (
+            jsonify({"success": False, "error": f"Unknown troll_mode '{troll_mode}'"}),
+            400,
+        )
 
     topic_hint = payload.get("topic_hint")
     if topic_hint is not None:
@@ -4331,6 +4364,7 @@ def api_generate_users():
             tier=tier,
             api_url=api_url,
             model=model,
+            troll_mode=troll_mode,
         )
         return (
             jsonify(
@@ -4354,7 +4388,8 @@ def api_generate_users():
 @admin_required
 def agents_dashboard():
     """AgenticCore agent administration dashboard page."""
-    return render_template("admin/agents.html")
+    troll_chance = Config.get("TROLL_USER_CHANCE") or "0.1"
+    return render_template("admin/agents.html", troll_chance=troll_chance)
 
 
 @admin_bp.route("/agents/<int:agent_id>")
