@@ -175,8 +175,27 @@ _BANNED_TAGS = frozenset(
 #: Attributes checked for a disallowed (non-inline) resource reference.
 #: ``href`` stays in this list because it still applies to non-anchor
 #: elements (e.g. a stray ``<area href>``); the anchor exception below is
-#: narrower than dropping ``href`` from this list entirely.
+#: narrower than dropping ``href`` from this list entirely. ``srcset`` holds
+#: a comma-separated list of candidate URLs (e.g. ``"a.jpg 1x, b.jpg 2x"``),
+#: not a single URI, so it is checked separately in ``_check`` rather than
+#: through the single-URI loop below (carried defect C1,
+#: WEBSITE_TOOL_EXECUTION.md "Carried defects").
 _RESOURCE_ATTRS = ("src", "href", "poster", "data", "action", "formaction")
+_SRCSET_ATTR = "srcset"
+_SRCSET_SPLIT_RE = re.compile(r",\s+")
+
+
+def _local_attr_name(name: str) -> str:
+    """Strip an XML namespace prefix (e.g. ``"xlink:href"`` -> ``"href"``).
+
+    Carried defect C2 (WEBSITE_TOOL_EXECUTION.md "Carried defects"):
+    ``html.parser`` reports attribute names verbatim, so a namespaced SVG
+    attribute like ``xlink:href`` never matched the plain ``"href"`` check.
+    Matching on the local part closes that gap without touching the ``<a
+    href>`` exception, which still only special-cases ``tag == "a"``.
+    """
+    return name.rsplit(":", 1)[-1]
+
 
 #: URI prefixes that stay on the page or are otherwise not a network
 #: dependency. Everything else (http(s)://, //, ftp://, a bare relative
@@ -207,42 +226,79 @@ class _WebsiteHTMLValidator(HTMLParser):
 
     def _check(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
-        attr_map = {name.lower(): (value or "") for name, value in attrs}
+        # Match attribute names by their local part (strip any "ns:"
+        # prefix) so a namespaced variant such as SVG's "xlink:href" is
+        # still caught by the plain "href" check (carried defect C2).
+        #
+        # Deliberately kept as a list of (name, value) pairs, not a dict
+        # keyed by local name: a document can legally repeat an attribute
+        # under two spellings that collapse to the same local name (e.g.
+        # both "xlink:href" and "href" on one <image>), and a naive
+        # last-write-wins dict would let a trailing safe value silently
+        # mask an earlier malicious one. Checking every occurrence
+        # individually means a violation on *any* spelling still raises,
+        # regardless of attribute order.
+        normalized = [
+            (_local_attr_name(name.lower()), (value or "")) for name, value in attrs
+        ]
+        attr_names = {name for name, _ in normalized}
 
         if tag in _BANNED_TAGS:
             raise _ContractViolation(f"generated HTML uses a disallowed <{tag}> tag")
 
-        if tag == "meta" and "http-equiv" in attr_map:
+        if tag == "meta" and "http-equiv" in attr_names:
             raise _ContractViolation(
                 "generated HTML uses a disallowed <meta http-equiv> tag"
             )
 
-        if tag == "script" and "src" in attr_map:
+        if tag == "script" and "src" in attr_names:
             raise _ContractViolation(
                 "generated HTML references an external <script src>"
             )
 
-        for attr_name in _RESOURCE_ATTRS:
-            if attr_name not in attr_map:
-                continue
-            if tag == "a" and attr_name == "href":
-                # Resolved spec interpretation (WEBSITE_TOOL_EXECUTION.md):
-                # an <a href> loads nothing - it only navigates - and the
-                # Phase 4 CSP sandbox grants neither allow-top-navigation
-                # nor allow-popups, so following one is already inert.
-                # Rejecting a whole 32K-token document over a plain nav
-                # link buys no security. This exception is deliberately
-                # narrow: every other resource attribute (including href
-                # on non-anchor elements such as <area>) is still checked
-                # below.
-                continue
-            value = attr_map[attr_name].strip().lower()
-            if not value or value.startswith(_ALLOWED_URI_PREFIXES):
-                continue
-            raise _ContractViolation(
-                f"generated HTML has a <{tag} {attr_name}> referencing an "
-                "external resource"
-            )
+        for attr_name, raw_value in normalized:
+            if attr_name in _RESOURCE_ATTRS:
+                if tag == "a" and attr_name == "href":
+                    # Resolved spec interpretation (WEBSITE_TOOL_EXECUTION.md):
+                    # an <a href> loads nothing - it only navigates - and the
+                    # Phase 4 CSP sandbox grants neither allow-top-navigation
+                    # nor allow-popups, so following one is already inert.
+                    # Rejecting a whole 32K-token document over a plain nav
+                    # link buys no security. This exception is deliberately
+                    # narrow: every other resource attribute (including href
+                    # on non-anchor elements such as <area>) is still checked
+                    # below.
+                    continue
+                value = raw_value.strip().lower()
+                if not value or value.startswith(_ALLOWED_URI_PREFIXES):
+                    continue
+                raise _ContractViolation(
+                    f"generated HTML has a <{tag} {attr_name}> referencing an "
+                    "external resource"
+                )
+
+            if attr_name == _SRCSET_ATTR:
+                # srcset (carried defect C1) is a comma-separated candidate
+                # list, e.g. "a.jpg 1x, b.jpg 2x" - each candidate is "<url>
+                # [descriptor]". Split on ", " (comma followed by
+                # whitespace), not a bare comma: a data: URL's base64
+                # payload routinely contains commas with no following
+                # whitespace (e.g. "base64,AAAA"), and naively splitting on
+                # every comma would shear a legitimate data: candidate in
+                # two and misread its trailing fragment as a second,
+                # URL-less candidate.
+                for candidate in _SRCSET_SPLIT_RE.split(raw_value):
+                    candidate = candidate.strip()
+                    if not candidate:
+                        continue
+                    url = candidate.split()[0]
+                    value = url.strip().lower()
+                    if value.startswith(_ALLOWED_URI_PREFIXES):
+                        continue
+                    raise _ContractViolation(
+                        f"generated HTML has a <{tag} srcset> referencing an "
+                        "external resource"
+                    )
 
 
 def _validate_html(content: str, settings: WebsiteGenerationSettings) -> str:

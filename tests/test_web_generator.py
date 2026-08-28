@@ -379,6 +379,127 @@ class TestAnchorHrefException:
         assert result.html == VALID_HTML
 
 
+class TestCarriedDefectsC1AndC2:
+    """Pins the two approved 2.T production fixes (WEBSITE_TOOL_EXECUTION.md
+    "Carried defects" C1/C2) together with the <a href> exception from 1.T,
+    so a future change to one cannot silently regress the other.
+
+    C1: ``srcset`` (a comma-separated candidate list, not a single URI) must
+    be checked like any other resource attribute.
+    C2: attribute matching is by local name - an ``ns:`` prefix (e.g. SVG's
+    ``xlink:href``) must not bypass the check.
+    """
+
+    @pytest.mark.parametrize(
+        "snippet",
+        [
+            # C1: an external candidate anywhere in the comma-separated
+            # list must be rejected, even alongside a safe data: candidate.
+            '<img src="data:image/png;base64,i" '
+            'srcset="https://evil.example/x.jpg 2x">',
+            '<img src="data:image/png;base64,i" '
+            'srcset="data:image/png;base64,i 1x, https://evil.example/y.jpg 2x">',
+            # No width/pixel-density descriptor - a bare candidate URL.
+            '<img src="data:image/png;base64,i" srcset="https://evil.example/z.jpg">',
+        ],
+    )
+    def test_srcset_external_candidate_rejected(self, app, fake_llm, snippet):
+        with app.app_context():
+            html = VALID_HTML.replace(
+                "<h1>Aurora Map</h1>", f"<h1>Aurora Map</h1>{snippet}"
+            )
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            with pytest.raises(WebsiteGenerationInvalidHTMLError):
+                _generate(fake_llm)
+
+    def test_srcset_data_uri_candidates_still_pass(self, app, fake_llm):
+        with app.app_context():
+            html = VALID_HTML.replace(
+                "<h1>Aurora Map</h1>",
+                "<h1>Aurora Map</h1>"
+                '<img src="data:image/png;base64,i" '
+                'srcset="data:image/png;base64,i 1x, data:image/png;base64,j 2x">',
+            )
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            result = _generate(fake_llm)
+
+        assert result.html == html
+
+    @pytest.mark.parametrize(
+        "snippet",
+        [
+            # C2: a namespaced attribute must be checked under its local
+            # name, regardless of which namespace prefix the model used.
+            '<svg><image xlink:href="https://evil.example/x.png"/></svg>',
+            '<svg><use xlink:href="https://evil.example/sprites.svg#a"/></svg>',
+        ],
+    )
+    def test_namespaced_href_rejected(self, app, fake_llm, snippet):
+        with app.app_context():
+            html = VALID_HTML.replace(
+                "<h1>Aurora Map</h1>", f"<h1>Aurora Map</h1>{snippet}"
+            )
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            with pytest.raises(WebsiteGenerationInvalidHTMLError):
+                _generate(fake_llm)
+
+    def test_namespaced_href_rejected_even_when_a_safe_href_follows(
+        self, app, fake_llm
+    ):
+        # A malicious xlink:href must not be masked by a later, harmless
+        # plain href on the same element - order-dependent last-write-wins
+        # collapsing would let this bypass the check.
+        with app.app_context():
+            html = VALID_HTML.replace(
+                "<h1>Aurora Map</h1>",
+                "<h1>Aurora Map</h1>"
+                '<svg><image xlink:href="https://evil.example/x.png" '
+                'href="data:image/png;base64,i"/></svg>',
+            )
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            with pytest.raises(WebsiteGenerationInvalidHTMLError):
+                _generate(fake_llm)
+
+    def test_namespaced_href_with_safe_value_still_passes(self, app, fake_llm):
+        with app.app_context():
+            html = VALID_HTML.replace(
+                "<h1>Aurora Map</h1>",
+                '<h1>Aurora Map</h1><svg><image xlink:href="#local-icon"/></svg>',
+            )
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            result = _generate(fake_llm)
+
+        assert result.html == html
+
+    def test_anchor_href_still_accepted_alongside_c1_c2_fixes(self, app, fake_llm):
+        # The 1.T <a href> exception must survive C1/C2 intact: a plain
+        # navigation link is unaffected by the new srcset/namespace checks.
+        with app.app_context():
+            html = VALID_HTML.replace(
+                "<h1>Aurora Map</h1>",
+                "<h1>Aurora Map</h1>"
+                '<a href="/about">About</a>'
+                '<a href="https://nasa.gov">NASA</a>',
+            )
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            result = _generate(fake_llm)
+
+        assert result.html == html
+
+    def test_area_href_still_rejected_alongside_c1_c2_fixes(self, app, fake_llm):
+        # And the narrow scope of that exception must also survive: a
+        # non-anchor <area href> is still rejected.
+        with app.app_context():
+            html = VALID_HTML.replace(
+                "<h1>Aurora Map</h1>",
+                "<h1>Aurora Map</h1>"
+                '<area href="https://evil.example/x" alt="offsite" shape="rect">',
+            )
+            fake_llm.enqueue_content(html, finish_reason="stop")
+            with pytest.raises(WebsiteGenerationInvalidHTMLError):
+                _generate(fake_llm)
+
+
 class TestSecretHandling:
     def test_api_key_never_appears_in_result(self, app, fake_llm):
         with app.app_context():
