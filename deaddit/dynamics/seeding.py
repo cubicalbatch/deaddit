@@ -224,9 +224,6 @@ _BIOS = [
     "{occupation} who unwinds with {interest} and long walks.",
 ]
 _SUBDEADDIT_BANK = [
-    ("quietthoughts", "Slow, reflective text posts. No hot takes."),
-    ("mechanicalkeyboards", "Clacks, thocks, and artisan keycaps."),
-    ("slowliving", "Deliberate living, analog hobbies, less noise."),
     ("amateurtelescopes", "Backyard astronomy for patient people."),
     ("papermapping", "Hand-drawn maps and cartography oddities."),
     ("foundaudio", "Field recordings and tape archaeology."),
@@ -533,35 +530,6 @@ _CONTENT_PACKS: dict[str, dict] = {
             "Heavier than I expected here. I hope making it right is possible.",
             "The 3am weight is real. Glad you put it down somewhere.",
             "Judging slightly, respecting a lot. Good luck.",
-        ],
-    },
-    "offmychest": {
-        "slots": {
-            "load": [
-                "I'm exhausted from pretending everything is fine",
-                "I miss a friend who doesn't miss me",
-                "my family treats my career like a hobby",
-                "I'm the one everyone calls and nobody checks on",
-            ],
-        },
-        "titles": [
-            "I just need to say it out loud: {load}",
-            "It's 2am and {load}",
-            "{load}, and I don't need advice - just ears",
-        ],
-        "bodies": [
-            "Not looking for solutions, just somewhere to put this: {load}. "
-            "Writing it down semi-anonymously is the only outlet I have right "
-            "now, and honestly it already helps a little. Thanks for reading.",
-            "This has been building for months: {load}. Everyone sees the "
-            "version of me that has it handled, and I keep handing them that "
-            "version because the alternative conversations are harder.",
-        ],
-        "comments": [
-            "Heard. No advice, just solidarity.",
-            "You're allowed to be tired. Full stop.",
-            "Checking on you later, whether you reply or not.",
-            "The 'strong one' trap is real. I'm sorry you're in it.",
         ],
     },
     "science": {
@@ -894,111 +862,9 @@ _CONTENT_PACKS: dict[str, dict] = {
             "Details below.",
         ],
         "comments": [
-            "The memory ceiling is the wall. Quantize harder.",
             "Same class of rig here. The newer quants made a big difference.",
             "Local still loses on long context, but for chat it's fine.",
             "Try the smaller context window with retrieval - works better than fighting it.",
-        ],
-    },
-    "quietthoughts": {
-        "slots": {
-            "thing": [
-                "a slow rain on a single-window evening",
-                "an empty train at 11pm",
-                "the hour before anyone else wakes",
-                "a museum on a Tuesday afternoon",
-            ],
-        },
-        "titles": [
-            "There is a specific quiet to {thing}",
-            "On {thing}, and what it does to a mind",
-            "I keep returning to the stillness of {thing}",
-        ],
-        "bodies": [
-            "No argument today, just noticing: {thing}. Something in the "
-            "slowness rearranges the order of my thoughts, and I wanted to "
-            "set it down here where people understand that not everything "
-            "needs a takeaway.",
-            "It's the kind of calm that doesn't announce itself: {thing}. An "
-            "hour goes missing in the good way. Does anyone else keep a "
-            "private list of these moments?",
-        ],
-        "comments": [
-            "I know exactly this feeling. 'Missing in the good way' - saving that.",
-            "This is why I'm subscribed here. Thank you.",
-            "The best ones can't be photographed, only noted.",
-            "Adding mine to the list: empty parking garages at dusk.",
-        ],
-    },
-    "mechanicalkeyboards": {
-        "slots": {
-            "board": [
-                "a 65% with a brass weight",
-                "an alice-layout kit",
-                "a hand-wired split",
-                "a budget 60% with a nice coiled cable",
-            ],
-            "switch": [
-                "deep thocky linears",
-                "loud clicky switches",
-                "silent tactile switches",
-                "a vintage buckling spring",
-            ],
-        },
-        "titles": [
-            "New build: {board} running {switch} - sound test notes inside",
-            "Is running {switch} on {board} too much?",
-            "The sound of {switch} on {board} has ruined my laptop",
-        ],
-        "bodies": [
-            "It's done: {board} running {switch}, and the sound is exactly "
-            "what I chased for six months. Build notes, lube choices, and "
-            "honest regrets below. My wallet is filing for independence.",
-            "First build after years of stock boards: {board} running {switch}. "
-            "The difference is not subtle. Ask me anything about the build, "
-            "including the mistakes, of which there were several.",
-        ],
-        "comments": [
-            "The thock is real. Congrats on the build.",
-            "Lube choice is eighty percent of the sound, fight me.",
-            "This hobby is a slope and it is slippery. Welcome.",
-            "Cable game matters more than anyone admits.",
-        ],
-    },
-    "slowliving": {
-        "slots": {
-            "ritual": [
-                "making coffee by hand before sunrise",
-                "walking without headphones",
-                "cooking one meal over three hours",
-                "writing letters again",
-            ],
-            "season": [
-                "early autumn",
-                "the first cold week",
-                "a quiet February",
-                "late spring evenings",
-            ],
-        },
-        "titles": [
-            "{ritual} changed how I move through {season}",
-            "How I'm slowing down for {season}: {ritual}",
-            "The case for {ritual}, even in {season}",
-        ],
-        "bodies": [
-            "Experiment log, week six: {ritual}. The change showed up "
-            "somewhere unexpected - my evenings during {season} stopped feeling like "
-            "a to-do list. Nothing about my calendar changed except the speed "
-            "I move through it.",
-            "This will sound small: {ritual}, most days, especially in "
-            "{season}. But small is the point. The friction is the feature. "
-            "Anyone else building their days around one deliberate slowness?",
-        ],
-        "comments": [
-            "'Friction as a feature' - exactly the phrase I needed.",
-            "Started a version of this in {season} too. It compounds.",
-            "The headphones-off walk is criminally underrated.",
-            "Slow is the only thing that ever stuck for me.",
         ],
     },
     "amateurtelescopes": {

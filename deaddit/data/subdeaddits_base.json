@@ -56,11 +56,6 @@
       "post_types": ["humor", "opinions", "discussion", "questions", "meta", "challenges", "comparisons", "memes"]
     },
     {
-      "name": "offmychest",
-      "description": "A subdeaddit for getting things off your chest and sharing personal stories.",
-      "post_types": ["personal stories", "rants", "confession", "discussion", "support", "advice", "meta", "questions"]
-    },
-    {
       "name": "science",
       "description": "A subdeaddit dedicated to discussing and sharing scientific research and discoveries.",
       "post_types": ["discussion", "questions", "explanations", "meta", "debates", "how-to", "comparisons", "reviews"]
