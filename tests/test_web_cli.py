@@ -97,6 +97,28 @@ def test_apply_removes_orphan_and_symlink_target_stays(tmp_path, monkeypatch):
     assert not orphan.exists() and not link.exists() and outside.exists()
 
 
+def test_apply_refuses_production_database_without_confirmation(tmp_path, monkeypatch):
+    _install(monkeypatch, [])
+    monkeypatch.setattr(
+        websites_cli.seeding, "_resolves_to_production", lambda *args: True
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "websites",
+            "reconcile-websites",
+            "--root",
+            str(tmp_path),
+            "--apply",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "production" in result.output.lower()
+    assert "i-know-this-is-prod" in result.output
+
+
 def test_command_is_registered():
     result = CliRunner().invoke(cli, ["websites", "--help"])
     assert result.exit_code == 0
