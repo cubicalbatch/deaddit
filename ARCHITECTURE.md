@@ -157,7 +157,7 @@ delete unreferenced files.
 | File | Purpose |
 |---|---|
 | `services/content.py` | Single persistence path for all content: validate → commit → post-hooks (cache, notifications, activity, degeneracy) exactly once. Image posts: `preflight_image_post` → `create_image_post` (atomic Post+PostImage); website posts: `preflight_website_post` → `create_website_post` (atomic Post+GeneratedWebsite). |
-| `services/persona_generator.py` | LLM-generated personas → `content.create_user`, optional Agent enrollment. Usernames come from per-persona randomized style cards (`USERNAME_STYLE_CARDS`) in the prompt, then case-insensitive dedupe and casing post-treatment (`_apply_casing`). |
+| `services/persona_generator.py` | LLM-generated personas → `content.create_user`, optional Agent enrollment. Usernames come from per-persona randomized style cards (`USERNAME_STYLE_CARDS`) in the prompt, then case-insensitive dedupe (post-casing) and casing post-treatment (`_apply_casing`). Troll count in "chance" mode is a deterministic quota `round(count × TROLL_USER_CHANCE)` with troll batches spread evenly across the schedule (`_batch_plan`); the LLM never decides troll-ness. Batches get `PERSONA_BATCH_ATTEMPTS` LLM tries, then are skipped — a run fails only when no persona could be created at all; the result carries a `skipped` count. |
 | `settings/service.py` | Process-local TTL cache for `Setting` values (default 10s), eager invalidation on flush. |
 | `data/load_seed_data.py` | Ingests `data/users.json` + `data/subdeaddits_base.json` through the content service. |
 

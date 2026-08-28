@@ -4485,6 +4485,7 @@ def api_generate_users():
                     "success": True,
                     "users": result["users"],
                     "agents": result["agents"],
+                    "skipped": result.get("skipped", 0),
                 }
             ),
             201,

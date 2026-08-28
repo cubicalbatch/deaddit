@@ -17,6 +17,7 @@ from deaddit.services.persona_generator import (
     TROLL_SECTION,
     USER_PROMPT_TEMPLATE,
     _assign_styles,
+    _batch_plan,
     _user_to_dict,
     generate_personas,
 )
@@ -25,6 +26,15 @@ from deaddit.services.persona_generator import (
 def _one_response(username: str = "generated") -> str:
     return json.dumps(
         [{"username": username, "bio": "A bio", "age": 30, "gender": "Male"}]
+    )
+
+
+def _n_response(prefix: str, n: int) -> str:
+    return json.dumps(
+        [
+            {"username": f"{prefix}_{i}", "bio": "A bio", "age": 30, "gender": "Male"}
+            for i in range(n)
+        ]
     )
 
 
@@ -73,22 +83,47 @@ class TestPersonaGeneratorTrollMode:
         user = User(username="serialized", is_troll=True)
         assert _user_to_dict(user)["is_troll"] is True
 
-    def test_chance_mixed_batch_uses_homogeneous_requests(
-        self, app, fake_llm, monkeypatch
-    ):
+    def test_chance_quota_is_exact_and_spread(self, app, fake_llm):
+        Config.set("TROLL_USER_CHANCE", "0.1")
+        # 25 personas at 10% -> exactly 3 trolls (round-half-up), with the
+        # troll batch scheduled after the three normal batches.
+        fake_llm.enqueue_content(_n_response("normal", 10))
+        fake_llm.enqueue_content(_n_response("normal", 10))
+        fake_llm.enqueue_content(_n_response("normal", 2))
+        fake_llm.enqueue_content(_n_response("troll", 3))
+        result = generate_personas(count=25, auto_create_agent=False)
+        assert result["skipped"] == 0
+        assert [u["is_troll"] for u in result["users"]] == [False] * 22 + [True] * 3
+        prompts = [r["payload"]["messages"][1]["content"] for r in fake_llm.requests]
+        assert [TROLL_SECTION in p for p in prompts] == [False, False, False, True]
+
+    def test_chance_mixed_batch_uses_homogeneous_requests(self, app, fake_llm):
         Config.set("TROLL_USER_CHANCE", "0.5")
-        # Two draws decide troll flags; casing post-treatment adds one
-        # random.random() call per created user
-        values = iter((0.05, 0.5, 0.9, 0.9))
-        monkeypatch.setattr(generator.random, "random", lambda: next(values, 0.9))
-        fake_llm.enqueue_content(_one_response("mixed_troll"))
+        # 2 personas at 50% -> exactly 1 troll; the normal batch is scheduled
+        # first, so troll and normal personas never share one request.
         fake_llm.enqueue_content(_one_response("mixed_normal"))
+        fake_llm.enqueue_content(_one_response("mixed_troll"))
         result = generate_personas(count=2, auto_create_agent=False)
         assert len(fake_llm.requests) == 2
         prompts = [r["payload"]["messages"][1]["content"] for r in fake_llm.requests]
-        assert TROLL_SECTION in prompts[0]
-        assert TROLL_SECTION not in prompts[1]
-        assert [u["is_troll"] for u in result["users"]] == [True, False]
+        assert TROLL_SECTION not in prompts[0]
+        assert TROLL_SECTION in prompts[1]
+        assert [u["is_troll"] for u in result["users"]] == [False, True]
+
+
+class TestBatchPlan:
+    def test_troll_batches_spread_evenly(self):
+        plan = _batch_plan(20, 180)
+        assert [is_troll for is_troll, _ in plan] == (
+            [False] * 9 + [True] + [False] * 9 + [True]
+        )
+        assert [size for _, size in plan] == [10] * 20
+
+    def test_single_type_and_edge_shapes(self):
+        assert _batch_plan(0, 5) == [(False, 5)]
+        assert _batch_plan(5, 0) == [(True, 5)]
+        assert _batch_plan(3, 22) == [(False, 10), (False, 10), (False, 2), (True, 3)]
+        assert _batch_plan(25, 0) == [(True, 10), (True, 10), (True, 5)]
 
 
 class TestTrollPromptAndAdmin:

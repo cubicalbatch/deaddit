@@ -11,6 +11,7 @@ import pytest
 from deaddit.extensions import db
 from deaddit.models import Agent, User
 from deaddit.services.persona_generator import (
+    PERSONA_BATCH_ATTEMPTS,
     PersonaGenerationError,
     generate_personas,
 )
@@ -50,6 +51,16 @@ SAMPLE_PERSONAS_JSON = json.dumps(
         },
     ]
 )
+
+
+def _personas_json(n: int) -> str:
+    """A JSON array of ``n`` minimal but valid persona dicts."""
+    return json.dumps(
+        [
+            {"username": f"user_{i}", "bio": "A bio", "age": 30, "gender": "Male"}
+            for i in range(n)
+        ]
+    )
 
 
 class TestPersonaGeneratorService:
@@ -172,10 +183,28 @@ class TestPersonaGeneratorService:
         with pytest.raises(ValueError, match="Invalid tier"):
             generate_personas(count=2, tier="invalid_tier")
 
-    def test_malformed_llm_response_raises_error(self, app, fake_llm):
-        fake_llm.enqueue_content("Sorry, I cannot help with this request.")
+    def test_all_batches_failing_still_raises(self, app, fake_llm):
+        # Every batch gets PERSONA_BATCH_ATTEMPTS tries; when not a single
+        # persona can be created the run still reports a hard failure.
+        for _ in range(PERSONA_BATCH_ATTEMPTS):
+            fake_llm.enqueue_content("Sorry, I cannot help with this request.")
         with pytest.raises(PersonaGenerationError):
             generate_personas(count=1)
+        assert len(fake_llm.requests) == PERSONA_BATCH_ATTEMPTS
+
+    def test_failing_batch_is_retried_then_skipped(self, app, fake_llm):
+        # Batch 1 (10 personas) succeeds; batch 2 (2 personas) burns all its
+        # attempts -> the run skips it and still returns the 10 created.
+        fake_llm.enqueue_content(_personas_json(10))
+        for _ in range(PERSONA_BATCH_ATTEMPTS):
+            fake_llm.enqueue_content("not json at all")
+        result = generate_personas(
+            count=12, auto_create_agent=False, troll_mode="no_troll"
+        )
+        assert len(result["users"]) == 10
+        assert result["skipped"] == 2
+        assert User.query.count() == 10
+        assert len(fake_llm.requests) == 1 + PERSONA_BATCH_ATTEMPTS
 
     def test_username_style_assignments_in_prompt(self, app, fake_llm, monkeypatch):
         from deaddit.services import persona_generator as pg

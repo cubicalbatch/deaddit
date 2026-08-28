@@ -16,7 +16,7 @@ from typing import Any
 
 from deaddit.config import Config
 from deaddit.extensions import db
-from deaddit.llm import ChatRequest, LLMClient, Sampling, routing
+from deaddit.llm import ChatRequest, LLMClient, LLMError, Sampling, routing
 from deaddit.models import Agent, User
 from deaddit.services.content import create_user
 
@@ -196,16 +196,17 @@ def _sanitize_persona(item: dict, seen_usernames: set[str]) -> dict:
         clean_username = f"user_{uuid.uuid4().hex[:8]}"
     clean_username = clean_username[:40]
 
-    candidate = clean_username
+    candidate = _apply_casing(clean_username)
     suffix = 1
     while (
         candidate.lower() in seen_usernames
         or User.query.filter(db.func.lower(User.username) == candidate.lower()).first()
         is not None
     ):
-        candidate = f"{clean_username[:35]}_{suffix}"
+        # Retry with the suffixed base; casing is re-rolled inside the loop
+        # so the stored (cased) name is always the one checked for clashes.
+        candidate = _apply_casing(f"{clean_username[:35]}_{suffix}")
         suffix += 1
-    candidate = _apply_casing(candidate)
     seen_usernames.add(candidate.lower())
 
     try:
@@ -293,6 +294,44 @@ def _agent_to_dict(agent: Agent) -> dict[str, Any]:
 
 MAX_PERSONAS_COUNT = 500
 PERSONA_BATCH_SIZE = 10
+PERSONA_BATCH_ATTEMPTS = 3
+
+
+def _batch_sizes(total: int) -> list[int]:
+    """Split ``total`` personas into batch sizes of PERSONA_BATCH_SIZE + remainder."""
+    full, remainder = divmod(total, PERSONA_BATCH_SIZE)
+    sizes = [PERSONA_BATCH_SIZE] * full
+    if remainder:
+        sizes.append(remainder)
+    return sizes
+
+
+def _batch_plan(troll_count: int, normal_count: int) -> list[tuple[bool, int]]:
+    """Batch schedule as ``(is_troll, batch_size)`` pairs.
+
+    Batches are homogeneous (all trolls or all normals) because the troll
+    directive applies to the whole prompt. Troll batches are spread evenly
+    across the schedule instead of running first, so a partially completed
+    run stays close to the requested ratio.
+    """
+    troll_sizes = _batch_sizes(troll_count)
+    normal_sizes = _batch_sizes(normal_count)
+    total = len(troll_sizes) + len(normal_sizes)
+    is_troll_batch = [False] * total
+    for k in range(len(troll_sizes)):
+        # k-th troll batch lands at its evenly spaced slot; indices are
+        # distinct because len(troll_sizes) <= total.
+        is_troll_batch[(k + 1) * total // len(troll_sizes) - 1] = True
+    plan: list[tuple[bool, int]] = []
+    troll_i = normal_i = 0
+    for is_troll in is_troll_batch:
+        if is_troll:
+            plan.append((True, troll_sizes[troll_i]))
+            troll_i += 1
+        else:
+            plan.append((False, normal_sizes[normal_i]))
+            normal_i += 1
+    return plan
 
 
 def generate_personas(
@@ -314,9 +353,15 @@ def generate_personas(
         tier: Autonomy tier for created agents ("regular", "power_user", "lurker").
         model: Optional override LLM model name.
         troll_mode: Persona troll assignment mode ("chance", "troll", "no_troll").
+            In "chance" mode the troll count is a deterministic quota of
+            ``round(count * TROLL_USER_CHANCE)`` personas — the LLM never
+            decides troll-ness.
 
     Returns:
-        Dictionary containing `users` (list of user dicts) and `agents` (list of agent dicts).
+        Dictionary containing `users` (list of user dicts), `agents` (list of
+        agent dicts) and `skipped` (personas not created because their batch
+        kept failing). Batches are retried and then skipped; a run only
+        raises when no persona could be created at all.
     """
     if not isinstance(count, int) or count < 1 or count > MAX_PERSONAS_COUNT:
         raise ValueError(f"Count must be an integer between 1 and {MAX_PERSONAS_COUNT}")
@@ -356,9 +401,9 @@ def generate_personas(
     )
 
     if troll_mode == "troll":
-        troll_flags = [True] * count
+        troll_count = count
     elif troll_mode == "no_troll":
-        troll_flags = [False] * count
+        troll_count = 0
     else:
         raw_chance = Config.get("TROLL_USER_CHANCE")
         try:
@@ -371,108 +416,139 @@ def generate_personas(
             )
             chance = 0.1
         chance = max(0.0, min(1.0, chance))
-        troll_flags = [random.random() < chance for _ in range(count)]
-
-    remaining_trolls = sum(troll_flags)
-    remaining_normals = count - remaining_trolls
+        # Deterministic quota, round-half-up: 200 personas at 10% -> exactly
+        # 20 trolls, no Bernoulli noise.
+        troll_count = min(count, int(count * chance + 0.5))
 
     seen_usernames: set[str] = set()
     created_users: list[User] = []
     created_agents: list[Agent] = []
     client = LLMClient()
 
-    def _request_batch(batch_target: int, is_troll: bool) -> tuple[int, bool]:
-        user_prompt = USER_PROMPT_TEMPLATE.format(
-            count=batch_target,
-            topic_section=topic_section,
-            troll_section=TROLL_SECTION if is_troll else "",
-            style_assignments="\n".join(
-                f"Persona {i + 1} username style: {style}"
-                for i, style in enumerate(_assign_styles(batch_target))
-            ),
-        )
+    def _request_batch(batch_target: int, is_troll: bool) -> int:
+        """Generate one homogeneous batch, retrying failed LLM attempts.
 
-        req = ChatRequest(
-            system_prompt=SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            model=model,
-            api_url=api_url,
-            api_key=api_key,
-            sampling=Sampling(max_tokens=16384, temperature=0.8),
-        )
-
-        result = client.complete(req)
-        raw_personas = _extract_json(result.content)
-        if not raw_personas:
-            if created_users:
-                return 0, True
-            raise PersonaGenerationError("LLM returned empty personas list")
-
+        Returns the number of personas created (may be less than
+        ``batch_target`` when attempts run out mid-batch). Raises
+        PersonaGenerationError only when every attempt failed to produce
+        a single persona.
+        """
         batch_created = 0
-        for raw_p in raw_personas:
-            if batch_created >= batch_target:
+        last_error: Exception | None = None
+        for attempt in range(1, PERSONA_BATCH_ATTEMPTS + 1):
+            remaining = batch_target - batch_created
+            if remaining <= 0:
                 break
-            p = _sanitize_persona(raw_p, seen_usernames)
-            user = create_user(
-                username=p["username"],
-                age=p["age"],
-                gender=p["gender"],
-                bio=p["bio"],
-                interests=p["interests"],
-                occupation=p["occupation"],
-                education=p["education"],
-                writing_style=p["writing_style"],
-                personality_traits=p["personality_traits"],
+            user_prompt = USER_PROMPT_TEMPLATE.format(
+                count=remaining,
+                topic_section=topic_section,
+                troll_section=TROLL_SECTION if is_troll else "",
+                style_assignments="\n".join(
+                    f"Persona {i + 1} username style: {style}"
+                    for i, style in enumerate(_assign_styles(remaining))
+                ),
+            )
+
+            req = ChatRequest(
+                system_prompt=SYSTEM_PROMPT,
+                user_prompt=user_prompt,
                 model=model,
-                is_troll=is_troll,
+                api_url=api_url,
+                api_key=api_key,
+                sampling=Sampling(max_tokens=16384, temperature=0.8),
             )
-            created_users.append(user)
-            batch_created += 1
 
-            if auto_create_agent:
-                agent_config = {
-                    "max_actions_per_run": 30,
-                    "min_delay": 300,
-                    "max_delay": 1800,
-                    "api_url": api_url,
-                    "model": model,
-                }
-                agent = Agent(
-                    persona_mode="fixed",
-                    user_username=user.username,
-                    autonomy_tier=tier,
-                    is_enabled=True,
-                    status="idle",
-                    config=agent_config,
-                    state={},
-                    consecutive_failures=0,
-                    next_run_at=datetime.utcnow(),
+            try:
+                result = client.complete(req)
+                raw_personas = _extract_json(result.content)
+            except (LLMError, PersonaGenerationError) as exc:
+                last_error = exc
+                logger.warning(
+                    "Persona batch attempt %d/%d failed: %s",
+                    attempt,
+                    PERSONA_BATCH_ATTEMPTS,
+                    exc,
                 )
-                db.session.add(agent)
-                created_agents.append(agent)
+                continue
 
-        if created_agents:
-            db.session.commit()
-        return batch_created, False
+            if not raw_personas:
+                last_error = PersonaGenerationError("LLM returned empty personas list")
+                logger.warning(
+                    "Persona batch attempt %d/%d returned no personas",
+                    attempt,
+                    PERSONA_BATCH_ATTEMPTS,
+                )
+                continue
 
-    while remaining_trolls + remaining_normals > 0:
-        if remaining_trolls:
-            batch_created, should_stop = _request_batch(
-                min(remaining_trolls, PERSONA_BATCH_SIZE), True
+            for raw_p in raw_personas:
+                if batch_created >= batch_target:
+                    break
+                p = _sanitize_persona(raw_p, seen_usernames)
+                user = create_user(
+                    username=p["username"],
+                    age=p["age"],
+                    gender=p["gender"],
+                    bio=p["bio"],
+                    interests=p["interests"],
+                    occupation=p["occupation"],
+                    education=p["education"],
+                    writing_style=p["writing_style"],
+                    personality_traits=p["personality_traits"],
+                    model=model,
+                    is_troll=is_troll,
+                )
+                created_users.append(user)
+                batch_created += 1
+
+                if auto_create_agent:
+                    agent_config = {
+                        "max_actions_per_run": 30,
+                        "min_delay": 300,
+                        "max_delay": 1800,
+                        "api_url": api_url,
+                        "model": model,
+                    }
+                    agent = Agent(
+                        persona_mode="fixed",
+                        user_username=user.username,
+                        autonomy_tier=tier,
+                        is_enabled=True,
+                        status="idle",
+                        config=agent_config,
+                        state={},
+                        consecutive_failures=0,
+                        next_run_at=datetime.utcnow(),
+                    )
+                    db.session.add(agent)
+                    created_agents.append(agent)
+
+            if created_agents:
+                db.session.commit()
+
+        if batch_created == 0:
+            raise PersonaGenerationError(
+                f"Batch of {batch_target} personas failed after "
+                f"{PERSONA_BATCH_ATTEMPTS} attempts: {last_error}"
             )
-            remaining_trolls -= batch_created
-            if should_stop:
-                break
+        return batch_created
 
-        if remaining_normals:
-            batch_created, should_stop = _request_batch(
-                min(remaining_normals, PERSONA_BATCH_SIZE), False
+    plan = _batch_plan(troll_count, count - troll_count)
+    last_batch_error: PersonaGenerationError | None = None
+    for batch_is_troll, batch_target in plan:
+        try:
+            _request_batch(batch_target, batch_is_troll)
+        except PersonaGenerationError as exc:
+            last_batch_error = exc
+            logger.warning(
+                "Skipping batch of %d personas after repeated failures",
+                batch_target,
             )
-            remaining_normals -= batch_created
-            if should_stop:
-                break
+
+    if not created_users and last_batch_error is not None:
+        raise last_batch_error
 
     return {
         "users": [_user_to_dict(u) for u in created_users],
         "agents": [_agent_to_dict(a) for a in created_agents],
+        "skipped": count - len(created_users),
     }
