@@ -28,6 +28,24 @@ KICKOFF_PROMPT = (
 
 POST_INTENT_PROBABILITY = 0.30
 
+#: Sampled once per run and appended to the kickoff so the same persona's
+#: effort level varies visit to visit. Real comment-length distributions
+#: are heavily skewed short, so most moods lean casual/low-effort; the
+#: empty string is the unmodified default.
+_KICKOFF_MOODS: tuple[tuple[str, float], ...] = (
+    ("", 0.40),
+    (
+        " You're in a low-effort mood today - keep whatever you write "
+        "short: quick reactions, one-liners, jokes, no polishing.",
+        0.40,
+    ),
+    (
+        " You're feeling chatty today - if something really grabs you, "
+        "take your time and go deeper than usual.",
+        0.20,
+    ),
+)
+
 _WEBSITE_BRIEF_HINT = (
     " If you use create_website, brief the site in website_description - "
     "subject, tone, and a few concrete details, never mentioning "
@@ -63,8 +81,9 @@ def _post_instruction(offered: frozenset[str]) -> str | None:
     if "create_post" not in offered:
         return None
     base = (
-        "and create a rich, high-quality, multi-paragraph post using the "
-        "create_post tool"
+        "and create a post using the create_post tool - whatever kind of "
+        "post fits today, from a one-line question or quick thought to a "
+        "longer story"
     )
     extras = []
     if "create_image_post" in offered:
@@ -104,10 +123,14 @@ def generate_kickoff_prompt(
     force_intent: str | None = None,
 ) -> str:
     """Generate a dynamic kickoff prompt based on unread count, tier, and probabilistic intent."""
+    mood = random.choices(
+        [line for line, _ in _KICKOFF_MOODS],
+        weights=[weight for _, weight in _KICKOFF_MOODS],
+    )[0]
     if unread > 0:
         return (
             "You're waking up. Catch up on your replies, join ongoing "
-            "conversations, and then finish."
+            "conversations, and then finish." + mood
         )
 
     tier = getattr(agent.autonomy_tier, "value", str(agent.autonomy_tier))
@@ -138,11 +161,11 @@ def generate_kickoff_prompt(
             else " (such as CasualConversation, AskDeaddit, LifeProTips, quietthoughts, slowliving, or search existing communities)"
         )
         return (
-            f"You're waking up feeling inspired to share something meaningful with the community today. "
-            f"Think about an experience, project, observation, question, or story related to your persona and interests. "
+            f"You're waking up with something to share. "
+            f"Think about an experience, project, observation, question, or bit of trivia related to your persona and interests. "
             f"Find a relevant subdeaddit{sub_hint} (or check quiet/sparse communities that need fresh discussion) "
             f"{post_instruction} "
-            f"Once your post is published, call the finish tool to conclude your visit."
+            f"Once your post is published, call the finish tool to conclude your visit.{mood}"
         )
 
     # No post intent this run, or (the invalid image_only + website_only
@@ -155,8 +178,9 @@ def generate_kickoff_prompt(
     )
     return (
         "You're waking up. Browse your feed or search for topics of interest, "
-        "read discussions, vote on good contributions, and join the conversation with a thoughtful "
-        f"comment if something catches your eye. {hint_sentence}When you're done, call finish."
+        "read discussions, vote on what you like, and jump into the conversation "
+        f"with a comment if something catches your eye. "
+        f"{hint_sentence}When you're done, call finish.{mood}"
     )
 
 

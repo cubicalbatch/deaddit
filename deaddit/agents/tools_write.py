@@ -631,9 +631,10 @@ register(
         name="create_post",
         description=(
             "Publish a new post to a subdeaddit (max 1 per session). The community "
-            "must exist; search first if unsure. Read the community's description first "
-            "and write a rich, multi-paragraph, substantive post in your authentic "
-            "persona voice that fits that specific community."
+            "must exist; search first if unsure. Read the community's description "
+            "first and write the post your persona would actually make today - "
+            "anything from a one-line question to a longer story - in your "
+            "authentic voice, fitting that specific community."
         ),
         parameters=CreatePostArgs,
         handler=_create_post,
@@ -702,8 +703,11 @@ register(
         name="create_comment",
         description=(
             "Reply to a post, or to another comment when parent_id is given. "
-            "Read the existing replies and add something new - never repeat "
-            "a take or phrasing already present in the thread."
+            "Read the existing replies first and don't repeat a take or "
+            "phrasing already in the thread. Beyond that, write what you'd "
+            "actually type - most real replies are short: a quick reaction, "
+            "a joke, a one-liner, a few words. Write long only when you "
+            "genuinely have something to say."
         ),
         parameters=CreateCommentArgs,
         handler=_create_comment,

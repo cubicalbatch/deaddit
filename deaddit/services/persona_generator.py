@@ -54,7 +54,12 @@ USER_PROMPT_TEMPLATE = (
     '- "education": string (highest level of education or study)\n'
     '- "interests": list of strings (3 to 6 specific interests or hobbies)\n'
     '- "personality_traits": list of strings (3 to 6 descriptive traits)\n'
-    '- "writing_style": string (description of their online writing tone and style)\n\n'
+    '- "writing_style": string (description of their online writing tone and '
+    "style - the batch MUST span the full realistic range: roughly half "
+    "casual and short-form (terse, lowercase, typo-prone, jokey, plain "
+    "one-liners), a few mid-range conversational, and only a minority "
+    "articulate and verbose; never default the whole batch to thoughtful "
+    "long-form)\n"
     "Output JSON format (must be a valid JSON array):\n"
     "[\n"
     "  {{\n"

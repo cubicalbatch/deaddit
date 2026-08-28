@@ -221,6 +221,36 @@ def test_similar_own_post_rejected_but_distinct_passes(ctx, db_session):
     assert len(titles) == 2
 
 
+def test_long_duplicate_comment_rejected_short_reaction_allowed(ctx, db_session):
+    """Comment duplicate suppression: substantive near-duplicates are
+    rejected (and never raise), while short reactions below the exemption
+    threshold may repeat verbatim - the Reddit norm the threshold exists
+    to permit."""
+    post_id = Post.query.filter_by(subdeaddit_name="testsub").first().id
+    body = (
+        "The gauge argument comes down to maintenance windows and who "
+        "actually funds the seasonal crews."
+    )
+
+    first = execute("create_comment", {"post_id": post_id, "content": body}, ctx)
+    near_dup = execute(
+        "create_comment",
+        {"post_id": post_id, "content": body + "!"},
+        _new_run_ctx(ctx, db_session),
+    )
+    assert first["ok"] is True
+    assert near_dup["ok"] is False
+    assert "too similar" in near_dup["error"]
+
+    repeat_ctx = _new_run_ctx(ctx, db_session)
+    lol = execute("create_comment", {"post_id": post_id, "content": "lol"}, repeat_ctx)
+    lol_again = execute(
+        "create_comment", {"post_id": post_id, "content": "lol!"}, repeat_ctx
+    )
+    assert lol["ok"] is True
+    assert lol_again["ok"] is True
+
+
 # ---------------------------------------------------------------------------
 # Loop detection
 

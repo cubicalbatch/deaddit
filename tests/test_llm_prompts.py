@@ -358,8 +358,8 @@ class TestImagePostGuidance:
         # never discuss generation / share the image as real
         assert "never mention" in prompt.lower()
         assert "as real" in prompt.lower()
-        # no contradictory multi-paragraph requirement for image bodies
-        assert "does not need the multi-paragraph treatment" in prompt
+        # no contradictory length requirement for image bodies
+        assert "a short caption or no body at all is fine" in prompt
 
     def test_image_only_policy_requires_the_image_tool(self, app, db_session):
         agent, user = _agent_with_image_posts(

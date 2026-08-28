@@ -61,6 +61,11 @@ _LOOP_WINDOW = 8
 _DUP_SIMILARITY_THRESHOLD = 0.85
 _DUP_LOOKBACK_HOURS = 48
 _DUP_OWN_LIMIT = 20
+#: Normalized content shorter than this skips the duplicate check: real
+#: users repeat short reactions ("lol", "this", "nice one") across threads
+#: and days. In-run repetition is still caught by loop detection and the
+#: per-run rate caps.
+_DUP_MIN_CANDIDATE_LEN = 25
 
 _llm_spec_cache: dict[str, ToolSpec] = {}
 
@@ -208,8 +213,13 @@ def _check_duplicate(name: str, ctx: ToolContext, validated: dict) -> str | None
         )
         subdeaddit_name = validated.get("community")
     elif name == "create_comment":
-        candidate = _normalize(validated.get("content", ""))
         subdeaddit_name = None
+        # Short reactions ("lol", "this", "nice one") legitimately repeat
+        # across threads and days; in-run repetition is still caught by
+        # loop detection and rate caps.
+        candidate = _normalize(validated.get("content", ""))
+        if len(candidate) < _DUP_MIN_CANDIDATE_LEN:
+            return None
     else:
         return None
     candidate_trigrams = _trigrams(candidate)
