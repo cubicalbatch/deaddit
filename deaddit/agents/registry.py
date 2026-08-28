@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DISABLED_IMAGE_POSTS_CONFIG",
+    "DISABLED_WEBSITE_POSTS_CONFIG",
     "POST_TOOL_NAMES",
     "TOOL_REGISTRY",
     "AutonomyTier",
@@ -32,6 +33,7 @@ __all__ = [
     "register",
     "specs_for",
     "tools_for",
+    "website_posts_config",
 ]
 
 
@@ -143,11 +145,16 @@ def all_tools() -> list[Tool]:
     return list(TOOL_REGISTRY.values())
 
 
-#: The two tools that publish a post. Both draw from the same per-run/hourly
-#: post budget and the same duplicate/loop guardrails (plan 4B) - an
-#: image-post failure must never leave a text post as an unthrottled
-#: fallback, and vice versa.
-POST_TOOL_NAMES: tuple[str, ...] = ("create_post", "create_image_post")
+#: The three tools that publish a post. All draw from the same per-run/
+#: hourly post budget and the same duplicate/loop guardrails (plan 4B, and
+#: the create_website spec's "Registry and executor" section) - a failure
+#: in one publication path must never leave another as an unthrottled
+#: fallback.
+POST_TOOL_NAMES: tuple[str, ...] = (
+    "create_post",
+    "create_image_post",
+    "create_website",
+)
 
 #: Canonical shape of a disabled/absent ``Agent.config["image_posts"]``.
 DISABLED_IMAGE_POSTS_CONFIG: dict[str, Any] = {
@@ -155,6 +162,15 @@ DISABLED_IMAGE_POSTS_CONFIG: dict[str, Any] = {
     "policy": "optional",
     "provider_id": None,
     "model": None,
+}
+
+#: Canonical shape of a disabled/absent ``Agent.config["website_posts"]``.
+#: Unlike images, website generation always reuses the agent's own effective
+#: LLM provider/model (see ``CREATE_WEBSITE_TOOL_PLAN.md``), so there is no
+#: separate provider/model to normalize here.
+DISABLED_WEBSITE_POSTS_CONFIG: dict[str, Any] = {
+    "enabled": False,
+    "policy": "optional",
 }
 
 
@@ -183,33 +199,86 @@ def image_posts_config(agent: Any) -> dict[str, Any]:
     }
 
 
-def _offer_post_tool(name: str, cfg: dict[str, Any]) -> bool:
-    """Whether *name* (one of :data:`POST_TOOL_NAMES`) should be offered."""
-    if name == "create_image_post":
-        return cfg["enabled"]
-    if name == "create_post":
-        return not (cfg["enabled"] and cfg["policy"] == "image_only")
-    return True
+def website_posts_config(agent: Any) -> dict[str, Any]:
+    """Normalize *agent*'s namespaced website-post configuration.
+
+    Mirrors :func:`image_posts_config`. Missing ``website_posts``, a
+    non-dict value, or ``enabled: false`` all normalize to
+    :data:`DISABLED_WEBSITE_POSTS_CONFIG`. An enabled config with a
+    missing/invalid ``policy`` defaults to ``"optional"`` here rather than
+    being rejected - admin-side validation (3.4) is what keeps stored
+    config well-formed; this function only has to be safe to call on
+    anything that might be sitting in the database.
+    """
+    config = getattr(agent, "config", None)
+    raw = config.get("website_posts") if isinstance(config, dict) else None
+    if not isinstance(raw, dict) or not raw.get("enabled"):
+        return dict(DISABLED_WEBSITE_POSTS_CONFIG)
+    policy = raw.get("policy")
+    if policy not in ("optional", "website_only"):
+        policy = "optional"
+    return {"enabled": True, "policy": policy}
+
+
+def _offered_post_tool_names(
+    image_cfg: dict[str, Any], website_cfg: dict[str, Any]
+) -> frozenset[str]:
+    """Resolve the image x website post-tool truth table to offered names.
+
+    ``image_only`` and ``website_only`` are each an *exclusive* lock: when
+    one is active, only that policy's tool is offered - not even
+    ``create_post`` - because both policies deliberately forbid the plain
+    text post as a fallback (spec "Agent configuration" truth table).
+
+    If both locks are active at once, the stored configuration is invalid
+    (admin-side validation in 3.4 is meant to reject it before it is ever
+    saved). Should it still reach here - e.g. data written before that
+    validation existed, or edited directly - this fails closed to *no* post
+    tool at all rather than picking a side. Falling back to ``create_post``
+    would violate both policies (each explicitly excludes it), and offering
+    either locked tool would honor one admin's configured intent at the
+    other's expense. An empty offer is the only outcome that cannot be read
+    as bypassing either policy.
+    """
+    image_only = image_cfg["enabled"] and image_cfg["policy"] == "image_only"
+    website_only = website_cfg["enabled"] and website_cfg["policy"] == "website_only"
+
+    if image_only and website_only:
+        return frozenset()
+    if image_only:
+        return frozenset({"create_image_post"})
+    if website_only:
+        return frozenset({"create_website"})
+
+    names = {"create_post"}
+    if image_cfg["enabled"]:
+        names.add("create_image_post")
+    if website_cfg["enabled"]:
+        names.add("create_website")
+    return frozenset(names)
 
 
 def tools_for(tier: str | AutonomyTier, agent: Any = None) -> list[Tool]:
     """Tools whose min_tier is met or exceeded by the given tier.
 
-    When *agent* is given, ``create_post``/``create_image_post`` are also
-    filtered by its namespaced ``image_posts`` configuration: disabled omits
-    ``create_image_post``, and the ``image_only`` policy omits ``create_post``
-    (plan 4B). Omitting *agent* skips this filter entirely (tier-only
-    behaviour), which non-agent-aware callers rely on.
+    When *agent* is given, ``create_post``/``create_image_post``/
+    ``create_website`` are also filtered together by its namespaced
+    ``image_posts`` and ``website_posts`` configuration, per
+    :func:`_offered_post_tool_names` (plan 4B; create_website spec's
+    "Agent configuration" truth table). Omitting *agent* skips this filter
+    entirely (tier-only behaviour), which non-agent-aware callers rely on.
     """
     active = parse_tier(tier)
     tools = [tool for tool in all_tools() if active.allows(tool.min_tier)]
     if agent is None:
         return tools
-    cfg = image_posts_config(agent)
+    offered = _offered_post_tool_names(
+        image_posts_config(agent), website_posts_config(agent)
+    )
     return [
         tool
         for tool in tools
-        if tool.name not in POST_TOOL_NAMES or _offer_post_tool(tool.name, cfg)
+        if tool.name not in POST_TOOL_NAMES or tool.name in offered
     ]
 
 

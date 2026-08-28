@@ -242,6 +242,35 @@ def _create_image_post(ctx: ToolContext, params: CreateImagePostArgs) -> dict:
     }
 
 
+class CreateWebsiteArgs(BaseModel):
+    community: str = Field(min_length=1, max_length=50)
+    title: str = Field(min_length=1, max_length=300)
+    content: str | None = Field(default=None, max_length=20000)
+    website_description: str = Field(min_length=100, max_length=12000)
+    hostname_hint: str = Field(min_length=3, max_length=253)
+    page_name_hint: str = Field(min_length=1, max_length=120)
+    post_type: str | None = Field(default=None, max_length=50)
+
+
+def _create_website_pending_3_2(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
+    """Registry-only placeholder; the guarded flow lands in subphase 3.2.
+
+    Subphase 3.1 (plan Phase 3, spec "Registry and executor") registers the
+    tool's wire schema, description, and shared post-tool-budget/config
+    wiring only. The real policy -> preflight -> generate -> store ->
+    publish flow (spec "Atomic publication flow") is deliberately not
+    implemented here; this stub only satisfies the ``Tool.handler`` contract
+    so the tool can be registered and offered. It is not reachable from the
+    default (disabled) ``website_posts`` configuration used by every
+    existing agent/test, and subphase 3.2 replaces this function with the
+    real ``_create_website`` implementation and its own registration.
+    """
+    del ctx, params
+    raise NotImplementedError(
+        "create_website generation is implemented in subphase 3.2"
+    )
+
+
 class CreateCommentArgs(BaseModel):
     post_id: int = Field(gt=0)
     parent_id: int | None = None
@@ -386,6 +415,43 @@ register(
         ),
         parameters=CreateImagePostArgs,
         handler=_create_image_post,
+        min_tier=AutonomyTier.REGULAR,
+        rate_class=RateClass.WRITE,
+    ),
+)
+register(
+    Tool(
+        name="create_website",
+        description=(
+            "Publish a new link post to a subdeaddit that points at a "
+            "one-page website you generate on the spot (counts toward the "
+            "same 1-per-session post limit as create_post; only offered "
+            "when your website-post configuration is enabled). The "
+            "community must exist; search first if unsure. "
+            "website_description is a separate, concrete, thorough brief "
+            "for the site generator - NOT the text of your post - and must "
+            "specify: the site's purpose and who runs it; its intended "
+            "audience; its information architecture (what sections/pages "
+            "it implies, even though only one page is rendered); its "
+            "visual language (layout, palette, typography, tone); its "
+            "actual content (real-sounding headings, copy, data, or "
+            "listings, not placeholder text); its interactions (what a "
+            "visitor can click, toggle, filter, or animate on this page); "
+            "and, most importantly, exactly which specific page of that "
+            "site this is - the one page your persona plausibly landed on "
+            "and is now sharing (e.g. one blog post, one product page, one "
+            "leaderboard), not a generic homepage description. "
+            "hostname_hint and page_name_hint are your best guess at a "
+            "fitting fictional URL; they may be adjusted to fit storage "
+            "rules. title and content are your own post, written in your "
+            "authentic persona voice, the way a person shares a link they "
+            "found - do not describe the website or restate the brief "
+            "there; content is optional and, if present, should read like "
+            "commentary on why you're sharing it, not a summary of what it "
+            "contains."
+        ),
+        parameters=CreateWebsiteArgs,
+        handler=_create_website_pending_3_2,
         min_tier=AutonomyTier.REGULAR,
         rate_class=RateClass.WRITE,
     ),
