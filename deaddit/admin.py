@@ -260,6 +260,11 @@ def admin_required(f):
     return decorated_function
 
 
+def _moderator_user() -> User | None:
+    """Return the shared admin principal when it exists."""
+    return db.session.get(User, "admin")
+
+
 @admin_bp.route("/login", methods=["GET", "POST"])
 @production_disabled
 def login():
@@ -4186,9 +4191,17 @@ def report_remove(report_id):
 
     from deaddit.dynamics import moderation
 
+    moderator = _moderator_user()
+    if moderator is None:
+        flash(
+            "Moderation actions require the 'admin' user to exist; create it first.",
+            "error",
+        )
+        return redirect(url_for("admin.reports"))
+
     try:
         report = moderation.remove_report(
-            report_id, moderator="admin", removal_reason=removal_reason
+            report_id, moderator=moderator.username, removal_reason=removal_reason
         )
     except ValueError as exc:
         flash(str(exc), "error")
@@ -4207,8 +4220,18 @@ def report_dismiss(report_id):
 
     from deaddit.dynamics import moderation
 
+    moderator = _moderator_user()
+    if moderator is None:
+        flash(
+            "Moderation actions require the 'admin' user to exist; create it first.",
+            "error",
+        )
+        return redirect(url_for("admin.reports"))
+
     try:
-        report = moderation.dismiss_report(report_id, moderator="admin", note=note)
+        report = moderation.dismiss_report(
+            report_id, moderator=moderator.username, note=note
+        )
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("admin.reports"))
@@ -4252,13 +4275,21 @@ def report_ban(report_id):
 
     from deaddit.dynamics import moderation
 
+    moderator = _moderator_user()
+    if moderator is None:
+        flash(
+            "Moderation actions require the 'admin' user to exist; create it first.",
+            "error",
+        )
+        return redirect(url_for("admin.reports"))
+
     try:
         ban = moderation.ban_user(
             username,
             reason,
             subdeaddit_name=subdeaddit_name,
             expires_at=expires_at,
-            banned_by="admin",
+            banned_by=moderator.username,
         )
     except ValueError as exc:
         flash(str(exc), "error")

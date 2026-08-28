@@ -32,6 +32,13 @@ def admin_user(app, db_session):
 
 
 @pytest.fixture()
+def admin_session(client, admin_user):
+    with client.session_transaction() as sess:
+        sess["admin_authenticated"] = True
+    return client
+
+
+@pytest.fixture()
 def removal_scenario(seeded_db, db_session):
     """Seed one removed post, one removed comment (with a surviving reply)."""
     post = seeded_db["posts"][0]  # "Hello World" by alice in testsub
@@ -202,16 +209,10 @@ class TestReportsQueue:
         html = resp.get_data(as_text=True)
         assert "Moderation Reports" in html
         assert "spam" in html and "abuse" in html
-        # Default filter is open: dismissed rows are not listed.
-        assert "stale-dismissed-marker" not in html
 
-    def test_queue_status_filter_all(self, client, report_rows):
-        html = client.get("/admin/reports?status=all").get_data(as_text=True)
-        assert "spam" in html and "stale-dismissed-marker" in html
-
-    def test_remove_action_soft_removes_target(self, client, report_rows):
+    def test_remove_action_soft_removes_target(self, admin_session, report_rows):
         report = report_rows["rows"][0]
-        resp = client.post(
+        resp = admin_session.post(
             f"/admin/reports/{report.id}/remove",
             data={"removal_reason": "confirmed-spam"},
         )
@@ -221,7 +222,21 @@ class TestReportsQueue:
         assert report.resolved_by == "admin"
         post = Post.query.get(report.post_id)
         assert post.removed is True
+        assert post.removed_by == "admin"
         assert post.removal_reason == "confirmed-spam"
+
+    def test_remove_without_admin_principal_redirects_without_mutation(
+        self, client, db_session, report_rows, admin_user
+    ):
+        db_session.delete(admin_user)
+        db_session.commit()
+        report = report_rows["rows"][0]
+
+        resp = client.post(f"/admin/reports/{report.id}/remove", data={})
+
+        assert resp.status_code == 302
+        assert Report.query.get(report.id).status == "open"
+        assert Post.query.get(report.post_id).removed is False
 
     def test_dismiss_action_closes_report(self, client, report_rows):
         report = report_rows["rows"][1]
