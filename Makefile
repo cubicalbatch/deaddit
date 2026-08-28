@@ -31,8 +31,8 @@ dev: ## Start the development server on $(HOST):$(PORT) with auto-reload
 dev-gunicorn: ## Start server using Gunicorn on $(HOST):$(PORT)
 	uv run gunicorn -b $(HOST):$(PORT) -c gunicorn.conf.py deaddit.wsgi:app
 
-worker: ## Start the background agent worker process
-	uv run deaddit-worker
+worker: ## Start the background agent worker process (auto-restarts on code changes)
+	uv run watchfiles --filter python deaddit-worker deaddit
 
 ## ── Database ──────────────────────────────────────────────────────────────
 
