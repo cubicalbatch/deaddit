@@ -851,6 +851,7 @@ def _post_payload(post):
         "comments_count": Comment.query.filter_by(post_id=post.id).count(),
         "created_at": post.created_at.isoformat() if post.created_at else "",
         "model": post.model or "",
+        "website": post.website.to_public_dict() if post.website else None,
     }
 
 

@@ -5,8 +5,9 @@ from flask import Blueprint, jsonify, request, url_for
 from sqlalchemy import func
 
 from deaddit.services.content import get_available_models
+from deaddit.utils import get_websites_bulk
 
-from .models import Comment, Post, PostImage, Subdeaddit, User
+from .models import Comment, GeneratedWebsite, Post, PostImage, Subdeaddit, User
 
 bp = Blueprint("api", __name__)
 
@@ -24,6 +25,18 @@ def _public_image(image: PostImage | None, removed: bool) -> dict | None:
     data["original_url"] = url_for("media.original", filename=data["original_url"])
     data["thumbnail_url"] = url_for("media.thumbnail", filename=data["thumbnail_url"])
     return data
+
+
+def _public_website(website: GeneratedWebsite | None, removed: bool) -> dict | None:
+    """Public URL/metadata payload for a generated website, or ``None``.
+
+    A removed post never exposes its website URL (moderation tombstone), and
+    private generation provenance never leaves ``GeneratedWebsite`` through
+    this sanctioned public view.
+    """
+    if website is None or removed:
+        return None
+    return website.to_public_dict()
 
 
 @bp.route("/api/subdeaddits", methods=["GET"])
@@ -90,6 +103,8 @@ def api_posts():
         ).all()
     }
 
+    websites_by_post_id = get_websites_bulk([post.id for post in posts])
+
     # Build response data, filtering by comment count if required
     post_data = []
     for post in posts:
@@ -112,6 +127,7 @@ def api_posts():
             "model": post.model,
             "llm_model": post.llm_model,
             "image": _public_image(images_by_post_id.get(post.id), post.removed),
+            "website": _public_website(websites_by_post_id.get(post.id), post.removed),
         }
         post_data.append(post_info)
 
@@ -150,6 +166,7 @@ def api_post(post_id):
         "comment_count": comment_count,
         "comments": comment_tree,
         "image": _public_image(post.image, post.removed),
+        "website": _public_website(post.website, post.removed),
     }
 
     return jsonify(post_data)
