@@ -2095,6 +2095,35 @@ a.pagenav__link:hover {
     box-shadow: var(--focus-ring);
 }
 
+/* Theme toggle (same id/class contract as admin.css — the public site
+   doesn't load admin.css, so the rule must live here too or the button
+   falls back to UA white `buttonface` and glares in dark mode). */
+.theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-2);
+    cursor: pointer;
+    transition: color var(--motion-fast) ease-in-out,
+                border-color var(--motion-fast) ease-in-out;
+}
+
+.theme-toggle:hover {
+    color: var(--text-1);
+    border-color: var(--text-3);
+}
+
+.theme-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
 /* --- Search results page --- */
 .search-header {
     margin-bottom: var(--space-md);
