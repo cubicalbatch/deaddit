@@ -81,6 +81,10 @@ class ChatResult:
     request_id: str
     tool_calls: list[dict] | None = None
     template_version: int | None = None  # LLM-5: echoed from ChatRequest
+    # Provider's choices[0].finish_reason (e.g. "stop", "length",
+    # "tool_calls"). None when the provider omits it -- back-compat, not an
+    # error case.
+    finish_reason: str | None = None
 
 
 @dataclass
@@ -171,6 +175,19 @@ def _extract_response(response: dict) -> tuple[str, list[dict] | None]:
     raise PermanentLLMError(f"Unexpected API response format: {str(response)[:200]}")
 
 
+def _extract_finish_reason(response: dict) -> str | None:
+    """Return choices[0].finish_reason, or None if absent/malformed.
+
+    Providers that omit the field (or send a response shape without a
+    choices[0]) yield None -- this is a back-compatibility requirement, not
+    an error case.
+    """
+    try:
+        return response["choices"][0].get("finish_reason")
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return None
+
+
 class LLMClient:
     def complete(self, req: ChatRequest) -> ChatResult:
         if req.tools:
@@ -222,6 +239,7 @@ class LLMClient:
             )
         latency_ms = (time.monotonic() - started) * 1000.0
         content, tool_calls = _extract_response(data)
+        finish_reason = _extract_finish_reason(data)
         usage = data.get("usage") or {}
         attempts = last_attempts()
 
@@ -245,6 +263,7 @@ class LLMClient:
             request_id=req.request_id,
             tool_calls=tool_calls,
             template_version=req.template_version,
+            finish_reason=finish_reason,
         )
 
     def _resolve_stream_support(self, req: ChatRequest) -> bool:
@@ -331,9 +350,12 @@ class LLMClient:
             )
             content_parts: list[str] = []
             tool_acc: dict[int, dict] = {}
+            finish_reason: str | None = None
             for chunk in chunks:
                 choices = chunk.get("choices") or []
                 choice = choices[0] if choices else {}
+                if choice.get("finish_reason"):
+                    finish_reason = choice["finish_reason"]
                 delta = choice.get("delta") or {}
                 text = delta.get("content")
                 if text:
@@ -384,6 +406,7 @@ class LLMClient:
             request_id=req.request_id,
             tool_calls=tool_calls or None,
             template_version=req.template_version,
+            finish_reason=finish_reason,
         )
         logger.info(
             "LLM stream complete: request_id=%s model=%s endpoint=%s "

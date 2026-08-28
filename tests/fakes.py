@@ -16,11 +16,12 @@ import json
 import deaddit.llm.transport as _llm_transport
 
 
-def _content_response(content: str) -> dict:
+def _content_response(content: str, finish_reason: str | None = None) -> dict:
+    choice: dict = {"message": {"role": "assistant", "content": content}}
+    if finish_reason is not None:
+        choice["finish_reason"] = finish_reason
     return {
-        "choices": [
-            {"message": {"role": "assistant", "content": content}},
-        ],
+        "choices": [choice],
         "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
     }
 
@@ -34,14 +35,22 @@ class FakeProvider:
         """Queue an OpenAI-shaped response dict, returned verbatim."""
         self._queue.append(response)
 
-    def enqueue_content(self, content: str) -> None:
-        self.enqueue(_content_response(content))
+    def enqueue_content(self, content: str, finish_reason: str | None = None) -> None:
+        self.enqueue(_content_response(content, finish_reason=finish_reason))
 
-    def enqueue_tool_calls(self, calls: list[dict], content: str | None = None) -> None:
+    def enqueue_tool_calls(
+        self,
+        calls: list[dict],
+        content: str | None = None,
+        finish_reason: str | None = None,
+    ) -> None:
         message: dict = {"role": "assistant", "tool_calls": calls}
         if content is not None:
             message["content"] = content
-        self.enqueue({"choices": [{"message": message}], "usage": {}})
+        choice: dict = {"message": message}
+        if finish_reason is not None:
+            choice["finish_reason"] = finish_reason
+        self.enqueue({"choices": [choice], "usage": {}})
 
     def enqueue_error(self, exc: Exception) -> None:
         self._queue.append(exc)

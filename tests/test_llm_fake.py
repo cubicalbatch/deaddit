@@ -31,6 +31,7 @@ class TestClientWithFakeProvider:
         assert isinstance(result.request_id, str) and result.request_id
         assert result.tool_calls is None
         assert result.usage["total_tokens"] == 2
+        assert result.finish_reason is None  # provider omitted it
 
     def test_request_id_passthrough(self, fake_llm):
         fake_llm.enqueue_content("ok")
@@ -54,6 +55,16 @@ class TestClientWithFakeProvider:
         result = LLMClient().complete(_request())
         assert result.tool_calls == calls
         assert result.content == ""
+
+    def test_finish_reason_survives_complete(self, fake_llm):
+        fake_llm.enqueue_content("truncated thought", finish_reason="length")
+        result = LLMClient().complete(_request())
+        assert result.finish_reason == "length"
+
+    def test_finish_reason_stop_survives_complete(self, fake_llm):
+        fake_llm.enqueue_content("a full answer", finish_reason="stop")
+        result = LLMClient().complete(_request())
+        assert result.finish_reason == "stop"
 
     def test_typed_error_propagates(self, fake_llm):
         fake_llm.enqueue_error(PermanentLLMError("bad response shape"))

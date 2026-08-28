@@ -111,6 +111,30 @@ def test_multi_chunk_ordering_yields_typed_events(app, db_session, fake_llm):
     assert done.result.attempts == 1
 
 
+def test_finish_reason_survives_real_stream(app, db_session, fake_llm):
+    _seed_cap(db_session, supports_tools=True, supports_streaming=True, method="manual")
+    fake_llm.enqueue_stream(
+        [
+            _content_chunk("Hel"),
+            _content_chunk("lo"),
+            {"choices": [{"delta": {}, "finish_reason": "length"}]},
+        ]
+    )
+    events = list(LLMClient().stream(_request()))
+    done = events[-1]
+    assert isinstance(done, Done)
+    assert done.synthesized is False
+    assert done.result.finish_reason == "length"
+
+
+def test_missing_finish_reason_normalizes_to_none_in_stream(app, db_session, fake_llm):
+    _seed_cap(db_session, supports_tools=True, supports_streaming=True, method="manual")
+    fake_llm.enqueue_stream([_content_chunk("Hello")])
+    events = list(LLMClient().stream(_request()))
+    done = events[-1]
+    assert done.result.finish_reason is None
+
+
 def test_reasoning_field_named_reasoning_is_normalized(app, db_session, fake_llm):
     _seed_cap(db_session, supports_tools=True, supports_streaming=True, method="manual")
     fake_llm.enqueue_stream([{"choices": [{"delta": {"reasoning": "hmm"}}]}])
