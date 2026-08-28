@@ -30,6 +30,7 @@ __all__ = [
     "all_tools",
     "get",
     "image_posts_config",
+    "offered_post_tool_names",
     "register",
     "specs_for",
     "tools_for",
@@ -220,7 +221,7 @@ def website_posts_config(agent: Any) -> dict[str, Any]:
     return {"enabled": True, "policy": policy}
 
 
-def _offered_post_tool_names(
+def offered_post_tool_names(
     image_cfg: dict[str, Any], website_cfg: dict[str, Any]
 ) -> frozenset[str]:
     """Resolve the image x website post-tool truth table to offered names.
@@ -239,6 +240,12 @@ def _offered_post_tool_names(
     either locked tool would honor one admin's configured intent at the
     other's expense. An empty offer is the only outcome that cannot be read
     as bypassing either policy.
+
+    Public (no leading underscore) because the executor (3.2) reuses this
+    exact truth table to authorize a tool call independently of whether
+    :func:`tools_for` ever offered it - a single source of truth for "what
+    is this agent allowed to publish" rather than two hand-maintained
+    tables that could silently drift apart.
     """
     image_only = image_cfg["enabled"] and image_cfg["policy"] == "image_only"
     website_only = website_cfg["enabled"] and website_cfg["policy"] == "website_only"
@@ -264,7 +271,7 @@ def tools_for(tier: str | AutonomyTier, agent: Any = None) -> list[Tool]:
     When *agent* is given, ``create_post``/``create_image_post``/
     ``create_website`` are also filtered together by its namespaced
     ``image_posts`` and ``website_posts`` configuration, per
-    :func:`_offered_post_tool_names` (plan 4B; create_website spec's
+    :func:`offered_post_tool_names` (plan 4B; create_website spec's
     "Agent configuration" truth table). Omitting *agent* skips this filter
     entirely (tier-only behaviour), which non-agent-aware callers rely on.
     """
@@ -272,7 +279,7 @@ def tools_for(tier: str | AutonomyTier, agent: Any = None) -> list[Tool]:
     tools = [tool for tool in all_tools() if active.allows(tool.min_tier)]
     if agent is None:
         return tools
-    offered = _offered_post_tool_names(
+    offered = offered_post_tool_names(
         image_posts_config(agent), website_posts_config(agent)
     )
     return [

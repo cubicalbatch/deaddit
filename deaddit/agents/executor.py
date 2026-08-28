@@ -22,7 +22,9 @@ from deaddit.agents.registry import (
     AutonomyTier,
     ToolContext,
     image_posts_config,
+    offered_post_tool_names,
     parse_tier,
+    website_posts_config,
 )
 from deaddit.agents.registry import (
     get as get_tool,
@@ -41,6 +43,7 @@ class ExecutorError(Exception):
 RATE_CAPS: dict[str, tuple[int, timedelta]] = {
     "create_post": (2, timedelta(hours=1)),
     "create_image_post": (2, timedelta(hours=1)),
+    "create_website": (2, timedelta(hours=1)),
     "create_comment": (12, timedelta(hours=1)),
     "vote": (40, timedelta(hours=1)),
 }
@@ -48,6 +51,7 @@ RATE_CAPS: dict[str, tuple[int, timedelta]] = {
 _RATE_CAP_MESSAGES = {
     "create_post": "you've posted a lot recently; try again later",
     "create_image_post": "you've posted a lot recently; try again later",
+    "create_website": "you've posted a lot recently; try again later",
     "create_comment": "you've commented a lot recently; try again later",
     "vote": "you've voted a lot recently; slow down a little",
 }
@@ -114,21 +118,37 @@ def _check_tier(ctx: ToolContext, min_tier_value: str) -> str | None:
     )
 
 
-def _check_image_policy(name: str, ctx: ToolContext) -> str | None:
-    """Authorize create_post/create_image_post against the agent's config.
+def _check_post_policy(name: str, ctx: ToolContext) -> str | None:
+    """Authorize create_post/create_image_post/create_website against config.
 
-    This runs regardless of what ``specs_for`` offered the model, so a
-    direct executor call cannot bypass the agent's image-post policy by
-    skipping registry filtering (plan 4B acceptance).
+    This runs regardless of what ``specs_for``/``tools_for`` offered the
+    model, so a forged, stale, or hand-crafted tool call cannot bypass the
+    agent's image/website post policy by skipping registry filtering (plan
+    4B acceptance; create_website spec "Registry and executor"). It reuses
+    :func:`offered_post_tool_names` - the exact same truth table
+    ``tools_for`` uses to decide what to offer - so enforcement can never
+    drift from offering: a call the registry would never have offered is
+    always rejected here too, including the invalid ``image_only`` +
+    ``website_only`` combination that fails closed to no post tool at all.
     """
     if name not in POST_TOOL_NAMES:
         return None
-    cfg = image_posts_config(ctx.agent)
-    if name == "create_image_post" and not cfg["enabled"]:
+    image_cfg = image_posts_config(ctx.agent)
+    website_cfg = website_posts_config(ctx.agent)
+    if name in offered_post_tool_names(image_cfg, website_cfg):
+        return None
+    if name == "create_image_post":
         return "image posts are not enabled for this agent"
-    if name == "create_post" and cfg["enabled"] and cfg["policy"] == "image_only":
+    if name == "create_website":
+        return "website posts are not enabled for this agent"
+    # create_post: excluded either because an image_only/website_only
+    # policy forbids the plain-text fallback, or because both forced
+    # policies conflict and the agent has no post tool available at all.
+    if image_cfg["enabled"] and image_cfg["policy"] == "image_only":
         return "this agent may only publish image posts, not text posts"
-    return None
+    if website_cfg["enabled"] and website_cfg["policy"] == "website_only":
+        return "this agent may only publish website posts, not text posts"
+    return "no post tool is available for this agent's configuration"
 
 
 def _parse_raw_arguments(raw_arguments: dict | str) -> dict:
@@ -182,7 +202,7 @@ def _check_duplicate(name: str, ctx: ToolContext, validated: dict) -> str | None
             f"{validated.get('title', '')} {validated.get('content', '')}"
         )
         subdeaddit_name = validated.get("subdeaddit")
-    elif name == "create_image_post":
+    elif name in ("create_image_post", "create_website"):
         candidate = _normalize(
             f"{validated.get('title', '')} {validated.get('content') or ''}"
         )
@@ -353,15 +373,19 @@ def execute(name: str, raw_arguments: dict | str, ctx: ToolContext) -> dict:
             started,
         )
 
-    # Image-post policy gate: independent of whether specs_for offered this
-    # tool, so a direct executor call cannot bypass the agent's config.
-    policy_problem = _check_image_policy(name, ctx)
+    # Post-tool policy gate: independent of whether specs_for offered this
+    # tool, so a direct executor call cannot bypass the agent's image/website
+    # post configuration.
+    policy_problem = _check_post_policy(name, ctx)
     if policy_problem is not None:
         return _persist_and_return(
             ctx,
             name,
             raw_arguments_dict,
-            _reject(policy_problem, hint="check your agent's image-post configuration"),
+            _reject(
+                policy_problem,
+                hint="check your agent's image-post/website-post configuration",
+            ),
             started,
         )
 

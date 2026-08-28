@@ -22,6 +22,7 @@ from deaddit.agents.registry import (
     image_posts_config,
     register,
 )
+from deaddit.config import Config
 from deaddit.dynamics.votes import cast_vote
 from deaddit.extensions import db
 from deaddit.images.client import generate as generate_image
@@ -33,14 +34,42 @@ from deaddit.images.storage import (
     store_variants,
 )
 from deaddit.images.types import Deadline, ImageProviderError
-from deaddit.models import Comment, ImageProvider, Post, Subdeaddit, ToolCall, User
+from deaddit.models import (
+    Comment,
+    GeneratedWebsite,
+    ImageProvider,
+    Post,
+    Subdeaddit,
+    ToolCall,
+    User,
+)
 from deaddit.services.content import (
     ContentValidationError,
+    PendingGeneratedWebsite,
     PendingPostImage,
     create_comment,
     create_image_post,
     create_post,
+    create_website_post,
     preflight_image_post,
+    preflight_website_post,
+)
+from deaddit.websites.generator import (
+    WebsiteGenerationError,
+    WebsiteGenerationInvalidHTMLError,
+    WebsiteGenerationTruncatedError,
+    generate_website_html,
+)
+from deaddit.websites.storage import (
+    InvalidHostnameHintError,
+    InvalidPageNameHintError,
+    WebsiteStorageError,
+    allocate_public_path,
+    normalize_hostname_hint,
+    normalize_page_name_hint,
+    resolve_website_settings,
+    store_website,
+    website_root,
 )
 
 #: Upper bound on how long a single image-generation attempt may run,
@@ -252,23 +281,234 @@ class CreateWebsiteArgs(BaseModel):
     post_type: str | None = Field(default=None, max_length=50)
 
 
-def _create_website_pending_3_2(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
-    """Registry-only placeholder; the guarded flow lands in subphase 3.2.
+#: Marker stored (and returned) on a create_website failure result once the
+#: nested HTML generation request has actually been sent - i.e. a "billed"
+#: attempt within the meaning of the spec's one-attempt-per-run guard. Never
+#: set on an ``ok: True`` result: a successful post already consumes the
+#: shared one-post-per-run budget checked at the top of this handler, so no
+#: further attempt in this run can ever reach the generator again.
+_WEBSITE_GENERATION_ATTEMPTED_KIND = "website_generation_attempted"
 
-    Subphase 3.1 (plan Phase 3, spec "Registry and executor") registers the
-    tool's wire schema, description, and shared post-tool-budget/config
-    wiring only. The real policy -> preflight -> generate -> store ->
-    publish flow (spec "Atomic publication flow") is deliberately not
-    implemented here; this stub only satisfies the ``Tool.handler`` contract
-    so the tool can be registered and offered. It is not reachable from the
-    default (disabled) ``website_posts`` configuration used by every
-    existing agent/test, and subphase 3.2 replaces this function with the
-    real ``_create_website`` implementation and its own registration.
+
+def _website_generation_attempts_this_run(ctx: ToolContext) -> int:
+    """Count billed create_website generation attempts already made this run.
+
+    A "billed" attempt is one that actually reached
+    :func:`deaddit.websites.generator.generate_website_html` - regardless of
+    whether it went on to produce a publishable page - so repeated malformed
+    32K-token responses cannot multiply generation cost within one visit
+    (spec invariant, "Atomic publication flow" step 1). Calls rejected
+    before generation (policy, the shared post budget, an unknown
+    community, a preflight failure, or an exhausted run deadline) are never
+    billed and do not count here. A successful call counts too, though in
+    practice the shared one-post-per-run budget already blocks any later
+    attempt in the same run.
     """
-    del ctx, params
-    raise NotImplementedError(
-        "create_website generation is implemented in subphase 3.2"
+    if ctx.run is None:
+        return 0
+    rows = ToolCall.query.filter_by(run_id=ctx.run.id, name="create_website").all()
+    count = 0
+    for row in rows:
+        if row.ok or (
+            isinstance(row.result, dict)
+            and row.result.get("kind") == _WEBSITE_GENERATION_ATTEMPTED_KIND
+        ):
+            count += 1
+    return count
+
+
+def _is_public_path_taken(public_path: str) -> bool:
+    return (
+        db.session.query(GeneratedWebsite.id).filter_by(public_path=public_path).first()
+        is not None
     )
+
+
+def _create_website(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
+    """Preflight -> generate -> validate -> allocate/store -> publish.
+
+    Website-post policy authorization already happened in the executor
+    (independent of whether this tool was even offered to the model,
+    mirroring ``create_image_post``) - this handler only enforces the
+    budgets/guardrails that live at the publication layer: the shared
+    one-post-per-run budget (spec "Atomic publication flow" step 1) and the
+    dedicated one-billed-generation-attempt-per-run guard
+    (:func:`_website_generation_attempts_this_run`).
+
+    No database transaction spans generation or the filesystem write: the
+    only database activity between "call the generator" and "store the
+    HTML" is none at all (steps 3-5 of the spec's "Atomic publication
+    flow" run in plain Python against already-fetched settings), and the
+    only commit in this whole function is inside
+    :func:`~deaddit.services.content.create_website_post`, called only
+    after the file already exists on disk. On any failure from that point
+    on, ``create_website_post`` itself deletes the just-stored file (unlike
+    the image path); this handler never deletes it a second time.
+    """
+    if ctx.run is not None and _posts_created_this_run(ctx) >= 1:
+        return {
+            "ok": False,
+            "error": "you have already created a post during this visit (maximum 1 post per session)",
+            "hint": "you can read or comment on other posts, vote, or call finish to end your visit",
+        }
+
+    if ctx.run is not None and _website_generation_attempts_this_run(ctx) >= 1:
+        return {
+            "ok": False,
+            "error": "you have already attempted to generate a website during this visit (maximum 1 attempt per session)",
+            "hint": "you can read or comment on other posts, vote, or call finish to end your visit",
+        }
+
+    if db.session.get(Subdeaddit, params.community) is None:
+        return {
+            "ok": False,
+            "error": f"subdeaddit '{params.community}' does not exist",
+            "hint": "use search with type='subdeaddit' to find existing communities",
+        }
+
+    try:
+        preflight_website_post(
+            user=ctx.user_username, subdeaddit=params.community, title=params.title
+        )
+    except ContentValidationError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    if not ctx.llm_api_url or not ctx.llm_model:
+        return {
+            "ok": False,
+            "error": "no LLM endpoint is configured for this agent",
+        }
+
+    if ctx.deadline is not None:
+        remaining = ctx.deadline.remaining()
+        if remaining <= 0:
+            return {
+                "ok": False,
+                "error": "not enough time remaining in this run to generate a website",
+            }
+        run_deadline_remaining = remaining
+    else:
+        run_deadline_remaining = None
+
+    settings = resolve_website_settings(Config.get)
+
+    try:
+        generation = generate_website_html(
+            website_description=params.website_description,
+            hostname_hint=params.hostname_hint,
+            page_name_hint=params.page_name_hint,
+            api_url=ctx.llm_api_url,
+            api_key=ctx.llm_api_key,
+            model=ctx.llm_model,
+            agent=ctx.user_username,
+            settings=settings,
+            run_deadline_remaining=run_deadline_remaining,
+        )
+    except WebsiteGenerationTruncatedError:
+        return {
+            "ok": False,
+            "error": "website generation stopped before completing the document; "
+            "try a shorter or simpler site brief",
+            "kind": _WEBSITE_GENERATION_ATTEMPTED_KIND,
+        }
+    except WebsiteGenerationInvalidHTMLError:
+        return {
+            "ok": False,
+            "error": "website generation produced an invalid document",
+            "kind": _WEBSITE_GENERATION_ATTEMPTED_KIND,
+        }
+    except WebsiteGenerationError:
+        return {
+            "ok": False,
+            "error": "website generation failed",
+            "kind": _WEBSITE_GENERATION_ATTEMPTED_KIND,
+        }
+
+    try:
+        hostname = normalize_hostname_hint(params.hostname_hint)
+        page_name = normalize_page_name_hint(params.page_name_hint)
+    except (InvalidHostnameHintError, InvalidPageNameHintError):
+        return {
+            "ok": False,
+            "error": "could not turn the requested hostname/page name into a "
+            "valid website address",
+            "kind": _WEBSITE_GENERATION_ATTEMPTED_KIND,
+        }
+
+    try:
+        allocated = allocate_public_path(
+            hostname, page_name, is_public_path_taken=_is_public_path_taken
+        )
+    except WebsiteStorageError:
+        return {
+            "ok": False,
+            "error": "could not allocate a unique website address; try again",
+            "kind": _WEBSITE_GENERATION_ATTEMPTED_KIND,
+        }
+
+    root = website_root(current_app)
+    try:
+        stored = store_website(generation.html, root)
+    except Exception:
+        return {
+            "ok": False,
+            "error": "website storage failed",
+            "kind": _WEBSITE_GENERATION_ATTEMPTED_KIND,
+        }
+
+    pending = PendingGeneratedWebsite(
+        storage_path=stored.storage_path,
+        byte_size=stored.byte_size,
+        sha256=stored.sha256,
+        public_path=allocated.public_path,
+        hostname=allocated.hostname,
+        page_name=allocated.page_name,
+        source_description=params.website_description,
+        creator_username_snapshot=ctx.user_username,
+        api_url_snapshot=generation.api_url,
+        model_snapshot=generation.model,
+        agent_id=getattr(ctx.agent, "id", None),
+        agent_run_id=getattr(ctx.run, "id", None),
+        request_id=generation.request_id,
+        prompt_tokens=generation.prompt_tokens,
+        completion_tokens=generation.completion_tokens,
+        total_tokens=generation.total_tokens,
+        finish_reason=generation.finish_reason,
+    )
+
+    try:
+        post = create_website_post(
+            title=params.title,
+            content=params.content,
+            user=ctx.user_username,
+            subdeaddit=params.community,
+            website=pending,
+            post_type=params.post_type,
+            model=_provenance(ctx),
+            llm_model=ctx.llm_model,
+        )
+    except ContentValidationError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "kind": _WEBSITE_GENERATION_ATTEMPTED_KIND,
+        }
+    except SQLAlchemyError:
+        return {
+            "ok": False,
+            "error": "failed to save the website post; please try again",
+            "kind": _WEBSITE_GENERATION_ATTEMPTED_KIND,
+        }
+
+    return {
+        "ok": True,
+        "post_id": post.id,
+        "title": post.title,
+        "subdeaddit": post.subdeaddit_name,
+        "website_url": f"/out/{post.website.public_path}",
+        "hostname": post.website.hostname,
+        "hint": "Website post created successfully. Call finish to conclude your visit.",
+    }
 
 
 class CreateCommentArgs(BaseModel):
@@ -451,7 +691,7 @@ register(
             "contains."
         ),
         parameters=CreateWebsiteArgs,
-        handler=_create_website_pending_3_2,
+        handler=_create_website,
         min_tier=AutonomyTier.REGULAR,
         rate_class=RateClass.WRITE,
     ),
