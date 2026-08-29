@@ -1,0 +1,194 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Voting{% endblock %}
+
+{% block extra_css %}
+<style>
+    .voting-mode .btn { min-width: 7rem; }
+    .voting-mode .mode-copy { min-height: 2.8rem; }
+    .preset-card { cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
+    .preset-card.selected { border-color: var(--bs-primary); box-shadow: 0 0 0 .2rem rgba(var(--bs-primary-rgb), .15); }
+    .preset-card .form-check-input { pointer-events: none; }
+    .preview-table th { white-space: nowrap; }
+    .policy-history code { font-size: .75rem; }
+    .field-error { min-height: 1.25rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <div>
+        <h1 class="h2 mb-1"><i class="bi bi-bar-chart-line me-2"></i>Simulated Voting</h1>
+        <p class="text-muted mb-0">Shape background activity without touching the public site.</p>
+    </div>
+    <span class="badge text-bg-secondary" id="current-policy-badge">No policy saved</span>
+</div>
+
+<div id="voting-alert" class="alert d-none" role="alert"></div>
+
+<section class="card mb-4">
+    <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-power me-2"></i>Simulator status</h2></div>
+    <div class="card-body">
+        <div class="voting-mode btn-group" role="group" aria-label="Simulator mode">
+            <button type="button" class="btn btn-outline-secondary mode-button" data-mode="off">Off</button>
+            <button type="button" class="btn btn-outline-warning mode-button" data-mode="shadow">Shadow</button>
+            <button type="button" class="btn btn-outline-danger mode-button" data-mode="live">Live</button>
+        </div>
+        <div class="small text-muted mt-3" id="mode-copy"></div>
+        <div class="alert alert-warning mt-3 mb-0 d-none" id="live-warning">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+            <strong>Live changes scores and karma.</strong> Use Shadow first to calibrate activity.
+        </div>
+    </div>
+</section>
+
+<section class="mb-4">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+        <h2 class="h5 mb-0">Behavior presets</h2>
+        <span class="small text-muted">Natural is recommended for first setup.</span>
+    </div>
+    <div class="row g-3" id="preset-cards"></div>
+</section>
+
+<section class="card mb-4">
+    <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-graph-up-arrow me-2"></i>Outcome preview</h2></div>
+    <div class="card-body">
+        <p class="text-muted small">Approximate cumulative votes for a typical item. Actual outcomes vary by content, eligible personas, caps, and deterministic sampling.</p>
+        <div class="table-responsive">
+            <table class="table table-sm preview-table align-middle mb-3">
+                <thead><tr><th>Item</th><th>Expected total</th><th>15 min</th><th>1 hour</th><th>6 hours</th><th>Active-window end</th><th>Long tail</th></tr></thead>
+                <tbody id="preview-body"></tbody>
+            </table>
+        </div>
+        <div class="row g-3 small">
+            <div class="col-md-6"><div class="border rounded p-3 h-100"><strong><i class="bi bi-clock me-1"></i>Active window</strong><p class="mb-0 mt-1" id="active-explanation">Routine activity runs only through each item's active window; completing that window does not permanently make the item ineligible.</p></div></div>
+            <div class="col-md-6"><div class="border rounded p-3 h-100"><strong><i class="bi bi-stars me-1"></i>Rediscovery tail</strong><p class="mb-0 mt-1" id="tail-explanation">Tail cadence applies to future exposures. Old content can still receive rare rediscovery votes.</p></div></div>
+        </div>
+    </div>
+</section>
+
+<section class="card mb-4">
+    <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-sliders me-2"></i>Advanced settings</h2></div>
+    <div class="card-body">
+        <p class="small text-muted">Changing any value creates a new immutable Custom policy. Existing policy rows are never edited.</p>
+        <details id="advanced-settings">
+            <summary class="btn btn-outline-secondary btn-sm">Show advanced settings</summary>
+            <form id="advanced-form" class="mt-3">
+                <div class="row g-3" id="advanced-fields"></div>
+            </form>
+        </details>
+        <div class="mt-3 d-flex align-items-center gap-2">
+            <button type="button" class="btn btn-primary" id="save-policy"><i class="bi bi-check-lg me-1"></i>Save policy</button>
+            <span class="small text-muted" id="save-help">Select a preset or adjust advanced settings.</span>
+        </div>
+    </div>
+</section>
+
+<section class="alert alert-info mb-4">
+    <strong><i class="bi bi-info-circle me-1"></i>How policy changes apply</strong>
+    <ul class="mb-0 mt-2 small">
+        <li>Active cadence changes apply to content created after saving.</li>
+        <li>Tail changes apply to future rediscovery, including older content.</li>
+        <li>Runtime pause/resume does not create a new policy.</li>
+    </ul>
+</section>
+
+<section class="card mb-4">
+    <div class="card-header"><h2 class="h5 mb-0"><i class="bi bi-heart-pulse me-2"></i>Recent health summary</h2></div>
+    <div class="card-body">
+        <div class="row g-3 mb-3" id="health-cards"></div>
+        <p class="small text-muted mb-2">Latest available tick aggregate: <strong id="cap-skips">0</strong> skipped by persona cap.</p>
+        <div class="small mb-3">Current policy effective: <strong id="effective-time">Not saved</strong></div>
+        <h3 class="h6">Recent policy history</h3>
+        <div class="table-responsive policy-history">
+            <table class="table table-sm align-middle"><thead><tr><th>Policy</th><th>Effective</th><th>Created</th></tr></thead><tbody id="history-body"></tbody></table>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+    const modeCopy = {
+        off: 'No simulated-voting work is computed or cast.',
+        shadow: 'Compute and aggregate decisions without writing votes.',
+        live: 'Compute decisions and cast eligible simulated votes.'
+    };
+    const fields = [
+        ['post', 'mean_active_votes', 'Post mean votes', 'number', '0.01'],
+        ['comment', 'mean_active_votes', 'Comment mean votes', 'number', '0.01'],
+        ['post', 'attention_shape', 'Post popularity variation', 'number', '0.01'],
+        ['comment', 'attention_shape', 'Comment popularity variation', 'number', '0.01'],
+        ['post', 'half_life_minutes', 'Post half-life (minutes)', 'number', '1'],
+        ['comment', 'half_life_minutes', 'Comment half-life (minutes)', 'number', '1'],
+        ['post', 'active_window_hours', 'Post active window (hours)', 'number', '1'],
+        ['comment', 'active_window_hours', 'Comment active window (hours)', 'number', '1'],
+        ['post', 'tail_vote_probability_per_exposure', 'Post tail chance / exposure', 'number', '0.001'],
+        ['comment', 'tail_vote_probability_per_exposure', 'Comment tail chance / exposure', 'number', '0.001'],
+        ['post', 'tail_half_life_days', 'Post tail half-life (days)', 'number', '1'],
+        ['comment', 'tail_half_life_days', 'Comment tail half-life (days)', 'number', '1'],
+        ['direction', 'base_downvote_probability', 'Baseline downvote share', 'number', '0.01'],
+        ['voter', 'default_hourly_cap', 'Persona hourly cap', 'number', '1'],
+        ['voter', 'minimum_gap_seconds', 'Minimum vote gap (seconds)', 'number', '1'],
+    ];
+    let state = { presets: {}, selectedPreset: 'natural', config: null };
+    const $ = (selector) => document.querySelector(selector);
+    const showAlert = (message, kind = 'danger') => {
+        const alert = $('#voting-alert');
+        alert.className = `alert alert-${kind}`;
+        alert.textContent = message;
+        alert.classList.remove('d-none');
+    };
+    const clearAlert = () => $('#voting-alert').classList.add('d-none');
+    const getValue = (section, key) => state.config?.[section]?.[key];
+    const setValue = (section, key, value) => { state.config[section][key] = value; };
+
+    function renderFields() {
+        $('#advanced-fields').innerHTML = fields.map(([section, key, label, type, step]) => {
+            const id = `${section}-${key}`;
+            const value = getValue(section, key) ?? '';
+            return `<div class="col-sm-6 col-lg-4"><label class="form-label small fw-bold" for="${id}">${label}</label><input class="form-control form-control-sm policy-field" id="${id}" data-section="${section}" data-key="${key}" type="${type}" step="${step}" value="${value}"><div class="invalid-feedback field-error" data-error="${section}.${key}"></div></div>`;
+        }).join('');
+        document.querySelectorAll('.policy-field').forEach((input) => input.addEventListener('input', () => {
+            const section = input.dataset.section;
+            const key = input.dataset.key;
+            setValue(section, key, Number(input.value));
+            state.selectedPreset = null;
+            renderPresetCards();
+            renderPreview(state.config);
+        }));
+    }
+    function renderPresetCards() {
+        $('#preset-cards').innerHTML = Object.values(state.presets).map((preset) => `<div class="col-md-4"><div class="card preset-card h-100 ${state.selectedPreset === preset.name ? 'selected' : ''}" data-preset="${preset.name}" tabindex="0"><div class="card-body"><div class="form-check"><input class="form-check-input" type="radio" ${state.selectedPreset === preset.name ? 'checked' : ''} aria-label="Select ${preset.label}"><label class="form-check-label fw-bold">${preset.label}${preset.recommended ? ' <span class="badge text-bg-success ms-1">Recommended</span>' : ''}</label></div><p class="small text-muted mt-2 mb-0">${preset.description}</p></div></div></div>`).join('');
+        document.querySelectorAll('.preset-card').forEach((card) => {
+            const choose = () => { const preset = state.presets[card.dataset.preset]; state.selectedPreset = preset.name; state.config = structuredClone(preset.config); renderPresetCards(); renderFields(); renderPreview(state.config); clearErrors(); };
+            card.addEventListener('click', choose);
+            card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(); } });
+        });
+    }
+    function renderPreview(config) {
+        if (!config) return;
+        const preview = state.selectedPreset && state.presets[state.selectedPreset] ? state.presets[state.selectedPreset].preview : buildPreview(config);
+        $('#preview-body').innerHTML = ['post', 'comment'].map((kind) => { const item = preview[kind]; const c = item.cumulative_votes; return `<tr><th class="text-capitalize">${kind}</th><td>${item.expected_votes}</td><td>${c['15_minutes']}</td><td>${c['1_hour']}</td><td>${c['6_hours']}</td><td>${c.active_window_end}</td><td>${c.long_tail}<br><span class="text-muted small">${(item.tail_vote_probability_per_exposure * 100).toFixed(2)}% / exposure</span></td></tr>`; }).join('');
+        $('#active-explanation').textContent = preview.eligibility.active;
+        $('#tail-explanation').textContent = `${preview.eligibility.tail} ${preview.eligibility.old_content}`;
+    }
+    // The server supplies previews for presets. Custom values use the same
+    // documented arrival curve locally so advanced edits update immediately.
+    function buildPreview(config) {
+        const result = {};
+        ['post', 'comment'].forEach((kind) => { const s = config[kind], mean = Number(s.mean_active_votes), h = Number(s.half_life_minutes), window = Number(s.active_window_hours) * 60, denominator = 1 - Math.pow(2, -window / h); const cumulative = {}; [['15_minutes', 15], ['1_hour', 60], ['6_hours', 360]].forEach(([name, age]) => { const f = age < window ? (1 - Math.pow(2, -age / h)) / denominator : 1; cumulative[name] = Math.min(mean, mean * f).toFixed(2); }); cumulative.active_window_end = mean.toFixed(2); cumulative.long_tail = mean.toFixed(2); result[kind] = {expected_votes: mean.toFixed(2), cumulative_votes: cumulative, tail_vote_probability_per_exposure: Number(s.tail_vote_probability_per_exposure)}; }); result.eligibility = {active: 'Active cadence applies to content created after the policy is saved and ends at the item\'s active-window boundary.', tail: 'Tail cadence applies to future archive or revival exposures, including content created under an older policy.', old_content: 'Old content can still receive rare rediscovery votes.'}; return result;
+    }
+    function clearErrors() { document.querySelectorAll('.policy-field').forEach((input) => input.classList.remove('is-invalid')); document.querySelectorAll('.field-error').forEach((node) => { node.textContent = ''; }); }
+    function showErrors(errors) { clearErrors(); Object.entries(errors || {}).forEach(([path, message]) => { const node = document.querySelector(`[data-error="${path}"]`); if (node) { node.textContent = message; const input = document.querySelector(`#${path.replace('.', '-')}`); if (input) input.classList.add('is-invalid'); } }); }
+    function setMode(mode) { document.querySelectorAll('.mode-button').forEach((button) => { button.classList.toggle('active', button.dataset.mode === mode); }); $('#mode-copy').textContent = modeCopy[mode]; $('#live-warning').classList.toggle('d-none', mode !== 'live'); }
+    function renderHealth(health) { const cards = [['simulated_votes', 'Simulated votes'], ['active_decisions', 'Active decisions'], ['archive_decisions', 'Archive decisions'], ['revival_decisions', 'Revival decisions'], ['upvote_share', 'Upvote share']]; $('#health-cards').innerHTML = cards.map(([key, label]) => `<div class="col-6 col-lg"><div class="border rounded p-3 h-100"><div class="small text-muted">${label}</div><div class="fs-5 fw-semibold">${key === 'upvote_share' ? (health[key] == null ? '—' : `${(health[key] * 100).toFixed(1)}%`) : health[key]}</div></div></div>`).join(''); $('#cap-skips').textContent = health.skipped_by_cap; }
+    function renderHistory(data) { const current = data.current_policy; $('#current-policy-badge').textContent = current ? `${current.label} policy` : 'No policy saved'; $('#effective-time').textContent = current ? new Date(current.effective_at).toLocaleString() : 'Not saved'; $('#history-body').innerHTML = (data.history || []).map((row) => `<tr><td><span class="badge text-bg-secondary">${row.label}</span> <span class="text-muted small">#${row.id}</span></td><td>${new Date(row.effective_at).toLocaleString()}</td><td>${new Date(row.created_at).toLocaleString()}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted">No saved policies yet.</td></tr>'; }
+    async function load() { const response = await fetch('{{ url_for("admin.voting_api") }}'); if (!response.ok) throw new Error('Unable to load voting settings.'); const data = await response.json(); state.presets = data.presets; state.selectedPreset = data.current_policy?.preset || 'natural'; state.config = structuredClone(data.current_policy?.config || data.presets.natural.config); setMode(data.mode); renderPresetCards(); renderFields(); renderPreview(data.current_policy ? data.preview : data.presets.natural.preview); renderHealth(data.health); renderHistory(data); }
+    document.querySelectorAll('.mode-button').forEach((button) => button.addEventListener('click', async () => { clearAlert(); const response = await fetch('{{ url_for("admin.voting_mode_api") }}', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({mode: button.dataset.mode})}); const data = await response.json(); if (!response.ok) { showAlert(data.error || 'Unable to change mode.'); return; } setMode(data.mode); showAlert(`Simulator mode changed to ${data.mode}.`, 'success'); }));
+    $('#save-policy').addEventListener('click', async () => { clearAlert(); clearErrors(); const body = state.selectedPreset ? {preset: state.selectedPreset} : {preset: 'custom', config: state.config}; const response = await fetch('{{ url_for("admin.voting_policy_api") }}', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)}); const data = await response.json(); if (!response.ok) { showErrors(data.errors); showAlert(data.error || 'Unable to save policy.'); return; } showAlert('Policy saved. It is immutable; further saves append another history row.', 'success'); await load(); });
+    load().catch((error) => showAlert(error.message));
+})();
+</script>
+{% endblock %}

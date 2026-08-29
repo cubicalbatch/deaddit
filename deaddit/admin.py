@@ -29,6 +29,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from deaddit import db
 from deaddit.agents.executor import normalize_persona_rate_caps
 from deaddit.config import Config
+from deaddit.dynamics.engagement import (
+    SUPPORTED_ALGORITHM_VERSIONS,
+    preset_config,
+    validate_policy,
+)
 from deaddit.images import client as image_client
 from deaddit.images import service as media_service
 from deaddit.images import verification as image_verification
@@ -67,11 +72,14 @@ from deaddit.models import (
     PromptTemplate,
     PromptTemplateVersion,
     Report,
+    Setting,
     Subdeaddit,
     SubdeadditModerator,
     ToolCall,
     User,
     Vote,
+    VoteCadencePolicy,
+    VoteSimulationHourly,
 )
 from deaddit.services.content import (
     ContentValidationError,
@@ -527,6 +535,324 @@ def admin_required(f):
         return f(*args, **kwargs)
 
     return decorated_function
+
+
+# ---------------------------------------------------------------------------
+# Simulated voting administration
+
+_VOTING_MODE_SETTING = "SIMULATED_VOTING_MODE"
+_VOTING_MODES = frozenset({"off", "shadow", "live"})
+_VOTING_PRESET_COPY = {
+    "quiet": "Sparse and slower; many items receive little activity.",
+    "natural": (
+        "Balanced everyday activity with most votes in the first few hours "
+        "and a small rediscovery tail."
+    ),
+    "busy": "Fast, high-volume activity with more popular outliers.",
+}
+_VOTING_PRESET_LABELS = {"quiet": "Quiet", "natural": "Natural", "busy": "Busy"}
+
+
+def _normalize_voting_mode(value):
+    """Use the same fail-closed mode interpretation as the worker."""
+    mode = (value or "").strip().lower() if isinstance(value, str) else ""
+    return mode if mode in _VOTING_MODES else "off"
+
+
+def _policy_validation_errors(config):
+    """Return API-friendly field errors without mutating or persisting config."""
+    try:
+        validate_policy(config)
+    except (TypeError, ValueError) as exc:
+        message = str(exc)
+        match = re.search(r"((?:post|comment|voter|direction)\.[a-z_]+)", message)
+        if match:
+            return {match.group(1): message}
+        if "minimum downvote probability" in message:
+            return {"direction.minimum_downvote_probability": message}
+        return {"policy": message}
+    return {}
+
+
+def _policy_columns(*, before=None, limit=None):
+    """Read policy columns without triggering ORM load hooks on bad rows."""
+    query = db.session.query(
+        VoteCadencePolicy.id,
+        VoteCadencePolicy.preset,
+        VoteCadencePolicy.algorithm_version,
+        VoteCadencePolicy.config,
+        VoteCadencePolicy.effective_at,
+        VoteCadencePolicy.created_at,
+    )
+    if before is not None:
+        query = query.filter(VoteCadencePolicy.effective_at <= before)
+    query = query.order_by(
+        VoteCadencePolicy.effective_at.desc(), VoteCadencePolicy.id.desc()
+    )
+    if limit is not None:
+        query = query.limit(limit)
+    return query.all()
+
+
+def _policy_record(row, *, include_config=True):
+    """Serialize a validated policy column row for the admin surface."""
+    if row.preset not in VoteCadencePolicy.VALID_PRESETS:
+        raise ValueError(f"invalid policy preset {row.preset}")
+    if row.algorithm_version not in SUPPORTED_ALGORITHM_VERSIONS:
+        raise ValueError(f"unsupported policy algorithm version {row.algorithm_version}")
+    config = validate_policy(row.config)
+    record = {
+        "id": row.id,
+        "preset": row.preset,
+        "label": _VOTING_PRESET_LABELS.get(row.preset, "Custom"),
+        "algorithm_version": row.algorithm_version,
+        "effective_at": row.effective_at.isoformat() if row.effective_at else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+    if include_config:
+        record["config"] = config
+    return record
+
+
+def _voting_preview(config):
+    """Calculate a readable, deterministic estimate from a policy config."""
+    result = {}
+    checkpoints = (
+        ("15_minutes", 15.0),
+        ("1_hour", 60.0),
+        ("6_hours", 360.0),
+    )
+    for target_type in ("post", "comment"):
+        section = config[target_type]
+        mean = float(section["mean_active_votes"])
+        half_life = float(section["half_life_minutes"])
+        window_minutes = float(section["active_window_hours"]) * 60.0
+        denominator = 1.0 - 2.0 ** (-window_minutes / half_life)
+        cumulative = {}
+        for name, age_minutes in checkpoints:
+            fraction = (
+                (1.0 - 2.0 ** (-age_minutes / half_life)) / denominator
+                if age_minutes < window_minutes
+                else 1.0
+            )
+            cumulative[name] = round(min(mean, mean * fraction), 2)
+        cumulative["active_window_end"] = round(mean, 2)
+        # Tail exposure cadence is intentionally not assumed here.  The API
+        # reports the active budget plus the per-exposure rediscovery chance.
+        cumulative["long_tail"] = round(mean, 2)
+        result[target_type] = {
+            "expected_votes": round(mean, 2),
+            "cumulative_votes": cumulative,
+            "active_window_hours": section["active_window_hours"],
+            "tail_half_life_days": section["tail_half_life_days"],
+            "tail_vote_probability_per_exposure": section[
+                "tail_vote_probability_per_exposure"
+            ],
+        }
+    result["eligibility"] = {
+        "active": (
+            "Active cadence applies to content created after the policy is "
+            "saved and ends at the item's active-window boundary."
+        ),
+        "tail": (
+            "Tail cadence applies to future archive or revival exposures, "
+            "including content created under an older policy."
+        ),
+        "old_content": "Old content can still receive rare rediscovery votes.",
+    }
+    return result
+
+
+def _voting_health():
+    since = datetime.utcnow() - timedelta(hours=24)
+    rows = VoteSimulationHourly.query.filter(
+        VoteSimulationHourly.hour >= since
+    ).all()
+    counters = {
+        "ticks": 0,
+        "errors": 0,
+        "active_proposals": 0,
+        "archive_proposals": 0,
+        "revival_proposals": 0,
+        "inserted_votes": 0,
+        "switched_votes": 0,
+        "upvotes": 0,
+        "downvotes": 0,
+        "cap_skips": 0,
+        "min_gap_skips": 0,
+        "no_voter_skips": 0,
+        "guardrail_skips": 0,
+    }
+    for row in rows:
+        for name in counters:
+            counters[name] += getattr(row, name) or 0
+    latest = (
+        VoteSimulationHourly.query.order_by(VoteSimulationHourly.updated_at.desc())
+        .first()
+    )
+    direction_total = counters["upvotes"] + counters["downvotes"]
+    simulated_votes = counters["inserted_votes"] + counters["switched_votes"]
+    latest_cap_skips = latest.cap_skips if latest else 0
+    return {
+        "period_hours": 24,
+        "simulated_votes": simulated_votes,
+        "last_24h_simulated_votes": simulated_votes,
+        "active_decisions": counters["active_proposals"],
+        "archive_decisions": counters["archive_proposals"],
+        "revival_decisions": counters["revival_proposals"],
+        "active": counters["active_proposals"],
+        "archive": counters["archive_proposals"],
+        "revival": counters["revival_proposals"],
+        "upvote_share": (
+            round(counters["upvotes"] / direction_total, 4)
+            if direction_total
+            else None
+        ),
+        "skipped_by_cap": latest_cap_skips,
+        "cap_skips": latest_cap_skips,
+        "counters": counters,
+        "latest_tick": (
+            {
+                "hour": latest.hour.isoformat() if latest.hour else None,
+                "mode": latest.mode,
+                "updated_at": (
+                    latest.updated_at.isoformat() if latest.updated_at else None
+                ),
+            }
+            if latest
+            else None
+        ),
+    }
+
+def _voting_api_payload():
+    now = datetime.utcnow()
+    mode = _normalize_voting_mode(Setting.get_value(_VOTING_MODE_SETTING, "off"))
+    valid_rows = []
+    for row in _policy_columns(limit=100):
+        try:
+            valid_rows.append(_policy_record(row))
+        except (TypeError, ValueError):
+            # A row inserted outside the ORM must not take the admin page down.
+            logger.error("Ignoring invalid simulated-voting policy row id=%s", row.id)
+    current = next(
+        (
+            record
+            for record in valid_rows
+            if record["effective_at"] is not None
+            and record["effective_at"] <= now.isoformat()
+        ),
+        None,
+    )
+    preview_config = (
+        current["config"] if current is not None else preset_config("natural")
+    )
+    presets = {
+        name: {
+            "name": name,
+            "label": _VOTING_PRESET_LABELS[name],
+            "description": _VOTING_PRESET_COPY[name],
+            "recommended": name == "natural",
+            "config": preset_config(name),
+            "preview": _voting_preview(preset_config(name)),
+        }
+        for name in ("quiet", "natural", "busy")
+    }
+    history = [
+        {key: value for key, value in record.items() if key != "config"}
+        for record in valid_rows[:10]
+    ]
+    health = _voting_health()
+    return {
+        "mode": mode,
+        "presets": presets,
+        "current_policy": current,
+        "resolved_policy": current,
+        "preview": _voting_preview(preview_config),
+        "health": health,
+        "recent_health": health,
+        "history": history,
+        "policy_history": history,
+    }
+
+
+@admin_bp.route("/voting")
+@production_disabled
+@admin_required
+def voting():
+    """Dedicated simulated-voting controls and health page."""
+    return render_template("admin/voting.html")
+
+
+@admin_bp.route("/api/voting")
+@production_disabled
+@admin_required
+def voting_api():
+    """Return server-owned voting configuration and aggregate health."""
+    return jsonify(_voting_api_payload())
+
+
+@admin_bp.route("/api/voting/mode", methods=["PUT"])
+@production_disabled
+@admin_required
+def voting_mode_api():
+    payload = request.get_json(silent=True)
+    mode = payload.get("mode") if isinstance(payload, dict) else None
+    if not isinstance(mode, str) or mode.strip().lower() not in _VOTING_MODES:
+        return jsonify({"error": "mode must be one of off, shadow, or live"}), 400
+    mode = mode.strip().lower()
+    if mode in {"shadow", "live"} and not db.session.query(
+        VoteCadencePolicy.id
+    ).first():
+        return jsonify(
+            {"error": f"Save a valid voting policy before enabling {mode} mode."}
+        ), 400
+    Setting.set_value(
+        _VOTING_MODE_SETTING,
+        mode,
+        description="Simulated voting worker mode (off, shadow, or live)",
+    )
+    return jsonify({"mode": mode})
+
+
+@admin_bp.route("/api/voting/policies", methods=["POST"])
+@production_disabled
+@admin_required
+def voting_policy_api():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "request body must be a JSON object"}), 400
+    preset = payload.get("preset")
+    if isinstance(preset, str):
+        preset = preset.strip().lower()
+    if preset in {"quiet", "natural", "busy"}:
+        config = preset_config(preset)
+    elif preset == "custom" or "config" in payload or "policy" in payload:
+        preset = "custom"
+        config = payload.get("config", payload.get("policy"))
+    elif set(payload) == {"post", "comment", "voter", "direction"}:
+        preset = "custom"
+        config = payload
+    else:
+        return jsonify(
+            {"error": "preset must be quiet, natural, busy, or custom"}
+        ), 400
+    errors = _policy_validation_errors(config)
+    if errors:
+        return jsonify({"error": "Validation failed", "errors": errors}), 400
+    try:
+        normalized = validate_policy(config)
+        policy = VoteCadencePolicy(
+            preset=preset,
+            algorithm_version=max(SUPPORTED_ALGORITHM_VERSIONS),
+            config=normalized,
+            effective_at=datetime.utcnow(),
+        )
+        db.session.add(policy)
+        db.session.commit()
+    except (TypeError, ValueError) as exc:
+        db.session.rollback()
+        return jsonify({"error": "Validation failed", "errors": {"policy": str(exc)}}), 400
+    return jsonify({"policy": _policy_record(policy)}), 201
 
 
 def _moderator_user() -> User | None:
