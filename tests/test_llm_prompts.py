@@ -462,10 +462,10 @@ class TestPromptMatrixMatchesOfferedTools:
     invalid image_only + website_only cell, which offers neither).
 
     ``create_post`` is deliberately excluded from this sweep: the shared
-    ``_QUALITY_RULES`` "Substantive Posts" bullet names it unconditionally
-    in every system prompt regardless of policy (deaddit/agents/prompts.py,
-    pre-existing base rules_block, not introduced by this subphase and out
-    of this subphase's scope to change) - see the 3.3 report."""
+    ``_PROFILE_QUALITY_RULES`` block names it unconditionally in every system
+    prompt regardless of policy (deaddit/agents/prompts.py, pre-existing base
+    rules_block, not introduced by this subphase and out of this subphase's
+    scope to change) - see the 3.3 report."""
 
     @pytest.mark.parametrize(
         "image_label,image_cfg,website_label,website_cfg", _FULL_MATRIX

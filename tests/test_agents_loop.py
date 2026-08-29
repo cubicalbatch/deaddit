@@ -584,7 +584,8 @@ def test_kickoff_prompt_post_intent_optional_offers_either_tool(seeded_db, db_se
     prompt, intent = _kickoff(db_session, agent, requested_intent="post")
     assert intent == "post"
     assert "create_post" in prompt
-    assert "create_image_post" in prompt
+    assert "offered post tool" in prompt
+    assert "create_image_post" not in prompt
 
 
 def test_kickoff_prompt_post_intent_image_only_forces_image_tool(seeded_db, db_session):
@@ -624,7 +625,7 @@ def test_kickoff_prompt_browse_intent_image_only_never_suggests_create_post(
     prompt, intent = _kickoff(db_session, agent, requested_intent="browse")
     assert intent == "browse"
     assert "create_post" not in prompt
-    assert "create_image_post" in prompt
+    assert "offered post tool" in prompt
     assert "finish" in prompt.lower()
 
 
@@ -641,7 +642,7 @@ def test_kickoff_prompt_post_intent_website_only_forces_website_tool(
     assert "create_website" in prompt
     assert "create_post" not in prompt
     assert "create_image_post" not in prompt
-    assert "website_description" in prompt
+    assert "using the create_website tool" in prompt
 
 
 def test_kickoff_prompt_browse_intent_website_only_never_suggests_create_post(
@@ -656,7 +657,7 @@ def test_kickoff_prompt_browse_intent_website_only_never_suggests_create_post(
     assert intent == "browse"
     assert "create_post" not in prompt
     assert "create_image_post" not in prompt
-    assert "create_website" in prompt
+    assert "offered post tool" in prompt
     assert "finish" in prompt.lower()
 
 
@@ -671,7 +672,8 @@ def test_kickoff_prompt_post_intent_optional_website_offers_it_alongside_post(
     prompt, intent = _kickoff(db_session, agent, requested_intent="post")
     assert intent == "post"
     assert "create_post" in prompt
-    assert "create_website" in prompt
+    assert "offered post tool" in prompt
+    assert "create_website" not in prompt
 
 
 def test_kickoff_prompt_post_intent_invalid_combo_degrades_to_browsing(
@@ -1231,10 +1233,10 @@ def test_episode_memory_follows_persona_across_runs_and_agents(
     _rig_selection(monkeypatch, "alice")
     fake_llm.enqueue(_finish("shared memory"))
     run_once(agent_b.id)
-    alice_kickoff = fake_llm.requests[-1]["payload"]["messages"][1]["content"]
+    alice_system = fake_llm.requests[-1]["payload"]["messages"][0]["content"]
 
     assert run_two.persona_username == "bob"
-    assert "Created 1 post" in alice_kickoff
+    assert "Created 1 post" in alice_system
 
 
 def test_lazy_backfill_on_first_random_selection(
@@ -1250,9 +1252,9 @@ def test_lazy_backfill_on_first_random_selection(
         user_username="alice", kind="backfill"
     ).all()
     assert len(backfills) == 1
-    first_kickoff = fake_llm.requests[0]["payload"]["messages"][1]["content"]
-    assert "Your memory:" in first_kickoff
-    assert "History (before becoming an agent):" in first_kickoff
+    first_system = fake_llm.requests[0]["payload"]["messages"][0]["content"]
+    assert "Your memory:" in first_system
+    assert "History (before becoming an agent):" in first_system
 
     run_once(agent.id)
     assert (

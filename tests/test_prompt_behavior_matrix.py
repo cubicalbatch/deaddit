@@ -1,8 +1,7 @@
-"""Phase 1 characterization matrix for the current agent visit prompts.
+"""Behavior matrix for prepared agent visit prompts.
 
-These tests intentionally describe the existing split between system-prompt
-sections, kickoff tuning, and registry tool offers.  They are a baseline for
-later prompt-builder work; they do not assert a desired refactor shape.
+These tests characterize the prompt-profile, capability, and tool-spec
+contracts that must compose through ``prepare_agent_visit``.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from deaddit.agents.prompts import (
     system_prompt_variables,
 )
 from deaddit.agents.registry import specs_for, tools_for
-from deaddit.models import Agent, User
+from deaddit.models import Agent, AgentMemory, User
 
 
 READ_ONLY_TOOLS = {
@@ -391,6 +390,107 @@ def test_initial_messages_freeze_unread_notice_and_system_kickoff_roles(
     assert messages[0]["content"].startswith("You are initial_messages")
     assert "You have 2 unread replies. Use the view_inbox tool" in messages[1]["content"]
 
+
+
+def test_prepared_messages_render_persistent_memory_once_in_system(
+    app, db_session
+):
+    agent, user = _make_agent(db_session, "memory_once")
+    db_session.add_all(
+        [
+            AgentMemory(
+                user_username=user.username,
+                kind="backfill",
+                content="History before becoming an agent.",
+            ),
+            AgentMemory(
+                user_username=user.username,
+                kind="episode",
+                content="Created a memorable post yesterday.",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    visit = prepare_agent_visit(
+        agent, user, requested_intent="browse", unread=0
+    )
+    system, kickoff = (message["content"] for message in visit.messages)
+    combined = system + "\n" + kickoff
+
+    assert system.count("Your memory:") == combined.count("Your memory:") == 1
+    assert "Recent visits:" in system
+    for content in (
+        "History before becoming an agent.",
+        "Created a memorable post yesterday.",
+    ):
+        assert system.count(content) == combined.count(content) == 1
+        assert content not in kickoff
+
+
+def test_prepared_capability_guidance_matches_exact_tool_specs(
+    app, db_session
+):
+    """The prepared plan is the shared source for capability prose and tools."""
+    for index, (image_mode, website_mode) in enumerate(CAPABILITIES):
+        agent, user = _make_agent(
+            db_session,
+            f"prepared_capability_{index}",
+            image_mode=image_mode,
+            website_mode=website_mode,
+        )
+        visit = prepare_agent_visit(
+            agent, user, requested_intent="post", unread=0
+        )
+        system = visit.messages[0]["content"]
+        offered = visit.plan.offered_tool_names
+        assert offered == frozenset(spec.name for spec in visit.tool_specs)
+        for tool_name in ("create_image_post", "create_website"):
+            assert (tool_name in system) is (tool_name in offered)
+
+
+def test_tool_descriptions_keep_operations_not_prompt_profile_tuning(
+    app, db_session
+):
+    agent, user = _make_agent(
+        db_session,
+        "operational_tool_contracts",
+        image_mode="optional",
+        website_mode="optional",
+    )
+    visit = prepare_agent_visit(
+        agent, user, requested_intent="post", unread=0
+    )
+    descriptions = {
+        spec.name: spec.description
+        for spec in visit.tool_specs
+        if spec.name
+        in {"create_post", "create_image_post", "create_website", "create_comment"}
+    }
+
+    assert "At most one post may be published per session." in descriptions["create_post"]
+    assert "alt_text is the public accessibility description" in descriptions[
+        "create_image_post"
+    ]
+    assert "website_description is the generator brief, not post content" in descriptions[
+        "create_website"
+    ]
+    assert "parent_id must identify a comment on that post" in descriptions[
+        "create_comment"
+    ]
+    tool_text = "\n".join(descriptions.values()).lower()
+    for removed_tuning in (
+        "authentic",
+        "format and length",
+        "most real replies",
+        "plausibly found",
+    ):
+        assert removed_tuning not in tool_text
+
+    system = visit.messages[0]["content"]
+    assert "Posting rules:" in system
+    assert "never mention that it was generated" in system
+    assert "plausibly found" in system
 
 def test_rng_draw_order_is_length_then_intent_then_content_tuning(
     app, db_session

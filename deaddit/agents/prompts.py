@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from deaddit import Config
-from deaddit.agents.memory import visit_memories
+from deaddit.agents.memory import VisitMemories, visit_memories
 from deaddit.agents.registry import (
     AutonomyTier,
     POST_TOOL_NAMES,
@@ -40,13 +40,12 @@ from deaddit.agents.registry import (
 from deaddit.dynamics.inbox import unread_count
 from deaddit.extensions import db
 from deaddit.llm.prompts import render_pinned, versioning_enabled
-from deaddit.models import Agent, AgentMemory, Subdeaddit, User
+from deaddit.models import Agent, Subdeaddit, User
 
 if TYPE_CHECKING:
     from deaddit.llm import ToolSpec
 
 
-MAX_MEMORIES_IN_PROMPT = 5
 
 DEFAULT_TEMPLATE_NAME = "agent.system_prompt"
 
@@ -82,7 +81,9 @@ _GENUINE_LINE = (
     "Be genuine. Do not spam, do not post the same thing twice, and stay "
     "in character as this person."
 )
-_QUALITY_RULES = (
+# General style and quality tuning belong to the source-controlled
+# ``agent_visit_default`` profile, not to individual tool contracts.
+_PROFILE_QUALITY_RULES = (
     "Posting rules:\n"
     "- Fit: before posting anywhere, read that community's description and\n"
     "  name its theme to yourself; only post what THIS community would\n"
@@ -214,17 +215,18 @@ def _subscriptions_section(user: User) -> str:
     return "\n\nYou are currently subscribed to: " + ", ".join(subscriptions)
 
 
-def _image_guidance_section(agent: Agent, intent: str = "browse") -> str:
-    """Image-post rules for agents actually offered create_image_post, else "".
-
-    Derived from :func:`effective_post_configs` and :func:`offered_post_tool_names`
-    - the same filtered truth table the registry uses to decide which tools the
-    agent's wire-format spec list actually contains.
-    """
-    image_cfg, website_cfg = effective_post_configs(agent, intent)
-    if not image_cfg["enabled"]:
-        return ""
-    offered = offered_post_tool_names(image_cfg, website_cfg)
+def _image_guidance_section(
+    agent: Agent,
+    intent: str = "browse",
+    *,
+    offered_tool_names: frozenset[str] | None = None,
+) -> str:
+    """Image-post framing for an image tool actually offered this visit."""
+    if offered_tool_names is None:
+        image_cfg, website_cfg = effective_post_configs(agent, intent)
+        offered = offered_post_tool_names(image_cfg, website_cfg)
+    else:
+        offered = offered_tool_names & frozenset(POST_TOOL_NAMES)
     if "create_image_post" not in offered:
         return ""
     if offered == frozenset({"create_image_post"}):
@@ -232,12 +234,18 @@ def _image_guidance_section(agent: Agent, intent: str = "browse") -> str:
     return _IMAGE_GUIDANCE_OPTIONAL
 
 
-def _website_guidance_section(agent: Agent, intent: str = "browse") -> str:
-    """Website-post rules for agents actually offered create_website, else ""."""
-    image_cfg, website_cfg = effective_post_configs(agent, intent)
-    if not website_cfg["enabled"]:
-        return ""
-    offered = offered_post_tool_names(image_cfg, website_cfg)
+def _website_guidance_section(
+    agent: Agent,
+    intent: str = "browse",
+    *,
+    offered_tool_names: frozenset[str] | None = None,
+) -> str:
+    """Website-post framing for a website tool actually offered this visit."""
+    if offered_tool_names is None:
+        image_cfg, website_cfg = effective_post_configs(agent, intent)
+        offered = offered_post_tool_names(image_cfg, website_cfg)
+    else:
+        offered = offered_tool_names & frozenset(POST_TOOL_NAMES)
     if "create_website" not in offered:
         return ""
     if offered == frozenset({"create_website"}):
@@ -245,40 +253,60 @@ def _website_guidance_section(agent: Agent, intent: str = "browse") -> str:
     return _WEBSITE_GUIDANCE_OPTIONAL
 
 
-def _memories_section(user: User) -> str:
-    memories = (
-        AgentMemory.query.filter_by(user_username=user.username, kind="episode")
-        .order_by(AgentMemory.created_at.desc())
-        .limit(MAX_MEMORIES_IN_PROMPT)
-        .all()
-    )
-    if not memories:
+def _memory_section(memories: VisitMemories | None) -> str:
+    """Render all persistent persona memory in one system-message section."""
+    if memories is None:
         return ""
-    bullets = []
-    for memory in reversed(memories):
-        snippet = " ".join((memory.content or "").split())
-        bullets.append(f"- {snippet}")
-    return "\n\nMemories from previous visits:\n" + "\n".join(bullets)
+    lines = ["Your memory:"]
+    lines.extend(f"- {content}" for content in memories.backfill)
+    if memories.episodes:
+        lines.append("Recent visits:")
+        lines.extend(f"- {content}" for content in memories.episodes)
+    return "\n\n" + "\n".join(lines)
 
 
 def system_prompt_variables(
-    agent: Agent, user: User, intent: str = "browse"
+    agent: Agent,
+    user: User,
+    intent: str = "browse",
+    *,
+    offered_tool_names: frozenset[str] | None = None,
+    memory_section: str | None = None,
 ) -> dict[str, str]:
     """Named variables a versioned system-prompt template is rendered with."""
+    if memory_section is None:
+        memory_section = _memory_section(visit_memories(user.username))
     return {
         "persona_block": _persona_block(user),
         "tier_line": _tier_line(agent),
-        "rules_block": _TOOLS_LINE + "\n" + _GENUINE_LINE + "\n" + _QUALITY_RULES,
-        "image_guidance_section": _image_guidance_section(agent, intent=intent),
-        "website_guidance_section": _website_guidance_section(agent, intent=intent),
+        "rules_block": _TOOLS_LINE + "\n" + _GENUINE_LINE + "\n" + _PROFILE_QUALITY_RULES,
+        "image_guidance_section": _image_guidance_section(
+            agent, intent, offered_tool_names=offered_tool_names
+        ),
+        "website_guidance_section": _website_guidance_section(
+            agent, intent, offered_tool_names=offered_tool_names
+        ),
         "subscriptions_section": _subscriptions_section(user),
-        "memories_section": _memories_section(user),
+        "memories_section": memory_section,
     }
 
 
-def build_system_prompt(agent: Agent, user: User, intent: str = "browse") -> str:
+def build_system_prompt(
+    agent: Agent,
+    user: User,
+    intent: str = "browse",
+    *,
+    offered_tool_names: frozenset[str] | None = None,
+    memory_section: str | None = None,
+) -> str:
     """Build the system prompt for one agent run."""
-    variables = system_prompt_variables(agent, user, intent=intent)
+    variables = system_prompt_variables(
+        agent,
+        user,
+        intent=intent,
+        offered_tool_names=offered_tool_names,
+        memory_section=memory_section,
+    )
     if versioning_enabled():
         pin_key = str(agent.id)
         pinned = render_pinned(
@@ -298,6 +326,10 @@ def build_system_prompt(agent: Agent, user: User, intent: str = "browse") -> str
         f"{variables['subscriptions_section']}"
         f"{variables['memories_section']}"
     )
+
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -527,12 +559,6 @@ _LENGTH_TARGETS: dict[str, tuple[_LengthTarget, ...]] = {
 }
 
 
-_WEBSITE_BRIEF_HINT = (
-    " If you use create_website, brief the site in website_description - "
-    "subject, tone, and a few concrete details, never mentioning "
-    "prompting or generation - and keep the post body to your own "
-    "reaction, separate from that brief."
-)
 
 
 def _post_instruction(offered: frozenset[str]) -> str | None:
@@ -545,53 +571,20 @@ def _post_instruction(offered: frozenset[str]) -> str | None:
     it cannot make.
     """
     if offered == frozenset({"create_website"}):
-        return (
-            "and create a website post using the create_website tool: "
-            "brief the site in website_description - subject, tone, and "
-            "a few concrete details, never mentioning prompting or "
-            "generation - and keep the post body to your own reaction, "
-            "separate from that brief."
-        )
+        return "and create a website post using the create_website tool."
     if offered == frozenset({"create_image_post"}):
-        return (
-            "and create an image post using the create_image_post tool: "
-            "request a detailed, persona-consistent scene you plausibly "
-            "saw or photographed, present it as real, and give it a "
-            "specific, engaging title."
-        )
+        return "and create an image post using the create_image_post tool."
     if "create_post" not in offered:
         return None
-    base = (
-        "and create a post using the create_post tool, in whatever format and "
-        "length fit today's idea"
-    )
-    extras = []
-    if "create_image_post" in offered:
-        extras.append(
-            "only when a visual is genuinely central to what you want to "
-            "share, the create_image_post tool"
-        )
-    if "create_website" in offered:
-        extras.append(
-            "only for the rare case where your persona would plausibly "
-            "share a link, the create_website tool"
-        )
-    if not extras:
-        return base + "."
-    instruction = f"{base} (or, {'; or, '.join(extras)})."
-    if "create_website" in offered:
-        instruction += _WEBSITE_BRIEF_HINT
-    return instruction
+    if offered == frozenset({"create_post"}):
+        return "and create a post using the create_post tool."
+    return "and create one post using the create_post tool or another offered post tool."
 
 
 def _starter_hint(offered: frozenset[str]) -> str | None:
-    """Browsing-kickoff nudge naming only a tool this agent was offered."""
-    if "create_post" in offered:
-        return "feel free to start a conversation with create_post"
-    if "create_image_post" in offered:
-        return "feel free to start a conversation with create_image_post"
-    if "create_website" in offered:
-        return "feel free to share something with create_website"
+    """Browsing-kickoff nudge without duplicating capability guidance."""
+    if offered:
+        return "feel free to start a conversation with an offered post tool"
     return None
 
 
@@ -877,18 +870,6 @@ def _render_kickoff(
     )
 
 
-def _kickoff_memory_section(user: User) -> str:
-    memories = visit_memories(user.username)
-    if memories is None:
-        return ""
-    lines = ["Your memory:"]
-    for content in memories.backfill:
-        lines.append(f"- {content}")
-    if memories.episodes:
-        lines.append("Recent visits:")
-        for content in memories.episodes:
-            lines.append(f"- {content}")
-    return "\n".join(lines)
 
 
 def prepare_agent_visit(
@@ -933,16 +914,20 @@ def prepare_agent_visit(
         length_target_id=resolved.length_target_id,
         direction_ids=tuple(direction.id for direction in resolved.directions),
     )
+    memory_section = _memory_section(visit_memories(user.username))
     messages: list[dict] = [
         {
             "role": "system",
-            "content": build_system_prompt(agent, user, intent=plan.intent),
+            "content": build_system_prompt(
+                agent,
+                user,
+                intent=plan.intent,
+                offered_tool_names=plan.offered_tool_names,
+                memory_section=memory_section,
+            ),
         },
         {"role": "user", "content": _render_kickoff(context, resolved, plan)},
     ]
-    memory_section = _kickoff_memory_section(user)
-    if memory_section:
-        messages[-1]["content"] += "\n\n" + memory_section
     if unread > 0:
         messages[-1]["content"] += (
             f"\n\nYou have {unread} unread replies. Use the view_inbox "

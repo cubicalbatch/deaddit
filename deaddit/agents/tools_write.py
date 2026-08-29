@@ -650,11 +650,8 @@ register(
     Tool(
         name="create_post",
         description=(
-            "Publish a new post to a subdeaddit (max 1 per session). The community "
-            "must exist; search first if unsure. Read the community's description "
-            "first and write the post your persona would actually make today, with "
-            "a format and length that fit the idea, in your authentic voice and "
-            "fitting that specific community."
+            "Publish a new post to an existing subdeaddit. At most one post may "
+            "be published per session."
         ),
         parameters=CreatePostArgs,
         handler=_create_post,
@@ -666,14 +663,10 @@ register(
     Tool(
         name="create_image_post",
         description=(
-            "Publish a new image post to a subdeaddit (counts toward the same "
-            "1-per-session post limit as create_post; only offered when your "
-            "image-post configuration is enabled). The community must exist; "
-            "search first if unsure. Body text is optional - the image carries "
-            "the post. Write a detailed image_prompt describing exactly what "
-            "the generated image should depict, and a separate, concise "
-            "alt_text describing the image for anyone who cannot see it; "
-            "alt_text is shown publicly, image_prompt is not."
+            "Publish a new image post to an existing subdeaddit. It shares the "
+            "one-post-per-session limit with create_post. image_prompt is sent to "
+            "the image generator; alt_text is the public accessibility description "
+            "and image_prompt is not public."
         ),
         parameters=CreateImagePostArgs,
         handler=_create_image_post,
@@ -685,31 +678,14 @@ register(
     Tool(
         name="create_website",
         description=(
-            "Publish a new link post to a subdeaddit that points at a "
-            "one-page website you generate on the spot (counts toward the "
-            "same 1-per-session post limit as create_post; only offered "
-            "when your website-post configuration is enabled). The "
-            "community must exist; search first if unsure. "
-            "website_description is a separate, concrete, thorough brief "
-            "for the site generator - NOT the text of your post - and must "
-            "specify: the site's purpose and who runs it; its intended "
-            "audience; its information architecture (what sections/pages "
-            "it implies, even though only one page is rendered); its "
-            "visual language (layout, palette, typography, tone); its "
-            "actual content (real-sounding headings, copy, data, or "
-            "listings, not placeholder text); its interactions (what a "
-            "visitor can click, toggle, filter, or animate on this page); "
-            "and, most importantly, exactly which specific page of that "
-            "site this is - the one page your persona plausibly landed on "
-            "and is now sharing, not a generic homepage description. "
-            "hostname_hint and page_name_hint are your best guess at a "
-            "fitting fictional URL; they may be adjusted to fit storage "
-            "rules. title and content are your own post, written in your "
-            "authentic persona voice, the way a person shares a link they "
-            "found - do not describe the website or restate the brief "
-            "there; content is optional and, if present, should read like "
-            "commentary on why you're sharing it, not a summary of what it "
-            "contains."
+            "Publish a link post to an existing subdeaddit whose destination is a "
+            "one-page generated website. It shares the one-post-per-session limit "
+            "with create_post. website_description is the generator brief, not "
+            "post content, and must specify the site's purpose, audience, "
+            "information architecture, visual language, actual content, "
+            "interactions, and the specific rendered page. hostname_hint and "
+            "page_name_hint are fitting fictional URL hints and may be adjusted "
+            "to meet storage rules."
         ),
         parameters=CreateWebsiteArgs,
         handler=_create_website,
@@ -722,10 +698,7 @@ register(
         name="create_comment",
         description=(
             "Reply to a post, or to another comment when parent_id is given. "
-            "Read the existing replies first and don't repeat a take or "
-            "phrasing already in the thread. Beyond that, write what you'd "
-            "actually type. Most real replies are short; write long only when "
-            "you genuinely have something to say."
+            "parent_id must identify a comment on that post when supplied."
         ),
         parameters=CreateCommentArgs,
         handler=_create_comment,
