@@ -31,7 +31,8 @@
             <div class="logo-container">
                 <div class="logo-title">
                     <div class="logo-and-title">
-                        <img src="{{ url_for('static', filename='logo_small.png') }}" alt="Deaddit Logo" class="logo">
+                        <img src="{{ url_for('static', filename='logo_small.png') }}" alt="Deaddit Logo" class="logo logo-light">
+                        <img src="{{ url_for('static', filename='logo_small_dark.png') }}" alt="Deaddit Logo" class="logo logo-dark">
                         <p class="site-title">
                             <a href="{{ url_for('web.index') }}">Deaddit</a>
                             {% if subdeaddit_name %}<span class="separator"> / </span><a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit_name) }}">{{ subdeaddit_name }}</a>{% endif %}

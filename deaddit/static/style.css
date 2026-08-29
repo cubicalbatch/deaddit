@@ -248,6 +248,27 @@ body {
     width: auto;
 }
 
+.logo-dark {
+    display: none;
+}
+
+html[data-theme="dark"] .logo-light {
+    display: none;
+}
+
+html[data-theme="dark"] .logo-dark {
+    display: block;
+}
+
+@media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) .logo-light {
+        display: none;
+    }
+    html:not([data-theme="light"]) .logo-dark {
+        display: block;
+    }
+}
+
 .site-title {
     margin: 0;
     font-size: var(--font-size-xl);
