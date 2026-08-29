@@ -271,8 +271,18 @@ def parse_visit_profile(body: str | dict) -> VisitProfile:
         for item in catalog:
             if item.id in stable_ids:
                 raise _profile_error(f"duplicate stable id {item.id!r}")
-            stable_ids.add(item.id)
     sample_count = document["sample_count"]
+    if (
+        isinstance(sample_count, bool)
+        or not isinstance(sample_count, int)
+        or not 1 <= sample_count <= 20
+    ):
+        raise _profile_error("sample_count must be an integer between 1 and 20")
+    for kind, catalog in direction_catalog.items():
+        if len(catalog) < sample_count:
+            raise _profile_error(
+                f"direction_catalog.{kind} must contain at least sample_count entries"
+            )
     return VisitProfile(
         schema_version=1,
         system_template=system_template,

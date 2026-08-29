@@ -86,20 +86,41 @@ def _profile_body(system_template: str | None, mix: dict[str, float]) -> str:
                     "id": "comment.honest_reaction",
                     "text": "Give a brief, honest reaction.",
                     "weight": 1,
-                }
+                },
+                {
+                    "id": "comment.relevant_fact",
+                    "text": "Add one relevant fact or missing context.",
+                    "weight": 1,
+                },
+                {
+                    "id": "comment.follow_up_question",
+                    "text": "Ask a genuine follow-up question.",
+                    "weight": 1,
+                },
             ],
             "post": [
                 {
                     "id": "post.genuine_question",
                     "text": "Ask a genuine question worth answering.",
                     "weight": 1,
-                }
+                },
+                {
+                    "id": "post.personal_experience",
+                    "text": "Share a relevant personal experience.",
+                    "weight": 1,
+                },
+                {
+                    "id": "post.tip_or_resource",
+                    "text": "Offer a useful tip or resource.",
+                    "weight": 1,
+                },
             ],
         },
+
+
         "sample_count": 3,
     }
     return json.dumps(document, sort_keys=True, separators=(",", ":"))
-
 
 def _profile_template(conn) -> int:
     row = conn.execute(
