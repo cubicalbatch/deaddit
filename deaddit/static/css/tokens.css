@@ -114,6 +114,16 @@
 
     /* Rails & highlights */
     --rail: var(--gray-300);                 /* nesting guide line - decorative, non-text (1.45:1 vs canvas) */
+    /* Comment thread rails, cycled by nesting depth. Purely decorative
+       wayfinding (depth is also carried by indent, chevron and aria), so
+       these sit below text contrast gates; they are tuned to read against
+       --bg-surface without competing with the comment text itself. */
+    --rail-0: #b9bfc7;
+    --rail-1: #7fb2d9;
+    --rail-2: #86bf9a;
+    --rail-3: #d8a86a;
+    --rail-4: #b79ed4;
+    --rail-5: #d79aa8;
     --highlight-bg: var(--accent-ramp-100);  /* soft permalink flash - 14.14:1 with text-1, 5.18:1 with text-2 */
 
     /* Status */
@@ -204,6 +214,15 @@ html[data-theme="dark"] {
 
     /* Rails & highlights */
     --rail: var(--gray-800);                 /* nesting guide line - decorative, non-text; lifted from #2a2d31 (1.26:1 vs surface) to read at a glance on dark */
+    /* Depth rails, dark-tuned: same hue order as light, dropped in
+       lightness and saturation so a deep thread does not turn into a
+       stack of glowing lines. */
+    --rail-0: #3c4148;
+    --rail-1: #35526b;
+    --rail-2: #35583f;
+    --rail-3: #63492a;
+    --rail-4: #4a3f66;
+    --rail-5: #62343f;
     --highlight-bg: var(--accent-soft);      /* dark-orange wash (#2b150a) - 13.83:1 with text-1 */
 
     /* Status (dark-tuned) */

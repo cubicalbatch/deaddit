@@ -4,6 +4,7 @@ Provides web-based UI for job management and content generation.
 """
 
 import base64
+import json
 import logging
 import os
 import re
@@ -718,6 +719,7 @@ def _user_payload(user):
         "personality_traits": user.personality_traits or "",
         "writing_style": user.writing_style or "",
         "is_troll": bool(user.is_troll),
+        "subscriptions": list((user.agent_state or {}).get("subscriptions") or []),
         "rate_caps": normalize_persona_rate_caps(
             (user.agent_state or {}).get("rate_caps")
         ),
@@ -774,6 +776,51 @@ def api_update_user(username):
         except ValueError as exc:
             return jsonify({"success": False, "error": str(exc)}), 400
 
+    resolved_subs = None
+    if "subscriptions" in data:
+        raw_subs = data["subscriptions"]
+        if raw_subs is None:
+            subs_list = []
+        elif isinstance(raw_subs, str):
+            raw_subs = raw_subs.strip()
+            if not raw_subs:
+                subs_list = []
+            elif raw_subs.startswith("["):
+                try:
+                    parsed = json.loads(raw_subs)
+                    subs_list = parsed if isinstance(parsed, list) else [str(parsed)]
+                except (json.JSONDecodeError, TypeError):
+                    subs_list = [s.strip() for s in raw_subs.split(",") if s.strip()]
+            else:
+                subs_list = [s.strip() for s in raw_subs.split(",") if s.strip()]
+        elif isinstance(raw_subs, list):
+            subs_list = [str(s).strip() for s in raw_subs if str(s).strip()]
+        else:
+            return (
+                jsonify({"success": False, "error": "Invalid subscriptions format"}),
+                400,
+            )
+
+        valid_subs = {s.name.lower(): s.name for s in Subdeaddit.query.all()}
+        resolved_subs = []
+        for item in subs_list:
+            cleaned = item.removeprefix("d/").removeprefix("r/").strip()
+            if not cleaned:
+                continue
+            canonical = valid_subs.get(cleaned.lower())
+            if not canonical:
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": f"Subdeaddit '{item}' does not exist",
+                        }
+                    ),
+                    400,
+                )
+            if canonical not in resolved_subs:
+                resolved_subs.append(canonical)
+
     try:
         user.age = data.get("age", user.age)
         user.gender = data.get("gender", user.gender)
@@ -786,15 +833,25 @@ def api_update_user(username):
         )
         user.writing_style = data.get("writing_style", user.writing_style)
         user.is_troll = bool(data.get("is_troll", user.is_troll))
+
+        state = dict(user.agent_state or {})
+        state_modified = False
+
         if rate_caps is not None:
-            # agent_state is persona-owned (subscriptions live here too):
-            # replace only the rate_caps namespace, reassign the column so
-            # the JSON mutation is tracked without flag_modified.
-            state = dict(user.agent_state or {})
             if rate_caps:
                 state["rate_caps"] = rate_caps
             else:
                 state.pop("rate_caps", None)
+            state_modified = True
+
+        if resolved_subs is not None:
+            if resolved_subs:
+                state["subscriptions"] = sorted(resolved_subs)
+            else:
+                state.pop("subscriptions", None)
+            state_modified = True
+
+        if state_modified:
             user.agent_state = state
 
         db.session.commit()

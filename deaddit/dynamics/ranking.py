@@ -26,12 +26,25 @@ import calendar
 import math
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import ColumnElement, text
+from sqlalchemy import ColumnElement, or_, text
 from sqlalchemy.sql.elements import TextClause
 
 from deaddit.models import Post
 
 POST_SORTS = ("hot", "new", "top", "rising")
+POST_FILTERS = ("pictures", "links", "text")
+POST_FILTER_ALIASES: dict[str, str] = {
+    "pictures": "pictures",
+    "picture": "pictures",
+    "images": "pictures",
+    "image": "pictures",
+    "links": "links",
+    "link": "links",
+    "website": "links",
+    "websites": "links",
+    "text": "text",
+    "texts": "text",
+}
 COMMENT_SORTS = ("top", "new", "best", "controversial")
 HOT_EPOCH = 1134028003
 HOT_GRAVITY = 45000.0
@@ -66,6 +79,67 @@ def normalize_post_sort(value: str | None) -> str:
     if isinstance(value, str) and value in POST_SORTS:
         return value
     return "hot"
+
+
+def normalize_post_filter(value: str | list[str] | None) -> list[str]:
+    """Parse and normalize user input into a sorted list of canonical filter tokens.
+
+    Supports comma-separated strings (e.g. 'pictures,links') or multi-param lists.
+    Valid canonical values are 'pictures', 'links', and 'text'.
+    Aliases ('image', 'link', 'website', etc.) are mapped to canonical tokens.
+    Unknown tokens are ignored.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        items = value.split(",")
+    elif isinstance(value, list | tuple):
+        items = []
+        for v in value:
+            if isinstance(v, str):
+                items.extend(v.split(","))
+    else:
+        return []
+
+    result = set()
+    for item in items:
+        cleaned = item.strip().lower()
+        if cleaned in POST_FILTER_ALIASES:
+            result.add(POST_FILTER_ALIASES[cleaned])
+
+    return sorted(result)
+
+
+def post_filter_clause(filters: list[str] | set[str] | None) -> ColumnElement | None:
+    """Construct a SQLAlchemy filter clause for the given active post filters.
+
+    - 'pictures': Post.image.has() & ~Post.website.has()
+    - 'links': Post.website.has()
+    - 'text': ~Post.image.has() & ~Post.website.has()
+
+    If filters is empty or contains all 3 canonical filters, returns None (no filtering).
+    When multiple filters are specified, they are combined with OR.
+    """
+    if not filters:
+        return None
+
+    filter_set = set(filters)
+    if filter_set >= set(POST_FILTERS):
+        return None
+
+    clauses = []
+    if "pictures" in filter_set:
+        clauses.append(Post.image.has() & ~Post.website.has())
+    if "links" in filter_set:
+        clauses.append(Post.website.has())
+    if "text" in filter_set:
+        clauses.append(~Post.image.has() & ~Post.website.has())
+
+    if not clauses:
+        return None
+    if len(clauses) == 1:
+        return clauses[0]
+    return or_(*clauses)
 
 
 def normalize_comment_sort(value: str | None) -> str:

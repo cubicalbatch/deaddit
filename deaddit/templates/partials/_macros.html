@@ -62,14 +62,6 @@
 </div>
 {%- endmacro %}
 
-{% macro vote_widget_small(score) -%}
-<div class="vote-widget vote-widget--sm">
-    <button type="button" class="vote-arrow vote-up" disabled aria-disabled="true" title="Synthetic score" aria-label="Upvote (disabled, synthetic score)">▲</button>
-    <span class="vote-score">{{ score or 0 }}</span>
-    <button type="button" class="vote-arrow vote-down" disabled aria-disabled="true" title="Synthetic score" aria-label="Downvote (disabled, synthetic score)">▼</button>
-</div>
-{%- endmacro %}
-
 {% macro chip(text, modifier='', title='') -%}
 <span class="chip {{ modifier }}"{% if title %} title="{{ title }}"{% endif %}>{{ text }}</span>
 {%- endmacro %}

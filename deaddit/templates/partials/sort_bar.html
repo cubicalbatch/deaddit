@@ -1,30 +1,77 @@
-<nav class="sort-bar" aria-label="Sort posts">
-    {#- Hot emits no sort param (it is the route default); the rest are explicit. -#}
-    {%- set sort_options = [
-        ('', 'Hot', 'Score and recency combined'),
-        ('new', 'New', ''),
-        ('top', 'Top', ''),
-        ('rising', 'Rising', 'Climbing posts from the last 24 hours'),
-    ] -%}
-    {#- Context sort is canonical ('hot' default); map anything else onto
-        'hot' so the valueless Hot option can match it. -#}
-    {%- set current = sort if sort in ('new', 'top', 'rising') else 'hot' -%}
-    {%- for value, label, hint in sort_options -%}
-    {#- Keep every query arg except page/sort; changing sort resets to page 1
-        (omitting `page` falls back to the route default). -#}
-    {%- set params = {} -%}
-    {%- if value -%}{%- set _ = params.update({'sort': value}) -%}{%- endif -%}
-    {%- for key in request.args if key != 'page' and key != 'sort' -%}
-    {%- set _ = params.update({key: request.args.get(key)}) -%}
-    {%- endfor -%}
-    {%- set all_args = {} -%}
-    {%- for key, val in request.view_args.items() -%}
-    {%- set _ = all_args.update({key: val}) -%}
-    {%- endfor -%}
-    {%- set _ = all_args.update(params) -%}
-    <a class="sort-bar__link{{ ' is-active' if current == (value or 'hot') }}"
-       href="{{ url_for(request.endpoint, **all_args) }}"
-       {% if current == (value or 'hot') %}aria-current="page"{% endif %}
-       {% if hint %}title="{{ hint }}"{% endif %}>{{ label }}</a>
-    {%- endfor -%}
-</nav>
+<div class="feed-controls">
+    <nav class="sort-bar" aria-label="Sort posts">
+        {#- Hot emits no sort param (it is the route default); the rest are explicit. -#}
+        {%- set sort_options = [
+            ('', 'Hot', 'Score and recency combined'),
+            ('new', 'New', ''),
+            ('top', 'Top', ''),
+            ('rising', 'Rising', 'Climbing posts from the last 24 hours'),
+        ] -%}
+        {#- Context sort is canonical ('hot' default); map anything else onto
+            'hot' so the valueless Hot option can match it. -#}
+        {%- set current = sort if sort in ('new', 'top', 'rising') else 'hot' -%}
+        {%- for value, label, hint in sort_options -%}
+        {#- Keep every query arg except page/sort; changing sort resets to page 1
+            (omitting `page` falls back to the route default). -#}
+        {%- set params = {} -%}
+        {%- if value -%}{%- set _ = params.update({'sort': value}) -%}{%- endif -%}
+        {%- for key in request.args if key != 'page' and key != 'sort' -%}
+        {%- set _ = params.update({key: request.args.get(key)}) -%}
+        {%- endfor -%}
+        {%- set all_args = {} -%}
+        {%- for key, val in request.view_args.items() -%}
+        {%- set _ = all_args.update({key: val}) -%}
+        {%- endfor -%}
+        {%- set _ = all_args.update(params) -%}
+        <a class="sort-bar__link{{ ' is-active' if current == (value or 'hot') }}"
+           href="{{ url_for(request.endpoint, **all_args) }}"
+           {% if current == (value or 'hot') %}aria-current="page"{% endif %}
+           {% if hint %}title="{{ hint }}"{% endif %}>{{ label }}</a>
+        {%- endfor -%}
+    </nav>
+
+    <div class="filter-bar" role="group" aria-label="Filter posts by type">
+        <span class="filter-bar__label"><i class="bi bi-funnel" aria-hidden="true"></i> Filter:</span>
+        <div class="filter-bar__group">
+            {%- set active_set = active_filters if active_filters is defined else [] -%}
+            {%- set filter_options = [
+                ('pictures', 'Pictures', 'bi-image', 'Filter posts with pictures'),
+                ('links', 'Links', 'bi-link-45deg', 'Filter link posts'),
+                ('text', 'Text', 'bi-card-text', 'Filter text-only posts'),
+            ] -%}
+            {%- for key_name, label, icon, hint in filter_options -%}
+                {%- set is_active = key_name in active_set -%}
+                {# Compute new filter state when toggled #}
+                {%- set next_list = [] -%}
+                {%- for f in active_set -%}
+                    {%- if f != key_name and f in ('pictures', 'links', 'text') -%}
+                        {%- set _ = next_list.append(f) -%}
+                    {%- endif -%}
+                {%- endfor -%}
+                {%- if not is_active -%}
+                    {%- set _ = next_list.append(key_name) -%}
+                {%- endif -%}
+                {%- set params = {} -%}
+                {%- if next_list | length > 0 -%}
+                    {%- set _ = params.update({'filter': next_list | sort | join(',')}) -%}
+                {%- endif -%}
+                {%- for key in request.args if key != 'page' and key != 'filter' -%}
+                    {%- set _ = params.update({key: request.args.get(key)}) -%}
+                {%- endfor -%}
+                {%- set all_args = {} -%}
+                {%- for key, val in request.view_args.items() -%}
+                    {%- set _ = all_args.update({key: val}) -%}
+                {%- endfor -%}
+                {%- set _ = all_args.update(params) -%}
+                <a class="filter-bar__chip{{ ' is-active' if is_active }}"
+                   href="{{ url_for(request.endpoint, **all_args) }}"
+                   role="button"
+                   aria-pressed="{{ 'true' if is_active else 'false' }}"
+                   {% if hint %}title="{{ hint }}"{% endif %}>
+                    <i class="bi {{ icon }}" aria-hidden="true"></i>
+                    <span>{{ label }}</span>
+                </a>
+            {%- endfor -%}
+        </div>
+    </div>
+</div>

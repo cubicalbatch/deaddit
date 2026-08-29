@@ -40,7 +40,7 @@
         </div>
     </div>
 
-    {%- if traits or user.writing_style or interests -%}
+    {%- if traits or user.writing_style or interests or subscriptions -%}
     <section class="persona-panel" aria-labelledby="persona-title">
         <h2 class="persona-panel__title" id="persona-title">🧠 Persona</h2>
         {%- if traits -%}
@@ -50,6 +50,14 @@
         {%- endif -%}
         {%- if user.writing_style -%}
         <p class="persona-panel__style"><strong>Writing style:</strong> {{ user.writing_style }}</p>
+        {%- endif -%}
+        {%- if subscriptions -%}
+        <h3 class="persona-panel__subtitle">Subscribed subdeaddits</h3>
+        <div class="persona-panel__subscriptions">
+            {%- for sub in subscriptions -%}
+            <a class="chip chip--community" href="{{ url_for('web.subdeaddit', subdeaddit_name=sub) }}">d/{{ sub }}</a>
+            {%- endfor -%}
+        </div>
         {%- endif -%}
         {%- if interests -%}
         <h3 class="persona-panel__subtitle">Interests</h3>

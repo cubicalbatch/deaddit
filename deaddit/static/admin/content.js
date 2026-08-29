@@ -286,6 +286,8 @@ class ContentManager {
             document.getElementById('editUserBio').value = user.bio || '';
             document.getElementById('editUserInterests').value = user.interests || '';
             document.getElementById('editUserWritingStyle').value = user.writing_style || '';
+            const subs = Array.isArray(user.subscriptions) ? user.subscriptions.join(', ') : (user.subscriptions || '');
+            document.getElementById('editUserSubscriptions').value = subs;
             const caps = user.rate_caps || {};
             document.getElementById('editUserRatePost').value = caps.post ?? '';
             document.getElementById('editUserRateComment').value = caps.comment ?? '';
@@ -310,6 +312,7 @@ class ContentManager {
             interests: document.getElementById('editUserInterests').value,
             personality_traits: document.getElementById('editUserPersonality').value,
             writing_style: document.getElementById('editUserWritingStyle').value,
+            subscriptions: document.getElementById('editUserSubscriptions').value,
             is_troll: document.getElementById('editUserTroll').checked,
             rate_caps: {
                 post: this.capInput('editUserRatePost'),

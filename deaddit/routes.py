@@ -1,5 +1,6 @@
 import json
 from collections import namedtuple
+from datetime import UTC
 
 from flask import Blueprint, render_template, request
 from sqlalchemy import distinct, func, or_
@@ -9,7 +10,9 @@ from deaddit.dynamics import degeneracy
 from deaddit.dynamics.ranking import (
     controversy,
     normalize_comment_sort,
+    normalize_post_filter,
     normalize_post_sort,
+    post_filter_clause,
     post_order_by,
     rising_filter,
     up_down_split,
@@ -66,6 +69,13 @@ def index():
     posts_per_page = 20
 
     query = Post.query.filter(Post.removed.is_(False))
+
+    active_filters = normalize_post_filter(
+        request.args.getlist("filter") or request.args.get("filter")
+    )
+    filter_clause = post_filter_clause(active_filters)
+    if filter_clause is not None:
+        query = query.filter(filter_clause)
 
     sort = normalize_post_sort(request.args.get("sort"))
     if sort == "rising":
@@ -132,6 +142,7 @@ def index():
         title="Deaddit - The Reddit clone with AI users",
         total_pages=total_pages,
         sort=sort,
+        active_filters=active_filters,
         rail_subs=rail_subs,
         rail_users=rail_users,
         description="Explore Deaddit, the AI-generated Reddit clone featuring diverse discussions and content created by artificial intelligence.",
@@ -147,6 +158,13 @@ def subdeaddit(subdeaddit_name):
     community = Subdeaddit.query.filter_by(name=subdeaddit_name).first_or_404()
 
     query = Post.query.filter_by(subdeaddit_name=subdeaddit_name, removed=False)
+
+    active_filters = normalize_post_filter(
+        request.args.getlist("filter") or request.args.get("filter")
+    )
+    filter_clause = post_filter_clause(active_filters)
+    if filter_clause is not None:
+        query = query.filter(filter_clause)
 
     sort = normalize_post_sort(request.args.get("sort"))
     if sort == "rising":
@@ -194,6 +212,7 @@ def subdeaddit(subdeaddit_name):
         sub_comment_count=sub_comment_count,
         total_pages=total_pages,
         sort=sort,
+        active_filters=active_filters,
     )
 
 
@@ -221,6 +240,27 @@ def post(subdeaddit_name, post_id):
         if sort == "controversial":
             return (-controversy(up, down), -node["id"])
         return (-node["score"], -node["id"])
+
+    def rank_metrics(node):
+        """Per-node values for every comment sort, published to the template.
+
+        The client re-sorts an already-rendered tree in place (no reload, no
+        scroll jump), so it needs the same numbers the server ranked with.
+        Every sort reduces to "metric DESC, id DESC" — `new` included, since
+        a newer timestamp is a larger number — so one comparator covers all
+        four. Scores here are the node dict's, i.e. already zeroed for
+        removed comments, which keeps client order identical to server order.
+        """
+        up, down = up_down_split(node["score"], node["vote_count"])
+        created = node["created_at"]
+        return {
+            "top": node["score"],
+            # Naive UTC -> epoch seconds, microseconds kept so same-second
+            # siblings break the same way on both sides of the wire.
+            "new": created.replace(tzinfo=UTC).timestamp() if created else 0.0,
+            "best": round(wilson_lower_bound(up, down), 9),
+            "controversial": controversy(up, down),
+        }
 
     def build_comment_tree(comments):
         comment_dict = {
@@ -263,6 +303,7 @@ def post(subdeaddit_name, post_id):
 
         # Sort roots and children by the chosen key, with deterministic ties.
         for comment in comment_dict.values():
+            comment["ranks"] = rank_metrics(comment)
             comment["children"].sort(key=comment_rank_key, reverse=(sort == "new"))
         root_comments.sort(key=comment_rank_key, reverse=(sort == "new"))
 
@@ -329,6 +370,9 @@ def post(subdeaddit_name, post_id):
         "post.html",
         post=post,
         comment_tree=comment_tree,
+        # Every loaded row is rendered (removed ones as tombstones), so the
+        # header count and the DOM always agree.
+        comment_count=len(comments),
         sort=sort,
         # Direct links to removed posts stay reachable: the template renders
         # a tombstone notice instead of title/body, comments stay visible.
@@ -409,6 +453,8 @@ def user_profile(username):
             return []
         return parsed if isinstance(parsed, list) else []
 
+    subscriptions = list((user.agent_state or {}).get("subscriptions") or [])
+
     context = {
         "user": user,
         "active_tab": tab,
@@ -418,6 +464,7 @@ def user_profile(username):
         "stats": stats,
         "traits": _safe_json_list(user.personality_traits),
         "interests": _safe_json_list(user.interests),
+        "subscriptions": subscriptions,
         "bio_html": format_content_html(user.bio),
         "title": f"Deaddit - User Profile: {username}",
     }

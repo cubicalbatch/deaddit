@@ -156,6 +156,27 @@ class TestProfileTraits:
         body = resp.get_data(as_text=True)
         assert "dry wit" in body
 
+    def test_subscriptions_exposed_in_context_and_body(
+        self, app, client, db_session, ctx
+    ):
+        user = _mk_user(
+            "subbed_user",
+            bio="a reader",
+        )
+        user.agent_state = {"subscriptions": ["books", "science"]}
+        db_session.add_all([_mk_sub("books"), _mk_sub("science"), user])
+        db_session.commit()
+
+        resp = client.get("/user/subbed_user")
+        assert resp.status_code == 200
+        profile = _ctx_of(ctx, "user_profile.html")
+        assert profile["subscriptions"] == ["books", "science"]
+
+        body = resp.get_data(as_text=True)
+        assert "Subscribed subdeaddits" in body
+        assert "d/books" in body
+        assert "d/science" in body
+
     def test_stats_dict_counts_posts_comments_upvotes(
         self, app, client, db_session, ctx
     ):
