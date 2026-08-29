@@ -530,6 +530,7 @@ class AgentRun(db.Model):
     turn_count = db.Column(db.Integer, nullable=False, default=0)
     action_count = db.Column(db.Integer, nullable=False, default=0)
     token_usage = db.Column(db.JSON)  # {'prompt': n, 'completion': n, 'total': n}
+    prompt_metadata = db.Column(db.JSON, nullable=True)
     error_message = db.Column(db.Text)
 
     turns = db.relationship(

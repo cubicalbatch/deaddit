@@ -27,9 +27,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
+from dataclasses import dataclass, replace
 from datetime import datetime
-
+from types import MappingProxyType
+from typing import Mapping
 from sqlalchemy import event
 
 from deaddit import Config
@@ -42,6 +45,279 @@ from deaddit.models import (
 )
 
 _TOKEN_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+@dataclass(frozen=True)
+class WeightedCatalogItem:
+    """One weighted, stable-id option in a visit profile catalog."""
+
+    id: str
+    text: str
+    weight: float
+
+
+@dataclass(frozen=True)
+class BehaviorBlock:
+    """An ordered behavior instruction block."""
+
+    id: str
+    text: str
+
+
+@dataclass(frozen=True)
+class VisitProfile:
+    """Immutable, validated document used to prepare an agent visit."""
+
+    schema_version: int
+    system_template: str
+    layouts: Mapping[str, str]
+    behavior_blocks: tuple[BehaviorBlock, ...]
+    intent_mix: Mapping[str, float]
+    length_catalog: Mapping[str, tuple[WeightedCatalogItem, ...]]
+    direction_catalog: Mapping[str, tuple[WeightedCatalogItem, ...]]
+    sample_count: int
+    # Resolver metadata; never serialized in the profile body.
+    profile_version: int | None = None
+    profile_ref: str | None = None
+
+    @property
+    def version(self) -> int | None:
+        return self.profile_version
+
+    @property
+    def ref(self) -> str | None:
+        return self.profile_ref
+
+
+_PROFILE_TEMPLATE_NAME = "agent.visit_profile"
+_PROFILE_TOP_LEVEL = frozenset(
+    {
+        "schema_version",
+        "system_template",
+        "layouts",
+        "behavior_blocks",
+        "intent_mix",
+        "length_catalog",
+        "direction_catalog",
+        "sample_count",
+    }
+)
+_PROFILE_INTENTS = frozenset({"post", "image", "website"})
+_PROFILE_CONTENT_KINDS = frozenset({"comment", "text_post", "media_post"})
+_PROFILE_DIRECTION_KINDS = frozenset({"post", "comment"})
+_PROFILE_VARIABLES = frozenset(
+    {
+        "persona",
+        "persona_block",
+        "autonomy_tier",
+        "tier_line",
+        "rules_block",
+        "tools",
+        "tools_line",
+        "genuine",
+        "genuine_line",
+        "quality_rules",
+        "profile_quality_rules",
+        "capability_guidance",
+        "memories",
+        "memory_block",
+        "subscriptions",
+        "subscriptions_section",
+        "community_hint",
+        "intent",
+        "content_kind",
+        "length_target",
+        "directions",
+        "sample_count",
+    }
+)
+_PROFILE_VARIABLE_RE = re.compile(r"\{([^{}]*)\}")
+
+
+def _profile_error(message: str) -> PromptError:
+    return PromptError(f"Invalid agent.visit_profile: {message}")
+
+
+def _profile_string(value: object, path: str, *, nonempty: bool = True) -> str:
+    if not isinstance(value, str) or (nonempty and not value):
+        adjective = "non-empty " if nonempty else ""
+        raise _profile_error(f"{path} must be a {adjective}string")
+    return value
+
+
+def _validate_profile_variables(text: str, path: str) -> None:
+    for match in _PROFILE_VARIABLE_RE.finditer(text):
+        name = match.group(1)
+        if not _TOKEN_RE.fullmatch(match.group(0)) or name not in _PROFILE_VARIABLES:
+            raise _profile_error(
+                f"{path} contains unknown or unsafe variable {match.group(0)!r}"
+            )
+    leftovers = _PROFILE_VARIABLE_RE.sub("", text)
+    if "{" in leftovers or "}" in leftovers:
+        raise _profile_error(f"{path} contains an unmatched brace")
+
+
+def _catalog_items(
+    value: object, path: str, *, direction: bool
+) -> tuple[WeightedCatalogItem, ...]:
+    if not isinstance(value, list):
+        raise _profile_error(f"{path} must be an array")
+    result: list[WeightedCatalogItem] = []
+    ids: set[str] = set()
+    for index, item in enumerate(value):
+        item_path = f"{path}[{index}]"
+        if not isinstance(item, dict) or set(item) != {"id", "text", "weight"}:
+            raise _profile_error(f"{item_path} must contain only id, text, and weight")
+        item_id = _profile_string(item["id"], f"{item_path}.id")
+        text = _profile_string(item["text"], f"{item_path}.text")
+        _validate_profile_variables(text, f"{item_path}.text")
+        weight = item["weight"]
+        if isinstance(weight, bool) or not isinstance(weight, (int, float)):
+            raise _profile_error(f"{item_path}.weight must be numeric")
+        if not math.isfinite(float(weight)) or float(weight) <= 0:
+            raise _profile_error(f"{item_path}.weight must be finite and positive")
+        if item_id in ids:
+            raise _profile_error(f"duplicate stable id {item_id!r}")
+        expected_prefix = f"{path.rsplit('.', 1)[-1]}."
+        if not item_id.startswith(expected_prefix):
+            raise _profile_error(f"{item_path}.id is incompatible with its content kind")
+        ids.add(item_id)
+        result.append(WeightedCatalogItem(item_id, text, float(weight)))
+    return tuple(result)
+
+
+
+def parse_visit_profile(body: str | dict) -> VisitProfile:
+    """Parse and strictly validate a canonical ``agent.visit_profile`` body."""
+    if isinstance(body, str):
+        try:
+            document = json.loads(body)
+        except (TypeError, ValueError) as exc:
+            raise _profile_error("body is not valid JSON") from exc
+    elif isinstance(body, dict):
+        document = body
+    else:
+        raise _profile_error("body must be JSON text or an object")
+    if not isinstance(document, dict) or set(document) != _PROFILE_TOP_LEVEL:
+        raise _profile_error("unknown or missing top-level fields")
+    if document["schema_version"] != 1:
+        raise _profile_error("schema_version must be 1")
+    system_template = _profile_string(
+        document["system_template"], "system_template", nonempty=False
+    )
+    # ``system_template`` is opaque by design: migrations must retain legacy
+    # prompt bytes even when they contain braces intended for another layer.
+    raw_layouts = document["layouts"]
+    if not isinstance(raw_layouts, dict) or set(raw_layouts) != {
+        "system",
+        "lurker",
+        "browse",
+        "post",
+    }:
+        raise _profile_error("layouts must contain exactly system, lurker, browse, and post")
+    layouts = {}
+    for name in ("system", "lurker", "browse", "post"):
+        layouts[name] = _profile_string(raw_layouts[name], f"layouts.{name}")
+        if name != "system":
+            _validate_profile_variables(layouts[name], f"layouts.{name}")
+    raw_blocks = document["behavior_blocks"]
+    if not isinstance(raw_blocks, list):
+        raise _profile_error("behavior_blocks must be an array")
+    blocks: list[BehaviorBlock] = []
+    block_ids: set[str] = set()
+    for index, block in enumerate(raw_blocks):
+        path = f"behavior_blocks[{index}]"
+        if not isinstance(block, dict) or set(block) != {"id", "text"}:
+            raise _profile_error(f"{path} must contain only id and text")
+        block_id = _profile_string(block["id"], f"{path}.id")
+        text = _profile_string(block["text"], f"{path}.text")
+        _validate_profile_variables(text, f"{path}.text")
+        if block_id in block_ids:
+            raise _profile_error(f"duplicate stable id {block_id!r}")
+        block_ids.add(block_id)
+        blocks.append(BehaviorBlock(block_id, text))
+
+    raw_mix = document["intent_mix"]
+    if not isinstance(raw_mix, dict) or set(raw_mix) != _PROFILE_INTENTS:
+        raise _profile_error("intent_mix must contain exactly post, image, and website")
+    intent_mix: dict[str, float] = {}
+    for name in sorted(_PROFILE_INTENTS):
+        value = raw_mix[name]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise _profile_error(f"intent_mix.{name} must be numeric")
+        value = float(value)
+        if not math.isfinite(value) or not 0 <= value <= 1:
+            raise _profile_error(f"intent_mix.{name} must be between 0 and 1")
+        intent_mix[name] = value
+    if intent_mix["image"] + intent_mix["website"] > 1.0 + 1e-9:
+        raise _profile_error("image and website intent mix cannot exceed 1")
+
+    raw_lengths = document["length_catalog"]
+    if not isinstance(raw_lengths, dict) or set(raw_lengths) != _PROFILE_CONTENT_KINDS:
+        raise _profile_error("length_catalog has incompatible content kinds")
+    length_catalog = {
+        kind: _catalog_items(raw_lengths[kind], f"length_catalog.{kind}", direction=False)
+        for kind in sorted(_PROFILE_CONTENT_KINDS)
+    }
+    raw_directions = document["direction_catalog"]
+    if not isinstance(raw_directions, dict) or set(raw_directions) != _PROFILE_DIRECTION_KINDS:
+        raise _profile_error("direction_catalog has incompatible content kinds")
+    direction_catalog = {
+        kind: _catalog_items(raw_directions[kind], f"direction_catalog.{kind}", direction=True)
+        for kind in sorted(_PROFILE_DIRECTION_KINDS)
+    }
+    stable_ids = {block.id for block in blocks}
+    for catalog in (*length_catalog.values(), *direction_catalog.values()):
+        for item in catalog:
+            if item.id in stable_ids:
+                raise _profile_error(f"duplicate stable id {item.id!r}")
+            stable_ids.add(item.id)
+    sample_count = document["sample_count"]
+    return VisitProfile(
+        schema_version=1,
+        system_template=system_template,
+        layouts=MappingProxyType(layouts),
+        behavior_blocks=tuple(blocks),
+        intent_mix=MappingProxyType(intent_mix),
+        length_catalog=MappingProxyType(length_catalog),
+        direction_catalog=MappingProxyType(direction_catalog),
+        sample_count=sample_count,
+    )
+
+
+def _profile_document(profile: VisitProfile) -> dict:
+    return {
+        "schema_version": profile.schema_version,
+        "system_template": profile.system_template,
+        "layouts": dict(profile.layouts),
+        "behavior_blocks": [
+            {"id": block.id, "text": block.text} for block in profile.behavior_blocks
+        ],
+        "intent_mix": dict(profile.intent_mix),
+        "length_catalog": {
+            kind: [
+                {"id": item.id, "text": item.text, "weight": item.weight}
+                for item in items
+            ]
+            for kind, items in profile.length_catalog.items()
+        },
+        "direction_catalog": {
+            kind: [
+                {"id": item.id, "text": item.text, "weight": item.weight}
+                for item in items
+            ]
+            for kind, items in profile.direction_catalog.items()
+        },
+        "sample_count": profile.sample_count,
+    }
+
+
+def serialize_visit_profile(profile: VisitProfile) -> str:
+    """Serialize a validated profile into deterministic canonical JSON."""
+    if not isinstance(profile, VisitProfile):
+        raise TypeError("profile must be a VisitProfile")
+    validated = parse_visit_profile(_profile_document(profile))
+    return json.dumps(_profile_document(validated), sort_keys=True, separators=(",", ":"))
 
 
 class PromptError(Exception):
@@ -114,6 +390,8 @@ def create_template(
     created_by: str | None = None,
 ) -> PromptTemplateVersion:
     """Create a template together with its immutable version 1."""
+    if name == _PROFILE_TEMPLATE_NAME:
+        body = serialize_visit_profile(parse_visit_profile(body))
     template = PromptTemplate(name=name, description=description)
     db.session.add(template)
     db.session.flush()  # assign template.id
@@ -126,8 +404,6 @@ def create_template(
     db.session.add(row)
     db.session.commit()
     return row
-
-
 def create_version(
     name_or_template: str | PromptTemplate,
     body: str,
@@ -141,6 +417,8 @@ def create_version(
     )
     if template is None:
         raise PromptError(f"Unknown prompt template {name_or_template!r}")
+    if template.name == _PROFILE_TEMPLATE_NAME:
+        body = serialize_visit_profile(parse_visit_profile(body))
     last = (
         PromptTemplateVersion.query.filter_by(template_id=template.id)
         .order_by(PromptTemplateVersion.version.desc())
@@ -179,8 +457,6 @@ def get_version(
 
 
 # --- pins ----------------------------------------------------------------
-
-
 def set_pin(
     target_kind: str,
     target_key: str,
@@ -191,6 +467,15 @@ def set_pin(
     template = get_template(template_name)
     if template is None:
         raise PromptError(f"Unknown prompt template {template_name!r}")
+    if template_name == _PROFILE_TEMPLATE_NAME:
+        version = get_version(template, version_number)
+        if version is None:
+            raise PromptError(
+                f"Unknown version {version_number} of prompt template {template_name!r}"
+            )
+        # Validate before touching an existing pin, so failed writes cannot
+        # accidentally replace a valid pin.
+        parse_visit_profile(version.body)
     row = PromptPin.query.filter_by(
         target_kind=target_kind, target_key=target_key
     ).first()
@@ -219,6 +504,57 @@ def get_pin(target_kind: str, target_key: str) -> PromptPin | None:
     return PromptPin.query.filter_by(
         target_kind=target_kind, target_key=target_key
     ).first()
+
+
+def _profile_pin_version(pin: PromptPin, source: str) -> PromptTemplateVersion:
+    template = db.session.get(PromptTemplate, pin.template_id)
+    if template is None or template.name != _PROFILE_TEMPLATE_NAME:
+        raise PromptError(
+            f"{source} pin must reference template {_PROFILE_TEMPLATE_NAME!r}"
+        )
+    version = PromptTemplateVersion.query.filter_by(
+        template_id=pin.template_id, version=pin.version_number
+    ).first()
+    if version is None:
+        raise PromptError(f"{source} pin references a missing profile version")
+    parse_visit_profile(version.body)
+    return version
+
+
+def resolve_visit_profile(
+    agent, source_default: VisitProfile | dict
+) -> tuple[VisitProfile, PromptTemplateVersion | None, str]:
+    """Resolve profile pins in agent, cohort, global, then source order."""
+    candidates: list[tuple[str, PromptPin | None]] = [
+        ("agent", get_pin("agent", str(agent.id))),
+    ]
+    cohort = (getattr(agent, "config", None) or {}).get("cohort")
+    candidates.append(("cohort", get_pin("cohort", str(cohort)) if cohort else None))
+    candidates.append(("global", get_pin("global", _PROFILE_TEMPLATE_NAME)))
+    for source, pin in candidates:
+        if pin is None:
+            continue
+        version = _profile_pin_version(pin, source)
+        profile = parse_visit_profile(version.body)
+        return (
+            replace(
+                profile,
+                profile_version=version.version,
+                profile_ref=f"{_PROFILE_TEMPLATE_NAME}:v{version.version}",
+            ),
+            version,
+            source,
+        )
+    profile = (
+        source_default
+        if isinstance(source_default, VisitProfile)
+        else parse_visit_profile(source_default)
+    )
+    return (
+        replace(profile, profile_ref=profile.profile_ref or "source_default"),
+        None,
+        "default",
+    )
 
 
 def resolve_pin(target_kind: str, target_key: str) -> PromptPin | None:
