@@ -637,8 +637,8 @@ class Vote(db.Model):
         db.UniqueConstraint("voter", "post_id", name="uq_vote_post"),
         db.UniqueConstraint("voter", "comment_id", name="uq_vote_comment"),
     )
- 
- 
+
+
 class VoteCadencePolicy(db.Model):
     """Immutable, versioned policy used by simulated voting."""
 
@@ -657,7 +657,6 @@ class VoteCadencePolicy(db.Model):
     )
 
     VALID_PRESETS = frozenset({"quiet", "natural", "busy", "custom"})
-
 
     def __init__(self, **kwargs):
         # Validate on ORM construction as well as on database loading.  The
@@ -710,11 +709,11 @@ class VoteCadencePolicy(db.Model):
             .first()
         )
 
- 
     @classmethod
     def resolve_for_tail_exposure(cls, exposed_at):
         """Resolve a policy for an archive/revival exposure."""
         return cls.resolve_for_exposure(exposed_at)
+
 
 class VoteSimulationHourly(db.Model):
     """Cross-process counters for one UTC hour and simulator mode."""
@@ -751,13 +750,13 @@ class VoteSimulationHourly(db.Model):
     @property
     def revival(self):
         return self.revival_proposals
- 
- 
+
+
 @event.listens_for(VoteCadencePolicy, "before_update")
 def _reject_vote_cadence_policy_update(mapper, connection, target):
     raise ValueError("VoteCadencePolicy rows are immutable")
- 
- 
+
+
 @event.listens_for(VoteCadencePolicy, "load")
 def _validate_loaded_vote_cadence_policy(target, context):
     from deaddit.dynamics.engagement import load_policy_config

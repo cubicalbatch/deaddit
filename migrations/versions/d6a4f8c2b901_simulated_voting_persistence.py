@@ -43,9 +43,7 @@ def upgrade():
         sa.Column("mode", sa.String(length=16), nullable=False),
         sa.Column("ticks", sa.Integer(), server_default="0", nullable=False),
         sa.Column("errors", sa.Integer(), server_default="0", nullable=False),
-        sa.Column(
-            "active_proposals", sa.Integer(), server_default="0", nullable=False
-        ),
+        sa.Column("active_proposals", sa.Integer(), server_default="0", nullable=False),
         sa.Column(
             "archive_proposals", sa.Integer(), server_default="0", nullable=False
         ),

@@ -74,9 +74,7 @@ def _index_names(path, table: str) -> set[str]:
 
 def test_phase1_migration_preserves_populated_data_on_downgrade(tmp_path):
     path = tmp_path / "simulated-voting.db"
-    app = create_app(
-        {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{path}", "TESTING": True}
-    )
+    app = create_app({"SQLALCHEMY_DATABASE_URI": f"sqlite:///{path}", "TESTING": True})
     runner = app.test_cli_runner()
     assert runner.invoke(args=["db", "upgrade"]).exit_code == 0
     assert runner.invoke(args=["db", "downgrade", _PRE_PHASE1_HEAD]).exit_code == 0
@@ -142,9 +140,13 @@ def test_phase1_migration_preserves_populated_data_on_downgrade(tmp_path):
             "SELECT config FROM vote_cadence_policy"
         ).fetchone()[0]
         assert json.loads(policy_json) == _CONFIG
-        assert connection.execute(
-            "SELECT source FROM vote WHERE voter = 'voter' AND post_id = ?", (post_id,)
-        ).fetchone()[0] == "simulated"
+        assert (
+            connection.execute(
+                "SELECT source FROM vote WHERE voter = 'voter' AND post_id = ?",
+                (post_id,),
+            ).fetchone()[0]
+            == "simulated"
+        )
         assert _index_names(path, "vote_cadence_policy") >= {
             "ix_vote_cadence_policy_effective_at"
         }
@@ -154,28 +156,35 @@ def test_phase1_migration_preserves_populated_data_on_downgrade(tmp_path):
         assert summary[0].startswith("2026-01-01 10:00:00")
         assert summary[1] == "shadow"
         assert summary[2:15] == (4, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
-        assert connection.execute(
-            "SELECT COUNT(*) FROM vote_simulation_hourly "
-            "WHERE hour LIKE '2026-01-01 10:00:00%'"
-        ).fetchone()[0] == 2
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM vote_simulation_hourly "
+                "WHERE hour LIKE '2026-01-01 10:00:00%'"
+            ).fetchone()[0]
+            == 2
+        )
 
     assert runner.invoke(args=["db", "downgrade", _PRE_PHASE1_HEAD]).exit_code == 0
     tables = _table_names(path)
     assert "vote_cadence_policy" not in tables
     assert "vote_simulation_hourly" not in tables
     with sqlite3.connect(path) as connection:
-        assert connection.execute(
-            "SELECT source FROM vote WHERE voter = 'voter' AND post_id = ?", (post_id,)
-        ).fetchone()[0] == "simulated"
+        assert (
+            connection.execute(
+                "SELECT source FROM vote WHERE voter = 'voter' AND post_id = ?",
+                (post_id,),
+            ).fetchone()[0]
+            == "simulated"
+        )
 
 
 def test_phase1_revision_is_current_single_head(tmp_path):
     path = tmp_path / "head.db"
-    app = create_app(
-        {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{path}", "TESTING": True}
-    )
+    app = create_app({"SQLALCHEMY_DATABASE_URI": f"sqlite:///{path}", "TESTING": True})
     result = app.test_cli_runner().invoke(args=["db", "upgrade"])
     assert result.exit_code == 0, result.output
     with sqlite3.connect(path) as connection:
-        revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+        revision = connection.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone()
     assert revision == (_PHASE1_HEAD,)

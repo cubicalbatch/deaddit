@@ -277,11 +277,9 @@ def test_concurrent_duplicate_insert_rolls_back_and_resolves(
     post = db_session.get(Post, post.id)
     assert (post.score, post.vote_count) == (1, 1)
     assert db_session.get(User, "bob").post_karma == 1
- 
- 
-def test_simulated_insert_returns_metadata_and_emits_activity(
-    seeded_db, db_session
-):
+
+
+def test_simulated_insert_returns_metadata_and_emits_activity(seeded_db, db_session):
     post = seeded_db["posts"][1]
     result = cast_vote(
         "alice", "post", post.id, 1, source="simulated", allow_recast=False
