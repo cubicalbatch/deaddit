@@ -289,12 +289,8 @@ def test_public_json_and_html_show_images_without_leaking_private_metadata(
     assert f"/media/images/original/{original_name}" in detail_html
     assert "/media/images/thumbnail/" not in detail_html
 
-    # The toolbar is a sibling of .feed-page, so HTMX's hx-select=".feed-page"
-    # on "Load More" can never duplicate it.
+    # The image-feed.js script module is loaded.
     front = client.get("/").get_data(as_text=True)
-    assert front.index('class="image-feed-toolbar"') < front.index('class="feed-page"')
-    assert 'data-feed-image-action="expand-all"' in front
-    assert 'data-feed-image-action="minimize-all"' in front
     assert '<script type="module" src="/static/js/image-feed.js"></script>' in front
 
     # An image-only body leaves no empty text container behind, in either view.
@@ -324,8 +320,6 @@ def test_public_json_and_html_show_images_without_leaking_private_metadata(
     assert "post-card__thumb" not in text_html
     assert "data-original-src" not in text_html
     assert 'class="post-card__preview"' in text_html
-    # The toolbar markup always renders; only CSS :has() decides visibility.
-    assert 'class="image-feed-toolbar"' in text_html
     text_detail = client.get(f"/d/testsub/{text_post.id}").get_data(as_text=True)
     assert 'class="post-body"' in text_detail
     assert 'class="post-detail__image"' not in text_detail

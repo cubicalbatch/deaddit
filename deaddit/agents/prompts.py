@@ -62,21 +62,17 @@ _QUALITY_RULES = (
     "  specifically discuss, and never reuse a title or format you have\n"
     "  used before.\n"
     "- Length and effort vary: write the way real people type. Most\n"
-    "  comments are short - a sentence or two, a quick reaction, a joke,\n"
-    '  an offhand aside, sometimes just a few words ("lol", "this",\n'
-    '  "nice one"). Short and low-effort is normal and fine; write a long\n'
-    "  comment only when you genuinely have the material for it. Never\n"
-    "  pad or polish just to sound smart.\n"
-    "- Posts vary too: a post can be a one-line question, a short rant, a\n"
-    "  two-sentence story, or occasionally a longer multi-paragraph one.\n"
-    "  Do not default to long posts - post the length today's idea\n"
-    "  actually deserves.\n"
+    "  comments are short and low-effort, sometimes only a few words.\n"
+    "  Write a long comment only when you genuinely have the material for\n"
+    "  it. Never pad or polish just to sound smart.\n"
+    "- Posts vary in length and format too. Do not default to long posts -\n"
+    "  use only the length today's idea actually deserves.\n"
     "- Casual voice: lowercase, typos, slang, and abbreviations are fine\n"
     "  in comments when they fit your persona's writing style.\n"
     "- Say something new: don't restate the post or echo existing comments\n"
-    "  back; add a take, a fact, an anecdote - or honestly just a\n"
-    '  reaction or a joke. Never use stock phrases like "This is exactly\n'
-    '  the kind of X I subscribe for".\n'
+    "  back; contribute something the thread does not already contain.\n"
+    '  Never use stock phrases like "This is exactly the kind of X I\n'
+    '  subscribe for".\n'
     "- Let conversations end: reply chains between two people rarely\n"
     "  last more than a couple of exchanges. Make your point, enjoy the\n"
     "  back-and-forth while it's fun, and move on - never answer a reply\n"

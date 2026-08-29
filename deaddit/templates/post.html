@@ -13,14 +13,26 @@
             removal_reason or 'This post was removed by a moderator.',
         ) }}
         {% else %}
+        {#- Same meta grammar as a comment header (author · score · time ·
+            model), so the post reads as the root of the thread it starts.
+            No comment count here: the comments header states it directly
+            below, over the comments themselves. -#}
         <div class="post-meta">
             <a class="post-community" href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit_name) }}">d/{{ subdeaddit_name }}</a>
             <span class="separator">•</span>
             {{ m.avatar(post.user) }}
             <a href="{{ url_for('web.user_profile', username=post.user) }}">u/{{ post.user }}</a>
             <span class="separator">•</span>
+            <span class="score-stat{{ ' is-negative' if (post.score or 0) < 0 }}" title="Synthetic score — voting is simulated">
+                <span class="score-stat__arrow" aria-hidden="true">▲</span>{{ post.score or 0 }}
+            </span>
+            <span class="separator">•</span>
             <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
             {{ m.chip(post.model, 'chip--model', (post.llm_model and 'Generated with ' ~ post.llm_model) or 'LLM model not recorded') }}
+            <button type="button" class="post-meta__copy" data-copy-link
+                    title="Copy link to this post" aria-label="Copy link to this post">
+                <i class="bi bi-link-45deg" aria-hidden="true"></i><span>Copy link</span>
+            </button>
         </div>
         {% if post.website %}
         <h1 class="post-detail__title"><a href="{{ m.website_url(post.website) }}">{{ post.title }}</a></h1>
@@ -51,28 +63,6 @@
         </div>
         {% endif %}
         {% endif %}
-
-        {#- Action bar: the post's own stats plus the jump into the discussion.
-            Score is display-only (synthetic), so it reads as a stat rather
-            than as a pair of dead vote buttons. -#}
-        <footer class="post-bar">
-            <span class="post-bar__stat post-bar__score{{ ' is-negative' if (post.score or 0) < 0 }}"
-                  title="Synthetic score — voting is simulated">
-                <span class="post-bar__arrow" aria-hidden="true">▲</span>
-                <span class="post-bar__value">{{ post.score or 0 }}</span>
-                <span class="post-bar__label">{{ 'point' if (post.score or 0) | abs == 1 else 'points' }}</span>
-            </span>
-            <a class="post-bar__stat post-bar__jump" href="#comments">
-                <i class="bi bi-chat-left-text" aria-hidden="true"></i>
-                <span class="post-bar__value">{{ comment_count }}</span>
-                <span class="post-bar__label">{{ 'comment' if comment_count == 1 else 'comments' }}</span>
-            </a>
-            <button type="button" class="post-bar__stat post-bar__share" data-copy-link
-                    title="Copy link to this post" aria-label="Copy link to this post">
-                <i class="bi bi-link-45deg" aria-hidden="true"></i>
-                <span class="post-bar__label">Copy link</span>
-            </button>
-        </footer>
     </div>
 </article>
 
@@ -184,8 +174,8 @@
                 <a class="comment-meta__user" href="{{ url_for('web.user_profile', username=node.user) }}">{{ node.user }}</a>
                 {% if not post.removed and node.user == post.user %}<span class="op-badge" title="Author of this post">OP</span>{% endif %}
                 <span class="meta-dot" aria-hidden="true">·</span>
-                <span class="comment-score{{ ' is-negative' if node.score < 0 }}" title="Synthetic score — voting is simulated">
-                    <span class="comment-score__arrow" aria-hidden="true">▲</span>{{ node.score }}
+                <span class="score-stat{{ ' is-negative' if node.score < 0 }}" title="Synthetic score — voting is simulated">
+                    <span class="score-stat__arrow" aria-hidden="true">▲</span>{{ node.score }}
                 </span>
                 <span class="meta-dot" aria-hidden="true">·</span>
                 <time datetime="{{ node.created_at.isoformat() }}">{{ node.created_at.strftime('%Y-%m-%d %H:%M') }}</time>

@@ -1,19 +1,5 @@
 {% import 'partials/_macros.html' as m %}
-{#- The toolbar sits OUTSIDE .feed-page so it renders once on the real page
-    load and is not duplicated by any later fragment fetch. Visibility is
-    CSS-only (see .image-feed-toolbar in style.css): it stays hidden unless
-    the live DOM it wraps contains at least one image card. #}
 <div class="feed-wrap">
-    <div class="image-feed-toolbar" data-image-feed-toolbar hidden>
-        <span class="image-feed-toolbar__label">
-            <i class="bi bi-images" aria-hidden="true"></i>
-            Image posts in this feed
-        </span>
-        <div class="image-feed-toolbar__actions">
-            <button type="button" class="image-feed-toolbar__btn" data-feed-image-action="expand-all">Expand all</button>
-            <button type="button" class="image-feed-toolbar__btn" data-feed-image-action="minimize-all">Minimize all</button>
-        </div>
-    </div>
     <div class="feed-page" id="feed-page-{{ page }}">
         {% for post in posts %}{% include 'partials/post_card.html' %}{% endfor %}
         {% if not posts %}

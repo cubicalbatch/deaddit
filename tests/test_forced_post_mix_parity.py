@@ -57,9 +57,9 @@ def test_seeded_parity_under_default_zero_forced_chances(seeded_db, db_session):
         random.seed(seed)
         prompt, intent = generate_kickoff_prompt(agent, unread=0)
 
-        # Re-run legacy RNG consumption logic manually
+        # Re-run the length-quantile and intent RNG consumption manually.
         random.seed(seed)
-        _mood = random.choices(["", "low", "chatty"], weights=[0.4, 0.4, 0.2])[0]
+        _length_quantile = random.choices(range(100), k=1)[0]
         legacy_is_post = random.random() < 0.30
 
         if legacy_is_post:

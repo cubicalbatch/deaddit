@@ -707,69 +707,35 @@ html[data-theme="dark"] .brand__logo--dark {
     color: var(--accent);
 }
 
-/* --- Post action bar: score / jump to comments / copy link --- */
-.post-bar {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--space-xs);
-    margin-top: var(--space-lg);
-    padding-top: var(--space-md);
-    border-top: 1px solid var(--border);
-    font-size: var(--font-size-sm);
-}
-
-.post-bar__stat {
+/* Copy link, parked at the far end of the meta row. The row is the post's
+   only chrome now — a footer bar under the body repeated the comment count
+   that the comments header states a few pixels lower. */
+.post-meta__copy {
     display: inline-flex;
     align-items: center;
     gap: var(--space-xs);
-    min-height: 36px;
+    margin-left: auto;
     padding: var(--space-xs) var(--space-sm);
     border: none;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-sm);
     background: none;
     color: var(--text-2);
     font-family: inherit;
     font-size: var(--font-size-sm);
-    text-decoration: none;
-}
-
-.post-bar__value {
-    font-weight: 700;
-    color: var(--text-1);
-    font-variant-numeric: tabular-nums;
-}
-
-.post-bar__score .post-bar__arrow {
-    color: var(--up);
-}
-
-.post-bar__score.is-negative .post-bar__arrow {
-    color: var(--down);
-    transform: rotate(180deg);
-}
-
-a.post-bar__stat,
-button.post-bar__stat {
+    font-weight: 500;
     cursor: pointer;
     transition: color var(--motion-fast) var(--ease-out-quart),
         background-color var(--motion-fast) var(--ease-out-quart);
 }
 
-a.post-bar__stat:hover,
-button.post-bar__stat:hover {
-    color: var(--text-1);
+.post-meta__copy:hover {
+    color: var(--link);
     background-color: var(--bg-hover-row);
 }
 
-a.post-bar__stat:focus-visible,
-button.post-bar__stat:focus-visible {
+.post-meta__copy:focus-visible {
     outline: 2px solid var(--accent);
-    outline-offset: -2px;
-}
-
-.post-bar__share {
-    margin-left: auto;
+    outline-offset: -1px;
 }
 
 .post-detail__website {
@@ -2885,8 +2851,10 @@ a.chip:hover {
 }
 
 /* Score reads as a stat, not as a control: voting on this site is
-   synthetic, so no arrows to click. */
-.comment-score {
+   synthetic, so no arrows to click. Shared by the post meta row and every
+   comment header, which is the point — the post is the root of the thread
+   and should carry the same meta grammar. */
+.score-stat {
     display: inline-flex;
     align-items: center;
     gap: 3px;
@@ -2896,13 +2864,13 @@ a.chip:hover {
     white-space: nowrap;
 }
 
-.comment-score__arrow {
+.score-stat__arrow {
     color: var(--up);
     font-size: 9px;
     line-height: 1;
 }
 
-.comment-score.is-negative .comment-score__arrow {
+.score-stat.is-negative .score-stat__arrow {
     color: var(--down);
     transform: rotate(180deg);
 }
@@ -3202,14 +3170,26 @@ a.chip:hover {
         margin-left: calc(-1 * var(--space-sm));
     }
 
-    .post-bar__share .post-bar__label {
-        display: none;
+    .post-meta__copy {
+        /* The meta row wraps here, and margin-left:auto would strand the
+           button alone at the right end of the last line. Let it sit inline
+           after the provenance chip instead. */
+        margin-left: 0;
+    }
+
+    .post-meta__copy span {
+        /* Icon only: aria-label and the tooltip carry the name. */
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
     }
 }
 
 /* Copy-link confirmation: the tooltip flips to "Copied!" and the control
    turns accent for the same moment. */
 .comment-permalink.is-copied,
-.post-bar__share.is-copied {
+.post-meta__copy.is-copied {
     color: var(--accent) !important;
 }

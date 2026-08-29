@@ -270,7 +270,6 @@ def test_mode_is_reread_from_database_every_tick(app, db_session):
     assert _hourly("live").ticks == 1
 
 
-
 def test_summary_deltas_expects_tail_probability_non_conversions():
     """Failed exposure rolls are ordinary non-events, not guardrail skips."""
     result = TickResult()
@@ -288,6 +287,7 @@ def test_summary_deltas_expects_tail_probability_non_conversions():
     assert deltas["cap_skips"] == 1
     assert deltas["no_voter_skips"] == 1
     assert deltas["min_gap_skips"] == 0
+
 
 # ---------------------------------------------------------------------------
 # Shadow vs live: identical decisions, only live mutates votes

@@ -38,21 +38,68 @@ KICKOFF_PROMPT = (
 
 POST_INTENT_PROBABILITY = 0.30
 
-#: Sampled once per run and appended to the kickoff so the same persona's
-#: effort level varies visit to visit. Real comment-length distributions
-#: are heavily skewed short, so most moods lean casual/low-effort; the
-#: empty string is the unmodified default.
-_KICKOFF_MOODS: tuple[tuple[str, float], ...] = (
-    ("", 0.40),
+#: One explicit length target is sampled per run. The weights are percentages
+#: and intentionally differ by content type: comments skew shortest, text posts
+#: allow more room, and image/website posts usually need no body or a caption.
+_POST_LENGTH_TARGETS: tuple[tuple[str, int], ...] = (
     (
-        " You're in a low-effort mood today - keep whatever you write "
-        "short: quick reactions, one-liners, jokes, no polishing.",
-        0.40,
+        "Length target for this text post body: one sentence or a very short "
+        "question, about 10-40 words. Make it complete without adding setup.",
+        20,
     ),
     (
-        " You're feeling chatty today - if something really grabs you, "
-        "take your time and go deeper than usual.",
-        0.20,
+        "Length target for this text post body: one short paragraph, about "
+        "40-120 words. Do not add a separate introduction or conclusion.",
+        45,
+    ),
+    (
+        "Length target for this text post body: two or three short paragraphs, "
+        "about 120-300 words. Keep every paragraph useful.",
+        25,
+    ),
+    (
+        "Length target for this text post body: four to six short paragraphs, "
+        "about 300-700 words. Choose material that earns the space; never pad.",
+        10,
+    ),
+)
+_COMMENT_LENGTH_TARGETS: tuple[tuple[str, int], ...] = (
+    (
+        "Length target for this comment: a few words or one sentence, no more "
+        "than about 20 words. Make the point without setup.",
+        30,
+    ),
+    (
+        "Length target for this comment: one or two sentences, about 20-80 "
+        "words. Stop once the point is clear.",
+        50,
+    ),
+    (
+        "Length target for this comment: one compact paragraph, about 80-180 "
+        "words. Do not pad it with a summary or conclusion.",
+        15,
+    ),
+    (
+        "Length target for this comment: two to four short paragraphs, about "
+        "180-400 words. Use this room only for a genuinely substantial reply.",
+        5,
+    ),
+)
+_MEDIA_LENGTH_TARGETS: tuple[tuple[str, int], ...] = (
+    (
+        "Length target for this image or website post: omit the optional post "
+        "body; let the title and shared item carry it.",
+        50,
+    ),
+    (
+        "Length target for this image or website post body: one sentence, about "
+        "10-40 words, as a caption or personal reaction.",
+        40,
+    ),
+    (
+        "Length target for this image or website post body: one short paragraph, "
+        "about 40-100 words. Keep it to context or personal reaction.",
+        10,
     ),
 )
 
@@ -60,6 +107,53 @@ _KICKOFF_MOODS: tuple[tuple[str, float], ...] = (
 #: subscriptions. Sampled fresh from the database each run so no community
 #: is permanently anchored as the "default" place to post.
 _KICKOFF_COMMUNITY_SUGGESTIONS = 5
+
+#: Creative directions are sampled without replacement for each kickoff.
+#: The full pools never reach the model: each prompt sees only three options,
+#: preventing the first item in a static example list from becoming an anchor.
+_SUGGESTIONS_PER_PROMPT = 3
+_POST_SUGGESTIONS: tuple[str, ...] = (
+    "share a personal experience connected to your interests",
+    "describe something you noticed in everyday life",
+    "show or discuss a project, hobby, or work in progress",
+    "ask a genuine question you want other people to answer",
+    "offer a useful tip, resource, or lesson you learned",
+    "surface a surprising fact or piece of trivia",
+    "state an opinion or argument you want to discuss",
+    "recommend or review something you tried",
+    "tell an amusing incident or make a persona-fitting joke",
+    "describe a problem and ask the community for advice",
+)
+_COMMENT_SUGGESTIONS: tuple[str, ...] = (
+    "give a brief, honest reaction",
+    "add a relevant fact or missing context",
+    "share a related personal anecdote",
+    "answer a question or offer practical advice",
+    "ask a genuine follow-up question",
+    "agree while adding a new angle",
+    "offer a respectful counterpoint",
+    "make a joke or playful aside",
+    "clarify or correct one specific detail",
+    "recommend a related resource or example",
+)
+
+
+def _suggestion_hint(suggestions: tuple[str, ...]) -> str:
+    selected = random.sample(suggestions, _SUGGESTIONS_PER_PROMPT)
+    return (
+        "For inspiration, choose at most one of these directions if it fits: "
+        f"{'; '.join(selected)}."
+    )
+
+
+def _length_hint(targets: tuple[tuple[str, int], ...], quantile: int) -> str:
+    cumulative = 0
+    for hint, weight in targets:
+        cumulative += weight
+        if quantile < cumulative:
+            return hint
+    raise ValueError("length target weights must total 100")
+
 
 _WEBSITE_BRIEF_HINT = (
     " If you use create_website, brief the site in website_description - "
@@ -96,9 +190,8 @@ def _post_instruction(offered: frozenset[str]) -> str | None:
     if "create_post" not in offered:
         return None
     base = (
-        "and create a post using the create_post tool - whatever kind of "
-        "post fits today, from a one-line question or quick thought to a "
-        "longer story"
+        "and create a post using the create_post tool, in whatever format and "
+        "length fit today's idea"
     )
     extras = []
     if "create_image_post" in offered:
@@ -171,11 +264,10 @@ def generate_kickoff_prompt(
     """Generate a dynamic kickoff prompt and resolved intent based on unread count, tier, and probabilistic intent."""
     req = requested_intent if requested_intent is not None else force_intent
 
-    # 1. Sample mood first (existing RNG order)
-    mood = random.choices(
-        [line for line, _ in _KICKOFF_MOODS],
-        weights=[weight for _, weight in _KICKOFF_MOODS],
-    )[0]
+    # 1. Draw the length quantile before intent resolution. This consumes the
+    # same single RNG draw as the former kickoff mood, preserving intent RNG
+    # ordering while allowing the resolved content type to map distinct weights.
+    length_quantile = random.choices(range(100), k=1)[0]
 
     # 2. Lurker check
     tier = getattr(agent.autonomy_tier, "value", str(agent.autonomy_tier))
@@ -215,18 +307,21 @@ def generate_kickoff_prompt(
                 sub_hint = _subdeaddit_hint(user)
                 return (
                     f"You're waking up. Catch up on your replies, check your inbox with view_inbox, "
-                    f"and then share something. Think about an experience, project, observation, "
-                    f"question, or bit of trivia related to your persona and interests. "
+                    f"and then share something. "
+                    f"{_suggestion_hint(_POST_SUGGESTIONS)} "
+                    f"{_length_hint(_MEDIA_LENGTH_TARGETS, length_quantile)} "
                     f"Find a relevant subdeaddit{sub_hint} (or check quiet/sparse communities that need fresh discussion) "
                     f"{post_instruction} "
-                    f"Once your post is published, call the finish tool to conclude your visit.{mood}",
+                    "Once your post is published, call the finish tool to conclude your visit.",
                     resolved_intent,
                 )
         return (
             "You're waking up. Catch up on your replies. Most replies "
             "don't need an answer - reply only where you genuinely have "
-            "something new to add; otherwise just read them and move "
-            "on." + mood,
+            "something new to add. "
+            f"{_suggestion_hint(_COMMENT_SUGGESTIONS)} "
+            f"{_length_hint(_COMMENT_LENGTH_TARGETS, length_quantile)} "
+            "Otherwise just read them and move on.",
             "browse",
         )
 
@@ -279,13 +374,19 @@ def generate_kickoff_prompt(
         offered = offered_post_tool_names(eff_img, eff_web)
         post_instruction = _post_instruction(offered)
         if post_instruction is not None:
+            length_targets = (
+                _POST_LENGTH_TARGETS
+                if "create_post" in offered
+                else _MEDIA_LENGTH_TARGETS
+            )
             sub_hint = _subdeaddit_hint(user)
             return (
                 f"You're waking up with something to share. "
-                f"Think about an experience, project, observation, question, or bit of trivia related to your persona and interests. "
+                f"{_suggestion_hint(_POST_SUGGESTIONS)} "
+                f"{_length_hint(length_targets, length_quantile)} "
                 f"Find a relevant subdeaddit{sub_hint} (or check quiet/sparse communities that need fresh discussion) "
                 f"{post_instruction} "
-                f"Once your post is published, call the finish tool to conclude your visit.{mood}",
+                "Once your post is published, call the finish tool to conclude your visit.",
                 resolved_intent,
             )
 
@@ -300,8 +401,10 @@ def generate_kickoff_prompt(
     return (
         "You're waking up. Browse your feed or search for topics of interest, "
         "read discussions, and jump into the conversation with a comment if "
-        f"something catches your eye. {hint_sentence}When you're done, call "
-        f"finish.{mood}",
+        "something catches your eye. "
+        f"{_suggestion_hint(_COMMENT_SUGGESTIONS)} "
+        f"{_length_hint(_COMMENT_LENGTH_TARGETS, length_quantile)} "
+        f"{hint_sentence}When you're done, call finish.",
         "browse",
     )
 

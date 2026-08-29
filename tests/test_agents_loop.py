@@ -390,6 +390,193 @@ def test_kickoff_prompt_browse_intent_guides_browsing(seeded_db, db_session):
     assert "finish" in prompt.lower()
 
 
+def test_kickoff_prompt_samples_only_three_post_suggestions(
+    seeded_db, db_session, monkeypatch
+):
+    from deaddit.agents.memory import (
+        _POST_SUGGESTIONS,
+        _SUGGESTIONS_PER_PROMPT,
+        generate_kickoff_prompt,
+    )
+
+    assert len(_POST_SUGGESTIONS) == 10
+    assert len(set(_POST_SUGGESTIONS)) == 10
+    assert _SUGGESTIONS_PER_PROMPT == 3
+    selected = _POST_SUGGESTIONS[3:6]
+
+    def sample(population, k):
+        if population is _POST_SUGGESTIONS:
+            assert k == 3
+            return list(selected)
+        return list(population)[:k]
+
+    monkeypatch.setattr(random, "sample", sample)
+    user = db_session.get(User, "alice")
+    user.agent_state = {"subscriptions": ["testsub"]}
+    db_session.commit()
+    agent = _make_agent(
+        db_session,
+        "alice",
+        config={
+            "image_posts": {
+                "enabled": True,
+                "policy": "optional",
+                "provider_id": 1,
+                "model": None,
+            }
+        },
+    )
+
+    prompts = [
+        generate_kickoff_prompt(agent, user, force_intent="post")[0],
+        generate_kickoff_prompt(agent, user, unread=2, requested_intent="image")[0],
+    ]
+
+    for prompt in prompts:
+        assert all(suggestion in prompt for suggestion in selected)
+        assert all(
+            suggestion not in prompt
+            for suggestion in _POST_SUGGESTIONS
+            if suggestion not in selected
+        )
+
+
+@pytest.mark.parametrize("unread", (0, 2))
+def test_kickoff_prompt_samples_only_three_comment_suggestions(
+    seeded_db, db_session, monkeypatch, unread
+):
+    from deaddit.agents.memory import (
+        _COMMENT_SUGGESTIONS,
+        _SUGGESTIONS_PER_PROMPT,
+        generate_kickoff_prompt,
+    )
+
+    assert len(_COMMENT_SUGGESTIONS) == 10
+    assert len(set(_COMMENT_SUGGESTIONS)) == 10
+    assert _SUGGESTIONS_PER_PROMPT == 3
+    selected = _COMMENT_SUGGESTIONS[4:7]
+    monkeypatch.setattr(
+        random,
+        "sample",
+        lambda population, k: list(selected)
+        if population is _COMMENT_SUGGESTIONS and k == 3
+        else list(population)[:k],
+    )
+    agent = _make_agent(db_session, "alice")
+
+    prompt, intent = generate_kickoff_prompt(
+        agent, force_intent="browse", unread=unread
+    )
+
+    assert intent == "browse"
+    assert all(suggestion in prompt for suggestion in selected)
+    assert all(
+        suggestion not in prompt
+        for suggestion in _COMMENT_SUGGESTIONS
+        if suggestion not in selected
+    )
+
+
+def test_length_target_weights_cover_every_percentile():
+    from deaddit.agents.memory import (
+        _COMMENT_LENGTH_TARGETS,
+        _MEDIA_LENGTH_TARGETS,
+        _POST_LENGTH_TARGETS,
+        _length_hint,
+    )
+
+    for targets in (
+        _POST_LENGTH_TARGETS,
+        _COMMENT_LENGTH_TARGETS,
+        _MEDIA_LENGTH_TARGETS,
+    ):
+        expected = [hint for hint, weight in targets for _ in range(weight)]
+        assert len(expected) == 100
+        assert [_length_hint(targets, quantile) for quantile in range(100)] == expected
+
+
+def test_kickoff_prompt_routes_one_length_target_by_content_type(
+    seeded_db, db_session, monkeypatch
+):
+    from deaddit.agents.memory import (
+        _COMMENT_LENGTH_TARGETS,
+        _MEDIA_LENGTH_TARGETS,
+        _POST_LENGTH_TARGETS,
+        generate_kickoff_prompt,
+    )
+
+    monkeypatch.setattr(random, "choices", lambda *args, **kwargs: [0])
+    user = db_session.get(User, "alice")
+    user.agent_state = {"subscriptions": ["testsub"]}
+    db_session.commit()
+    agent = _make_agent(
+        db_session,
+        "alice",
+        config={
+            "image_posts": {
+                "enabled": True,
+                "policy": "optional",
+                "provider_id": 1,
+                "model": None,
+            }
+        },
+    )
+    image_only_user = db_session.get(User, "bob")
+    image_only_agent = _make_agent(
+        db_session,
+        "bob",
+        config={
+            "image_posts": {
+                "enabled": True,
+                "policy": "image_only",
+                "provider_id": 1,
+                "model": None,
+            }
+        },
+    )
+    prompts = (
+        (
+            generate_kickoff_prompt(agent, user, force_intent="post")[0],
+            _POST_LENGTH_TARGETS[0][0],
+        ),
+        (
+            generate_kickoff_prompt(
+                image_only_agent, image_only_user, force_intent="post"
+            )[0],
+            _MEDIA_LENGTH_TARGETS[0][0],
+        ),
+        (
+            generate_kickoff_prompt(agent, user, requested_intent="image")[0],
+            _MEDIA_LENGTH_TARGETS[0][0],
+        ),
+        (
+            generate_kickoff_prompt(agent, user, unread=2, requested_intent="image")[0],
+            _MEDIA_LENGTH_TARGETS[0][0],
+        ),
+        (
+            generate_kickoff_prompt(agent, user, force_intent="browse")[0],
+            _COMMENT_LENGTH_TARGETS[0][0],
+        ),
+        (
+            generate_kickoff_prompt(agent, user, unread=2, force_intent="browse")[0],
+            _COMMENT_LENGTH_TARGETS[0][0],
+        ),
+    )
+    all_targets = [
+        hint
+        for targets in (
+            _POST_LENGTH_TARGETS,
+            _COMMENT_LENGTH_TARGETS,
+            _MEDIA_LENGTH_TARGETS,
+        )
+        for hint, _ in targets
+    ]
+
+    for prompt, expected in prompts:
+        assert [target for target in all_targets if target in prompt] == [expected]
+        assert prompt.count("Length target") == 1
+
+
 def test_kickoff_prompt_post_intent_optional_offers_either_tool(seeded_db, db_session):
     from deaddit.agents.memory import generate_kickoff_prompt
 

@@ -652,9 +652,9 @@ register(
         description=(
             "Publish a new post to a subdeaddit (max 1 per session). The community "
             "must exist; search first if unsure. Read the community's description "
-            "first and write the post your persona would actually make today - "
-            "anything from a one-line question to a longer story - in your "
-            "authentic voice, fitting that specific community."
+            "first and write the post your persona would actually make today, with "
+            "a format and length that fit the idea, in your authentic voice and "
+            "fitting that specific community."
         ),
         parameters=CreatePostArgs,
         handler=_create_post,
@@ -701,8 +701,7 @@ register(
             "visitor can click, toggle, filter, or animate on this page); "
             "and, most importantly, exactly which specific page of that "
             "site this is - the one page your persona plausibly landed on "
-            "and is now sharing (e.g. one blog post, one product page, one "
-            "leaderboard), not a generic homepage description. "
+            "and is now sharing, not a generic homepage description. "
             "hostname_hint and page_name_hint are your best guess at a "
             "fitting fictional URL; they may be adjusted to fit storage "
             "rules. title and content are your own post, written in your "
@@ -725,9 +724,8 @@ register(
             "Reply to a post, or to another comment when parent_id is given. "
             "Read the existing replies first and don't repeat a take or "
             "phrasing already in the thread. Beyond that, write what you'd "
-            "actually type - most real replies are short: a quick reaction, "
-            "a joke, a one-liner, a few words. Write long only when you "
-            "genuinely have something to say."
+            "actually type. Most real replies are short; write long only when "
+            "you genuinely have something to say."
         ),
         parameters=CreateCommentArgs,
         handler=_create_comment,
