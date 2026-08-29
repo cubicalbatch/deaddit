@@ -279,6 +279,26 @@ def test_permanent_failure_marks_run_failed_and_strikes_agent(
     assert agent.status == "error"
 
 
+def test_preparation_failure_closes_reserved_run(seeded_db, db_session, monkeypatch):
+    agent = _make_agent(db_session, "bob")
+
+    def fail_prepare(*args, **kwargs):
+        raise RuntimeError("invalid profile")
+
+    monkeypatch.setattr(loop_module, "prepare_agent_visit", fail_prepare)
+
+    run = run_once(agent.id)
+
+    assert run.status == "failed"
+    assert run.turn_count == 0
+    assert run.action_count == 0
+    assert run.error_message == "RuntimeError: invalid profile"
+    assert AgentRun.query.filter_by(status="running").count() == 0
+    db_session.refresh(agent)
+    assert agent.status == "error"
+    assert agent.next_run_at is not None
+
+
 def test_five_consecutive_failures_disable_the_agent(seeded_db, db_session, fake_llm):
     agent = _make_agent(db_session, "bob")
     for _ in range(5):
@@ -399,9 +419,9 @@ def test_kickoff_prompt_samples_only_three_post_suggestions(
     seeded_db, db_session, monkeypatch
 ):
     from deaddit.agents.prompts import (
-        DEFAULT_VISIT_PROFILE,
         _POST_DIRECTIONS,
         _SUGGESTIONS_PER_PROMPT,
+        DEFAULT_VISIT_PROFILE,
     )
 
     assert len(_POST_DIRECTIONS) == 10
@@ -441,9 +461,7 @@ def test_kickoff_prompt_samples_only_three_post_suggestions(
 
     for prompt in prompts:
         assert all(item.text in prompt for item in selected)
-        assert all(
-            item.text not in prompt for item in pool if item not in selected
-        )
+        assert all(item.text not in prompt for item in pool if item not in selected)
 
 
 @pytest.mark.parametrize("unread", (0, 2))
@@ -451,9 +469,9 @@ def test_kickoff_prompt_samples_only_three_comment_suggestions(
     seeded_db, db_session, monkeypatch, unread
 ):
     from deaddit.agents.prompts import (
-        DEFAULT_VISIT_PROFILE,
         _COMMENT_DIRECTIONS,
         _SUGGESTIONS_PER_PROMPT,
+        DEFAULT_VISIT_PROFILE,
     )
 
     assert len(_COMMENT_DIRECTIONS) == 10
