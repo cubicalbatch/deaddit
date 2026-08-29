@@ -24,7 +24,7 @@ import pytest
 from sqlalchemy import event
 
 from deaddit import db as _db
-from deaddit.dynamics.engagement import preset_config
+from deaddit.dynamics.engagement import TickResult, preset_config
 from deaddit.extensions import db
 from deaddit.models import (
     Job,
@@ -269,6 +269,25 @@ def test_mode_is_reread_from_database_every_tick(app, db_session):
     assert len(_simulated_votes()) == votes_before
     assert _hourly("live").ticks == 1
 
+
+
+def test_summary_deltas_expects_tail_probability_non_conversions():
+    """Failed exposure rolls are ordinary non-events, not guardrail skips."""
+    result = TickResult()
+    for _ in range(160):
+        result.skip("tail_probability")
+    result.skip("prior_voter")
+    result.skip("global_limit")
+    result.skip("cap")
+    result.skip("no_voter")
+    result.casts.append({"status": "rejected"})
+
+    deltas = summary_deltas(result)
+
+    assert deltas["guardrail_skips"] == 3  # prior_voter + global_limit + rejected cast
+    assert deltas["cap_skips"] == 1
+    assert deltas["no_voter_skips"] == 1
+    assert deltas["min_gap_skips"] == 0
 
 # ---------------------------------------------------------------------------
 # Shadow vs live: identical decisions, only live mutates votes

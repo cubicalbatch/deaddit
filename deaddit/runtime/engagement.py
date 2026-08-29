@@ -80,18 +80,26 @@ _TICK_LIMITS: dict[str, int] = {
 }
 
 #: Engine skip reasons with a dedicated hourly counter; every other skip
-#: reason is a guardrail skip.
+#: reason except the ones below is a guardrail skip.
 _SKIP_COUNTERS = {
     "cap": "cap_skips",
     "min_gap": "min_gap_skips",
     "no_voter": "no_voter_skips",
 }
 
+#: Skip reasons that are ordinary non-events, not guardrail rejections.
+#: ``tail_probability`` is a per-exposure conversion roll that is expected to
+#: fail for ~99% of tail proposals by design; counting it as a guardrail
+#: skip drowns the real guardrail signal in the health aggregates.
+_NON_COUNTER_SKIPS = frozenset({"tail_probability"})
+
 
 def summary_deltas(result: TickResult) -> dict[str, int]:
     """Map one engine :class:`TickResult` to hourly-summary counter deltas."""
     guardrail_skips = sum(
-        count for reason, count in result.skips.items() if reason not in _SKIP_COUNTERS
+        count
+        for reason, count in result.skips.items()
+        if reason not in _SKIP_COUNTERS and reason not in _NON_COUNTER_SKIPS
     )
     guardrail_skips += sum(
         1 for cast in result.casts if cast.get("status") == "rejected"
