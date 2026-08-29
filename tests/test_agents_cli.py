@@ -220,7 +220,10 @@ def test_run_once_uses_numeric_agent_id_and_reports_selected_persona(
     assert result.exit_code == 0, result.output
     assert calls == [(agent.id, "manual", None)]
     assert f"run {AgentRun.query.one().id}: agent_id={agent.id}" in result.output
-    assert "persona=selected_persona status=completed trigger=manual" in result.output
+    assert (
+        "persona=selected_persona intent=None status=completed trigger=manual"
+        in result.output
+    )
 
 
 # ---------------------------------------------------------------------------

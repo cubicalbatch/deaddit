@@ -181,7 +181,7 @@ def test_phase1_migration_preserves_populated_data_on_downgrade(tmp_path):
 def test_phase1_revision_is_current_single_head(tmp_path):
     path = tmp_path / "head.db"
     app = create_app({"SQLALCHEMY_DATABASE_URI": f"sqlite:///{path}", "TESTING": True})
-    result = app.test_cli_runner().invoke(args=["db", "upgrade"])
+    result = app.test_cli_runner().invoke(args=["db", "upgrade", _PHASE1_HEAD])
     assert result.exit_code == 0, result.output
     with sqlite3.connect(path) as connection:
         revision = connection.execute(

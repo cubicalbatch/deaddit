@@ -841,6 +841,8 @@ class TickResult:
             "archive_candidates_examined": self.archive_candidates_examined,
             "revival_threads_examined": self.revival_threads_examined,
         }
+
+
 def tail_vote_probability(
     policy: VoteCadencePolicy | PolicyConfig | Mapping[str, Any],
     target_type: str,
@@ -849,9 +851,12 @@ def tail_vote_probability(
 ) -> float:
     """Return the age-decayed chance that an exposure becomes a vote."""
     section = _section_for(policy, target_type)
-    age_days = max(
-        0.0, (_as_utc_naive(exposed_at) - _as_utc_naive(created_at)).total_seconds()
-    ) / 86400.0
+    age_days = (
+        max(
+            0.0, (_as_utc_naive(exposed_at) - _as_utc_naive(created_at)).total_seconds()
+        )
+        / 86400.0
+    )
     maximum = float(section["tail_max_age_days"])
     if age_days >= maximum:
         return 0.0
@@ -916,7 +921,9 @@ def _archive_weight(
     decay = math.exp(-math.log(2.0) * age_days / float(section["tail_half_life_days"]))
     # vote_count is a bounded, indexed-row activity signal already present on
     # Post.  Subscription coverage is separately counted among personas.
-    return max(0.001, (1.0 + float(post.vote_count or 0)) * (1.0 + subscribed_personas) * decay)
+    return max(
+        0.001, (1.0 + float(post.vote_count or 0)) * (1.0 + subscribed_personas) * decay
+    )
 
 
 def _candidate_horizon(
@@ -1255,6 +1262,7 @@ class ActiveWindowEngine:
                 casts_used=casts_used,
             )
         return result
+
     def _tail_counts(
         self, now: datetime
     ) -> tuple[dict[str, int], dict[str, int], dict[str, datetime]]:
@@ -1293,10 +1301,13 @@ class ActiveWindowEngine:
         casts_used: int,
     ) -> int:
         """Attempt one tail exposure, then use the normal voter/cast path."""
-        if sum(
-            decision.target_type == target_type and decision.target_id == target.id
-            for decision in result.decisions
-        ) >= self.per_item_limit:
+        if (
+            sum(
+                decision.target_type == target_type and decision.target_id == target.id
+                for decision in result.decisions
+            )
+            >= self.per_item_limit
+        ):
             result.skip("item_limit")
             return casts_used
         probability = tail_vote_probability(policy, target_type, target.created_at, now)
@@ -1441,7 +1452,9 @@ class ActiveWindowEngine:
                 for user in eligible_users
             )
             weight = _archive_weight(post, policy, now, coverage)
-            rank = -math.log(max(_hash_unit("archive", bucket, post.id), 1e-15)) / weight
+            rank = (
+                -math.log(max(_hash_unit("archive", bucket, post.id), 1e-15)) / weight
+            )
             ranked.append((rank, post))
         ranked.sort(key=lambda item: (item[0], item[1].id))
         recent_counts, hourly_counts, latest_votes = self._tail_counts(now)
@@ -1465,8 +1478,8 @@ class ActiveWindowEngine:
         recent_comments = (
             db.session.query(Comment)
             .filter(
-                Comment.created_at >= now
-                - timedelta(minutes=self.recent_comment_lookback_minutes),
+                Comment.created_at
+                >= now - timedelta(minutes=self.recent_comment_lookback_minutes),
                 Comment.created_at <= now,
             )
             .order_by(Comment.created_at.desc(), Comment.id.desc())
@@ -1496,7 +1509,9 @@ class ActiveWindowEngine:
                     Comment.post_id == post.id,
                     Comment.parent_id.is_(None),
                 )
-                .order_by(Comment.score.desc(), Comment.created_at.desc(), Comment.id.desc())
+                .order_by(
+                    Comment.score.desc(), Comment.created_at.desc(), Comment.id.desc()
+                )
                 .limit(self.revival_visible_comment_limit)
                 .all()
             )
@@ -1523,7 +1538,6 @@ class ActiveWindowEngine:
                     latest_votes=latest_votes,
                     casts_used=casts_used,
                 )
-
 
     run = tick
 

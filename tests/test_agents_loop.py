@@ -376,7 +376,8 @@ def test_kickoff_prompt_post_intent_inspires_create_post(seeded_db, db_session):
     from deaddit.agents.memory import generate_kickoff_prompt
 
     agent = _make_agent(db_session, "alice")
-    prompt = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, intent = generate_kickoff_prompt(agent, force_intent="post")
+    assert intent == "post"
     assert "create_post" in prompt
     assert "inspired" in prompt.lower() or "share" in prompt.lower()
 
@@ -385,7 +386,8 @@ def test_kickoff_prompt_browse_intent_guides_browsing(seeded_db, db_session):
     from deaddit.agents.memory import generate_kickoff_prompt
 
     agent = _make_agent(db_session, "alice")
-    prompt = generate_kickoff_prompt(agent, force_intent="browse")
+    prompt, intent = generate_kickoff_prompt(agent, force_intent="browse")
+    assert intent == "browse"
     assert "browse" in prompt.lower()
     assert "finish" in prompt.lower()
 
@@ -405,7 +407,8 @@ def test_kickoff_prompt_post_intent_optional_offers_either_tool(seeded_db, db_se
             }
         },
     )
-    prompt = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, intent = generate_kickoff_prompt(agent, force_intent="post")
+    assert intent == "post"
     assert "create_post" in prompt
     assert "create_image_post" in prompt
 
@@ -425,7 +428,8 @@ def test_kickoff_prompt_post_intent_image_only_forces_image_tool(seeded_db, db_s
             }
         },
     )
-    prompt = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, intent = generate_kickoff_prompt(agent, force_intent="post")
+    assert intent == "post"
     assert "create_image_post" in prompt
     assert "create_post" not in prompt
 
@@ -447,7 +451,8 @@ def test_kickoff_prompt_browse_intent_image_only_never_suggests_create_post(
             }
         },
     )
-    prompt = generate_kickoff_prompt(agent, force_intent="browse")
+    prompt, intent = generate_kickoff_prompt(agent, force_intent="browse")
+    assert intent == "browse"
     assert "create_post" not in prompt
     assert "create_image_post" in prompt
     assert "finish" in prompt.lower()
@@ -463,7 +468,8 @@ def test_kickoff_prompt_post_intent_website_only_forces_website_tool(
         "alice",
         config={"website_posts": {"enabled": True, "policy": "website_only"}},
     )
-    prompt = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, intent = generate_kickoff_prompt(agent, force_intent="post")
+    assert intent == "post"
     assert "create_website" in prompt
     assert "create_post" not in prompt
     assert "create_image_post" not in prompt
@@ -480,7 +486,8 @@ def test_kickoff_prompt_browse_intent_website_only_never_suggests_create_post(
         "alice",
         config={"website_posts": {"enabled": True, "policy": "website_only"}},
     )
-    prompt = generate_kickoff_prompt(agent, force_intent="browse")
+    prompt, intent = generate_kickoff_prompt(agent, force_intent="browse")
+    assert intent == "browse"
     assert "create_post" not in prompt
     assert "create_image_post" not in prompt
     assert "create_website" in prompt
@@ -497,7 +504,8 @@ def test_kickoff_prompt_post_intent_optional_website_offers_it_alongside_post(
         "alice",
         config={"website_posts": {"enabled": True, "policy": "optional"}},
     )
-    prompt = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, intent = generate_kickoff_prompt(agent, force_intent="post")
+    assert intent == "post"
     assert "create_post" in prompt
     assert "create_website" in prompt
 
@@ -524,7 +532,8 @@ def test_kickoff_prompt_post_intent_invalid_combo_degrades_to_browsing(
             "website_posts": {"enabled": True, "policy": "website_only"},
         },
     )
-    prompt = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, intent = generate_kickoff_prompt(agent, force_intent="post")
+    assert intent == "browse"
     assert "create_post" not in prompt
     assert "create_image_post" not in prompt
     assert "create_website" not in prompt
@@ -593,7 +602,7 @@ def test_kickoff_prompt_suggests_only_real_communities(
     monkeypatch.setattr(random, "sample", lambda population, k: population[:k])
 
     agent = _make_agent(db_session, "alice")
-    prompt = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, _ = generate_kickoff_prompt(agent, force_intent="post")
 
     segment = prompt.split("(such as ", 1)[1].split(" or search", 1)[0]
     suggested = [name.strip() for name in segment.split(",")]
@@ -612,7 +621,7 @@ def test_kickoff_prompt_uses_subscriptions_when_present(seeded_db, db_session):
     db_session.commit()
 
     agent = _make_agent(db_session, "alice")
-    prompt = generate_kickoff_prompt(agent, user, force_intent="post")
+    prompt, _ = generate_kickoff_prompt(agent, user, force_intent="post")
     assert "(such as testsub)" in prompt
 
 

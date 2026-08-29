@@ -332,6 +332,8 @@ def test_attention_zero_and_heavy_tail_are_deterministic():
         for item in range(20)
     ]
     assert max(values) <= 7
+
+
 def _tail_policy(now, *, post_probability=1.0, comment_probability=1.0):
     config = preset_config("natural")
     config["post"].update(

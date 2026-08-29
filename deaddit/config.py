@@ -11,6 +11,7 @@ persist them, and they resolve strictly from the environment or defaults.
 
 import logging
 import os
+from datetime import datetime
 
 from deaddit.models import Setting
 from deaddit.settings.service import SecretNotPersistable, cached, invalidate
@@ -55,6 +56,9 @@ class Config:
         "WEBSITE_GENERATION_TIMEOUT_SECONDS": "300",
         "WEBSITE_MAX_HTML_BYTES": "1048576",
         "TROLL_USER_CHANCE": "0.1",
+        "AGENT_POST_INTENT_CHANCE": "0.30",
+        "AGENT_FORCED_IMAGE_CHANCE": "0.0",
+        "AGENT_FORCED_WEBSITE_CHANCE": "0.0",
     }
 
     # Descriptions for each setting
@@ -80,6 +84,9 @@ class Config:
         "WEBSITE_GENERATION_TIMEOUT_SECONDS": "Read timeout in seconds for the nested create_website HTML-generation request",
         "WEBSITE_MAX_HTML_BYTES": "Byte ceiling for one stored generated-website HTML document",
         "TROLL_USER_CHANCE": "Probability (0-1) that a newly generated persona is a troll; applies only when troll_mode is 'chance'",
+        "AGENT_POST_INTENT_CHANCE": "Share of eligible automatic visits that enter the post-intent funnel (0-1)",
+        "AGENT_FORCED_IMAGE_CHANCE": "Image share within post-intent visits (0-1; requires agent image capability)",
+        "AGENT_FORCED_WEBSITE_CHANCE": "Website share within post-intent visits (0-1; requires agent website capability)",
     }
 
     @classmethod
@@ -140,6 +147,37 @@ class Config:
         description = cls.DESCRIPTIONS.get(key)
         Setting.set_value(key, value, description)
         invalidate(key)
+
+    @classmethod
+    def set_many(cls, mapping: dict[str, str]) -> None:
+        """Set multiple configuration values atomically in one transaction.
+
+        Validates that no secret keys are included, upserts all Setting rows,
+        commits the transaction, and invalidates cache entries only after
+        a successful commit.
+        """
+        for key in mapping:
+            if is_secret_key(key):
+                raise SecretNotPersistable(
+                    f"Refusing to store secret '{key}' in the database (env-only since A6). "
+                    "Set it via the environment or .env."
+                )
+        from deaddit.extensions import db
+
+        for key, value in mapping.items():
+            description = cls.DESCRIPTIONS.get(key)
+            setting = db.session.get(Setting, key)
+            if setting:
+                setting.value = str(value)
+                if description:
+                    setting.description = description
+                setting.updated_at = datetime.utcnow()
+            else:
+                setting = Setting(key=key, value=str(value), description=description)
+                db.session.add(setting)
+        db.session.commit()
+        for key in mapping:
+            invalidate(key)
 
     @staticmethod
     def _has_value(value: str | None) -> bool:

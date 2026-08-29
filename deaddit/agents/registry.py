@@ -31,6 +31,7 @@ __all__ = [
     "Tool",
     "ToolContext",
     "all_tools",
+    "effective_post_configs",
     "get",
     "image_posts_config",
     "offered_post_tool_names",
@@ -95,6 +96,7 @@ class ToolContext:
     agent: Any  # deaddit.models.Agent row
     run: Any  # deaddit.models.AgentRun row
     user_username: str  # the run's selected persona (run.persona_username); not necessarily agent.user_username
+    post_intent: str = "browse"
     llm_api_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
@@ -304,35 +306,91 @@ def offered_post_tool_names(
     return frozenset(names)
 
 
-def tools_for(tier: str | AutonomyTier, agent: Any = None) -> list[Tool]:
+def effective_post_configs(
+    agent: Any, intent: str = "browse"
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return static configs with a resolved special intent applied as a lock.
+
+    - "image" -> image policy image_only, website disabled.
+    - "website" -> website policy website_only, image disabled.
+    - "post" / "browse" -> static configs unchanged.
+    - An inconsistent special intent whose static namespace is unavailable
+      fails closed to no post tools. It must NOT fall back inside this
+      authorization helper; automatic/manual degradation happens while
+      resolving intent.
+    """
+    img_cfg = image_posts_config(agent)
+    web_cfg = website_posts_config(agent)
+
+    if intent == "image":
+        static_offered = offered_post_tool_names(img_cfg, web_cfg)
+        if "create_image_post" in static_offered:
+            eff_img = dict(img_cfg)
+            eff_img["policy"] = "image_only"
+            return eff_img, dict(DISABLED_WEBSITE_POSTS_CONFIG)
+        return (
+            {
+                "enabled": True,
+                "policy": "image_only",
+                "provider_id": None,
+                "model": None,
+            },
+            {"enabled": True, "policy": "website_only"},
+        )
+
+    if intent == "website":
+        static_offered = offered_post_tool_names(img_cfg, web_cfg)
+        if "create_website" in static_offered:
+            eff_web = dict(web_cfg)
+            eff_web["policy"] = "website_only"
+            return dict(DISABLED_IMAGE_POSTS_CONFIG), eff_web
+        return (
+            {
+                "enabled": True,
+                "policy": "image_only",
+                "provider_id": None,
+                "model": None,
+            },
+            {"enabled": True, "policy": "website_only"},
+        )
+
+    return img_cfg, web_cfg
+
+
+def tools_for(
+    tier: str | AutonomyTier, agent: Any = None, intent: str = "browse"
+) -> list[Tool]:
     """Tools whose min_tier is met or exceeded by the given tier.
 
     When *agent* is given, ``create_post``/``create_image_post``/
-    ``create_website`` are also filtered together by its namespaced
-    ``image_posts`` and ``website_posts`` configuration, per
-    :func:`offered_post_tool_names` (plan 4B; create_website spec's
-    "Agent configuration" truth table). Omitting *agent* skips this filter
+    ``create_website`` are filtered through :func:`effective_post_configs`
+    with *intent*, and for resolved special intents ("image" or "website"),
+    ``create_comment`` is dropped. Omitting *agent* skips this filter
     entirely (tier-only behaviour), which non-agent-aware callers rely on.
     """
     active = parse_tier(tier)
     tools = [tool for tool in all_tools() if active.allows(tool.min_tier)]
     if agent is None:
         return tools
-    offered = offered_post_tool_names(
-        image_posts_config(agent), website_posts_config(agent)
-    )
-    return [
-        tool
-        for tool in tools
-        if tool.name not in POST_TOOL_NAMES or tool.name in offered
-    ]
+    eff_img, eff_web = effective_post_configs(agent, intent)
+    offered = offered_post_tool_names(eff_img, eff_web)
+    result = []
+    for tool in tools:
+        if intent in ("image", "website") and tool.name == "create_comment":
+            continue
+        if tool.name in POST_TOOL_NAMES and tool.name not in offered:
+            continue
+        result.append(tool)
+    return result
 
 
-def specs_for(tier: str | AutonomyTier, agent: Any = None) -> list[ToolSpec]:
+def specs_for(
+    tier: str | AutonomyTier, agent: Any = None, intent: str = "browse"
+) -> list[ToolSpec]:
     """Wire-format tool payloads for the LLM at the given tier (see tools_for)."""
     from deaddit.llm import ToolSpec
 
     return [
         ToolSpec(tool.name, tool.description, tool.parameters)
-        for tool in tools_for(tier, agent=agent)
+        for tool in tools_for(tier, agent=agent, intent=intent)
     ]
