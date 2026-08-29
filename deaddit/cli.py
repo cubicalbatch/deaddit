@@ -6,7 +6,7 @@ import click
 
 from deaddit import create_app
 from deaddit.agents.cli import agent
-from deaddit.dynamics import seeding
+from deaddit.dynamics import baseline, seeding
 from deaddit.images.cli import images
 from deaddit.websites.cli import websites
 
@@ -27,6 +27,49 @@ def dynamics() -> None:
 
 
 cli.add_command(dynamics)
+
+
+@dynamics.command("baseline-report")
+@click.option(
+    "--db",
+    "db_path",
+    default=None,
+    help="Path to a SQLite DB COPY (read-only); defaults to instance/deaddit.db",
+)
+@click.option(
+    "--as-of",
+    default=None,
+    help="UTC snapshot time (ISO 8601); defaults to the latest DB timestamp.",
+)
+@click.option(
+    "--top-k",
+    type=click.IntRange(min=0, max=1000),
+    default=10,
+    show_default=True,
+    help="Number of active posts in the hot-feed replay listing.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Dump the stable report object as JSON.",
+)
+def baseline_report(
+    db_path: str | None, as_of: str | None, top_k: int, as_json: bool
+) -> None:
+    """Report Phase 0 agent/vote baseline metrics without writing state."""
+    try:
+        conn = baseline.connect_ro(db_path)
+        try:
+            report = baseline.compute_report(conn, as_of=as_of, top_k=top_k)
+        finally:
+            conn.close()
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        click.echo(baseline.render_text(report))
 
 
 @dynamics.command("seed-history")

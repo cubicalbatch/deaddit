@@ -149,3 +149,11 @@ def test_users_without_content_are_not_reset(seeded_db, db_session):
 def test_summary_keys_exact(seeded_db):
     summary = recompute_scores_and_karma()
     assert set(summary) == {"repaired", "drift_votes", "karma_updates"}
+
+
+def test_recompute_empty_database_has_zero_repair_summary(app):
+    assert recompute_scores_and_karma() == {
+        "repaired": 0,
+        "drift_votes": 0,
+        "karma_updates": 0,
+    }

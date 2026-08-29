@@ -416,3 +416,8 @@ def test_naive_datetimes_treated_as_utc():
     assert post_rank_key("hot", score=5, created_at=NOW, now=aware) == post_rank_key(
         "hot", score=5, created_at=aware, now=aware
     )
+
+
+def test_hot_zero_score_at_epoch_is_neutral():
+    """A zero-score post has no signed-log boost at the hot epoch."""
+    assert post_rank_key("hot", score=0, created_at=EPOCH_DT, now=NOW) == 0.0

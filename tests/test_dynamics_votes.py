@@ -54,6 +54,22 @@ def test_rejects_missing_post_and_comment(seeded_db):
     )
 
 
+def test_rejects_unknown_target_type(seeded_db):
+    result = cast_vote("alice", "subdeaddit", 1, 1)
+    assert result == {
+        "status": "rejected",
+        "reason": "subdeaddit 1 does not exist",
+        "score": 0,
+    }
+
+
+def test_downvote_setting_parser_ignores_outer_whitespace(seeded_db):
+    Setting.set_value("allow_downvotes", "  TRUE  ")
+    assert _downvotes_allowed() is True
+    Setting.set_value("allow_downvotes", "  off  ")
+    assert _downvotes_allowed() is False
+
+
 def test_rejects_self_vote_on_post(seeded_db):
     post = seeded_db["posts"][0]  # authored by alice
     result = cast_vote("alice", "post", post.id, 1)
