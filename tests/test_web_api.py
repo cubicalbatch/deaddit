@@ -16,10 +16,10 @@ _PRIVATE_SENTINELS = (
     "http://secret-endpoint-9f1a/v1",
     "secret-model-9f1a",
     "req-secret-9f1a",
-    "111",
-    "222",
-    "333",
-    "stop",
+    "918231",
+    "918232",
+    "918233",
+    "secret-stop-reason-9f1a",
 )
 
 
@@ -93,9 +93,9 @@ def _make_website_post(app, db_session, *, removed=False):
             api_url_snapshot=_PRIVATE_SENTINELS[1],
             model_snapshot=_PRIVATE_SENTINELS[2],
             request_id=_PRIVATE_SENTINELS[3],
-            prompt_tokens=111,
-            completion_tokens=222,
-            total_tokens=333,
+            prompt_tokens=int(_PRIVATE_SENTINELS[4]),
+            completion_tokens=int(_PRIVATE_SENTINELS[5]),
+            total_tokens=int(_PRIVATE_SENTINELS[6]),
             finish_reason=_PRIVATE_SENTINELS[7],
         )
     )

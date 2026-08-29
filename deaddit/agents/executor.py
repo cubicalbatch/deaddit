@@ -21,10 +21,9 @@ from deaddit.agents.registry import (
     POST_TOOL_NAMES,
     AutonomyTier,
     ToolContext,
-    image_posts_config,
+    effective_post_configs,
     offered_post_tool_names,
     parse_tier,
-    website_posts_config,
 )
 from deaddit.agents.registry import (
     get as get_tool,
@@ -175,16 +174,16 @@ def _check_post_policy(name: str, ctx: ToolContext) -> str | None:
     model, so a forged, stale, or hand-crafted tool call cannot bypass the
     agent's image/website post policy by skipping registry filtering (plan
     4B acceptance; create_website spec "Registry and executor"). It reuses
-    :func:`offered_post_tool_names` - the exact same truth table
-    ``tools_for`` uses to decide what to offer - so enforcement can never
-    drift from offering: a call the registry would never have offered is
-    always rejected here too, including the invalid ``image_only`` +
-    ``website_only`` combination that fails closed to no post tool at all.
+    :func:`offered_post_tool_names` with :func:`effective_post_configs`
+    so enforcement can never drift from offering: a call the registry
+    would never have offered is always rejected here too, including the
+    invalid ``image_only`` + ``website_only`` combination that fails closed
+    to no post tool at all.
     """
     if name not in POST_TOOL_NAMES:
         return None
-    image_cfg = image_posts_config(ctx.agent)
-    website_cfg = website_posts_config(ctx.agent)
+    intent = getattr(ctx, "post_intent", "browse")
+    image_cfg, website_cfg = effective_post_configs(ctx.agent, intent)
     if name in offered_post_tool_names(image_cfg, website_cfg):
         return None
     if name == "create_image_post":
@@ -462,6 +461,20 @@ def execute(name: str, raw_arguments: dict | str, ctx: ToolContext) -> dict:
             _reject(
                 policy_problem,
                 hint="check your agent's image-post/website-post configuration",
+            ),
+            started,
+        )
+
+    # Visit reservation gate: comments are not available during image/website reserved visits.
+    intent = getattr(ctx, "post_intent", "browse")
+    if intent in ("image", "website") and name == "create_comment":
+        return _persist_and_return(
+            ctx,
+            name,
+            raw_arguments_dict,
+            _reject(
+                f"comments are not available during a reserved {intent} post visit",
+                hint="focus on your post or use finish to conclude your visit",
             ),
             started,
         )

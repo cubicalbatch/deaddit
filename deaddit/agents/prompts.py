@@ -13,9 +13,8 @@ byte-identical pre-LLM-5 assembly.
 
 from deaddit.agents.registry import (
     AutonomyTier,
-    image_posts_config,
+    effective_post_configs,
     offered_post_tool_names,
-    website_posts_config,
 )
 from deaddit.llm.prompts import render_pinned, versioning_enabled
 from deaddit.models import Agent, AgentMemory, User
@@ -187,23 +186,17 @@ def _subscriptions_section(user: User) -> str:
     return "\n\nYou are currently subscribed to: " + ", ".join(subscriptions)
 
 
-def _image_guidance_section(agent: Agent) -> str:
+def _image_guidance_section(agent: Agent, intent: str = "browse") -> str:
     """Image-post rules for agents actually offered create_image_post, else "".
 
-    Derived from :func:`offered_post_tool_names` - the same filtered
-    truth table the registry uses to decide which tools the agent's
-    wire-format spec list actually contains - rather than from the raw
-    ``image_posts`` config alone. This matters because a ``website_only``
-    lock on the *other* namespace squeezes an "enabled: optional" image
-    config out of the offer entirely (see registry docstring); reading
-    only ``image_posts_config`` here would recommend a tool the agent was
-    never given. Empty for a disabled/absent config or a squeezed-out one
-    so this section never changes the prompt for such agents.
+    Derived from :func:`effective_post_configs` and :func:`offered_post_tool_names`
+    - the same filtered truth table the registry uses to decide which tools the
+    agent's wire-format spec list actually contains.
     """
-    image_cfg = image_posts_config(agent)
+    image_cfg, website_cfg = effective_post_configs(agent, intent)
     if not image_cfg["enabled"]:
         return ""
-    offered = offered_post_tool_names(image_cfg, website_posts_config(agent))
+    offered = offered_post_tool_names(image_cfg, website_cfg)
     if "create_image_post" not in offered:
         return ""
     if offered == frozenset({"create_image_post"}):
@@ -211,21 +204,12 @@ def _image_guidance_section(agent: Agent) -> str:
     return _IMAGE_GUIDANCE_OPTIONAL
 
 
-def _website_guidance_section(agent: Agent) -> str:
-    """Website-post rules for agents actually offered create_website, else "".
-
-    Mirrors :func:`_image_guidance_section`: derived from
-    :func:`offered_post_tool_names` rather than the raw ``website_posts``
-    config, so a squeezed-out configuration (an ``image_only`` lock beats
-    an "enabled: optional" website config) or the invalid
-    ``image_only`` + ``website_only`` combination (which offers no post
-    tool at all) never produce guidance for a tool the agent was not
-    actually offered.
-    """
-    website_cfg = website_posts_config(agent)
+def _website_guidance_section(agent: Agent, intent: str = "browse") -> str:
+    """Website-post rules for agents actually offered create_website, else ""."""
+    image_cfg, website_cfg = effective_post_configs(agent, intent)
     if not website_cfg["enabled"]:
         return ""
-    offered = offered_post_tool_names(image_posts_config(agent), website_cfg)
+    offered = offered_post_tool_names(image_cfg, website_cfg)
     if "create_website" not in offered:
         return ""
     if offered == frozenset({"create_website"}):
@@ -249,45 +233,34 @@ def _memories_section(user: User) -> str:
     return "\n\nMemories from previous visits:\n" + "\n".join(bullets)
 
 
-def system_prompt_variables(agent: Agent, user: User) -> dict[str, str]:
-    """Named variables a versioned system-prompt template is rendered with.
-
-    The default template body is
-    ``{persona_block}\\n\\n{tier_line}\\n\\n{rules_block}{image_guidance_section}``
-    ``{website_guidance_section}`` followed by
-    ``{subscriptions_section}{memories_section}``; rendering it with these
-    variables reproduces :func:`build_system_prompt`'s assembly
-    byte-for-byte. ``image_guidance_section`` and
-    ``website_guidance_section`` are each "" for an agent not actually
-    offered that tool per :func:`offered_post_tool_names` (covering a
-    disabled config, a config squeezed out by the other namespace's
-    exclusive lock, and the invalid image_only + website_only
-    combination), so neither ever changes the prompt for such agents.
-    """
+def system_prompt_variables(
+    agent: Agent, user: User, intent: str = "browse"
+) -> dict[str, str]:
+    """Named variables a versioned system-prompt template is rendered with."""
     return {
         "persona_block": _persona_block(user),
         "tier_line": _tier_line(agent),
         "rules_block": _TOOLS_LINE + "\n" + _GENUINE_LINE + "\n" + _QUALITY_RULES,
-        "image_guidance_section": _image_guidance_section(agent),
-        "website_guidance_section": _website_guidance_section(agent),
+        "image_guidance_section": _image_guidance_section(agent, intent=intent),
+        "website_guidance_section": _website_guidance_section(agent, intent=intent),
         "subscriptions_section": _subscriptions_section(user),
         "memories_section": _memories_section(user),
     }
 
 
-def build_system_prompt(agent: Agent, user: User) -> str:
+def build_system_prompt(agent: Agent, user: User, intent: str = "browse") -> str:
     """Build the system prompt for one agent run."""
+    variables = system_prompt_variables(agent, user, intent=intent)
     if versioning_enabled():
         pin_key = str(agent.id)
         pinned = render_pinned(
             "agent",
             pin_key,
-            variables=system_prompt_variables(agent, user),
+            variables=variables,
             subject_key=pin_key,
         )
         if pinned is not None:
             return pinned[0]
-    variables = system_prompt_variables(agent, user)
     return (
         f"{variables['persona_block']}\n\n"
         f"{variables['tier_line']}\n\n"

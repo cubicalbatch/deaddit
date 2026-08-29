@@ -237,8 +237,10 @@ def run_once(
     *,
     trigger: str = "manual",
     force_intent: str | None = None,
+    requested_intent: str | None = None,
 ) -> AgentRun:
     """Run one full agent visit synchronously. Caller provides the app context."""
+    req = requested_intent if requested_intent is not None else force_intent
     agent = db.session.get(Agent, agent_id)
     if agent is None:
         raise ValueError(f"No agent with id {agent_id}")
@@ -292,7 +294,6 @@ def run_once(
         api_url = config.get("api_url") or Config.get("OPENAI_API_URL")
         model = config.get("model") or Config.get("OPENAI_MODEL", "llama3")
         api_key = Config.get_api_key_for_endpoint(api_url)
-    specs = specs_for(agent.autonomy_tier, agent=agent)
 
     try:
         run = reserve_persona_run(agent, trigger=trigger)
@@ -303,7 +304,14 @@ def run_once(
 
     user = db.session.get(User, run.persona_username)
     ensure_lazy_backfill(agent, user)
-    messages = build_initial_messages(agent, user, force_intent=force_intent)
+    messages, resolved_intent = build_initial_messages(
+        agent, user, requested_intent=req
+    )
+    run.intent = resolved_intent
+    db.session.commit()
+
+    specs = specs_for(agent.autonomy_tier, agent=agent, intent=resolved_intent)
+
     usage: dict[str, int] = dict.fromkeys(USAGE_KEYS, 0)
     turn_count = 0
     action_count = 0
@@ -315,6 +323,7 @@ def run_once(
         agent=agent,
         run=run,
         user_username=run.persona_username,
+        post_intent=resolved_intent,
         llm_api_url=api_url,
         llm_api_key=api_key,
         llm_model=model,

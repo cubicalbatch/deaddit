@@ -286,13 +286,14 @@ class WakeScheduler:
         try:
             with self.app.app_context():
                 run = run_once(agent_id, trigger="schedule")
-                logger.info(
-                    "Agent %s run %s finished as persona '%s' (%s)",
-                    agent_id,
-                    run.id,
-                    run.persona_username,
-                    run.status,
-                )
+                if run is not None:
+                    logger.info(
+                        "Agent %s run %s finished as persona '%s' (%s)",
+                        agent_id,
+                        run.id,
+                        run.persona_username,
+                        run.status,
+                    )
         except ValueError as exc:
             logger.info("Scheduled wake for agent %s rejected: %s", agent_id, exc)
             self._backoff_agent(agent_id)

@@ -393,6 +393,16 @@
         const left = el("div");
         left.appendChild(el("strong", null, "#" + run.id));
         left.appendChild(el("span", "ms-2 text-muted small", run.trigger));
+        if (run.intent) {
+            const INTENT_LABELS = {
+                "browse": "browse",
+                "post": "post",
+                "image": "img",
+                "website": "web"
+            };
+            const label = INTENT_LABELS[run.intent] || run.intent;
+            left.appendChild(el("span", "badge bg-secondary ms-2", label));
+        }
         left.appendChild(el("span", "ms-2 text-muted small",
             "as " + (run.persona_username || "—")));
         left.appendChild(document.createTextNode(" "));

@@ -332,9 +332,9 @@ def _fmt_dt(value) -> str:
 @click.argument("agent_id", type=int)
 @click.option(
     "--intent",
-    type=click.Choice(["post", "browse"]),
+    type=click.Choice(["post", "browse", "image", "website"]),
     default=None,
-    help="Force a specific intent (post or browse).",
+    help="Force a specific intent (post, browse, image, or website).",
 )
 @click.pass_context
 def run_once_command(ctx, agent_id, intent) -> None:
@@ -352,8 +352,8 @@ def run_once_command(ctx, agent_id, intent) -> None:
 
         click.echo(
             f"run {run.id}: agent_id={run.agent_id} "
-            f"persona={run.persona_username} status={run.status} "
-            f"trigger={run.trigger}"
+            f"persona={run.persona_username} intent={run.intent} "
+            f"status={run.status} trigger={run.trigger}"
         )
         calls = ToolCall.query.filter_by(run_id=run.id).order_by(ToolCall.id).all()
         for index, call in enumerate(calls, start=1):

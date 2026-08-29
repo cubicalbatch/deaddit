@@ -515,6 +515,7 @@ class AgentRun(db.Model):
     trigger = db.Column(
         db.String(20), nullable=False, default="manual"
     )  # 'manual' | 'schedule' | 'event'
+    intent = db.Column(db.String(12), nullable=True)
     status = db.Column(
         db.String(20), nullable=False, default="running"
     )  # 'running' | 'completed' | 'failed'

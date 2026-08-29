@@ -6,6 +6,7 @@ Provides web-based UI for job management and content generation.
 import base64
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -1803,6 +1804,15 @@ def settings():
         "models": all_settings["MODELS"]["value"],
         "api_token_set": all_settings["API_TOKEN"]["value"] == "***set***",
         "openai_key_set": all_settings["OPENAI_KEY"]["value"] != "***not set***",
+        "agent_post_intent_chance": all_settings.get(
+            "AGENT_POST_INTENT_CHANCE", {}
+        ).get("value", "0.30"),
+        "agent_forced_image_chance": all_settings.get(
+            "AGENT_FORCED_IMAGE_CHANCE", {}
+        ).get("value", "0.0"),
+        "agent_forced_website_chance": all_settings.get(
+            "AGENT_FORCED_WEBSITE_CHANCE", {}
+        ).get("value", "0.0"),
         "all_settings": all_settings,
         "default_provider": default_provider.to_dict() if default_provider else None,
     }
@@ -2070,6 +2080,116 @@ def save_deaddit_config_api():
                     "message": "API_TOKEN is environment-only since refactor A6 — set it in your environment/.env.",
                 }
             )
+
+        # Agent content mix configuration
+        has_post = any(
+            k in data
+            for k in (
+                "agent_post_intent_pct",
+                "agent_post_intent_chance",
+                "AGENT_POST_INTENT_CHANCE",
+            )
+        )
+        has_img = any(
+            k in data
+            for k in (
+                "agent_forced_image_pct",
+                "agent_forced_image_chance",
+                "AGENT_FORCED_IMAGE_CHANCE",
+            )
+        )
+        has_web = any(
+            k in data
+            for k in (
+                "agent_forced_website_pct",
+                "agent_forced_website_chance",
+                "AGENT_FORCED_WEBSITE_CHANCE",
+            )
+        )
+
+        if has_post or has_img or has_web:
+
+            def _parse_mix_val(raw, name):
+                if raw is None or (isinstance(raw, str) and not raw.strip()):
+                    return None
+                try:
+                    f = float(raw)
+                    if not math.isfinite(f):
+                        raise ValueError(f"{name} must be a finite number")
+                    return f
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{name} must be a valid number: {raw!r}") from exc
+
+            post_raw = (
+                data.get("agent_post_intent_pct")
+                if "agent_post_intent_pct" in data
+                else data.get("agent_post_intent_chance")
+                if "agent_post_intent_chance" in data
+                else data.get("AGENT_POST_INTENT_CHANCE")
+            )
+            img_raw = (
+                data.get("agent_forced_image_pct")
+                if "agent_forced_image_pct" in data
+                else data.get("agent_forced_image_chance")
+                if "agent_forced_image_chance" in data
+                else data.get("AGENT_FORCED_IMAGE_CHANCE")
+            )
+            web_raw = (
+                data.get("agent_forced_website_pct")
+                if "agent_forced_website_pct" in data
+                else data.get("agent_forced_website_chance")
+                if "agent_forced_website_chance" in data
+                else data.get("AGENT_FORCED_WEBSITE_CHANCE")
+            )
+
+            try:
+                post_val = _parse_mix_val(post_raw, "Post intent chance")
+                img_val = _parse_mix_val(img_raw, "Forced image chance")
+                web_val = _parse_mix_val(web_raw, "Forced website chance")
+            except ValueError as exc:
+                return jsonify({"success": False, "message": str(exc)})
+
+            # Convert percentages [0, 100] to fractions [0, 1] if values are in percent range
+            # (or if supplied as 0..1 fraction directly)
+            def _to_fraction(val, name):
+                if val is None:
+                    return None
+                if val < 0:
+                    raise ValueError(f"{name} cannot be negative")
+                if val > 100.0:
+                    raise ValueError(f"{name} cannot exceed 100%")
+                if val > 1.0 or ("_pct" in str(data)):
+                    return val / 100.0
+                return val
+
+            try:
+                p_frac = _to_fraction(post_val, "Post intent chance")
+                i_frac = _to_fraction(img_val, "Forced image chance")
+                w_frac = _to_fraction(web_val, "Forced website chance")
+            except ValueError as exc:
+                return jsonify({"success": False, "message": str(exc)})
+
+            # Check forced mix sum constraint
+            i_check = i_frac if i_frac is not None else 0.0
+            w_check = w_frac if w_frac is not None else 0.0
+            if i_check + w_check > 1.0001:
+                return jsonify(
+                    {
+                        "success": False,
+                        "message": "Forced image and website allocation cannot exceed 100%",
+                    }
+                )
+
+            mix_updates = {}
+            if p_frac is not None:
+                mix_updates["AGENT_POST_INTENT_CHANCE"] = str(round(p_frac, 4))
+            if i_frac is not None:
+                mix_updates["AGENT_FORCED_IMAGE_CHANCE"] = str(round(i_frac, 4))
+            if w_frac is not None:
+                mix_updates["AGENT_FORCED_WEBSITE_CHANCE"] = str(round(w_frac, 4))
+
+            if mix_updates:
+                Config.set_many(mix_updates)
 
         return jsonify(
             {"success": True, "message": "Deaddit configuration saved successfully"}
@@ -3731,6 +3851,7 @@ def _run_json(run):
         "agent_id": run.agent_id,
         "persona_username": run.persona_username,
         "trigger": run.trigger,
+        "intent": getattr(run, "intent", None),
         "status": run.status,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,

@@ -891,7 +891,7 @@ def test_initial_messages_inject_backfills_and_recent_episodes(seeded_db, db_ses
     )
     db.session.commit()
 
-    messages = build_initial_messages(agent, db.session.get(User, "alice"))
+    messages, _ = build_initial_messages(agent, db.session.get(User, "alice"))
     assert messages[0]["role"] == "system"
     kickoff = messages[-1]["content"]
     assert "Your memory:" in kickoff
@@ -904,6 +904,6 @@ def test_initial_messages_inject_backfills_and_recent_episodes(seeded_db, db_ses
 def test_initial_messages_have_no_memory_block_when_empty(seeded_db, db_session):
     agent = _make_agent(db_session, "alice")
 
-    messages = build_initial_messages(agent, db.session.get(User, "alice"))
+    messages, _ = build_initial_messages(agent, db.session.get(User, "alice"))
 
     assert "Your memory:" not in messages[-1]["content"]

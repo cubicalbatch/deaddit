@@ -10,6 +10,7 @@ from deaddit import Config
 from deaddit.agents.prompts import build_system_prompt
 from deaddit.agents.registry import (
     AutonomyTier,
+    effective_post_configs,
     image_posts_config,
     offered_post_tool_names,
     website_posts_config,
@@ -129,73 +130,165 @@ def _starter_hint(offered: frozenset[str]) -> str | None:
     return None
 
 
+def _parse_float_setting(key: str, default: float) -> float:
+    raw = Config.get(key, str(default))
+    try:
+        val = float(raw)
+        if 0.0 <= val <= 1.0:
+            return val
+    except (TypeError, ValueError):
+        pass
+    logger.warning("Invalid %s=%r; using default %s", key, raw, default)
+    return default
+
+
+def _subdeaddit_hint(user: User | None) -> str:
+    subscriptions = ((user.agent_state if user else None) or {}).get(
+        "subscriptions"
+    ) or []
+    if subscriptions:
+        return f" (such as {', '.join(subscriptions)})"
+    names = [
+        row[0]
+        for row in db.session.query(Subdeaddit.name).order_by(Subdeaddit.name.asc())
+    ]
+    sample = random.sample(names, min(len(names), _KICKOFF_COMMUNITY_SUGGESTIONS))
+    return (
+        f" (such as {', '.join(sample)} or search existing communities)"
+        if sample
+        else " (search existing communities with the search tool)"
+    )
+
+
 def generate_kickoff_prompt(
     agent: Agent,
     user: User | None = None,
     unread: int = 0,
     *,
+    requested_intent: str | None = None,
     force_intent: str | None = None,
-) -> str:
-    """Generate a dynamic kickoff prompt based on unread count, tier, and probabilistic intent."""
+) -> tuple[str, str]:
+    """Generate a dynamic kickoff prompt and resolved intent based on unread count, tier, and probabilistic intent."""
+    req = requested_intent if requested_intent is not None else force_intent
+
+    # 1. Sample mood first (existing RNG order)
     mood = random.choices(
         [line for line, _ in _KICKOFF_MOODS],
         weights=[weight for _, weight in _KICKOFF_MOODS],
     )[0]
-    if unread > 0:
-        return (
-            "You're waking up. Catch up on your replies, join ongoing "
-            "conversations, and then finish." + mood
-        )
 
+    # 2. Lurker check
     tier = getattr(agent.autonomy_tier, "value", str(agent.autonomy_tier))
     if tier == AutonomyTier.LURKER.value:
         return (
             "You're waking up. Browse the community feeds, read interesting posts, "
-            "and see what's new. When you are done, call finish to end your visit."
+            "and see what's new. When you are done, call finish to end your visit.",
+            "browse",
         )
 
-    is_post_intent = (
-        force_intent == "post"
-        if force_intent is not None
-        else (random.random() < POST_INTENT_PROBABILITY)
-    )
+    # 3. Validate explicit special requests; degrade if ineligible
+    if req in ("image", "website"):
+        static_offered = offered_post_tool_names(
+            image_posts_config(agent), website_posts_config(agent)
+        )
+        if req == "image" and "create_image_post" not in static_offered:
+            logger.warning(
+                "Requested intent 'image' is ineligible for agent %s; degrading to 'post'",
+                agent.id,
+            )
+            req = "post"
+        elif req == "website" and "create_website" not in static_offered:
+            logger.warning(
+                "Requested intent 'website' is ineligible for agent %s; degrading to 'post'",
+                agent.id,
+            )
+            req = "post"
 
-    offered = offered_post_tool_names(
-        image_posts_config(agent), website_posts_config(agent)
-    )
-    post_instruction = _post_instruction(offered) if is_post_intent else None
-
-    if post_instruction is not None:
-        subscriptions = ((user.agent_state if user else None) or {}).get(
-            "subscriptions"
-        ) or []
-        if subscriptions:
-            sub_hint = f" (such as {', '.join(subscriptions)})"
-        else:
-            names = [
-                row[0]
-                for row in db.session.query(Subdeaddit.name).order_by(
-                    Subdeaddit.name.asc()
+    # 4. Unread replies handling
+    if unread > 0:
+        if req in ("image", "website"):
+            resolved_intent = req
+            eff_img, eff_web = effective_post_configs(agent, resolved_intent)
+            offered = offered_post_tool_names(eff_img, eff_web)
+            post_instruction = _post_instruction(offered)
+            if post_instruction is not None:
+                sub_hint = _subdeaddit_hint(user)
+                return (
+                    f"You're waking up. Catch up on your replies, check your inbox with view_inbox, "
+                    f"and then share something. Think about an experience, project, observation, "
+                    f"question, or bit of trivia related to your persona and interests. "
+                    f"Find a relevant subdeaddit{sub_hint} (or check quiet/sparse communities that need fresh discussion) "
+                    f"{post_instruction} "
+                    f"Once your post is published, call the finish tool to conclude your visit.{mood}",
+                    resolved_intent,
                 )
-            ]
-            sample = random.sample(
-                names, min(len(names), _KICKOFF_COMMUNITY_SUGGESTIONS)
-            )
-            sub_hint = (
-                f" (such as {', '.join(sample)} or search existing communities)"
-                if sample
-                else " (search existing communities with the search tool)"
-            )
         return (
-            f"You're waking up with something to share. "
-            f"Think about an experience, project, observation, question, or bit of trivia related to your persona and interests. "
-            f"Find a relevant subdeaddit{sub_hint} (or check quiet/sparse communities that need fresh discussion) "
-            f"{post_instruction} "
-            f"Once your post is published, call the finish tool to conclude your visit.{mood}"
+            "You're waking up. Catch up on your replies, join ongoing "
+            "conversations, and then finish." + mood,
+            "browse",
         )
 
-    # No post intent this run, or (the invalid image_only + website_only
-    # combination) no post tool offered at all - either way, browse.
+    # 5. Intent resolution when unread == 0
+    if req is not None:
+        if req == "browse":
+            resolved_intent = "browse"
+            is_post_intent = False
+        else:
+            resolved_intent = req
+            is_post_intent = True
+    else:
+        post_chance = _parse_float_setting(
+            "AGENT_POST_INTENT_CHANCE", POST_INTENT_PROBABILITY
+        )
+        if random.random() < post_chance:
+            img_chance = _parse_float_setting("AGENT_FORCED_IMAGE_CHANCE", 0.0)
+            web_chance = _parse_float_setting("AGENT_FORCED_WEBSITE_CHANCE", 0.0)
+            img_share = min(1.0, max(0.0, img_chance))
+            web_share = min(max(0.0, 1.0 - img_share), max(0.0, web_chance))
+
+            if img_share <= 0.0 and web_share <= 0.0:
+                resolved_intent = "post"
+            else:
+                r = random.random()
+                if r < img_share:
+                    selected_kind = "image"
+                elif r < img_share + web_share:
+                    selected_kind = "website"
+                else:
+                    selected_kind = "post"
+
+                static_offered = offered_post_tool_names(
+                    image_posts_config(agent), website_posts_config(agent)
+                )
+                if selected_kind == "image" and "create_image_post" in static_offered:
+                    resolved_intent = "image"
+                elif selected_kind == "website" and "create_website" in static_offered:
+                    resolved_intent = "website"
+                else:
+                    resolved_intent = "post"
+            is_post_intent = True
+        else:
+            resolved_intent = "browse"
+            is_post_intent = False
+
+    # 6. Post or browse kickoff text
+    if is_post_intent:
+        eff_img, eff_web = effective_post_configs(agent, resolved_intent)
+        offered = offered_post_tool_names(eff_img, eff_web)
+        post_instruction = _post_instruction(offered)
+        if post_instruction is not None:
+            sub_hint = _subdeaddit_hint(user)
+            return (
+                f"You're waking up with something to share. "
+                f"Think about an experience, project, observation, question, or bit of trivia related to your persona and interests. "
+                f"Find a relevant subdeaddit{sub_hint} (or check quiet/sparse communities that need fresh discussion) "
+                f"{post_instruction} "
+                f"Once your post is published, call the finish tool to conclude your visit.{mood}",
+                resolved_intent,
+            )
+
+    eff_img, eff_web = effective_post_configs(agent, "browse")
+    offered = offered_post_tool_names(eff_img, eff_web)
     starter_hint = _starter_hint(offered)
     hint_sentence = (
         f"If you encounter an empty or quiet community, {starter_hint}. "
@@ -206,14 +299,20 @@ def generate_kickoff_prompt(
         "You're waking up. Browse your feed or search for topics of interest, "
         "read discussions, and jump into the conversation with a comment if "
         f"something catches your eye. {hint_sentence}When you're done, call "
-        f"finish.{mood}"
+        f"finish.{mood}",
+        "browse",
     )
 
 
 def build_initial_messages(
-    agent: Agent, user: User, *, force_intent: str | None = None
-) -> list[dict]:
-    """Build the opening messages array for an agent conversation."""
+    agent: Agent,
+    user: User,
+    *,
+    requested_intent: str | None = None,
+    force_intent: str | None = None,
+) -> tuple[list[dict], str]:
+    """Build the opening messages array and resolved intent for an agent conversation."""
+    req = requested_intent if requested_intent is not None else force_intent
     unread = 0
     try:
         unread = unread_count(user.username)
@@ -224,11 +323,14 @@ def build_initial_messages(
             exc_info=True,
         )
 
-    kickoff = generate_kickoff_prompt(
-        agent, user, unread=unread, force_intent=force_intent
+    kickoff, resolved_intent = generate_kickoff_prompt(
+        agent, user, unread=unread, requested_intent=req
     )
     messages: list[dict] = [
-        {"role": "system", "content": build_system_prompt(agent, user)},
+        {
+            "role": "system",
+            "content": build_system_prompt(agent, user, intent=resolved_intent),
+        },
         {"role": "user", "content": kickoff},
     ]
     memory_block = _memory_block(user.username)
@@ -239,7 +341,7 @@ def build_initial_messages(
             f"\n\nYou have {unread} unread replies. Use the view_inbox "
             "tool to read them before deciding what to do."
         )
-    return messages
+    return messages, resolved_intent
 
 
 BACKFILL_PREFIX = "History (before becoming an agent):"
