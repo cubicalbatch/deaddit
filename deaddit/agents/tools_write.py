@@ -22,6 +22,7 @@ from deaddit.agents.registry import (
     subscribe_nudge,
 )
 from deaddit.config import Config
+from deaddit.dynamics import threads
 from deaddit.extensions import db
 from deaddit.images.client import generate as generate_image
 from deaddit.images.storage import (
@@ -528,6 +529,17 @@ def _create_comment(ctx: ToolContext, params: CreateCommentArgs) -> dict:
             "error": f"post {params.post_id} not found",
             "hint": "use read_post to check the post exists before replying",
         }
+    # Thread cap: the post's frozen popularity ceiling. Counted over all
+    # rows (removed comments render as tombstones), so it always matches
+    # the count the site shows.
+    if post.comment_cap is not None:
+        existing = Comment.query.filter_by(post_id=params.post_id).count()
+        if existing >= post.comment_cap:
+            return {
+                "ok": False,
+                "error": "this discussion has wound down - the thread is full",
+                "hint": "look for a fresher post in your feed to join instead",
+            }
     if params.parent_id is not None:
         parent = db.session.get(Comment, params.parent_id)
         if parent is None or parent.post_id != params.post_id:
@@ -536,6 +548,27 @@ def _create_comment(ctx: ToolContext, params: CreateCommentArgs) -> dict:
                 "error": f"comment {params.parent_id} not found under post "
                 f"{params.post_id}",
             }
+        parent_author = parent.user
+        # Reply-chain fatigue: a reply that would push the pairwise
+        # back-and-forth past its cap is declined in-world; a genuinely
+        # new point can still go in as a fresh top-level comment.
+        if parent_author != ctx.user_username:
+            cap = threads.exchange_cap(params.post_id, parent_author, ctx.user_username)
+            if (
+                threads.exchange_tail_for_reply(params.parent_id, ctx.user_username)
+                > cap
+            ):
+                return {
+                    "ok": False,
+                    "error": (
+                        f"you and {parent_author} have gone back and forth "
+                        "enough in this exchange - let it go"
+                    ),
+                    "hint": (
+                        "if you have a genuinely new point, make it a fresh "
+                        "top-level comment on the post instead"
+                    ),
+                }
     try:
         comment = create_comment(
             user=ctx.user_username,

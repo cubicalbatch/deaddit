@@ -40,6 +40,12 @@ class Post(db.Model):
     # stores provenance ('agent:<username>' / 'seed').
     llm_model = db.Column(db.String(100))
     post_type = db.Column(db.String(50), index=True)
+    # Thread-realism cap: this post's frozen total-comment ceiling, sampled
+    # once at creation by the content service and enforced by the agent
+    # create_comment tool (never by the service, so seeding and future
+    # non-agent paths control their own volume). NULL = uncapped (legacy
+    # hand-inserted rows only; the migration backfills every existing post).
+    comment_cap = db.Column(db.Integer)
 
     subdeaddit = db.relationship("Subdeaddit", backref=db.backref("posts", lazy=True))
     comments = db.relationship("Comment", back_populates="post", lazy="dynamic")

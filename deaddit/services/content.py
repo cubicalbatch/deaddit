@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import cache
@@ -69,6 +70,39 @@ _RATE_LIMITS: dict[str, tuple[str, int]] = {
     "post": ("rate_limit_posts_per_hour", 5),
     "comment": ("rate_limit_comments_per_hour", 30),
 }
+
+# Thread-realism: every post carries a frozen total-comment ceiling sampled
+# once at creation - the post's "popularity lottery". The agent
+# create_comment tool enforces it; this service never does, so seeding and
+# future non-agent paths control their own comment volume.
+_THREAD_CAP_MIN = ("thread_comment_cap_min", 20)
+_THREAD_CAP_MAX = ("thread_comment_cap_max", 39)
+
+
+def _setting_int(key: str, default: int, *, minimum: int) -> int:
+    """Read a whole-number Setting, falling back to ``default`` when absent,
+    malformed, or below ``minimum``."""
+    raw = Setting.get_value(key, str(default))
+    try:
+        value = int(str(raw))
+    except (TypeError, ValueError):
+        return default
+    return value if value >= minimum else default
+
+
+def sample_comment_cap() -> int:
+    """Sample one post's total-comment ceiling, in
+    ``[thread_comment_cap_min, thread_comment_cap_max]``.
+
+    Triangular with the mode near the low end: real threads skew toward
+    modest totals with only a few running to the maximum. An inverted or
+    degenerate range collapses to the minimum.
+    """
+    lo = _setting_int(*_THREAD_CAP_MIN, minimum=1)
+    hi = _setting_int(*_THREAD_CAP_MAX, minimum=1)
+    if hi <= lo:
+        return lo
+    return round(random.triangular(lo, hi, lo + (hi - lo) * 0.25))
 
 
 def _check_rate_limit(user: str, kind: str) -> None:
@@ -200,6 +234,7 @@ def create_post(
         model=model,
         llm_model=llm_model,
         post_type=post_type,
+        comment_cap=sample_comment_cap(),
     )
     if created_at is not None:
         post.created_at = created_at
@@ -323,6 +358,7 @@ def create_image_post(
         model=model,
         llm_model=llm_model,
         post_type=post_type,
+        comment_cap=sample_comment_cap(),
     )
     if created_at is not None:
         post.created_at = created_at
@@ -504,6 +540,7 @@ def create_website_post(
             model=model,
             llm_model=llm_model,
             post_type=post_type,
+            comment_cap=sample_comment_cap(),
         )
         if created_at is not None:
             post.created_at = created_at

@@ -77,6 +77,11 @@ _QUALITY_RULES = (
     "  back; add a take, a fact, an anecdote - or honestly just a\n"
     '  reaction or a joke. Never use stock phrases like "This is exactly\n'
     '  the kind of X I subscribe for".\n'
+    "- Let conversations end: reply chains between two people rarely\n"
+    "  last more than a couple of exchanges. Make your point, enjoy the\n"
+    "  back-and-forth while it's fun, and move on - never answer a reply\n"
+    "  out of politeness alone; leaving the last word to someone else is\n"
+    "  normal.\n"
     "- Persona integrity: your belongings and history are only what your\n"
     "  persona and memories establish - never adopt the OP's stated\n"
     "  possessions or experiences as your own, and if you disagree, do it\n"

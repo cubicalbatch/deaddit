@@ -77,8 +77,11 @@ def test_phase1_migration_preserves_populated_data_on_downgrade(tmp_path):
     app = create_app({"SQLALCHEMY_DATABASE_URI": f"sqlite:///{path}", "TESTING": True})
     runner = app.test_cli_runner()
     assert runner.invoke(args=["db", "upgrade"]).exit_code == 0
-    assert runner.invoke(args=["db", "downgrade", _PRE_PHASE1_HEAD]).exit_code == 0
 
+    # Populate at the current schema: the ORM maps every head column, so
+    # rows must exist before any downgrade walks below the newest
+    # migration (later revisions may have added post columns the ORM
+    # now inserts unconditionally).
     with app.app_context():
         db.session.add_all(
             [
@@ -103,6 +106,23 @@ def test_phase1_migration_preserves_populated_data_on_downgrade(tmp_path):
                 "voter", "post", post_id, 1, source="simulated", allow_recast=False
             )["change_kind"]
             == "insert"
+        )
+
+    # The downgrade under test must leave populated rows intact.
+    assert runner.invoke(args=["db", "downgrade", _PRE_PHASE1_HEAD]).exit_code == 0
+    with sqlite3.connect(path) as connection:
+        assert (
+            connection.execute(
+                "SELECT source FROM vote WHERE voter = 'voter' AND post_id = ?",
+                (post_id,),
+            ).fetchone()[0]
+            == "simulated"
+        )
+        assert (
+            connection.execute(
+                "SELECT title FROM post WHERE id = ?", (post_id,)
+            ).fetchone()[0]
+            == "populated"
         )
 
     assert runner.invoke(args=["db", "upgrade"]).exit_code == 0

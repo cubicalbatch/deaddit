@@ -24,11 +24,24 @@ from deaddit.models import (
     Comment,
     Notification,
     Post,
+    Setting,
     User,
 )
 from deaddit.runtime.nightly import NIGHTLY_JOBS
 from deaddit.services import content as content_service
 from deaddit.services.content import create_comment, create_post
+
+
+@pytest.fixture(autouse=True)
+def _exchange_fatigue_off(db_session):
+    """Reply-exchange fatigue suppression is covered in test_thread_realism.py.
+
+    Pin the per-pair cap high so every reply here produces a plain ping
+    and these mechanics tests (emission, dedupe, inbox wiring) stay
+    independent of the deterministic pair hash.
+    """
+    Setting.set_value("reply_exchange_cap_min", "9")
+    Setting.set_value("reply_exchange_cap_max", "9")
 
 
 @pytest.fixture()

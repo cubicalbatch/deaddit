@@ -93,6 +93,8 @@ def _post_summary(post: Post, comment_count: int, has_image: bool) -> dict:
         "score": post.score,
         "age_hours": round(_age_hours(post.created_at), 2),
         "comment_count": comment_count,
+        "thread_full": post.comment_cap is not None
+        and comment_count >= post.comment_cap,
         "excerpt": _excerpt(post.content, 200),
         "has_image": has_image,
     }
@@ -290,6 +292,7 @@ def _read_post(ctx: ToolContext, params: ReadPostArgs) -> dict:
     post = db.session.get(Post, params.post_id)
     if post is None:
         return {"ok": False, "error": "post not found"}
+    comment_count = Comment.query.filter_by(post_id=post.id).count()
     post_dict: dict = {
         "id": post.id,
         "title": post.title,
@@ -298,6 +301,9 @@ def _read_post(ctx: ToolContext, params: ReadPostArgs) -> dict:
         "content": (post.content or "")[:2000],
         "score": post.score,
         "created_at": _iso(post.created_at),
+        "comment_count": comment_count,
+        "thread_full": post.comment_cap is not None
+        and comment_count >= post.comment_cap,
         "comments": _build_comment_tree(post.id, params),
     }
     if post.image is not None and not post.removed:

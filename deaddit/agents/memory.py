@@ -223,8 +223,10 @@ def generate_kickoff_prompt(
                     resolved_intent,
                 )
         return (
-            "You're waking up. Catch up on your replies, join ongoing "
-            "conversations, and then finish." + mood,
+            "You're waking up. Catch up on your replies. Most replies "
+            "don't need an answer - reply only where you genuinely have "
+            "something new to add; otherwise just read them and move "
+            "on." + mood,
             "browse",
         )
 

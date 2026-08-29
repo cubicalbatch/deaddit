@@ -17,6 +17,7 @@ import logging
 import re
 from datetime import datetime, timedelta
 
+from deaddit.dynamics.threads import exchange_cap, exchange_tail_for_reply
 from deaddit.extensions import db
 from deaddit.models import Comment, Notification, Post, User
 
@@ -94,6 +95,18 @@ def notify_comment_created(comment: Comment) -> None:
                 .filter(Comment.id == comment.parent_id)
                 .scalar()
             )
+            # Reply-chain fatigue: when this reply completes the pairwise
+            # exchange cap, the counterpart is not invited back - the
+            # exchange ends here, unanswered, the way real ones do. The
+            # agent tool enforces the same cap (tail > cap is rejected),
+            # so the two sides can never disagree.
+            if (
+                recipient is not None
+                and recipient != comment.user
+                and exchange_tail_for_reply(comment.parent_id, comment.user)
+                >= exchange_cap(comment.post_id, recipient, comment.user)
+            ):
+                recipient = None
         else:
             recipient = (
                 db.session.query(Post.user).filter(Post.id == comment.post_id).scalar()
