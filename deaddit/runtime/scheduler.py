@@ -15,6 +15,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from deaddit import create_app
 from deaddit.runtime.claim import sweep_stale_jobs
+from deaddit.runtime.engagement import EngagementScheduler
 from deaddit.runtime.nightly import register_nightly_jobs
 from deaddit.runtime.runner import JobRunner
 from deaddit.runtime.wakes import WakeScheduler
@@ -33,6 +34,8 @@ def main() -> None:
     with app.app_context():
         interrupted_runs, armed_agents = wakes.recover()
 
+    engagement = EngagementScheduler(app)
+
     scheduler = BackgroundScheduler()
     with app.app_context():
         registered = register_nightly_jobs(scheduler)
@@ -41,6 +44,7 @@ def main() -> None:
     runner.start()
     wakes.start()
     scheduler.start()
+    engagement.start()
 
     logger.info(
         "deaddit worker started: worker_id=%s recovered=%d nightly_jobs=%d "
@@ -68,6 +72,7 @@ def main() -> None:
         pass
     finally:
         wakes.stop(wait=True)
+        engagement.stop(wait=True)
         runner.stop(wait=True)
         scheduler.shutdown(wait=True)
 
