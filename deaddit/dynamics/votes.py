@@ -32,6 +32,15 @@ def _reject(reason: str, score: int) -> dict[str, Any]:
     return {"status": "rejected", "reason": reason, "score": score}
 
 
+def _success(
+    score: int, changed: bool, change_kind: str, structured: bool
+) -> dict[str, Any]:
+    result = {"status": "ok", "score": score}
+    if structured:
+        result.update(changed=changed, change_kind=change_kind)
+    return result
+
+
 def _find_vote(voter: str, target: str, target_id: int) -> Vote | None:
     filters: dict[str, Any] = {"voter": voter}
     if target == "post":
@@ -42,20 +51,25 @@ def _find_vote(voter: str, target: str, target_id: int) -> Vote | None:
 
 
 def cast_vote(
-    voter: str, target: str, target_id: int, value: int, _retried: bool = False
+    voter: str,
+    target: str,
+    target_id: int,
+    value: int,
+    _retried: bool = False,
+    *,
+    source: str | None = None,
+    allow_recast: bool | None = None,
 ) -> dict[str, Any]:
-    """Cast (or recast) ``voter``'s vote of ``value`` on a post or comment.
+    """Cast a vote while keeping score, vote count, and karma canonical.
 
-    One transaction: upsert the :class:`Vote` row, adjust the target's
-    ``score``/``vote_count``, and adjust the author's
-    ``post_karma``/``comment_karma``.
-
-    Returns ``{"status": "ok", "score": <int>}`` on success (including an
-    idempotent same-value re-vote) or ``{"status": "rejected", "reason":
-    <str>, "score": <int>}`` otherwise. A concurrent duplicate insert loses
-    to a unique-constraint IntegrityError, rolls back, and retries once so
-    the outcome matches serialized execution.
+    ``source`` and ``allow_recast`` are keyword-only.  Omitting both retains
+    the historical result shape and recast behavior for existing callers.
+    Explicit arguments return ``changed`` and ``change_kind`` metadata.
     """
+    requested_source = "agent" if source is None else source
+    recast = True if allow_recast is None else allow_recast
+    structured = source is not None or allow_recast is not None
+
     model = _MODELS.get(target)
     item = db.session.get(model, target_id) if model else None
     if item is None:
@@ -84,21 +98,32 @@ def cast_vote(
 
     is_post = target == "post"
     delta = 0
+    changed = False
+    change_kind = "same_value_noop"
     try:
         vote = _find_vote(voter, target, target_id)
         if vote is None:
             vote = Vote(
                 voter=voter,
                 value=value,
+                source=requested_source,
                 post_id=target_id if is_post else None,
                 comment_id=None if is_post else target_id,
             )
             db.session.add(vote)
             delta = value
             item.vote_count += 1
+            changed = True
+            change_kind = "insert"
+        elif not recast:
+            # The simulator is insert-only.  This branch intentionally wins
+            # even for a same-value request: the pair was already claimed.
+            change_kind = "insert_only_collision"
         elif vote.value != value:
             delta = value - vote.value
             vote.value = value
+            changed = True
+            change_kind = "direction_switch"
         # Same-value re-vote: pure no-op.
 
         if delta:
@@ -114,13 +139,22 @@ def cast_vote(
         if _retried:
             raise
         # Lost an insert race against a concurrent identical vote; the
-        # re-read resolves it deterministically (no-op or switch).
-        return cast_vote(voter, target, target_id, value, _retried=True)
+        # re-read resolves it deterministically (no-op, collision, or switch).
+        return cast_vote(
+            voter,
+            target,
+            target_id,
+            value,
+            _retried=True,
+            source=source,
+            allow_recast=allow_recast,
+        )
 
-    activity.record_event(
-        event_type="vote",
-        username=voter,
-        post_id=target_id if is_post else None,
-        comment_id=None if is_post else target_id,
-    )
-    return {"status": "ok", "score": int(item.score)}
+    if changed:
+        activity.record_event(
+            event_type="vote",
+            username=voter,
+            post_id=target_id if is_post else None,
+            comment_id=None if is_post else target_id,
+        )
+    return _success(int(item.score), changed, change_kind, structured)

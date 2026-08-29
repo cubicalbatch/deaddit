@@ -3,6 +3,8 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
+from sqlalchemy import event
+
 from deaddit.extensions import db
 
 
@@ -626,7 +628,7 @@ class Vote(db.Model):
     value = db.Column(db.SmallInteger, nullable=False)
     source = db.Column(
         db.String(16), nullable=False, server_default="agent", index=True
-    )  # 'agent'|'human'|'backfill'
+    )  # 'agent'|'human'|'backfill'|'simulated'
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     __table_args__ = (
@@ -635,6 +637,132 @@ class Vote(db.Model):
         db.UniqueConstraint("voter", "post_id", name="uq_vote_post"),
         db.UniqueConstraint("voter", "comment_id", name="uq_vote_comment"),
     )
+ 
+ 
+class VoteCadencePolicy(db.Model):
+    """Immutable, versioned policy used by simulated voting."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    preset = db.Column(db.String(16), nullable=False)
+    algorithm_version = db.Column(db.Integer, nullable=False)
+    config = db.Column(db.JSON, nullable=False)
+    effective_at = db.Column(db.DateTime, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "preset IN ('quiet', 'natural', 'busy', 'custom')",
+            name="ck_vote_cadence_policy_preset",
+        ),
+    )
+
+    VALID_PRESETS = frozenset({"quiet", "natural", "busy", "custom"})
+
+
+    def __init__(self, **kwargs):
+        # Validate on ORM construction as well as on database loading.  The
+        # loader path below catches rows inserted outside SQLAlchemy.
+        from deaddit.dynamics.engagement import validate_policy
+
+        preset = kwargs.get("preset")
+        if preset not in self.VALID_PRESETS:
+            raise ValueError("invalid vote cadence policy preset")
+        algorithm_version = kwargs.get("algorithm_version")
+        if not isinstance(algorithm_version, int) or algorithm_version < 1:
+            raise ValueError("algorithm_version must be a positive integer")
+        kwargs["config"] = validate_policy(kwargs.get("config"))
+        super().__init__(**kwargs)
+
+    @property
+    def validated_config(self):
+        """Return a validated, detached policy configuration."""
+        from deaddit.dynamics.engagement import validate_policy
+
+        return validate_policy(self.config)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "preset": self.preset,
+            "algorithm_version": self.algorithm_version,
+            "config": self.validated_config,
+            "effective_at": self.effective_at.isoformat()
+            if self.effective_at
+            else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+    @classmethod
+    def resolve_for_content(cls, created_at):
+        """Resolve the latest policy effective when content was created."""
+        return (
+            cls.query.filter(cls.effective_at <= created_at)
+            .order_by(cls.effective_at.desc(), cls.id.desc())
+            .first()
+        )
+
+    @classmethod
+    def resolve_for_exposure(cls, exposed_at):
+        """Resolve the latest policy effective at a tail exposure."""
+        return (
+            cls.query.filter(cls.effective_at <= exposed_at)
+            .order_by(cls.effective_at.desc(), cls.id.desc())
+            .first()
+        )
+
+ 
+    @classmethod
+    def resolve_for_tail_exposure(cls, exposed_at):
+        """Resolve a policy for an archive/revival exposure."""
+        return cls.resolve_for_exposure(exposed_at)
+
+class VoteSimulationHourly(db.Model):
+    """Cross-process counters for one UTC hour and simulator mode."""
+
+    hour = db.Column(db.DateTime, primary_key=True)
+    mode = db.Column(db.String(16), primary_key=True)
+    ticks = db.Column(db.Integer, nullable=False, server_default="0")
+    errors = db.Column(db.Integer, nullable=False, server_default="0")
+    active_proposals = db.Column(db.Integer, nullable=False, server_default="0")
+    archive_proposals = db.Column(db.Integer, nullable=False, server_default="0")
+    revival_proposals = db.Column(db.Integer, nullable=False, server_default="0")
+    inserted_votes = db.Column(db.Integer, nullable=False, server_default="0")
+    switched_votes = db.Column(db.Integer, nullable=False, server_default="0")
+    upvotes = db.Column(db.Integer, nullable=False, server_default="0")
+    downvotes = db.Column(db.Integer, nullable=False, server_default="0")
+    cap_skips = db.Column(db.Integer, nullable=False, server_default="0")
+    min_gap_skips = db.Column(db.Integer, nullable=False, server_default="0")
+    no_voter_skips = db.Column(db.Integer, nullable=False, server_default="0")
+    guardrail_skips = db.Column(db.Integer, nullable=False, server_default="0")
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Short aliases make the names used by the worker's decision vocabulary
+    # readable without adding duplicate persisted columns.
+    @property
+    def active(self):
+        return self.active_proposals
+
+    @property
+    def archive(self):
+        return self.archive_proposals
+
+    @property
+    def revival(self):
+        return self.revival_proposals
+ 
+ 
+@event.listens_for(VoteCadencePolicy, "before_update")
+def _reject_vote_cadence_policy_update(mapper, connection, target):
+    raise ValueError("VoteCadencePolicy rows are immutable")
+ 
+ 
+@event.listens_for(VoteCadencePolicy, "load")
+def _validate_loaded_vote_cadence_policy(target, context):
+    from deaddit.dynamics.engagement import load_policy_config
+
+    load_policy_config(target)
 
 
 # --- Platform dynamics: notifications ---
