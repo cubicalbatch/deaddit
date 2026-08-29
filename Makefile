@@ -26,13 +26,15 @@ setup: ## Setup local uv environment, dependencies, .env, and initialize databas
 ## ── Development ───────────────────────────────────────────────────────────
 
 dev: ## Start the development server on $(HOST):$(PORT) with auto-reload
-	uv run flask --app deaddit.wsgi run --host $(HOST) --port $(PORT) --debug
+	@mkdir -p logs
+	PYTHONUNBUFFERED=1 uv run flask --app deaddit.wsgi run --host $(HOST) --port $(PORT) --debug 2>&1 | tee -a logs/dev.log
 
 dev-gunicorn: ## Start server using Gunicorn on $(HOST):$(PORT)
 	uv run gunicorn -b $(HOST):$(PORT) -c gunicorn.conf.py deaddit.wsgi:app
 
 worker: ## Start the background agent worker process (auto-restarts on code changes)
-	uv run watchfiles --filter python deaddit-worker deaddit
+	@mkdir -p logs
+	PYTHONUNBUFFERED=1 uv run watchfiles --filter python deaddit-worker deaddit 2>&1 | tee -a logs/worker.log
 
 ## ── Database ──────────────────────────────────────────────────────────────
 
@@ -62,5 +64,5 @@ format: ## Format code with ruff
 ## ── Cleanup ───────────────────────────────────────────────────────────────
 
 clean: ## Remove python caches and temporary build/test artifacts
-	rm -rf .pytest_cache .ruff_cache .coverage
+	rm -rf .pytest_cache .ruff_cache .coverage logs
 	find . -type d -name '__pycache__' -not -path './.venv/*' -exec rm -rf {} +
