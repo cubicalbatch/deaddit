@@ -15,8 +15,7 @@ from __future__ import annotations
 import pytest
 
 from deaddit.agents.executor import execute
-from deaddit.agents.memory import generate_kickoff_prompt
-from deaddit.agents.prompts import build_system_prompt
+from deaddit.agents.prompts import build_system_prompt, prepare_agent_visit
 from deaddit.agents.registry import ToolContext
 from deaddit.dynamics.threads import (
     _alternating_tail_length,
@@ -372,7 +371,11 @@ def test_reply_notification_suppressed_once_exchange_completes(seeded_db, db_ses
 def test_unread_kickoff_encourages_moving_on(seeded_db, db_session):
     agent = _make_agent(db_session, "alice")
 
-    prompt, intent = generate_kickoff_prompt(agent, unread=3)
+    visit = prepare_agent_visit(
+        agent, db_session.get(User, "alice"), unread=3
+    )
+    prompt = visit.messages[1]["content"]
+    intent = visit.plan.intent
 
     assert intent == "browse"
     assert "Most replies" in prompt

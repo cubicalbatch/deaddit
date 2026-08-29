@@ -6,7 +6,7 @@ The AgenticCore consumes it in two places:
 
 - the ``view_inbox`` agent tool (:func:`deaddit.agents.tools_read._view_inbox`)
   fetches a page and marks what it saw as read;
-- context assembly (:func:`deaddit.agents.memory.build_initial_messages`) asks
+- context assembly (:func:`deaddit.agents.prompts.prepare_agent_visit`) asks
   :func:`unread_count` to decide whether to inject an inbox notice.
 
 Pagination is keyset-stable under inserts: the cursor encodes

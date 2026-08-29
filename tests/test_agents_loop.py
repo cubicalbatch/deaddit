@@ -12,7 +12,7 @@ import pytest
 import deaddit.agents.loop as loop_module
 from deaddit.agents.executor import execute
 from deaddit.agents.loop import NUDGE_MESSAGE, is_runtime_enabled, run_once
-from deaddit.agents.prompts import build_system_prompt
+from deaddit.agents.prompts import build_system_prompt, prepare_agent_visit
 from deaddit.agents.registry import ToolContext
 from deaddit.images.types import ImageGenerationResult
 from deaddit.llm.errors import PermanentLLMError
@@ -72,6 +72,15 @@ def _make_agent(db_session, username, *, enabled=True, config=None):
     db_session.add(agent)
     db_session.commit()
     return agent
+
+
+def _kickoff(db_session, agent, user=None, **kwargs):
+    """Prepare one visit; return (kickoff text, resolved intent)."""
+
+    if user is None:
+        user = db_session.get(User, agent.user_username)
+    visit = prepare_agent_visit(agent, user, **kwargs)
+    return visit.messages[1]["content"], visit.plan.intent
 
 
 def _make_random_agent(db_session, *, config=None):
@@ -371,20 +380,16 @@ def test_two_consecutive_rejections_force_finish(seeded_db, db_session, fake_llm
 
 
 def test_kickoff_prompt_post_intent_inspires_create_post(seeded_db, db_session):
-    from deaddit.agents.memory import generate_kickoff_prompt
-
     agent = _make_agent(db_session, "alice")
-    prompt, intent = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, intent = _kickoff(db_session, agent, requested_intent="post")
     assert intent == "post"
     assert "create_post" in prompt
     assert "inspired" in prompt.lower() or "share" in prompt.lower()
 
 
 def test_kickoff_prompt_browse_intent_guides_browsing(seeded_db, db_session):
-    from deaddit.agents.memory import generate_kickoff_prompt
-
     agent = _make_agent(db_session, "alice")
-    prompt, intent = generate_kickoff_prompt(agent, force_intent="browse")
+    prompt, intent = _kickoff(db_session, agent, requested_intent="browse")
     assert intent == "browse"
     assert "browse" in prompt.lower()
     assert "finish" in prompt.lower()
@@ -393,19 +398,19 @@ def test_kickoff_prompt_browse_intent_guides_browsing(seeded_db, db_session):
 def test_kickoff_prompt_samples_only_three_post_suggestions(
     seeded_db, db_session, monkeypatch
 ):
-    from deaddit.agents.memory import (
-        _POST_SUGGESTIONS,
+    from deaddit.agents.prompts import (
+        _POST_DIRECTIONS,
         _SUGGESTIONS_PER_PROMPT,
-        generate_kickoff_prompt,
     )
 
-    assert len(_POST_SUGGESTIONS) == 10
-    assert len(set(_POST_SUGGESTIONS)) == 10
+    assert len(_POST_DIRECTIONS) == 10
+    assert len({direction.id for direction in _POST_DIRECTIONS}) == 10
+    assert len({direction.text for direction in _POST_DIRECTIONS}) == 10
     assert _SUGGESTIONS_PER_PROMPT == 3
-    selected = _POST_SUGGESTIONS[3:6]
+    selected = _POST_DIRECTIONS[3:6]
 
     def sample(population, k):
-        if population is _POST_SUGGESTIONS:
+        if population is _POST_DIRECTIONS:
             assert k == 3
             return list(selected)
         return list(population)[:k]
@@ -428,16 +433,16 @@ def test_kickoff_prompt_samples_only_three_post_suggestions(
     )
 
     prompts = [
-        generate_kickoff_prompt(agent, user, force_intent="post")[0],
-        generate_kickoff_prompt(agent, user, unread=2, requested_intent="image")[0],
+        _kickoff(db_session, agent, user, requested_intent="post")[0],
+        _kickoff(db_session, agent, user, unread=2, requested_intent="image")[0],
     ]
 
     for prompt in prompts:
-        assert all(suggestion in prompt for suggestion in selected)
+        assert all(direction.text in prompt for direction in selected)
         assert all(
-            suggestion not in prompt
-            for suggestion in _POST_SUGGESTIONS
-            if suggestion not in selected
+            direction.text not in prompt
+            for direction in _POST_DIRECTIONS
+            if direction not in selected
         )
 
 
@@ -445,65 +450,54 @@ def test_kickoff_prompt_samples_only_three_post_suggestions(
 def test_kickoff_prompt_samples_only_three_comment_suggestions(
     seeded_db, db_session, monkeypatch, unread
 ):
-    from deaddit.agents.memory import (
-        _COMMENT_SUGGESTIONS,
+    from deaddit.agents.prompts import (
+        _COMMENT_DIRECTIONS,
         _SUGGESTIONS_PER_PROMPT,
-        generate_kickoff_prompt,
     )
 
-    assert len(_COMMENT_SUGGESTIONS) == 10
-    assert len(set(_COMMENT_SUGGESTIONS)) == 10
+    assert len(_COMMENT_DIRECTIONS) == 10
+    assert len({direction.id for direction in _COMMENT_DIRECTIONS}) == 10
+    assert len({direction.text for direction in _COMMENT_DIRECTIONS}) == 10
     assert _SUGGESTIONS_PER_PROMPT == 3
-    selected = _COMMENT_SUGGESTIONS[4:7]
+    selected = _COMMENT_DIRECTIONS[4:7]
     monkeypatch.setattr(
         random,
         "sample",
         lambda population, k: list(selected)
-        if population is _COMMENT_SUGGESTIONS and k == 3
+        if population is _COMMENT_DIRECTIONS and k == 3
         else list(population)[:k],
     )
     agent = _make_agent(db_session, "alice")
 
-    prompt, intent = generate_kickoff_prompt(
-        agent, force_intent="browse", unread=unread
+    prompt, intent = _kickoff(
+        db_session, agent, requested_intent="browse", unread=unread
     )
 
     assert intent == "browse"
-    assert all(suggestion in prompt for suggestion in selected)
+    assert all(direction.text in prompt for direction in selected)
     assert all(
-        suggestion not in prompt
-        for suggestion in _COMMENT_SUGGESTIONS
-        if suggestion not in selected
+        direction.text not in prompt
+        for direction in _COMMENT_DIRECTIONS
+        if direction not in selected
     )
 
 
 def test_length_target_weights_cover_every_percentile():
-    from deaddit.agents.memory import (
-        _COMMENT_LENGTH_TARGETS,
-        _MEDIA_LENGTH_TARGETS,
-        _POST_LENGTH_TARGETS,
-        _length_hint,
-    )
+    from deaddit.agents.prompts import _LENGTH_TARGETS, _length_target
 
-    for targets in (
-        _POST_LENGTH_TARGETS,
-        _COMMENT_LENGTH_TARGETS,
-        _MEDIA_LENGTH_TARGETS,
-    ):
-        expected = [hint for hint, weight in targets for _ in range(weight)]
+    for content_kind, targets in _LENGTH_TARGETS.items():
+        expected = [target for target in targets for _ in range(target.weight)]
         assert len(expected) == 100
-        assert [_length_hint(targets, quantile) for quantile in range(100)] == expected
+        assert (
+            [_length_target(content_kind, quantile) for quantile in range(100)]
+            == expected
+        )
 
 
 def test_kickoff_prompt_routes_one_length_target_by_content_type(
     seeded_db, db_session, monkeypatch
 ):
-    from deaddit.agents.memory import (
-        _COMMENT_LENGTH_TARGETS,
-        _MEDIA_LENGTH_TARGETS,
-        _POST_LENGTH_TARGETS,
-        generate_kickoff_prompt,
-    )
+    from deaddit.agents.prompts import _LENGTH_TARGETS
 
     monkeypatch.setattr(random, "choices", lambda *args, **kwargs: [0])
     user = db_session.get(User, "alice")
@@ -534,42 +528,39 @@ def test_kickoff_prompt_routes_one_length_target_by_content_type(
             }
         },
     )
+    text_post_target = _LENGTH_TARGETS["text_post"][0].text
+    media_target = _LENGTH_TARGETS["media_post"][0].text
+    comment_target = _LENGTH_TARGETS["comment"][0].text
     prompts = (
         (
-            generate_kickoff_prompt(agent, user, force_intent="post")[0],
-            _POST_LENGTH_TARGETS[0][0],
+            _kickoff(db_session, agent, user, requested_intent="post")[0],
+            text_post_target,
         ),
         (
-            generate_kickoff_prompt(
-                image_only_agent, image_only_user, force_intent="post"
+            _kickoff(
+                db_session, image_only_agent, image_only_user, requested_intent="post"
             )[0],
-            _MEDIA_LENGTH_TARGETS[0][0],
+            media_target,
         ),
         (
-            generate_kickoff_prompt(agent, user, requested_intent="image")[0],
-            _MEDIA_LENGTH_TARGETS[0][0],
+            _kickoff(db_session, agent, user, requested_intent="image")[0],
+            media_target,
         ),
         (
-            generate_kickoff_prompt(agent, user, unread=2, requested_intent="image")[0],
-            _MEDIA_LENGTH_TARGETS[0][0],
+            _kickoff(db_session, agent, user, unread=2, requested_intent="image")[0],
+            media_target,
         ),
         (
-            generate_kickoff_prompt(agent, user, force_intent="browse")[0],
-            _COMMENT_LENGTH_TARGETS[0][0],
+            _kickoff(db_session, agent, user, requested_intent="browse")[0],
+            comment_target,
         ),
         (
-            generate_kickoff_prompt(agent, user, unread=2, force_intent="browse")[0],
-            _COMMENT_LENGTH_TARGETS[0][0],
+            _kickoff(db_session, agent, user, unread=2, requested_intent="browse")[0],
+            comment_target,
         ),
     )
     all_targets = [
-        hint
-        for targets in (
-            _POST_LENGTH_TARGETS,
-            _COMMENT_LENGTH_TARGETS,
-            _MEDIA_LENGTH_TARGETS,
-        )
-        for hint, _ in targets
+        target.text for targets in _LENGTH_TARGETS.values() for target in targets
     ]
 
     for prompt, expected in prompts:
@@ -578,8 +569,6 @@ def test_kickoff_prompt_routes_one_length_target_by_content_type(
 
 
 def test_kickoff_prompt_post_intent_optional_offers_either_tool(seeded_db, db_session):
-    from deaddit.agents.memory import generate_kickoff_prompt
-
     agent = _make_agent(
         db_session,
         "alice",
@@ -592,15 +581,13 @@ def test_kickoff_prompt_post_intent_optional_offers_either_tool(seeded_db, db_se
             }
         },
     )
-    prompt, intent = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, intent = _kickoff(db_session, agent, requested_intent="post")
     assert intent == "post"
     assert "create_post" in prompt
     assert "create_image_post" in prompt
 
 
 def test_kickoff_prompt_post_intent_image_only_forces_image_tool(seeded_db, db_session):
-    from deaddit.agents.memory import generate_kickoff_prompt
-
     agent = _make_agent(
         db_session,
         "alice",
@@ -613,7 +600,7 @@ def test_kickoff_prompt_post_intent_image_only_forces_image_tool(seeded_db, db_s
             }
         },
     )
-    prompt, intent = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, intent = _kickoff(db_session, agent, requested_intent="post")
     assert intent == "post"
     assert "create_image_post" in prompt
     assert "create_post" not in prompt
@@ -622,8 +609,6 @@ def test_kickoff_prompt_post_intent_image_only_forces_image_tool(seeded_db, db_s
 def test_kickoff_prompt_browse_intent_image_only_never_suggests_create_post(
     seeded_db, db_session
 ):
-    from deaddit.agents.memory import generate_kickoff_prompt
-
     agent = _make_agent(
         db_session,
         "alice",
@@ -636,7 +621,7 @@ def test_kickoff_prompt_browse_intent_image_only_never_suggests_create_post(
             }
         },
     )
-    prompt, intent = generate_kickoff_prompt(agent, force_intent="browse")
+    prompt, intent = _kickoff(db_session, agent, requested_intent="browse")
     assert intent == "browse"
     assert "create_post" not in prompt
     assert "create_image_post" in prompt
@@ -646,14 +631,12 @@ def test_kickoff_prompt_browse_intent_image_only_never_suggests_create_post(
 def test_kickoff_prompt_post_intent_website_only_forces_website_tool(
     seeded_db, db_session
 ):
-    from deaddit.agents.memory import generate_kickoff_prompt
-
     agent = _make_agent(
         db_session,
         "alice",
         config={"website_posts": {"enabled": True, "policy": "website_only"}},
     )
-    prompt, intent = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, intent = _kickoff(db_session, agent, requested_intent="post")
     assert intent == "post"
     assert "create_website" in prompt
     assert "create_post" not in prompt
@@ -664,14 +647,12 @@ def test_kickoff_prompt_post_intent_website_only_forces_website_tool(
 def test_kickoff_prompt_browse_intent_website_only_never_suggests_create_post(
     seeded_db, db_session
 ):
-    from deaddit.agents.memory import generate_kickoff_prompt
-
     agent = _make_agent(
         db_session,
         "alice",
         config={"website_posts": {"enabled": True, "policy": "website_only"}},
     )
-    prompt, intent = generate_kickoff_prompt(agent, force_intent="browse")
+    prompt, intent = _kickoff(db_session, agent, requested_intent="browse")
     assert intent == "browse"
     assert "create_post" not in prompt
     assert "create_image_post" not in prompt
@@ -682,14 +663,12 @@ def test_kickoff_prompt_browse_intent_website_only_never_suggests_create_post(
 def test_kickoff_prompt_post_intent_optional_website_offers_it_alongside_post(
     seeded_db, db_session
 ):
-    from deaddit.agents.memory import generate_kickoff_prompt
-
     agent = _make_agent(
         db_session,
         "alice",
         config={"website_posts": {"enabled": True, "policy": "optional"}},
     )
-    prompt, intent = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, intent = _kickoff(db_session, agent, requested_intent="post")
     assert intent == "post"
     assert "create_post" in prompt
     assert "create_website" in prompt
@@ -702,8 +681,6 @@ def test_kickoff_prompt_post_intent_invalid_combo_degrades_to_browsing(
     tool at all (registry.offered_post_tool_names fails closed). A forced
     post intent must not instruct a post it cannot make - it should
     degrade to the plain browsing kickoff instead."""
-    from deaddit.agents.memory import generate_kickoff_prompt
-
     agent = _make_agent(
         db_session,
         "alice",
@@ -717,7 +694,7 @@ def test_kickoff_prompt_post_intent_invalid_combo_degrades_to_browsing(
             "website_posts": {"enabled": True, "policy": "website_only"},
         },
     )
-    prompt, intent = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, intent = _kickoff(db_session, agent, requested_intent="post")
     assert intent == "browse"
     assert "create_post" not in prompt
     assert "create_image_post" not in prompt
@@ -782,12 +759,10 @@ def test_kickoff_prompt_suggests_only_real_communities(
 ):
     """A1: the no-subscription fallback names only existing communities,
     sampled from the database - never a hardcoded (possibly stale) list."""
-    from deaddit.agents.memory import generate_kickoff_prompt
-
     monkeypatch.setattr(random, "sample", lambda population, k: population[:k])
 
     agent = _make_agent(db_session, "alice")
-    prompt, _ = generate_kickoff_prompt(agent, force_intent="post")
+    prompt, _ = _kickoff(db_session, agent, requested_intent="post")
 
     segment = prompt.split("(such as ", 1)[1].split(" or search", 1)[0]
     suggested = [name.strip() for name in segment.split(",")]
@@ -799,14 +774,12 @@ def test_kickoff_prompt_suggests_only_real_communities(
 
 
 def test_kickoff_prompt_uses_subscriptions_when_present(seeded_db, db_session):
-    from deaddit.agents.memory import generate_kickoff_prompt
-
     user = db_session.get(User, "alice")
     user.agent_state = {"subscriptions": ["testsub"]}
     db_session.commit()
 
     agent = _make_agent(db_session, "alice")
-    prompt, _ = generate_kickoff_prompt(agent, user, force_intent="post")
+    prompt, _ = _kickoff(db_session, agent, user, requested_intent="post")
     assert "(such as testsub)" in prompt
 
 

@@ -17,9 +17,9 @@ import deaddit.llm.capabilities as capabilities
 from deaddit.agents.memory import (
     BACKFILL_PREFIX,
     backfill_persona_history,
-    build_initial_messages,
     summarize_run,
 )
+from deaddit.agents.prompts import prepare_agent_visit
 from deaddit.extensions import db
 from deaddit.llm.errors import CapabilityError
 from deaddit.models import (
@@ -872,7 +872,7 @@ def test_backfill_falls_back_to_extractive_when_provider_raises(
 # Memory: kickoff injection
 
 
-def test_initial_messages_inject_backfills_and_recent_episodes(seeded_db, db_session):
+def test_prepared_visit_injects_backfills_and_recent_episodes(seeded_db, db_session):
     agent = _make_agent(db_session, "alice")
     db.session.add_all(
         [
@@ -891,7 +891,8 @@ def test_initial_messages_inject_backfills_and_recent_episodes(seeded_db, db_ses
     )
     db.session.commit()
 
-    messages, _ = build_initial_messages(agent, db.session.get(User, "alice"))
+    visit = prepare_agent_visit(agent, db.session.get(User, "alice"))
+    messages = visit.messages
     assert messages[0]["role"] == "system"
     kickoff = messages[-1]["content"]
     assert "Your memory:" in kickoff
@@ -901,9 +902,11 @@ def test_initial_messages_inject_backfills_and_recent_episodes(seeded_db, db_ses
     assert "- quiet visit" in kickoff
 
 
-def test_initial_messages_have_no_memory_block_when_empty(seeded_db, db_session):
+def test_prepared_visit_has_no_memory_section_when_empty(seeded_db, db_session):
     agent = _make_agent(db_session, "alice")
 
-    messages, _ = build_initial_messages(agent, db.session.get(User, "alice"))
+    messages = prepare_agent_visit(
+        agent, db.session.get(User, "alice")
+    ).messages
 
     assert "Your memory:" not in messages[-1]["content"]

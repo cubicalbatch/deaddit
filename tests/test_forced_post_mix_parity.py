@@ -6,7 +6,7 @@ import random
 from unittest.mock import patch
 
 from deaddit import Config
-from deaddit.agents.memory import generate_kickoff_prompt
+from deaddit.agents.prompts import prepare_agent_visit
 from deaddit.models import Agent, User
 
 
@@ -42,6 +42,14 @@ def _make_test_agent(db_session, username="alice", **kwargs):
     return agent
 
 
+def _kickoff(db_session, agent, **kwargs):
+    """Prepare one visit and return (kickoff text, resolved intent)."""
+    visit = prepare_agent_visit(
+        agent, db_session.get(User, agent.user_username), **kwargs
+    )
+    return visit.messages[1]["content"], visit.plan.intent
+
+
 def test_seeded_parity_under_default_zero_forced_chances(seeded_db, db_session):
     """Under defaults (AGENT_FORCED_IMAGE_CHANCE=0, AGENT_FORCED_WEBSITE_CHANCE=0),
 
@@ -55,7 +63,7 @@ def test_seeded_parity_under_default_zero_forced_chances(seeded_db, db_session):
     for seed in range(50):
         # Run with memory.py
         random.seed(seed)
-        prompt, intent = generate_kickoff_prompt(agent, unread=0)
+        prompt, intent = _kickoff(db_session, agent, unread=0)
 
         # Re-run the length-quantile and intent RNG consumption manually.
         random.seed(seed)
@@ -85,30 +93,30 @@ def test_categorical_interval_boundaries(seeded_db, db_session):
     with patch(
         "random.random", side_effect=[0.5, 0.10]
     ):  # 1st roll post-chance (0.5 < 1.0), 2nd roll 0.10
-        _, intent = generate_kickoff_prompt(agent, unread=0)
+        _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "image"
 
     # Image boundary exact
     with patch("random.random", side_effect=[0.5, 0.19999]):
-        _, intent = generate_kickoff_prompt(agent, unread=0)
+        _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "image"
 
     # Website slice: 0.20 <= r < 0.50
     with patch("random.random", side_effect=[0.5, 0.20]):
-        _, intent = generate_kickoff_prompt(agent, unread=0)
+        _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "website"
 
     with patch("random.random", side_effect=[0.5, 0.49999]):
-        _, intent = generate_kickoff_prompt(agent, unread=0)
+        _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "website"
 
     # Post remainder slice: r >= 0.50
     with patch("random.random", side_effect=[0.5, 0.50]):
-        _, intent = generate_kickoff_prompt(agent, unread=0)
+        _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "post"
 
     with patch("random.random", side_effect=[0.5, 0.99]):
-        _, intent = generate_kickoff_prompt(agent, unread=0)
+        _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "post"
 
 
@@ -139,7 +147,7 @@ def test_ineligible_selected_slices_degrade_to_post_without_transfer(
 
     # Draw website slice: r = 0.35 (in [0.30, 0.70)) -> should degrade to "post", not "image"
     with patch("random.random", side_effect=[0.5, 0.35]):
-        _, intent = generate_kickoff_prompt(agent, unread=0)
+        _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "post"
 
 
@@ -152,18 +160,18 @@ def test_unread_and_lurker_gates_resolve_browse(seeded_db, db_session):
     Config.set("AGENT_FORCED_IMAGE_CHANCE", "1.0")
 
     # Lurker always browse
-    _, lurk_intent = generate_kickoff_prompt(lurker, unread=0)
+    _, lurk_intent = _kickoff(db_session, lurker, unread=0)
     assert lurk_intent == "browse"
 
     # Unread > 0 resolves to browse under automatic run
-    _, unread_intent = generate_kickoff_prompt(regular, unread=3)
+    _, unread_intent = _kickoff(db_session, regular, unread=3)
     assert unread_intent == "browse"
 
 
 def test_explicit_special_intent_overrides_unread(seeded_db, db_session):
     """Explicit requested special intent overrides unread replies."""
     agent = _make_test_agent(db_session, "alice")
-    prompt, intent = generate_kickoff_prompt(agent, unread=2, requested_intent="image")
+    prompt, intent = _kickoff(db_session, agent, unread=2, requested_intent="image")
     assert intent == "image"
     assert "create_image_post" in prompt
     assert "view_inbox" in prompt or "inbox" in prompt.lower()

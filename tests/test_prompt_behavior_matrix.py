@@ -13,8 +13,11 @@ from unittest.mock import patch
 import pytest
 
 from deaddit import Config
-from deaddit.agents.memory import build_initial_messages, generate_kickoff_prompt
-from deaddit.agents.prompts import build_system_prompt, system_prompt_variables
+from deaddit.agents.prompts import (
+    build_system_prompt,
+    prepare_agent_visit,
+    system_prompt_variables,
+)
 from deaddit.agents.registry import specs_for, tools_for
 from deaddit.models import Agent, User
 
@@ -280,11 +283,12 @@ def test_subscriptions_and_prompt_prose_sections_are_stable(app, db_session):
     # Content tuning and the transient kickoff objective remain in the user
     # message.  Operational tool wording appears in both the system contract
     # and the forced-post kickoff when a post is explicitly requested.
-    with patch("deaddit.agents.memory.random.choices", return_value=[0]):
-        kickoff, intent = generate_kickoff_prompt(
+    with patch("deaddit.agents.prompts.random.choices", return_value=[0]):
+        visit = prepare_agent_visit(
             agent, user, requested_intent="post", unread=0
         )
-    assert intent == "post"
+    kickoff = visit.messages[1]["content"]
+    assert visit.plan.intent == "post"
     assert "For inspiration, choose at most one" in kickoff
     assert "Length target for this text post body:" in kickoff
     assert "You're waking up with something to share." in kickoff
@@ -316,17 +320,19 @@ def test_kickoff_requested_intent_and_unread_matrix(app, db_session):
         for requested in requests:
             for unread in (0, 2):
                 with patch(
-                    "deaddit.agents.memory.random.choices", return_value=[50]
+                    "deaddit.agents.prompts.random.choices", return_value=[50]
                 ), patch(
-                    "deaddit.agents.memory.random.sample",
+                    "deaddit.agents.prompts.random.sample",
                     side_effect=lambda population, count: list(population)[:count],
                 ):
-                    kickoff, resolved = generate_kickoff_prompt(
+                    visit = prepare_agent_visit(
                         agent,
                         user,
                         unread=unread,
                         requested_intent=requested,
                     )
+                kickoff = visit.messages[1]["content"]
+                resolved = visit.plan.intent
 
                 if unread > 0:
                     expected = (
@@ -373,15 +379,14 @@ def test_initial_messages_freeze_unread_notice_and_system_kickoff_roles(
     app, db_session, monkeypatch
 ):
     agent, user = _make_agent(db_session, "initial_messages")
-    monkeypatch.setattr("deaddit.agents.memory.unread_count", lambda username: 2)
-    monkeypatch.setattr("deaddit.agents.memory._memory_block", lambda username: "")
-    with patch("deaddit.agents.memory.random.choices", return_value=[0]), patch(
-        "deaddit.agents.memory.random.sample", side_effect=lambda population, count: list(population)[:count]
+    monkeypatch.setattr("deaddit.agents.prompts.unread_count", lambda username: 2)
+    monkeypatch.setattr("deaddit.agents.prompts.visit_memories", lambda username: None)
+    with patch("deaddit.agents.prompts.random.choices", return_value=[0]), patch(
+        "deaddit.agents.prompts.random.sample", side_effect=lambda population, count: list(population)[:count]
     ):
-        messages, resolved = build_initial_messages(
-            agent, user, requested_intent="browse"
-        )
-    assert resolved == "browse"
+        visit = prepare_agent_visit(agent, user, requested_intent="browse")
+    messages = visit.messages
+    assert visit.plan.intent == "browse"
     assert [message["role"] for message in messages] == ["system", "user"]
     assert messages[0]["content"].startswith("You are initial_messages")
     assert "You have 2 unread replies. Use the view_inbox tool" in messages[1]["content"]
@@ -415,32 +420,32 @@ def test_rng_draw_order_is_length_then_intent_then_content_tuning(
     Config.set("AGENT_POST_INTENT_CHANCE", "1.0")
     Config.set("AGENT_FORCED_IMAGE_CHANCE", "0.0")
     Config.set("AGENT_FORCED_WEBSITE_CHANCE", "0.0")
-    with patch("deaddit.agents.memory.random.choices", choices), patch(
-        "deaddit.agents.memory.random.random", random_value
-    ), patch("deaddit.agents.memory.random.sample", sample):
-        _, intent = generate_kickoff_prompt(agent, user, unread=0)
-    assert intent == "post"
+    with patch("deaddit.agents.prompts.random.choices", choices), patch(
+        "deaddit.agents.prompts.random.random", random_value
+    ), patch("deaddit.agents.prompts.random.sample", sample):
+        visit = prepare_agent_visit(agent, user, unread=0)
+    assert visit.plan.intent == "post"
     assert events == ["length", "random", "sample", "sample"]
 
     events.clear()
-    with patch("deaddit.agents.memory.random.choices", choices), patch(
-        "deaddit.agents.memory.random.random", random_value
-    ), patch("deaddit.agents.memory.random.sample", sample):
-        _, intent = generate_kickoff_prompt(
+    with patch("deaddit.agents.prompts.random.choices", choices), patch(
+        "deaddit.agents.prompts.random.random", random_value
+    ), patch("deaddit.agents.prompts.random.sample", sample):
+        visit = prepare_agent_visit(
             agent, user, unread=0, requested_intent="browse"
         )
-    assert intent == "browse"
+    assert visit.plan.intent == "browse"
     assert events == ["length", "sample"]
 
     events.clear()
     lurker, lurker_user = _make_agent(db_session, "rng_lurker", tier="lurker")
-    with patch("deaddit.agents.memory.random.choices", choices), patch(
-        "deaddit.agents.memory.random.random", random_value
-    ), patch("deaddit.agents.memory.random.sample", sample):
-        _, intent = generate_kickoff_prompt(
+    with patch("deaddit.agents.prompts.random.choices", choices), patch(
+        "deaddit.agents.prompts.random.random", random_value
+    ), patch("deaddit.agents.prompts.random.sample", sample):
+        visit = prepare_agent_visit(
             lurker, lurker_user, unread=0, requested_intent="post"
         )
-    assert intent == "browse"
+    assert visit.plan.intent == "browse"
     assert events == ["length"]
 
 
@@ -456,10 +461,14 @@ def test_same_seed_and_inputs_are_byte_identical(app, db_session):
     Config.set("AGENT_FORCED_WEBSITE_CHANCE", "0.50")
 
     random.seed(90210)
-    first_prompt, first_intent = generate_kickoff_prompt(agent, user, unread=0)
+    first = prepare_agent_visit(agent, user, unread=0)
     random.seed(90210)
-    second_prompt, second_intent = generate_kickoff_prompt(agent, user, unread=0)
-    assert (first_prompt, first_intent) == (second_prompt, second_intent)
+    second = prepare_agent_visit(agent, user, unread=0)
+    assert first.messages == second.messages
+    assert first.plan == second.plan
+    assert [spec.name for spec in first.tool_specs] == [
+        spec.name for spec in second.tool_specs
+    ]
 
 
 @pytest.mark.parametrize(
@@ -483,14 +492,15 @@ def test_automatic_sampled_intent_uses_current_categorical_slices(
     Config.set("AGENT_FORCED_IMAGE_CHANCE", "0.25")
     Config.set("AGENT_FORCED_WEBSITE_CHANCE", "0.50")
     with patch(
-        "deaddit.agents.memory.random.random",
+        "deaddit.agents.prompts.random.random",
         side_effect=[0.0, kind_draw],
     ), patch(
-        "deaddit.agents.memory.random.sample",
+        "deaddit.agents.prompts.random.sample",
         side_effect=lambda population, count: list(population)[:count],
     ):
-        kickoff, intent = generate_kickoff_prompt(agent, user, unread=0)
-    assert intent == expected_intent
+        visit = prepare_agent_visit(agent, user, unread=0)
+    kickoff = visit.messages[1]["content"]
+    assert visit.plan.intent == expected_intent
     assert tool_name in kickoff
 
 
@@ -513,11 +523,12 @@ def test_length_quantile_selects_current_content_family(
         f"length_{intent}_{quantile}",
         image_mode="optional",
     )
-    with patch("deaddit.agents.memory.random.choices", return_value=[quantile]), patch(
-        "deaddit.agents.memory.random.sample", side_effect=lambda population, count: list(population)[:count]
+    with patch("deaddit.agents.prompts.random.choices", return_value=[quantile]), patch(
+        "deaddit.agents.prompts.random.sample", side_effect=lambda population, count: list(population)[:count]
     ):
-        kickoff, resolved = generate_kickoff_prompt(
+        visit = prepare_agent_visit(
             agent, user, requested_intent=intent, unread=0
         )
-    assert resolved == intent
+    kickoff = visit.messages[1]["content"]
+    assert visit.plan.intent == intent
     assert needle in kickoff

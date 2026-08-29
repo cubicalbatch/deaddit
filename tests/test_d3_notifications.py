@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import event
 
 from deaddit.agents.executor import execute
-from deaddit.agents.memory import build_initial_messages
+from deaddit.agents.prompts import prepare_agent_visit
 from deaddit.agents.registry import ToolContext
 from deaddit.dynamics.inbox import (
     get_inbox,
@@ -454,13 +454,15 @@ def _agent_with_memory(db_session, username):
     return agent
 
 
-def test_build_initial_messages_includes_memory_then_unread_notice(
+def test_prepared_visit_includes_memory_then_unread_notice(
     seeded_db, db_session
 ):
     agent = _agent_with_memory(db_session, "alice")
     _seed_inbox(db_session, "alice", 2)
 
-    messages, _ = build_initial_messages(agent, db_session.get(User, "alice"))
+    messages = prepare_agent_visit(
+        agent, db_session.get(User, "alice")
+    ).messages
     kickoff = messages[-1]["content"]
 
     assert "Your memory:" in kickoff
@@ -471,10 +473,12 @@ def test_build_initial_messages_includes_memory_then_unread_notice(
     assert kickoff.index("Your memory:") < kickoff.index("You have 2 unread replies")
 
 
-def test_build_initial_messages_omits_notice_when_nothing_unread(seeded_db, db_session):
+def test_prepared_visit_omits_notice_when_nothing_unread(seeded_db, db_session):
     agent = _agent_with_memory(db_session, "alice")
 
-    messages, _ = build_initial_messages(agent, db_session.get(User, "alice"))
+    messages = prepare_agent_visit(
+        agent, db_session.get(User, "alice")
+    ).messages
     kickoff = messages[-1]["content"]
 
     assert "Your memory:" in kickoff

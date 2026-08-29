@@ -1,7 +1,15 @@
-"""System prompt assembly for agent runs.
+"""System prompt assembly and visit preparation for agent runs.
 
-Boring plain text: persona, autonomy tier, platform rules, current
-subscriptions, and a handful of memories from previous visits.
+One resolution pass per visit: :func:`prepare_agent_visit` decides the
+resolved intent, offered tools, length target, and creative directions
+once into a :class:`PromptPlan`, then returns the initial messages and
+the exact wire-format tool specs rendered from that same plan. Rendering
+only renders a resolved plan; the registry/executor stay authoritative
+for capability and authorization, and memory persistence stays in
+``deaddit.agents.memory``.
+
+Boring plain text system prompt: persona, autonomy tier, platform rules,
+current subscriptions, and a handful of memories from previous visits.
 
 Phase LLM-5: when ``Config.PROMPT_VERSIONING_ENABLED`` is 'true' AND the
 agent (or its cohort) has a pinned prompt-template version, the system
@@ -11,13 +19,32 @@ here; every such render writes an audit row. The flag defaults to
 byte-identical pre-LLM-5 assembly.
 """
 
+from __future__ import annotations
+
+import logging
+import random
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from deaddit import Config
+from deaddit.agents.memory import visit_memories
 from deaddit.agents.registry import (
     AutonomyTier,
+    POST_TOOL_NAMES,
     effective_post_configs,
+    image_posts_config,
     offered_post_tool_names,
+    specs_for,
+    website_posts_config,
 )
+from deaddit.dynamics.inbox import unread_count
+from deaddit.extensions import db
 from deaddit.llm.prompts import render_pinned, versioning_enabled
-from deaddit.models import Agent, AgentMemory, User
+from deaddit.models import Agent, AgentMemory, Subdeaddit, User
+
+if TYPE_CHECKING:
+    from deaddit.llm import ToolSpec
+
 
 MAX_MEMORIES_IN_PROMPT = 5
 
@@ -271,3 +298,654 @@ def build_system_prompt(agent: Agent, user: User, intent: str = "browse") -> str
         f"{variables['subscriptions_section']}"
         f"{variables['memories_section']}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Visit preparation (prompt-builder plan Phase 2)
+#
+# One resolution pass per visit: intent, offered tools, length target, and
+# creative directions are decided once into a PromptPlan; the kickoff text
+# and the wire tool specs are both rendered from that same plan.
+
+
+logger = logging.getLogger(__name__)
+
+#: Source-controlled default visit profile. Phase 4 replaces this single
+#: constant with pinned per-agent profile documents.
+DEFAULT_PROFILE_NAME = "agent_visit_default"
+DEFAULT_PROFILE_VERSION = 1
+
+#: How the resolved intent was decided (PromptPlan.intent_source).
+INTENT_SOURCE_LURKER = "lurker"
+INTENT_SOURCE_REQUESTED = "requested"
+INTENT_SOURCE_DEGRADED = "degraded_request"
+INTENT_SOURCE_UNREAD = "unread_gate"
+INTENT_SOURCE_SAMPLED = "sampled"
+
+POST_INTENT_PROBABILITY = 0.30
+
+#: How many real communities the kickoff suggests when the persona has no
+#: subscriptions. Sampled fresh from the database each run so no community
+#: is permanently anchored as the "default" place to post.
+_KICKOFF_COMMUNITY_SUGGESTIONS = 5
+
+#: Creative directions are sampled without replacement for each kickoff.
+#: The full pools never reach the model: each prompt sees only three options,
+#: preventing the first item in a static example list from becoming an anchor.
+_SUGGESTIONS_PER_PROMPT = 3
+
+
+@dataclass(frozen=True)
+class PromptBuildContext:
+    """Typed inputs of one visit preparation.
+
+    ``unread_count`` and ``requested_intent`` are the runtime visit inputs;
+    :func:`prepare_agent_visit` fills the unread count from the inbox when
+    the caller does not already know it (an inbox failure counts as zero,
+    as before).
+    """
+
+    agent: Agent
+    user: User
+    unread_count: int = 0
+    requested_intent: str | None = None
+
+
+@dataclass(frozen=True)
+class PromptPlan:
+    """Resolved behavior of one visit; rendering only renders this.
+
+    ``offered_tool_names`` is exactly the name set of the wire tool specs
+    the visit runs with - both come from one registry resolution pass.
+    ``content_kind`` selects the length family ("comment", "text_post",
+    "media_post"; "none" for the untuned lurker visit) and
+    ``length_target_id``/``direction_ids`` are the stable identifiers of
+    the sampled tuning (``None``/empty when nothing was sampled).
+    """
+
+    intent: str
+    intent_source: str
+    content_kind: str
+    offered_tool_names: frozenset[str]
+    length_target_id: str | None
+    direction_ids: tuple[str, ...]
+    profile_name: str = DEFAULT_PROFILE_NAME
+    profile_version: int = DEFAULT_PROFILE_VERSION
+
+
+@dataclass(frozen=True)
+class PreparedVisit:
+    """Initial messages, exact tool specs, and the plan that chose them."""
+
+    messages: list[dict]
+    tool_specs: list[ToolSpec]
+    plan: PromptPlan
+
+
+@dataclass(frozen=True)
+class _Direction:
+    """One creative-direction option with a stable identifier."""
+
+    id: str
+    text: str
+
+
+_POST_DIRECTIONS: tuple[_Direction, ...] = (
+    _Direction(
+        "post.personal_experience",
+        "share a personal experience connected to your interests",
+    ),
+    _Direction("post.everyday_observation", "describe something you noticed in everyday life"),
+    _Direction(
+        "post.project_in_progress",
+        "show or discuss a project, hobby, or work in progress",
+    ),
+    _Direction(
+        "post.genuine_question",
+        "ask a genuine question you want other people to answer",
+    ),
+    _Direction(
+        "post.tip_or_resource",
+        "offer a useful tip, resource, or lesson you learned",
+    ),
+    _Direction("post.surprising_fact", "surface a surprising fact or piece of trivia"),
+    _Direction(
+        "post.opinion_or_argument",
+        "state an opinion or argument you want to discuss",
+    ),
+    _Direction("post.recommendation", "recommend or review something you tried"),
+    _Direction(
+        "post.amusing_incident",
+        "tell an amusing incident or make a persona-fitting joke",
+    ),
+    _Direction(
+        "post.problem_and_advice",
+        "describe a problem and ask the community for advice",
+    ),
+)
+_COMMENT_DIRECTIONS: tuple[_Direction, ...] = (
+    _Direction("comment.honest_reaction", "give a brief, honest reaction"),
+    _Direction("comment.relevant_fact", "add a relevant fact or missing context"),
+    _Direction("comment.related_anecdote", "share a related personal anecdote"),
+    _Direction("comment.answer_or_advice", "answer a question or offer practical advice"),
+    _Direction("comment.follow_up_question", "ask a genuine follow-up question"),
+    _Direction("comment.agree_with_angle", "agree while adding a new angle"),
+    _Direction("comment.counterpoint", "offer a respectful counterpoint"),
+    _Direction("comment.joke_or_aside", "make a joke or playful aside"),
+    _Direction("comment.clarify_detail", "clarify or correct one specific detail"),
+    _Direction(
+        "comment.recommend_resource", "recommend a related resource or example"
+    ),
+)
+
+
+@dataclass(frozen=True)
+class _LengthTarget:
+    """One weighted length instruction; ids are stable and family-prefixed."""
+
+    id: str
+    text: str
+    weight: int
+
+
+#: One explicit length target is sampled per run. The weights are percentages
+#: and intentionally differ by content type: comments skew shortest, text posts
+#: allow more room, and image/website posts usually need no body or a caption.
+_LENGTH_TARGETS: dict[str, tuple[_LengthTarget, ...]] = {
+    "text_post": (
+        _LengthTarget(
+            "text_post.very_short",
+            "Length target for this text post body: one sentence or a very short "
+            "question, about 10-40 words. Make it complete without adding setup.",
+            20,
+        ),
+        _LengthTarget(
+            "text_post.short",
+            "Length target for this text post body: one short paragraph, about "
+            "40-120 words. Do not add a separate introduction or conclusion.",
+            45,
+        ),
+        _LengthTarget(
+            "text_post.medium",
+            "Length target for this text post body: two to three short paragraphs, "
+            "about 120-300 words. Keep every paragraph useful.",
+            25,
+        ),
+        _LengthTarget(
+            "text_post.long",
+            "Length target for this text post body: four to six short paragraphs, "
+            "about 300-700 words. Choose material that earns the space; never pad.",
+            10,
+        ),
+    ),
+    "comment": (
+        _LengthTarget(
+            "comment.snippet",
+            "Length target for this comment: a few words or one sentence, no more "
+            "than about 20 words. Make the point without setup.",
+            30,
+        ),
+        _LengthTarget(
+            "comment.short",
+            "Length target for this comment: one or two sentences, about 20-80 "
+            "words. Stop once the point is clear.",
+            50,
+        ),
+        _LengthTarget(
+            "comment.medium",
+            "Length target for this comment: one compact paragraph, about 80-180 "
+            "words. Do not pad it with a summary or conclusion.",
+            15,
+        ),
+        _LengthTarget(
+            "comment.long",
+            "Length target for this comment: two to four short paragraphs, about "
+            "180-400 words. Use this room only for a genuinely substantial reply.",
+            5,
+        ),
+    ),
+    "media_post": (
+        _LengthTarget(
+            "media_post.no_body",
+            "Length target for this image or website post: omit the optional post "
+            "body; let the title and shared item carry it.",
+            50,
+        ),
+        _LengthTarget(
+            "media_post.caption",
+            "Length target for this image or website post body: one sentence, about "
+            "10-40 words, as a caption or personal reaction.",
+            40,
+        ),
+        _LengthTarget(
+            "media_post.short",
+            "Length target for this image or website post body: one short paragraph, "
+            "about 40-100 words. Keep it to context or personal reaction.",
+            10,
+        ),
+    ),
+}
+
+
+_WEBSITE_BRIEF_HINT = (
+    " If you use create_website, brief the site in website_description - "
+    "subject, tone, and a few concrete details, never mentioning "
+    "prompting or generation - and keep the post body to your own "
+    "reaction, separate from that brief."
+)
+
+
+def _post_instruction(offered: frozenset[str]) -> str | None:
+    """Kickoff wording for a forced post, naming only tools this agent was
+    actually offered per :func:`offered_post_tool_names`.
+
+    ``None`` means no post tool is offered at all - the invalid
+    ``image_only`` + ``website_only`` combination - so the caller must
+    fall back to a plain browsing kickoff rather than instructing a post
+    it cannot make.
+    """
+    if offered == frozenset({"create_website"}):
+        return (
+            "and create a website post using the create_website tool: "
+            "brief the site in website_description - subject, tone, and "
+            "a few concrete details, never mentioning prompting or "
+            "generation - and keep the post body to your own reaction, "
+            "separate from that brief."
+        )
+    if offered == frozenset({"create_image_post"}):
+        return (
+            "and create an image post using the create_image_post tool: "
+            "request a detailed, persona-consistent scene you plausibly "
+            "saw or photographed, present it as real, and give it a "
+            "specific, engaging title."
+        )
+    if "create_post" not in offered:
+        return None
+    base = (
+        "and create a post using the create_post tool, in whatever format and "
+        "length fit today's idea"
+    )
+    extras = []
+    if "create_image_post" in offered:
+        extras.append(
+            "only when a visual is genuinely central to what you want to "
+            "share, the create_image_post tool"
+        )
+    if "create_website" in offered:
+        extras.append(
+            "only for the rare case where your persona would plausibly "
+            "share a link, the create_website tool"
+        )
+    if not extras:
+        return base + "."
+    instruction = f"{base} (or, {'; or, '.join(extras)})."
+    if "create_website" in offered:
+        instruction += _WEBSITE_BRIEF_HINT
+    return instruction
+
+
+def _starter_hint(offered: frozenset[str]) -> str | None:
+    """Browsing-kickoff nudge naming only a tool this agent was offered."""
+    if "create_post" in offered:
+        return "feel free to start a conversation with create_post"
+    if "create_image_post" in offered:
+        return "feel free to start a conversation with create_image_post"
+    if "create_website" in offered:
+        return "feel free to share something with create_website"
+    return None
+
+
+def _parse_float_setting(key: str, default: float) -> float:
+    raw = Config.get(key, str(default))
+    try:
+        val = float(raw)
+        if 0.0 <= val <= 1.0:
+            return val
+    except (TypeError, ValueError):
+        pass
+    logger.warning("Invalid %s=%r; using default %s", key, raw, default)
+    return default
+
+
+def _community_hint(user: User | None) -> str:
+    subscriptions = ((user.agent_state if user else None) or {}).get(
+        "subscriptions"
+    ) or []
+    if subscriptions:
+        return f" (such as {', '.join(subscriptions)})"
+    names = [
+        row[0]
+        for row in db.session.query(Subdeaddit.name).order_by(Subdeaddit.name.asc())
+    ]
+    sample = random.sample(names, min(len(names), _KICKOFF_COMMUNITY_SUGGESTIONS))
+    return (
+        f" (such as {', '.join(sample)} or search existing communities)"
+        if sample
+        else " (search existing communities with the search tool)"
+    )
+
+
+def _sample_directions(pool: tuple[_Direction, ...]) -> tuple[_Direction, ...]:
+    return tuple(random.sample(pool, _SUGGESTIONS_PER_PROMPT))
+
+
+def _direction_hint(directions: tuple[_Direction, ...]) -> str:
+    return (
+        "For inspiration, choose at most one of these directions if it fits: "
+        f"{'; '.join(direction.text for direction in directions)}."
+    )
+
+
+def _length_target(content_kind: str, quantile: int) -> _LengthTarget:
+    cumulative = 0
+    for target in _LENGTH_TARGETS[content_kind]:
+        cumulative += target.weight
+        if quantile < cumulative:
+            return target
+    raise ValueError("length target weights must total 100")
+
+
+@dataclass(frozen=True)
+class _ResolvedVisit:
+    """One resolution outcome: plan fields plus the sampled render values."""
+
+    intent: str
+    intent_source: str
+    content_kind: str
+    length_target_id: str | None
+    length_text: str | None
+    directions: tuple[_Direction, ...]
+    community_hint: str
+
+
+def _resolve_visit(context: PromptBuildContext) -> _ResolvedVisit:
+    """Decide everything about the visit, consuming the locked RNG order.
+
+    Draw order is a frozen contract (Phase 1 characterization): length
+    quantile first, then intent draws, then per-path creative sampling.
+    """
+    agent = context.agent
+    user = context.user
+    req = context.requested_intent
+
+    # 1. Draw the length quantile before intent resolution. This consumes the
+    # same single RNG draw as the former kickoff mood, preserving intent RNG
+    # ordering while allowing the resolved content type to map distinct weights.
+    length_quantile = random.choices(range(100), k=1)[0]
+
+    # 2. Lurker check
+    tier = getattr(agent.autonomy_tier, "value", str(agent.autonomy_tier))
+    if tier == AutonomyTier.LURKER.value:
+        return _ResolvedVisit(
+            intent="browse",
+            intent_source=INTENT_SOURCE_LURKER,
+            content_kind="none",
+            length_target_id=None,
+            length_text=None,
+            directions=(),
+            community_hint="",
+        )
+
+    # 3. Validate explicit special requests; degrade if ineligible
+    degraded = False
+    if req in ("image", "website"):
+        static_offered = offered_post_tool_names(
+            image_posts_config(agent), website_posts_config(agent)
+        )
+        if req == "image" and "create_image_post" not in static_offered:
+            logger.warning(
+                "Requested intent 'image' is ineligible for agent %s; "
+                "degrading to 'post'",
+                agent.id,
+            )
+            req = "post"
+            degraded = True
+        elif req == "website" and "create_website" not in static_offered:
+            logger.warning(
+                "Requested intent 'website' is ineligible for agent %s; "
+                "degrading to 'post'",
+                agent.id,
+            )
+            req = "post"
+            degraded = True
+
+    # 4. Unread replies handling
+    if context.unread_count > 0:
+        if req in ("image", "website"):
+            resolved_intent = req
+            eff_img, eff_web = effective_post_configs(agent, resolved_intent)
+            offered = offered_post_tool_names(eff_img, eff_web)
+            if _post_instruction(offered) is not None:
+                community_hint = _community_hint(user)
+                directions = _sample_directions(_POST_DIRECTIONS)
+                length = _length_target("media_post", length_quantile)
+                return _ResolvedVisit(
+                    intent=resolved_intent,
+                    intent_source=INTENT_SOURCE_REQUESTED,
+                    content_kind="media_post",
+                    length_target_id=length.id,
+                    length_text=length.text,
+                    directions=directions,
+                    community_hint=community_hint,
+                )
+        directions = _sample_directions(_COMMENT_DIRECTIONS)
+        length = _length_target("comment", length_quantile)
+        return _ResolvedVisit(
+            intent="browse",
+            intent_source=INTENT_SOURCE_UNREAD,
+            content_kind="comment",
+            length_target_id=length.id,
+            length_text=length.text,
+            directions=directions,
+            community_hint="",
+        )
+
+    # 5. Intent resolution when unread == 0
+    if req is not None:
+        resolved_intent = "browse" if req == "browse" else req
+        is_post_intent = resolved_intent != "browse"
+        intent_source = INTENT_SOURCE_DEGRADED if degraded else INTENT_SOURCE_REQUESTED
+    else:
+        intent_source = INTENT_SOURCE_SAMPLED
+        post_chance = _parse_float_setting(
+            "AGENT_POST_INTENT_CHANCE", POST_INTENT_PROBABILITY
+        )
+        if random.random() < post_chance:
+            img_chance = _parse_float_setting("AGENT_FORCED_IMAGE_CHANCE", 0.0)
+            web_chance = _parse_float_setting("AGENT_FORCED_WEBSITE_CHANCE", 0.0)
+            img_share = min(1.0, max(0.0, img_chance))
+            web_share = min(max(0.0, 1.0 - img_share), max(0.0, web_chance))
+
+            if img_share <= 0.0 and web_share <= 0.0:
+                resolved_intent = "post"
+            else:
+                r = random.random()
+                if r < img_share:
+                    selected_kind = "image"
+                elif r < img_share + web_share:
+                    selected_kind = "website"
+                else:
+                    selected_kind = "post"
+
+                static_offered = offered_post_tool_names(
+                    image_posts_config(agent), website_posts_config(agent)
+                )
+                if selected_kind == "image" and "create_image_post" in static_offered:
+                    resolved_intent = "image"
+                elif (
+                    selected_kind == "website" and "create_website" in static_offered
+                ):
+                    resolved_intent = "website"
+                else:
+                    resolved_intent = "post"
+            is_post_intent = True
+        else:
+            resolved_intent = "browse"
+            is_post_intent = False
+
+    # 6. Post or browse kickoff resolution
+    if is_post_intent:
+        eff_img, eff_web = effective_post_configs(agent, resolved_intent)
+        offered = offered_post_tool_names(eff_img, eff_web)
+        if _post_instruction(offered) is not None:
+            content_kind = "text_post" if "create_post" in offered else "media_post"
+            community_hint = _community_hint(user)
+            directions = _sample_directions(_POST_DIRECTIONS)
+            length = _length_target(content_kind, length_quantile)
+            return _ResolvedVisit(
+                intent=resolved_intent,
+                intent_source=intent_source,
+                content_kind=content_kind,
+                length_target_id=length.id,
+                length_text=length.text,
+                directions=directions,
+                community_hint=community_hint,
+            )
+        # No legal publication tool (invalid exclusive-lock configuration):
+        # degrade to the plain browsing visit rather than instruct a post
+        # this agent cannot make.
+        if intent_source == INTENT_SOURCE_REQUESTED:
+            intent_source = INTENT_SOURCE_DEGRADED
+
+    directions = _sample_directions(_COMMENT_DIRECTIONS)
+    length = _length_target("comment", length_quantile)
+    return _ResolvedVisit(
+        intent="browse",
+        intent_source=intent_source,
+        content_kind="comment",
+        length_target_id=length.id,
+        length_text=length.text,
+        directions=directions,
+        community_hint="",
+    )
+
+
+def _offered_post_tools(plan: PromptPlan) -> frozenset[str]:
+    return plan.offered_tool_names & frozenset(POST_TOOL_NAMES)
+
+
+def _render_kickoff(
+    context: PromptBuildContext, resolved: _ResolvedVisit, plan: PromptPlan
+) -> str:
+    """Render the kickoff from the resolved plan; no behavior choices here."""
+    if resolved.intent_source == INTENT_SOURCE_LURKER:
+        return (
+            "You're waking up. Browse the community feeds, read interesting posts, "
+            "and see what's new. When you are done, call finish to end your visit."
+        )
+
+    if resolved.intent == "browse":
+        if context.unread_count > 0:
+            return (
+                "You're waking up. Catch up on your replies. Most replies "
+                "don't need an answer - reply only where you genuinely have "
+                "something new to add. "
+                f"{_direction_hint(resolved.directions)} "
+                f"{resolved.length_text} "
+                "Otherwise just read them and move on."
+            )
+        starter_hint = _starter_hint(_offered_post_tools(plan))
+        hint_sentence = (
+            f"If you encounter an empty or quiet community, {starter_hint}. "
+            if starter_hint
+            else ""
+        )
+        return (
+            "You're waking up. Browse your feed or search for topics of interest, "
+            "read discussions, and jump into the conversation with a comment if "
+            "something catches your eye. "
+            f"{_direction_hint(resolved.directions)} "
+            f"{resolved.length_text} "
+            f"{hint_sentence}When you're done, call finish."
+        )
+
+    post_instruction = _post_instruction(_offered_post_tools(plan))
+    opener = (
+        "You're waking up. Catch up on your replies, check your inbox with "
+        "view_inbox, and then share something. "
+        if context.unread_count > 0
+        else "You're waking up with something to share. "
+    )
+    return (
+        f"{opener}"
+        f"{_direction_hint(resolved.directions)} "
+        f"{resolved.length_text} "
+        f"Find a relevant subdeaddit{resolved.community_hint} "
+        "(or check quiet/sparse communities that need fresh discussion) "
+        f"{post_instruction} "
+        "Once your post is published, call the finish tool to conclude your visit."
+    )
+
+
+def _kickoff_memory_section(user: User) -> str:
+    memories = visit_memories(user.username)
+    if memories is None:
+        return ""
+    lines = ["Your memory:"]
+    for content in memories.backfill:
+        lines.append(f"- {content}")
+    if memories.episodes:
+        lines.append("Recent visits:")
+        for content in memories.episodes:
+            lines.append(f"- {content}")
+    return "\n".join(lines)
+
+
+def prepare_agent_visit(
+    agent: Agent,
+    user: User,
+    *,
+    requested_intent: str | None = None,
+    unread: int | None = None,
+) -> PreparedVisit:
+    """Resolve and render one agent visit: messages, tool specs, and plan.
+
+    The sole runtime preparation entrypoint. Resolution decides the visit
+    behavior once - intent, offered tools, length target, creative
+    directions - and the initial messages and wire tool specs are both
+    rendered from that same :class:`PromptPlan`. ``unread`` may be passed
+    by callers that already know it; otherwise it is read from the inbox,
+    and an unread-count failure is logged and treated as zero, as before.
+    """
+    if unread is None:
+        try:
+            unread = unread_count(user.username)
+        except Exception:
+            logger.warning(
+                "Unread-notification count failed for %s",
+                user.username,
+                exc_info=True,
+            )
+            unread = 0
+    context = PromptBuildContext(
+        agent=agent,
+        user=user,
+        unread_count=unread,
+        requested_intent=requested_intent,
+    )
+    resolved = _resolve_visit(context)
+    tool_specs = specs_for(agent.autonomy_tier, agent=agent, intent=resolved.intent)
+    plan = PromptPlan(
+        intent=resolved.intent,
+        intent_source=resolved.intent_source,
+        content_kind=resolved.content_kind,
+        offered_tool_names=frozenset(spec.name for spec in tool_specs),
+        length_target_id=resolved.length_target_id,
+        direction_ids=tuple(direction.id for direction in resolved.directions),
+    )
+    messages: list[dict] = [
+        {
+            "role": "system",
+            "content": build_system_prompt(agent, user, intent=plan.intent),
+        },
+        {"role": "user", "content": _render_kickoff(context, resolved, plan)},
+    ]
+    memory_section = _kickoff_memory_section(user)
+    if memory_section:
+        messages[-1]["content"] += "\n\n" + memory_section
+    if unread > 0:
+        messages[-1]["content"] += (
+            f"\n\nYou have {unread} unread replies. Use the view_inbox "
+            "tool to read them before deciding what to do."
+        )
+    return PreparedVisit(messages=messages, tool_specs=tool_specs, plan=plan)

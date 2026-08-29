@@ -17,12 +17,9 @@ from sqlalchemy.exc import IntegrityError
 
 from deaddit import Config
 from deaddit.agents.executor import execute
-from deaddit.agents.memory import (
-    build_initial_messages,
-    ensure_lazy_backfill,
-    summarize_run,
-)
-from deaddit.agents.registry import ToolContext, specs_for
+from deaddit.agents.memory import ensure_lazy_backfill, summarize_run
+from deaddit.agents.prompts import prepare_agent_visit
+from deaddit.agents.registry import ToolContext
 from deaddit.extensions import db
 from deaddit.images.types import Deadline
 from deaddit.llm import (
@@ -304,13 +301,12 @@ def run_once(
 
     user = db.session.get(User, run.persona_username)
     ensure_lazy_backfill(agent, user)
-    messages, resolved_intent = build_initial_messages(
-        agent, user, requested_intent=req
-    )
-    run.intent = resolved_intent
+    visit = prepare_agent_visit(agent, user, requested_intent=req)
+    messages = visit.messages
+    run.intent = visit.plan.intent
     db.session.commit()
 
-    specs = specs_for(agent.autonomy_tier, agent=agent, intent=resolved_intent)
+    specs = visit.tool_specs
 
     usage: dict[str, int] = dict.fromkeys(USAGE_KEYS, 0)
     turn_count = 0
@@ -323,7 +319,7 @@ def run_once(
         agent=agent,
         run=run,
         user_username=run.persona_username,
-        post_intent=resolved_intent,
+        post_intent=visit.plan.intent,
         llm_api_url=api_url,
         llm_api_key=api_key,
         llm_model=model,
