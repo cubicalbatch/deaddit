@@ -1,13 +1,18 @@
-"""Forced post mix: RNG seed parity and categorical distribution tests."""
+"""Forced post mix: RNG seed parity and categorical distribution tests.
+
+Phase 4: the mix lives in the pinned immutable ``agent.visit_profile``
+document, not in Config settings.
+"""
 
 from __future__ import annotations
 
 import random
 from unittest.mock import patch
 
-from deaddit import Config
 from deaddit.agents.prompts import prepare_agent_visit
 from deaddit.models import Agent, User
+
+from tests.visit_profiles import pin_intent_mix
 
 
 def _make_test_agent(db_session, username="alice", **kwargs):
@@ -51,17 +56,12 @@ def _kickoff(db_session, agent, **kwargs):
 
 
 def test_seeded_parity_under_default_zero_forced_chances(seeded_db, db_session):
-    """Under defaults (AGENT_FORCED_IMAGE_CHANCE=0, AGENT_FORCED_WEBSITE_CHANCE=0),
-
-    the RNG consumption must match the legacy single-roll behaviour exactly.
-    """
+    """Under a 0.30/0/0 profile mix the RNG consumption must match the legacy
+    single-roll behaviour exactly."""
     agent = _make_test_agent(db_session, "alice")
-    Config.set("AGENT_POST_INTENT_CHANCE", "0.30")
-    Config.set("AGENT_FORCED_IMAGE_CHANCE", "0.0")
-    Config.set("AGENT_FORCED_WEBSITE_CHANCE", "0.0")
+    pin_intent_mix(agent, post=0.30, image=0.0, website=0.0)
 
     for seed in range(50):
-        # Run with memory.py
         random.seed(seed)
         prompt, intent = _kickoff(db_session, agent, unread=0)
 
@@ -85,9 +85,7 @@ def test_seeded_parity_under_default_zero_forced_chances(seeded_db, db_session):
 def test_categorical_interval_boundaries(seeded_db, db_session):
     """Verify exact categorical interval mapping [0, image_share), [image_share, image_share + website_share), [sum, 1)."""
     agent = _make_test_agent(db_session, "alice")
-    Config.set("AGENT_POST_INTENT_CHANCE", "1.0")  # always post intent
-    Config.set("AGENT_FORCED_IMAGE_CHANCE", "0.20")
-    Config.set("AGENT_FORCED_WEBSITE_CHANCE", "0.30")
+    pin_intent_mix(agent, post=1.0, image=0.20, website=0.30)
 
     # Image slice: r < 0.20
     with patch(
@@ -141,9 +139,7 @@ def test_ineligible_selected_slices_degrade_to_post_without_transfer(
             "website_posts": {"enabled": False, "policy": "optional"},
         },
     )
-    Config.set("AGENT_POST_INTENT_CHANCE", "1.0")
-    Config.set("AGENT_FORCED_IMAGE_CHANCE", "0.30")
-    Config.set("AGENT_FORCED_WEBSITE_CHANCE", "0.40")
+    pin_intent_mix(agent, post=1.0, image=0.30, website=0.40)
 
     # Draw website slice: r = 0.35 (in [0.30, 0.70)) -> should degrade to "post", not "image"
     with patch("random.random", side_effect=[0.5, 0.35]):
@@ -156,8 +152,8 @@ def test_unread_and_lurker_gates_resolve_browse(seeded_db, db_session):
     lurker = _make_test_agent(db_session, "lurky", tier="lurker")
     regular = _make_test_agent(db_session, "regular_alice", tier="regular")
 
-    Config.set("AGENT_POST_INTENT_CHANCE", "1.0")
-    Config.set("AGENT_FORCED_IMAGE_CHANCE", "1.0")
+    pin_intent_mix(lurker, post=1.0, image=1.0)
+    pin_intent_mix(regular, post=1.0, image=1.0)
 
     # Lurker always browse
     _, lurk_intent = _kickoff(db_session, lurker, unread=0)

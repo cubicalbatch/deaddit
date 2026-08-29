@@ -20,6 +20,7 @@ from deaddit.agents.executor import execute
 from deaddit.agents.memory import ensure_lazy_backfill, summarize_run
 from deaddit.agents.prompts import prepare_agent_visit
 from deaddit.agents.registry import ToolContext
+from deaddit.llm.prompts import serialize_visit_profile
 from deaddit.extensions import db
 from deaddit.images.types import Deadline
 from deaddit.llm import (
@@ -304,6 +305,30 @@ def run_once(
     visit = prepare_agent_visit(agent, user, requested_intent=req)
     messages = visit.messages
     run.intent = visit.plan.intent
+    run.prompt_metadata = {
+        "schema_version": 1,
+        "profile": {
+            "name": visit.plan.profile_name,
+            "version": visit.plan.profile_version,
+            "ref": visit.plan.profile_ref,
+            "resolution_source": visit.plan.resolution_source,
+            "body": serialize_visit_profile(
+                # The immutable profile body is carried in render metadata.
+                # ``prepare_agent_visit`` keeps this source on the plan.
+                visit.plan.profile,
+            ),
+        },
+        "intent": visit.plan.intent,
+        "intent_source": visit.plan.intent_source,
+        "content_kind": visit.plan.content_kind,
+        "length_target_id": visit.plan.length_target_id,
+        "direction_ids": list(visit.plan.direction_ids),
+        "offered_tool_names": sorted(visit.plan.offered_tool_names),
+        "render_variables": {
+            kind: dict(values) for kind, values in visit.plan.render_variables.items()
+        },
+        "initial_messages": [dict(message) for message in messages],
+    }
     db.session.commit()
 
     specs = visit.tool_specs

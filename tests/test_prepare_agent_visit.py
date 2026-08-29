@@ -16,8 +16,9 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.visit_profiles import pin_intent_mix
+
 import deaddit.agents.loop as loop_module
-from deaddit import Config
 from deaddit.agents.loop import run_once
 from deaddit.agents.prompts import (
     DEFAULT_PROFILE_NAME,
@@ -208,10 +209,8 @@ def test_plan_records_intent_source_and_content_kind(app, db_session):
     assert visit.plan.length_target_id is None
     assert visit.plan.direction_ids == ()
 
-    # Automatic runs record the sampled source.
-    Config.set("AGENT_POST_INTENT_CHANCE", "1.0")
-    Config.set("AGENT_FORCED_IMAGE_CHANCE", "0.0")
-    Config.set("AGENT_FORCED_WEBSITE_CHANCE", "0.0")
+    # Automatic runs record the sampled source under a pinned post mix.
+    pin_intent_mix(agent, post=1.0, image=0.0, website=0.0)
     visit = prepare_agent_visit(agent, user, unread=0)
     assert (visit.plan.intent, visit.plan.intent_source) == (
         "post",

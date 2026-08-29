@@ -51,14 +51,10 @@ class Config:
         "SEED_DECAY_DAYS": "30",
         "SEED_ANCHOR_AT": None,
         "AGENT_RUNTIME_ENABLED": "false",
-        "PROMPT_VERSIONING_ENABLED": "false",
         "WEBSITE_MAX_OUTPUT_TOKENS": "32768",
         "WEBSITE_GENERATION_TIMEOUT_SECONDS": "300",
         "WEBSITE_MAX_HTML_BYTES": "1048576",
         "TROLL_USER_CHANCE": "0.1",
-        "AGENT_POST_INTENT_CHANCE": "0.30",
-        "AGENT_FORCED_IMAGE_CHANCE": "0.0",
-        "AGENT_FORCED_WEBSITE_CHANCE": "0.0",
     }
 
     # Descriptions for each setting
@@ -79,14 +75,10 @@ class Config:
         "SEED_DECAY_DAYS": "Days over which seed vote probability decays linearly to zero from the anchor",
         "SEED_ANCHOR_AT": "ISO timestamp anchor for seed decay; written on first non-dry-run history seed",
         "AGENT_RUNTIME_ENABLED": "Whether the autonomous agent runtime is enabled (true/false); manual run-once is always allowed",
-        "PROMPT_VERSIONING_ENABLED": "Whether pinned prompt-template versions drive agent system prompts (true/false); LLM-5 parity freeze - keep false until the AC-P3 window closes",
         "WEBSITE_MAX_OUTPUT_TOKENS": "Requested max output tokens for create_website HTML generation (floor 32768; a configured value below the floor is raised to it, not honored)",
         "WEBSITE_GENERATION_TIMEOUT_SECONDS": "Read timeout in seconds for the nested create_website HTML-generation request",
         "WEBSITE_MAX_HTML_BYTES": "Byte ceiling for one stored generated-website HTML document",
         "TROLL_USER_CHANCE": "Probability (0-1) that a newly generated persona is a troll; applies only when troll_mode is 'chance'",
-        "AGENT_POST_INTENT_CHANCE": "Share of eligible automatic visits that enter the post-intent funnel (0-1)",
-        "AGENT_FORCED_IMAGE_CHANCE": "Image share within post-intent visits (0-1; requires agent image capability)",
-        "AGENT_FORCED_WEBSITE_CHANCE": "Website share within post-intent visits (0-1; requires agent website capability)",
     }
 
     @classmethod

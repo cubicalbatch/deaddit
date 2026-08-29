@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from deaddit import Config
+from tests.visit_profiles import pin_intent_mix
 from deaddit.agents.prompts import (
     build_system_prompt,
     prepare_agent_visit,
@@ -517,9 +517,7 @@ def test_rng_draw_order_is_length_then_intent_then_content_tuning(
         events.append("sample")
         return []
 
-    Config.set("AGENT_POST_INTENT_CHANCE", "1.0")
-    Config.set("AGENT_FORCED_IMAGE_CHANCE", "0.0")
-    Config.set("AGENT_FORCED_WEBSITE_CHANCE", "0.0")
+    pin_intent_mix(agent, post=1.0, image=0.0, website=0.0)
     with patch("deaddit.agents.prompts.random.choices", choices), patch(
         "deaddit.agents.prompts.random.random", random_value
     ), patch("deaddit.agents.prompts.random.sample", sample):
@@ -556,9 +554,7 @@ def test_same_seed_and_inputs_are_byte_identical(app, db_session):
         image_mode="optional",
         website_mode="optional",
     )
-    Config.set("AGENT_POST_INTENT_CHANCE", "1.0")
-    Config.set("AGENT_FORCED_IMAGE_CHANCE", "0.25")
-    Config.set("AGENT_FORCED_WEBSITE_CHANCE", "0.50")
+    pin_intent_mix(agent, post=1.0, image=0.25, website=0.50)
 
     random.seed(90210)
     first = prepare_agent_visit(agent, user, unread=0)
@@ -588,9 +584,7 @@ def test_automatic_sampled_intent_uses_current_categorical_slices(
         image_mode="optional",
         website_mode="optional",
     )
-    Config.set("AGENT_POST_INTENT_CHANCE", "1.0")
-    Config.set("AGENT_FORCED_IMAGE_CHANCE", "0.25")
-    Config.set("AGENT_FORCED_WEBSITE_CHANCE", "0.50")
+    pin_intent_mix(agent, post=1.0, image=0.25, website=0.50)
     with patch(
         "deaddit.agents.prompts.random.random",
         side_effect=[0.0, kind_draw],

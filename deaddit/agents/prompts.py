@@ -11,22 +11,20 @@ for capability and authorization, and memory persistence stays in
 Boring plain text system prompt: persona, autonomy tier, platform rules,
 current subscriptions, and a handful of memories from previous visits.
 
-Phase LLM-5: when ``Config.PROMPT_VERSIONING_ENABLED`` is 'true' AND the
-agent (or its cohort) has a pinned prompt-template version, the system
-prompt is rendered from that immutable version instead of assembled
-here; every such render writes an audit row. The flag defaults to
-'false' (parity freeze) and the no-pin fallback below stays the
-byte-identical pre-LLM-5 assembly.
+The source-controlled default profile and the effective pinned profile are
+resolved once per visit.  Registry/executor capability resolution remains
+authoritative for offered tools.
 """
 
 from __future__ import annotations
 
 import logging
 import random
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+import re
+from dataclasses import dataclass, field, replace
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Mapping
 
-from deaddit import Config
 from deaddit.agents.memory import VisitMemories, visit_memories
 from deaddit.agents.registry import (
     AutonomyTier,
@@ -39,15 +37,18 @@ from deaddit.agents.registry import (
 )
 from deaddit.dynamics.inbox import unread_count
 from deaddit.extensions import db
-from deaddit.llm.prompts import render_pinned, versioning_enabled
+from deaddit.llm.prompts import (
+    VisitProfile,
+    parse_visit_profile,
+    render,
+    resolve_visit_profile,
+)
 from deaddit.models import Agent, Subdeaddit, User
 
 if TYPE_CHECKING:
     from deaddit.llm import ToolSpec
 
 
-
-DEFAULT_TEMPLATE_NAME = "agent.system_prompt"
 
 TIER_DESCRIPTIONS: dict[str, str] = {
     AutonomyTier.LURKER.value: (
@@ -264,31 +265,73 @@ def _memory_section(memories: VisitMemories | None) -> str:
         lines.extend(f"- {content}" for content in memories.episodes)
     return "\n\n" + "\n".join(lines)
 
+ 
+def _profile_behavior_rules(profile: VisitProfile) -> str:
+    return "\n".join(block.text for block in profile.behavior_blocks)
+
 
 def system_prompt_variables(
     agent: Agent,
     user: User,
     intent: str = "browse",
     *,
+    profile: VisitProfile | None = None,
     offered_tool_names: frozenset[str] | None = None,
     memory_section: str | None = None,
 ) -> dict[str, str]:
-    """Named variables a versioned system-prompt template is rendered with."""
+    """Build the strict variable set consumed by a visit profile layout."""
+    if profile is None:
+        profile = DEFAULT_VISIT_PROFILE
     if memory_section is None:
         memory_section = _memory_section(visit_memories(user.username))
+    tools_line = _TOOLS_LINE
+    genuine_line = _GENUINE_LINE
+    quality_rules = _profile_behavior_rules(profile)
+    capability_guidance = (
+        _image_guidance_section(agent, intent, offered_tool_names=offered_tool_names)
+        + _website_guidance_section(agent, intent, offered_tool_names=offered_tool_names)
+    )
+    persona = _persona_block(user)
+    tier = _tier_line(agent)
+    subscriptions = _subscriptions_section(user)
     return {
-        "persona_block": _persona_block(user),
-        "tier_line": _tier_line(agent),
-        "rules_block": _TOOLS_LINE + "\n" + _GENUINE_LINE + "\n" + _PROFILE_QUALITY_RULES,
+        "persona": persona,
+        "persona_block": persona,
+        "autonomy_tier": str(getattr(agent.autonomy_tier, "value", agent.autonomy_tier)),
+        "tier_line": tier,
+        "rules_block": quality_rules,
+        "tools": tools_line,
+        "tools_line": tools_line,
+        "genuine": genuine_line,
+        "genuine_line": genuine_line,
+        "quality_rules": quality_rules,
+        "profile_quality_rules": quality_rules,
+        "capability_guidance": capability_guidance,
+        "memories": memory_section,
+        "memory_block": memory_section,
+        # Legacy agent.system_prompt templates rendered this variable name;
+        # migrated visit profiles still reference it.
+        "memories_section": memory_section,
+        "subscriptions": subscriptions,
+        "subscriptions_section": subscriptions,
+        "community_hint": "",
+        "intent": intent,
+        "content_kind": "none",
+        "length_target": "",
+        "directions": "",
+        "sample_count": str(profile.sample_count),
         "image_guidance_section": _image_guidance_section(
             agent, intent, offered_tool_names=offered_tool_names
         ),
         "website_guidance_section": _website_guidance_section(
             agent, intent, offered_tool_names=offered_tool_names
         ),
-        "subscriptions_section": _subscriptions_section(user),
-        "memories_section": memory_section,
     }
+
+
+def _render_profile_layout(profile: VisitProfile, layout: str, variables: Mapping[str, str]) -> str:
+    names = set(re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", layout))
+    return render(layout, {name: variables[name] for name in names})
 
 
 def build_system_prompt(
@@ -296,36 +339,22 @@ def build_system_prompt(
     user: User,
     intent: str = "browse",
     *,
+    profile: VisitProfile | None = None,
     offered_tool_names: frozenset[str] | None = None,
     memory_section: str | None = None,
 ) -> str:
-    """Build the system prompt for one agent run."""
+    """Render the resolved visit profile's system layout."""
+    if profile is None:
+        profile = DEFAULT_VISIT_PROFILE
     variables = system_prompt_variables(
         agent,
         user,
         intent=intent,
+        profile=profile,
         offered_tool_names=offered_tool_names,
         memory_section=memory_section,
     )
-    if versioning_enabled():
-        pin_key = str(agent.id)
-        pinned = render_pinned(
-            "agent",
-            pin_key,
-            variables=variables,
-            subject_key=pin_key,
-        )
-        if pinned is not None:
-            return pinned[0]
-    return (
-        f"{variables['persona_block']}\n\n"
-        f"{variables['tier_line']}\n\n"
-        f"{variables['rules_block']}"
-        f"{variables['image_guidance_section']}"
-        f"{variables['website_guidance_section']}"
-        f"{variables['subscriptions_section']}"
-        f"{variables['memories_section']}"
-    )
+    return _render_profile_layout(profile, profile.layouts["system"], variables)
 
 
 
@@ -353,8 +382,6 @@ INTENT_SOURCE_REQUESTED = "requested"
 INTENT_SOURCE_DEGRADED = "degraded_request"
 INTENT_SOURCE_UNREAD = "unread_gate"
 INTENT_SOURCE_SAMPLED = "sampled"
-
-POST_INTENT_PROBABILITY = 0.30
 
 #: How many real communities the kickoff suggests when the persona has no
 #: subscriptions. Sampled fresh from the database each run so no community
@@ -403,6 +430,12 @@ class PromptPlan:
     direction_ids: tuple[str, ...]
     profile_name: str = DEFAULT_PROFILE_NAME
     profile_version: int = DEFAULT_PROFILE_VERSION
+    profile_ref: str | None = None
+    resolution_source: str = "default"
+    render_variables: Mapping[str, Mapping[str, str]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    profile: VisitProfile | None = None
 
 
 @dataclass(frozen=True)
@@ -560,25 +593,54 @@ _LENGTH_TARGETS: dict[str, tuple[_LengthTarget, ...]] = {
 
 
 
-
-def _post_instruction(offered: frozenset[str]) -> str | None:
-    """Kickoff wording for a forced post, naming only tools this agent was
-    actually offered per :func:`offered_post_tool_names`.
-
-    ``None`` means no post tool is offered at all - the invalid
-    ``image_only`` + ``website_only`` combination - so the caller must
-    fall back to a plain browsing kickoff rather than instructing a post
-    it cannot make.
-    """
-    if offered == frozenset({"create_website"}):
-        return "and create a website post using the create_website tool."
-    if offered == frozenset({"create_image_post"}):
-        return "and create an image post using the create_image_post tool."
-    if "create_post" not in offered:
-        return None
-    if offered == frozenset({"create_post"}):
-        return "and create a post using the create_post tool."
-    return "and create one post using the create_post tool or another offered post tool."
+_DEFAULT_PROFILE_DOCUMENT = {
+    "schema_version": 1,
+    "system_template": (
+        "{persona_block}\n\n{tier_line}\n\n{rules_block}"
+        "{capability_guidance}{subscriptions_section}{memories}"
+    ),
+    "layouts": {
+        "system": (
+            "{persona_block}\n\n{tier_line}\n\n{rules_block}"
+            "{capability_guidance}{subscriptions_section}{memories}"
+        ),
+        "lurker": (
+            "You're waking up. Browse the community feeds, read interesting posts, "
+            "and see what's new. When you are done, call finish to end your visit."
+        ),
+        "browse": "You're waking up. {directions}",
+        "post": "{directions}",
+    },
+    "behavior_blocks": [
+        {"id": "general.tools", "text": _TOOLS_LINE},
+        {"id": "general.genuine", "text": _GENUINE_LINE},
+        {"id": "general.quality", "text": _PROFILE_QUALITY_RULES},
+    ],
+    "intent_mix": {"post": 0.30, "image": 0.0, "website": 0.0},
+    "length_catalog": {
+        kind: [
+            {"id": target.id, "text": target.text, "weight": target.weight}
+            for target in targets
+        ]
+        for kind, targets in _LENGTH_TARGETS.items()
+    },
+    "direction_catalog": {
+        "post": [
+            {"id": direction.id, "text": direction.text, "weight": 1}
+            for direction in _POST_DIRECTIONS
+        ],
+        "comment": [
+            {"id": direction.id, "text": direction.text, "weight": 1}
+            for direction in _COMMENT_DIRECTIONS
+        ],
+    },
+    "sample_count": _SUGGESTIONS_PER_PROMPT,
+}
+DEFAULT_VISIT_PROFILE = replace(
+    parse_visit_profile(_DEFAULT_PROFILE_DOCUMENT),
+    profile_version=DEFAULT_PROFILE_VERSION,
+    profile_ref=DEFAULT_PROFILE_NAME,
+)
 
 
 def _starter_hint(offered: frozenset[str]) -> str | None:
@@ -586,18 +648,6 @@ def _starter_hint(offered: frozenset[str]) -> str | None:
     if offered:
         return "feel free to start a conversation with an offered post tool"
     return None
-
-
-def _parse_float_setting(key: str, default: float) -> float:
-    raw = Config.get(key, str(default))
-    try:
-        val = float(raw)
-        if 0.0 <= val <= 1.0:
-            return val
-    except (TypeError, ValueError):
-        pass
-    logger.warning("Invalid %s=%r; using default %s", key, raw, default)
-    return default
 
 
 def _community_hint(user: User | None) -> str:
@@ -618,24 +668,48 @@ def _community_hint(user: User | None) -> str:
     )
 
 
-def _sample_directions(pool: tuple[_Direction, ...]) -> tuple[_Direction, ...]:
-    return tuple(random.sample(pool, _SUGGESTIONS_PER_PROMPT))
+def _post_instruction(offered: frozenset[str]) -> str | None:
+    """Kickoff wording for a forced post, naming only tools this agent was
+    actually offered per :func:`offered_post_tool_names`.
+
+    ``None`` means no post tool is offered at all - the invalid
+    ``image_only`` + ``website_only`` combination - so the caller must
+    fall back to a plain browsing kickoff rather than instructing a post
+    it cannot make.
+    """
+    if offered == frozenset({"create_website"}):
+        return "and create a website post using the create_website tool."
+    if offered == frozenset({"create_image_post"}):
+        return "and create an image post using the create_image_post tool."
+    if "create_post" not in offered:
+        return None
+    if offered == frozenset({"create_post"}):
+        return "and create a post using the create_post tool."
+    return "and create one post using the create_post tool or another offered post tool."
+
+def _sample_directions(
+    profile: VisitProfile, kind: str
+) -> tuple[tuple[str, str], ...]:
+    items = profile.direction_catalog[kind]
+    return tuple((item.id, item.text) for item in random.sample(items, profile.sample_count))
 
 
-def _direction_hint(directions: tuple[_Direction, ...]) -> str:
+def _direction_hint(directions: tuple[tuple[str, str], ...]) -> str:
     return (
         "For inspiration, choose at most one of these directions if it fits: "
-        f"{'; '.join(direction.text for direction in directions)}."
+        f"{'; '.join(text for _id, text in directions)}."
     )
 
 
-def _length_target(content_kind: str, quantile: int) -> _LengthTarget:
-    cumulative = 0
-    for target in _LENGTH_TARGETS[content_kind]:
+def _length_target(
+    profile: VisitProfile, content_kind: str, quantile: int
+) -> tuple[str, str]:
+    cumulative = 0.0
+    for target in profile.length_catalog[content_kind]:
         cumulative += target.weight
         if quantile < cumulative:
-            return target
-    raise ValueError("length target weights must total 100")
+            return target.id, target.text
+    raise ValueError("length target weights must total more than 100")
 
 
 @dataclass(frozen=True)
@@ -647,11 +721,11 @@ class _ResolvedVisit:
     content_kind: str
     length_target_id: str | None
     length_text: str | None
-    directions: tuple[_Direction, ...]
+    directions: tuple[tuple[str, str], ...]
     community_hint: str
 
 
-def _resolve_visit(context: PromptBuildContext) -> _ResolvedVisit:
+def _resolve_visit(profile: VisitProfile, context: PromptBuildContext) -> _ResolvedVisit:
     """Decide everything about the visit, consuming the locked RNG order.
 
     Draw order is a frozen contract (Phase 1 characterization): length
@@ -710,25 +784,25 @@ def _resolve_visit(context: PromptBuildContext) -> _ResolvedVisit:
             offered = offered_post_tool_names(eff_img, eff_web)
             if _post_instruction(offered) is not None:
                 community_hint = _community_hint(user)
-                directions = _sample_directions(_POST_DIRECTIONS)
-                length = _length_target("media_post", length_quantile)
+                directions = _sample_directions(profile, "post")
+                length_id, length_text = _length_target(profile, "media_post", length_quantile)
                 return _ResolvedVisit(
                     intent=resolved_intent,
                     intent_source=INTENT_SOURCE_REQUESTED,
                     content_kind="media_post",
-                    length_target_id=length.id,
-                    length_text=length.text,
+                    length_target_id=length_id,
+                    length_text=length_text,
                     directions=directions,
                     community_hint=community_hint,
                 )
-        directions = _sample_directions(_COMMENT_DIRECTIONS)
-        length = _length_target("comment", length_quantile)
+        directions = _sample_directions(profile, "comment")
+        length_id, length_text = _length_target(profile, "comment", length_quantile)
         return _ResolvedVisit(
             intent="browse",
             intent_source=INTENT_SOURCE_UNREAD,
             content_kind="comment",
-            length_target_id=length.id,
-            length_text=length.text,
+            length_target_id=length_id,
+            length_text=length_text,
             directions=directions,
             community_hint="",
         )
@@ -740,14 +814,12 @@ def _resolve_visit(context: PromptBuildContext) -> _ResolvedVisit:
         intent_source = INTENT_SOURCE_DEGRADED if degraded else INTENT_SOURCE_REQUESTED
     else:
         intent_source = INTENT_SOURCE_SAMPLED
-        post_chance = _parse_float_setting(
-            "AGENT_POST_INTENT_CHANCE", POST_INTENT_PROBABILITY
-        )
+        post_chance = profile.intent_mix["post"]
         if random.random() < post_chance:
-            img_chance = _parse_float_setting("AGENT_FORCED_IMAGE_CHANCE", 0.0)
-            web_chance = _parse_float_setting("AGENT_FORCED_WEBSITE_CHANCE", 0.0)
-            img_share = min(1.0, max(0.0, img_chance))
-            web_share = min(max(0.0, 1.0 - img_share), max(0.0, web_chance))
+            img_share = min(1.0, max(0.0, profile.intent_mix["image"]))
+            web_share = min(
+                max(0.0, 1.0 - img_share), max(0.0, profile.intent_mix["website"])
+            )
 
             if img_share <= 0.0 and web_share <= 0.0:
                 resolved_intent = "post"
@@ -783,31 +855,28 @@ def _resolve_visit(context: PromptBuildContext) -> _ResolvedVisit:
         if _post_instruction(offered) is not None:
             content_kind = "text_post" if "create_post" in offered else "media_post"
             community_hint = _community_hint(user)
-            directions = _sample_directions(_POST_DIRECTIONS)
-            length = _length_target(content_kind, length_quantile)
+            directions = _sample_directions(profile, "post")
+            length_id, length_text = _length_target(profile, content_kind, length_quantile)
             return _ResolvedVisit(
                 intent=resolved_intent,
                 intent_source=intent_source,
                 content_kind=content_kind,
-                length_target_id=length.id,
-                length_text=length.text,
+                length_target_id=length_id,
+                length_text=length_text,
                 directions=directions,
                 community_hint=community_hint,
             )
-        # No legal publication tool (invalid exclusive-lock configuration):
-        # degrade to the plain browsing visit rather than instruct a post
-        # this agent cannot make.
         if intent_source == INTENT_SOURCE_REQUESTED:
             intent_source = INTENT_SOURCE_DEGRADED
 
-    directions = _sample_directions(_COMMENT_DIRECTIONS)
-    length = _length_target("comment", length_quantile)
+    directions = _sample_directions(profile, "comment")
+    length_id, length_text = _length_target(profile, "comment", length_quantile)
     return _ResolvedVisit(
         intent="browse",
         intent_source=intent_source,
         content_kind="comment",
-        length_target_id=length.id,
-        length_text=length.text,
+        length_target_id=length_id,
+        length_text=length_text,
         directions=directions,
         community_hint="",
     )
@@ -818,56 +887,73 @@ def _offered_post_tools(plan: PromptPlan) -> frozenset[str]:
 
 
 def _render_kickoff(
-    context: PromptBuildContext, resolved: _ResolvedVisit, plan: PromptPlan
-) -> str:
-    """Render the kickoff from the resolved plan; no behavior choices here."""
+    profile: VisitProfile,
+    context: PromptBuildContext,
+    resolved: _ResolvedVisit,
+    plan: PromptPlan,
+    *,
+    memory_section: str,
+) -> tuple[str, dict[str, str]]:
+    """Render one profile kickoff layout without making new behavior choices."""
     if resolved.intent_source == INTENT_SOURCE_LURKER:
-        return (
-            "You're waking up. Browse the community feeds, read interesting posts, "
-            "and see what's new. When you are done, call finish to end your visit."
-        )
-
-    if resolved.intent == "browse":
+        layout_name = "lurker"
+        directions_text = ""
+    elif resolved.intent == "browse":
+        layout_name = "browse"
         if context.unread_count > 0:
-            return (
-                "You're waking up. Catch up on your replies. Most replies "
-                "don't need an answer - reply only where you genuinely have "
-                "something new to add. "
+            directions_text = (
+                "Catch up on your replies. Most replies don't need an answer - "
+                "reply only where you genuinely have something new to add. "
                 f"{_direction_hint(resolved.directions)} "
-                f"{resolved.length_text} "
-                "Otherwise just read them and move on."
+                f"{resolved.length_text} Otherwise just read them and move on."
             )
-        starter_hint = _starter_hint(_offered_post_tools(plan))
-        hint_sentence = (
-            f"If you encounter an empty or quiet community, {starter_hint}. "
-            if starter_hint
-            else ""
+        else:
+            starter_hint = _starter_hint(_offered_post_tools(plan))
+            hint_sentence = (
+                f"If you encounter an empty or quiet community, {starter_hint}. "
+                if starter_hint
+                else ""
+            )
+            directions_text = (
+                "Browse your feed or search for topics of interest, read discussions, "
+                "and jump into the conversation with a comment if something catches "
+                "your eye. "
+                f"{_direction_hint(resolved.directions)} "
+                f"{resolved.length_text} {hint_sentence}When you're done, call finish."
+            )
+    else:
+        layout_name = "post"
+        post_instruction = _post_instruction(_offered_post_tools(plan))
+        opener = (
+            "You're waking up. Catch up on your replies, check your inbox with "
+            "view_inbox, and then share something. "
+            if context.unread_count > 0
+            else "You're waking up with something to share. "
         )
-        return (
-            "You're waking up. Browse your feed or search for topics of interest, "
-            "read discussions, and jump into the conversation with a comment if "
-            "something catches your eye. "
-            f"{_direction_hint(resolved.directions)} "
-            f"{resolved.length_text} "
-            f"{hint_sentence}When you're done, call finish."
+        directions_text = (
+            f"{opener}{_direction_hint(resolved.directions)} "
+            f"{resolved.length_text} Find a relevant subdeaddit{resolved.community_hint} "
+            "(or check quiet/sparse communities that need fresh discussion) "
+            f"{post_instruction} Once your post is published, call the finish tool "
+            "to conclude your visit."
         )
-
-    post_instruction = _post_instruction(_offered_post_tools(plan))
-    opener = (
-        "You're waking up. Catch up on your replies, check your inbox with "
-        "view_inbox, and then share something. "
-        if context.unread_count > 0
-        else "You're waking up with something to share. "
+    variables = system_prompt_variables(
+        context.agent,
+        context.user,
+        intent=plan.intent,
+        profile=profile,
+        offered_tool_names=plan.offered_tool_names,
+        memory_section=memory_section,
     )
-    return (
-        f"{opener}"
-        f"{_direction_hint(resolved.directions)} "
-        f"{resolved.length_text} "
-        f"Find a relevant subdeaddit{resolved.community_hint} "
-        "(or check quiet/sparse communities that need fresh discussion) "
-        f"{post_instruction} "
-        "Once your post is published, call the finish tool to conclude your visit."
+    variables.update(
+        {
+            "directions": directions_text,
+            "length_target": resolved.length_text or "",
+            "community_hint": resolved.community_hint,
+            "content_kind": plan.content_kind,
+        }
     )
+    return _render_profile_layout(profile, profile.layouts[layout_name], variables), variables
 
 
 
@@ -904,33 +990,58 @@ def prepare_agent_visit(
         unread_count=unread,
         requested_intent=requested_intent,
     )
-    resolved = _resolve_visit(context)
+    profile, _version_row, resolution_source = resolve_visit_profile(
+        agent, DEFAULT_VISIT_PROFILE
+    )
+    resolved = _resolve_visit(profile, context)
     tool_specs = specs_for(agent.autonomy_tier, agent=agent, intent=resolved.intent)
+    offered_names = frozenset(spec.name for spec in tool_specs)
+    profile_ref = profile.profile_ref or DEFAULT_PROFILE_NAME
+    profile_name = profile_ref.split(":v", 1)[0]
     plan = PromptPlan(
         intent=resolved.intent,
         intent_source=resolved.intent_source,
         content_kind=resolved.content_kind,
-        offered_tool_names=frozenset(spec.name for spec in tool_specs),
+        offered_tool_names=offered_names,
         length_target_id=resolved.length_target_id,
-        direction_ids=tuple(direction.id for direction in resolved.directions),
+        direction_ids=tuple(direction_id for direction_id, _text in resolved.directions),
+        profile_name=profile_name,
+        profile_version=profile.profile_version or DEFAULT_PROFILE_VERSION,
+        profile_ref=profile_ref,
+        resolution_source=resolution_source,
+        profile=profile,
     )
     memory_section = _memory_section(visit_memories(user.username))
+    system_variables = system_prompt_variables(
+        agent,
+        user,
+        intent=plan.intent,
+        profile=profile,
+        offered_tool_names=plan.offered_tool_names,
+        memory_section=memory_section,
+    )
+    system_message = _render_profile_layout(
+        profile, profile.layouts["system"], system_variables
+    )
+    kickoff, kickoff_variables = _render_kickoff(
+        profile, context, resolved, plan, memory_section=memory_section
+    )
     messages: list[dict] = [
-        {
-            "role": "system",
-            "content": build_system_prompt(
-                agent,
-                user,
-                intent=plan.intent,
-                offered_tool_names=plan.offered_tool_names,
-                memory_section=memory_section,
-            ),
-        },
-        {"role": "user", "content": _render_kickoff(context, resolved, plan)},
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": kickoff},
     ]
     if unread > 0:
         messages[-1]["content"] += (
             f"\n\nYou have {unread} unread replies. Use the view_inbox "
             "tool to read them before deciding what to do."
         )
+    plan = replace(
+        plan,
+        render_variables=MappingProxyType(
+            {
+                "system": MappingProxyType(dict(system_variables)),
+                "kickoff": MappingProxyType(dict(kickoff_variables)),
+            }
+        ),
+    )
     return PreparedVisit(messages=messages, tool_specs=tool_specs, plan=plan)

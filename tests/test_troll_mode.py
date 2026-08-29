@@ -159,13 +159,31 @@ class TestTrollPromptAndAdmin:
         assert "Mode: troll." in _persona_block(troll)
         assert "Mode: troll." not in _persona_block(normal)
         assert set(system_prompt_variables(agent, troll)) == {
+            "persona",
             "persona_block",
+            "autonomy_tier",
             "tier_line",
             "rules_block",
+            "tools",
+            "tools_line",
+            "genuine",
+            "genuine_line",
+            "quality_rules",
+            "profile_quality_rules",
+            "capability_guidance",
+            "memories",
+            "memory_block",
+            "memories_section",
+            "subscriptions",
+            "subscriptions_section",
+            "community_hint",
+            "intent",
+            "content_kind",
+            "length_target",
+            "directions",
+            "sample_count",
             "image_guidance_section",
             "website_guidance_section",
-            "subscriptions_section",
-            "memories_section",
         }
 
     def test_admin_generation_toggle_and_config(self, admin_client, fake_llm, app):

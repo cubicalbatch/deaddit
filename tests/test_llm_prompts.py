@@ -11,12 +11,14 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import re
 
 import pytest
 
 from deaddit import db
 from deaddit.agents.prompts import (
     build_system_prompt,
+    prepare_agent_visit,
     system_prompt_variables,
 )
 from deaddit.llm.prompts import (
@@ -27,10 +29,11 @@ from deaddit.llm.prompts import (
     create_version,
     get_version,
     render,
+    render_pinned,
     resolve_pin,
     set_pin,
-    versioning_enabled,
 )
+from tests.visit_profiles import pin_profile
 from deaddit.models import (
     Agent,
     AgentMemory,
@@ -44,6 +47,13 @@ DEFAULT_BODY = (
 )
 
 GOLDEN_PATH = "tests/goldens/llm5_agent_system_prompt.txt"
+
+
+def _binding(body: str, variables: dict) -> dict:
+    """The strict variable subset one template body actually names."""
+    names = set(re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", body))
+    return {name: variables[name] for name in names}
+
 
 
 def _sha(text: str) -> str:
@@ -190,14 +200,6 @@ class TestPinResolution:
         assert pin.target_kind == "agent"
         assert pin.version_number == 2
 
-        from deaddit.models import Setting
-
-        db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
-        db_session.commit()
-        assert build_system_prompt(agent, user) == render(
-            DEFAULT_BODY + "\nversion2", system_prompt_variables(agent, user)
-        )
-
     def test_random_agent_pin_renders_for_selected_user(self, app, db_session):
         user = User(username="selected_random")
         db_session.add(user)
@@ -210,27 +212,12 @@ class TestPinResolution:
             state={},
         )
         db_session.add(agent)
-        create_template("random", DEFAULT_BODY)
-        key = str(agent.id)
-        set_pin("agent", key, "random", 1)
 
-        from deaddit.models import Setting
-
-        db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
-        db_session.commit()
-        assert build_system_prompt(agent, user) == render(
-            DEFAULT_BODY, system_prompt_variables(agent, user)
-        )
-
-    def test_clear_pin_falls_back_to_cohort(self, app, db_session):
-        create_template("cpt", "b")
-        set_pin("cohort", "wave5", "cpt", 1)
-        agent = self._agent(db_session, "clearable", cohort="wave5")
-        key = str(agent.id)
-        set_pin("agent", key, "cpt", 1)
-        assert clear_pin("agent", key) is True
-        assert clear_pin("agent", key) is False
-        assert resolve_pin("agent", key).target_kind == "cohort"
+        # A pinned visit profile renders for whichever persona the run selects.
+        pin_profile(agent)
+        visit = prepare_agent_visit(agent, user, requested_intent="browse", unread=0)
+        assert visit.messages[0]["content"].startswith("You are selected_random")
+        assert visit.plan.resolution_source == "agent"
 
     def test_set_pin_rejects_unknown_template(self, app, db_session):
         from deaddit.llm.prompts import PromptError
@@ -241,7 +228,7 @@ class TestPinResolution:
 
 
 class TestRenderAudit:
-    def test_build_system_prompt_writes_numeric_agent_audit_row(self, app, db_session):
+    def test_render_pinned_writes_numeric_agent_audit_row(self, app, db_session):
         version = create_template("aud", DEFAULT_BODY)
         user = User(username="audited")
         db_session.add(user)
@@ -257,11 +244,13 @@ class TestRenderAudit:
         key = str(agent.id)
         set_pin("agent", key, "aud", version.version)
 
-        from deaddit.models import Setting
-
-        db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
-        db_session.commit()
-        text = build_system_prompt(agent, user)
+        variables = _binding(
+            DEFAULT_BODY, system_prompt_variables(agent, user)
+        )
+        text, version_row = render_pinned(
+            "agent", key, variables=variables, subject_key=key
+        )
+        assert version_row.id == version.id
 
         row = PromptRenderAudit.query.one()
         assert row.template_version_id == version.id
@@ -277,27 +266,15 @@ class TestRenderAudit:
         assert _sha(replay) == row.rendered_sha256
 
 
-# --- parity freeze: live-prompt byte stability -----------------------------
+# --- default assembly byte stability ---------------------------------------
 
 
-class TestParityFreezeByteStability:
-    def test_flag_defaults_off(self, app, db_session):
-        assert versioning_enabled() is False
-
-    def test_flag_off_matches_pre_phase_golden(self, app, db_session):
+class TestDefaultAssemblyByteStability:
+    def test_default_assembly_matches_pre_phase_golden(self, app, db_session):
         agent, user = _golden_agent(app, db_session)
         rendered = build_system_prompt(agent, user)
         golden = open(GOLDEN_PATH).read()
         assert rendered == golden
-
-    def test_flag_on_without_pin_still_matches_golden(self, app, db_session):
-        from deaddit.models import Setting
-
-        db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
-        db_session.commit()
-        agent, user = _golden_agent(app, db_session)
-        assert build_system_prompt(agent, user) == open(GOLDEN_PATH).read()
-        assert PromptRenderAudit.query.count() == 0
 
     @pytest.mark.parametrize("tier", ("lurker", "regular", "power_user"))
     def test_system_prompts_omit_retired_vote_action(self, app, db_session, tier):
@@ -306,23 +283,19 @@ class TestParityFreezeByteStability:
         prompt = build_system_prompt(agent, user)
         assert "vote" not in prompt.lower()
 
-    def test_default_template_renders_byte_identical_via_registry(
+    def test_pinned_profile_renders_byte_identical_to_direct_renderer(
         self, app, db_session
     ):
         agent, user = _golden_agent(app, db_session)
-        v1 = create_template(
-            "agent.system_prompt", DEFAULT_BODY, description="LLM-5 default"
-        )
-        set_pin("agent", str(agent.id), "agent.system_prompt", 1)
-        from deaddit.models import Setting
-
-        db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
-        db_session.commit()
-        pinned_text = build_system_prompt(agent, user)
+        pin_profile(agent, system_layout=DEFAULT_BODY)
+        visit = prepare_agent_visit(agent, user, requested_intent="browse", unread=0)
+        pinned_text = visit.messages[0]["content"]
         assert pinned_text == open(GOLDEN_PATH).read()
-        assert PromptRenderAudit.query.count() == 1
-        # registry path and direct renderer agree byte-for-byte
-        assert render(v1.body, system_prompt_variables(agent, user)) == pinned_text
+        # profile layout and direct renderer agree byte-for-byte
+        assert render(
+            DEFAULT_BODY,
+            _binding(DEFAULT_BODY, system_prompt_variables(agent, user)),
+        ) == pinned_text
 
 
 # --- 4C: image-post guidance -----------------------------------------------
@@ -385,22 +358,21 @@ class TestImagePostGuidance:
         assert "never mention" in prompt.lower()
         assert "as real" in prompt.lower()
 
-    def test_image_guidance_flows_through_versioned_template(self, app, db_session):
-        """The image-aware rules reach a pinned render through the same
-        named variable as the live assembly, not through separate wiring."""
+    def test_image_guidance_flows_through_pinned_profile(self, app, db_session):
+        """The image-aware rules reach a pinned profile render through the
+        same named variable as the live assembly, not separate wiring."""
         agent, user = _agent_with_image_posts(
             db_session,
             "pinned_optional",
             {"enabled": True, "policy": "optional", "provider_id": 1, "model": None},
         )
-        create_template("agent.system_prompt.imgtest", DEFAULT_BODY)
-        set_pin("agent", str(agent.id), "agent.system_prompt.imgtest", 1)
-        from deaddit.models import Setting
-
-        db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
-        db_session.commit()
-        pinned_text = build_system_prompt(agent, user)
-        assert pinned_text == render(DEFAULT_BODY, system_prompt_variables(agent, user))
+        pin_profile(agent, system_layout=DEFAULT_BODY)
+        visit = prepare_agent_visit(agent, user, requested_intent="browse", unread=0)
+        pinned_text = visit.messages[0]["content"]
+        assert pinned_text == render(
+            DEFAULT_BODY,
+            _binding(DEFAULT_BODY, system_prompt_variables(agent, user)),
+        )
         assert "create_image_post" in pinned_text
 
 
@@ -546,22 +518,21 @@ class TestWebsitePostGuidance:
         assert "website_description" in prompt
         assert "separate from that brief" in prompt.lower()
 
-    def test_website_only_guidance_flows_through_versioned_template(
+    def test_website_only_guidance_flows_through_pinned_profile(
         self, app, db_session
     ):
         """Same named-variable contract as the image feature: the pinned
-        render and the live assembly must agree byte-for-byte."""
+        profile render and the direct renderer agree byte-for-byte."""
         agent, user = _agent_with_post_config(
             db_session, "pinned_website_only", website_posts_config=_WEB_ONLY
         )
-        create_template("agent.system_prompt.webtest", DEFAULT_BODY)
-        set_pin("agent", str(agent.id), "agent.system_prompt.webtest", 1)
-        from deaddit.models import Setting
-
-        db_session.add(Setting(key="PROMPT_VERSIONING_ENABLED", value="true"))
-        db_session.commit()
-        pinned_text = build_system_prompt(agent, user)
-        assert pinned_text == render(DEFAULT_BODY, system_prompt_variables(agent, user))
+        pin_profile(agent, system_layout=DEFAULT_BODY)
+        visit = prepare_agent_visit(agent, user, requested_intent="browse", unread=0)
+        pinned_text = visit.messages[0]["content"]
+        assert pinned_text == render(
+            DEFAULT_BODY,
+            _binding(DEFAULT_BODY, system_prompt_variables(agent, user)),
+        )
         assert "create_website" in pinned_text
 
     def test_invalid_image_only_and_website_only_offers_no_post_tool(

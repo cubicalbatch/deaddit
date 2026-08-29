@@ -375,61 +375,6 @@
     </div>
 </div>
 
-<!-- Section: Agent Content Mix -->
-<div class="row mb-4">
-    <div class="col-md-12">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="card-title mb-0">
-                    <i class="bi bi-pie-chart"></i> Agent Content Mix
-                </h5>
-            </div>
-            <div class="card-body">
-                <form id="agent-content-mix-form">
-                    <div class="row">
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="agent_post_intent_pct" class="form-label">Post Intent Rate (%)</label>
-                                <input type="number" step="0.1" min="0" max="100" class="form-control" id="agent_post_intent_pct" name="agent_post_intent_pct"
-                                       value="{{ (config.agent_post_intent_chance|float * 100)|round(1) }}">
-                                <div class="form-text">Share of eligible automatic visits that enter the post-intent funnel (default: 30%).</div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="agent_forced_image_pct" class="form-label">Forced Image Share (%)</label>
-                                <input type="number" step="0.1" min="0" max="100" class="form-control" id="agent_forced_image_pct" name="agent_forced_image_pct"
-                                       value="{{ (config.agent_forced_image_chance|float * 100)|round(1) }}">
-                                <div class="form-text">Forced image share within post-intent visits (requires agent image capability).</div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="agent_forced_website_pct" class="form-label">Forced Website Share (%)</label>
-                                <input type="number" step="0.1" min="0" max="100" class="form-control" id="agent_forced_website_pct" name="agent_forced_website_pct"
-                                       value="{{ (config.agent_forced_website_chance|float * 100)|round(1) }}">
-                                <div class="form-text">Forced website share within post-intent visits (requires agent website capability).</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <div id="content-mix-hint" class="fw-semibold text-muted">
-                            <!-- Populated dynamically by JS -->
-                        </div>
-                        <small class="text-muted d-block mt-1">
-                            <i class="bi bi-info-circle"></i> Forced kinds apply only to agents with configured capabilities. Visits with unread replies or lurker tier skip this roll and browse/reply.
-                        </small>
-                    </div>
-                    <div class="d-flex gap-2">
-                        <button type="submit" id="save-content-mix-btn" class="btn btn-primary">
-                            <i class="bi bi-check-circle"></i> Save Content Mix
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
 
 <!-- Section 3: Advanced & System Info -->
 <div class="row mb-4">
@@ -1450,77 +1395,6 @@
             .finally(done);
     });
 
-    // ---------- Agent Content Mix Form & Dynamic Hint ----------
-
-    function updateContentMixHint() {
-        const postInput = document.getElementById('agent_post_intent_pct');
-        const imgInput = document.getElementById('agent_forced_image_pct');
-        const webInput = document.getElementById('agent_forced_website_pct');
-        const hintEl = document.getElementById('content-mix-hint');
-        const saveBtn = document.getElementById('save-content-mix-btn');
-        if (!postInput || !imgInput || !webInput || !hintEl) return;
-
-        const postPct = parseFloat(postInput.value) || 0;
-        const imgPct = parseFloat(imgInput.value) || 0;
-        const webPct = parseFloat(webInput.value) || 0;
-        const forcedSum = imgPct + webPct;
-
-        if (forcedSum > 100) {
-            hintEl.className = 'fw-semibold text-danger';
-            hintEl.innerHTML = `<i class="bi bi-exclamation-triangle-fill"></i> Error: Forced image (${imgPct.toFixed(1)}%) + website (${webPct.toFixed(1)}%) sum to ${forcedSum.toFixed(1)}%, which exceeds 100%!`;
-            if (saveBtn) saveBtn.disabled = true;
-        } else {
-            const freeChoice = Math.max(0, 100 - forcedSum);
-            hintEl.className = 'fw-semibold text-primary';
-            hintEl.textContent = `Requested allocation of eligible post-intent visits: ${imgPct.toFixed(1)}% image, ${webPct.toFixed(1)}% website, ${freeChoice.toFixed(1)}% free choice.`;
-            if (saveBtn) saveBtn.disabled = false;
-        }
-    }
-
-    const mixForm = document.getElementById('agent-content-mix-form');
-    if (mixForm) {
-        ['agent_post_intent_pct', 'agent_forced_image_pct', 'agent_forced_website_pct'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) {
-                el.addEventListener('input', updateContentMixHint);
-                el.addEventListener('change', updateContentMixHint);
-            }
-        });
-        updateContentMixHint();
-
-        mixForm.addEventListener('submit', function (event) {
-            event.preventDefault();
-            const postPct = parseFloat(document.getElementById('agent_post_intent_pct').value) || 0;
-            const imgPct = parseFloat(document.getElementById('agent_forced_image_pct').value) || 0;
-            const webPct = parseFloat(document.getElementById('agent_forced_website_pct').value) || 0;
-
-            if (imgPct + webPct > 100) {
-                showAlert('<i class="bi bi-exclamation-triangle"></i> Forced image and website allocation cannot exceed 100%', 'alert-warning');
-                return;
-            }
-
-            const payload = {
-                agent_post_intent_pct: postPct,
-                agent_forced_image_pct: imgPct,
-                agent_forced_website_pct: webPct
-            };
-
-            const done = busy(mixForm.querySelector('button[type="submit"]'), 'Saving...');
-            postJson('/admin/api/save-deaddit-config', payload)
-                .then(data => {
-                    if (data.success) {
-                        showAlert('<i class="bi bi-check-circle"></i> Agent content mix saved successfully!', 'alert-success');
-                        setTimeout(() => window.location.reload(), 1200);
-                    } else {
-                        showAlert('<i class="bi bi-x-circle"></i> Failed to save content mix: ' + (data.error || data.message), 'alert-danger');
-                    }
-                })
-                .catch(error => {
-                    showAlert('<i class="bi bi-x-circle"></i> Error saving content mix: ' + error.message, 'alert-danger');
-                })
-                .finally(done);
-        });
-    }
 
     // ---------- Initialization & Wiring ----------
 

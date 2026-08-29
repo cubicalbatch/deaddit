@@ -1,4 +1,9 @@
-"""Forced post mix: Admin API and Config.set_many tests."""
+"""Forced post mix: Config/admin plumbing after the Phase 4 cutover.
+
+The three ``AGENT_*`` intent-mix settings moved into immutable
+``agent.visit_profile`` documents; these tests lock that no live Config
+or admin path can still set them.
+"""
 
 from __future__ import annotations
 
@@ -9,19 +14,23 @@ from deaddit.admin import _run_json
 from deaddit.models import AgentRun
 from deaddit.settings.service import SecretNotPersistable
 
+_RETIRED_KEYS = (
+    "AGENT_POST_INTENT_CHANCE",
+    "AGENT_FORCED_IMAGE_CHANCE",
+    "AGENT_FORCED_WEBSITE_CHANCE",
+)
+
 
 def test_config_set_many_atomic_success_and_cache_invalidation(app, db_session):
     """Config.set_many atomically sets multiple keys in one transaction and invalidates cache."""
     mapping = {
-        "AGENT_POST_INTENT_CHANCE": "0.45",
-        "AGENT_FORCED_IMAGE_CHANCE": "0.15",
-        "AGENT_FORCED_WEBSITE_CHANCE": "0.25",
+        "SEED_VOTE_MAX": "200",
+        "SEED_DECAY_DAYS": "60",
     }
     Config.set_many(mapping)
 
-    assert Config.get("AGENT_POST_INTENT_CHANCE") == "0.45"
-    assert Config.get("AGENT_FORCED_IMAGE_CHANCE") == "0.15"
-    assert Config.get("AGENT_FORCED_WEBSITE_CHANCE") == "0.25"
+    assert Config.get("SEED_VOTE_MAX") == "200"
+    assert Config.get("SEED_DECAY_DAYS") == "60"
 
 
 def test_config_set_many_refuses_secret_keys(app, db_session):
@@ -29,15 +38,21 @@ def test_config_set_many_refuses_secret_keys(app, db_session):
     with pytest.raises(SecretNotPersistable):
         Config.set_many(
             {
-                "AGENT_POST_INTENT_CHANCE": "0.50",
+                "SEED_VOTE_MAX": "150",
                 "API_TOKEN": "forbidden_token",
             }
         )
 
 
-def test_admin_api_save_deaddit_config_content_mix(client, db_session):
-    """Test /admin/api/save-deaddit-config validation and fraction conversion."""
-    # 1. Successful submission of percentages
+def test_intent_mix_settings_are_retired(app, db_session):
+    """No intent-mix default or description remains; the profile owns the mix."""
+    for key in _RETIRED_KEYS:
+        assert key not in Config.DEFAULTS
+        assert key not in Config.DESCRIPTIONS
+
+
+def test_admin_api_ignores_intent_mix_payload(client, db_session):
+    """The settings save API no longer writes intent-mix settings."""
     res = client.post(
         "/admin/api/save-deaddit-config",
         json={
@@ -49,37 +64,8 @@ def test_admin_api_save_deaddit_config_content_mix(client, db_session):
     assert res.status_code == 200
     data = res.get_json()
     assert data["success"] is True
-    assert Config.get("AGENT_POST_INTENT_CHANCE") == "0.35"
-    assert Config.get("AGENT_FORCED_IMAGE_CHANCE") == "0.2"
-    assert Config.get("AGENT_FORCED_WEBSITE_CHANCE") == "0.25"
-
-    # 2. Rejection when sum of forced image and website exceeds 100%
-    res_bad_sum = client.post(
-        "/admin/api/save-deaddit-config",
-        json={
-            "agent_post_intent_pct": 50.0,
-            "agent_forced_image_pct": 60.0,
-            "agent_forced_website_pct": 50.0,
-        },
-    )
-    assert res_bad_sum.status_code == 200
-    data_bad = res_bad_sum.get_json()
-    assert data_bad["success"] is False
-    assert "exceed 100%" in data_bad["message"]
-
-    # 3. Rejection of negative numbers
-    res_neg = client.post(
-        "/admin/api/save-deaddit-config",
-        json={
-            "agent_post_intent_pct": -10.0,
-            "agent_forced_image_pct": 0.0,
-            "agent_forced_website_pct": 0.0,
-        },
-    )
-    assert res_neg.status_code == 200
-    data_neg = res_neg.get_json()
-    assert data_neg["success"] is False
-    assert "negative" in data_neg["message"].lower()
+    for key in _RETIRED_KEYS:
+        assert Config.get(key) is None
 
 
 def test_run_json_serialization_includes_intent(db_session):

@@ -399,6 +399,7 @@ def test_kickoff_prompt_samples_only_three_post_suggestions(
     seeded_db, db_session, monkeypatch
 ):
     from deaddit.agents.prompts import (
+        DEFAULT_VISIT_PROFILE,
         _POST_DIRECTIONS,
         _SUGGESTIONS_PER_PROMPT,
     )
@@ -407,10 +408,11 @@ def test_kickoff_prompt_samples_only_three_post_suggestions(
     assert len({direction.id for direction in _POST_DIRECTIONS}) == 10
     assert len({direction.text for direction in _POST_DIRECTIONS}) == 10
     assert _SUGGESTIONS_PER_PROMPT == 3
-    selected = _POST_DIRECTIONS[3:6]
+    pool = DEFAULT_VISIT_PROFILE.direction_catalog["post"]
+    selected = pool[3:6]
 
     def sample(population, k):
-        if population is _POST_DIRECTIONS:
+        if tuple(population) == pool:
             assert k == 3
             return list(selected)
         return list(population)[:k]
@@ -438,11 +440,9 @@ def test_kickoff_prompt_samples_only_three_post_suggestions(
     ]
 
     for prompt in prompts:
-        assert all(direction.text in prompt for direction in selected)
+        assert all(item.text in prompt for item in selected)
         assert all(
-            direction.text not in prompt
-            for direction in _POST_DIRECTIONS
-            if direction not in selected
+            item.text not in prompt for item in pool if item not in selected
         )
 
 
@@ -451,6 +451,7 @@ def test_kickoff_prompt_samples_only_three_comment_suggestions(
     seeded_db, db_session, monkeypatch, unread
 ):
     from deaddit.agents.prompts import (
+        DEFAULT_VISIT_PROFILE,
         _COMMENT_DIRECTIONS,
         _SUGGESTIONS_PER_PROMPT,
     )
@@ -459,12 +460,13 @@ def test_kickoff_prompt_samples_only_three_comment_suggestions(
     assert len({direction.id for direction in _COMMENT_DIRECTIONS}) == 10
     assert len({direction.text for direction in _COMMENT_DIRECTIONS}) == 10
     assert _SUGGESTIONS_PER_PROMPT == 3
-    selected = _COMMENT_DIRECTIONS[4:7]
+    pool = DEFAULT_VISIT_PROFILE.direction_catalog["comment"]
+    selected = pool[4:7]
     monkeypatch.setattr(
         random,
         "sample",
         lambda population, k: list(selected)
-        if population is _COMMENT_DIRECTIONS and k == 3
+        if tuple(population) == pool and k == 3
         else list(population)[:k],
     )
     agent = _make_agent(db_session, "alice")
@@ -474,24 +476,26 @@ def test_kickoff_prompt_samples_only_three_comment_suggestions(
     )
 
     assert intent == "browse"
-    assert all(direction.text in prompt for direction in selected)
-    assert all(
-        direction.text not in prompt
-        for direction in _COMMENT_DIRECTIONS
-        if direction not in selected
-    )
+    assert all(item.text in prompt for item in selected)
+    assert all(item.text not in prompt for item in pool if item not in selected)
 
 
 def test_length_target_weights_cover_every_percentile():
-    from deaddit.agents.prompts import _LENGTH_TARGETS, _length_target
+    from deaddit.agents.prompts import DEFAULT_VISIT_PROFILE, _length_target
 
-    for content_kind, targets in _LENGTH_TARGETS.items():
-        expected = [target for target in targets for _ in range(target.weight)]
-        assert len(expected) == 100
-        assert (
-            [_length_target(content_kind, quantile) for quantile in range(100)]
-            == expected
-        )
+    for content_kind, items in DEFAULT_VISIT_PROFILE.length_catalog.items():
+        weights = [item.weight for item in items]
+        assert sum(weights) == 100
+        for quantile in range(100):
+            chosen = _length_target(DEFAULT_VISIT_PROFILE, content_kind, quantile)
+            cumulative = 0.0
+            expected = items[-1]
+            for item in items:
+                cumulative += item.weight
+                if quantile < cumulative:
+                    expected = item
+                    break
+            assert chosen[0] == expected.id, (content_kind, quantile)
 
 
 def test_kickoff_prompt_routes_one_length_target_by_content_type(

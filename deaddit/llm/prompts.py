@@ -18,9 +18,9 @@ Design points:
   prompt version produced which run without schema churn on
   ``agent_run`` / ``llm_usage``.
 
-PARITY FREEZE (Wave 5): nothing here changes any live effective prompt.
-The whole path is inert unless ``Config.PROMPT_VERSIONING_ENABLED``
-is switched to ``true`` AFTER the AC-P3 measurement window closes.
+Phase 4: the same tables also store validated immutable
+``agent.visit_profile`` documents, pinned agent > cohort > global, with the
+source-controlled profile as the final fallback.
 """
 
 from __future__ import annotations
@@ -35,7 +35,6 @@ from types import MappingProxyType
 from typing import Mapping
 from sqlalchemy import event
 
-from deaddit import Config
 from deaddit.extensions import db
 from deaddit.models import (
     PromptPin,
@@ -621,18 +620,6 @@ def render_pinned(
         variables=variables,
     )
     return text, version_row
-
-
-# --- feature flag --------------------------------------------------------
-
-
-def versioning_enabled() -> bool:
-    """Whether versioned prompts drive live prompt assembly.
-
-    PARITY FREEZE: default ``false``; flipping this AFTER the AC-P3 window
-    is the documented one-command activation.
-    """
-    return Config.get("PROMPT_VERSIONING_ENABLED", "false") == "true"
 
 
 # --- immutability guard --------------------------------------------------
