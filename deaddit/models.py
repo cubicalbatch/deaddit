@@ -615,7 +615,13 @@ class AgentMemory(db.Model):
 
 # --- Platform dynamics: votes & karma ---
 class Vote(db.Model):
-    """A single up/down vote on a post or a comment (Phase D1)."""
+    """A canonical up/down vote on a post or comment.
+
+    ``source`` records provenance (``simulated``, historical ``agent``,
+    ``human``, or ``backfill``). A durable row is created only for a changed
+    vote; same-value re-votes and insert-only collisions are no-ops and do not
+    emit activity.
+    """
 
     id = db.Column(db.Integer, primary_key=True)
     voter = db.Column(
@@ -640,8 +646,12 @@ class Vote(db.Model):
 
 
 class VoteCadencePolicy(db.Model):
-    """Immutable, versioned policy used by simulated voting."""
+    """Immutable, versioned policy used by worker-owned simulated voting.
 
+    Active cadence is resolved from content creation time. Tail settings are
+    resolved from the future archive/revival exposure time, so changing a
+    policy never rewrites existing rows.
+    """
     id = db.Column(db.Integer, primary_key=True)
     preset = db.Column(db.String(16), nullable=False)
     algorithm_version = db.Column(db.Integer, nullable=False)
@@ -716,8 +726,11 @@ class VoteCadencePolicy(db.Model):
 
 
 class VoteSimulationHourly(db.Model):
-    """Cross-process counters for one UTC hour and simulator mode."""
+    """Cross-process counters for one UTC hour and simulator mode.
 
+    Rows are additive health summaries, not a vote ledger: durable provenance
+    and no-op behavior remain authoritative in :class:`Vote`.
+    """
     hour = db.Column(db.DateTime, primary_key=True)
     mode = db.Column(db.String(16), primary_key=True)
     ticks = db.Column(db.Integer, nullable=False, server_default="0")
@@ -976,17 +989,18 @@ class ActivityEvent(db.Model):
 
 
 class PlatformDaily(db.Model):
-    """Per-UTC-day rollup of engagement, spend, and health metrics (§8).
+    """Per-UTC-day rollup of engagement, spend, provenance, and health.
 
     Written by the nightly rollup job (deaddit.dynamics.metrics), idempotent
     per day. ``llm_*`` columns join LLMUsage on day=date(created_at) per the
     LLM-3 conventions: token sums are COALESCEd to 0, but ``llm_cost_usd`` is
     NULL when no priced attempt exists that day (never fake $0), and
-    ``cost_per_engagement`` is NULL when cost or engagement is absent.
-    ``provenance_json`` keeps Resolution-9 provenance splits intact: post and
-    comment counts bucketed by model marker ('agent:*' vs 'seed' vs other).
+    ``cost_per_engagement`` is NULL when cost or content engagement is absent.
+    That cost is LLM-only: simulated votes do not consume or represent tokens.
+    Additive vote-source and VoteSimulationHourly daily splits are stored in
+    ``provenance_json``; the established post/comment model-marker buckets are
+    unchanged.
     """
-
     day = db.Column(db.Date, primary_key=True)
     posts = db.Column(db.Integer, nullable=False, server_default="0")
     comments = db.Column(db.Integer, nullable=False, server_default="0")

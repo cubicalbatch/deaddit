@@ -2,9 +2,11 @@
 
 Polls the ``SIMULATED_VOTING_MODE`` setting and drives the Phase 2/3
 engagement engine (:func:`deaddit.dynamics.engagement.run_active_tick`)
-once per interval. There is no LLM or agent-run dependency here: every tick
-is a bounded, deterministic engine call whose semantics live beside the
-engine.
+once per interval. ``off`` fails closed; ``shadow`` computes decisions and
+hourly counters without writes; ``live`` casts canonical
+``Vote(source='simulated')`` rows. There is no LLM or agent-run dependency
+here: every tick is a bounded, deterministic engine call whose semantics live
+beside the engine, and routine votes consume no LLM tokens.
 
 Worker-only by law (plan invariant 2): the web process never imports or
 starts this scheduler. It is registered exclusively in

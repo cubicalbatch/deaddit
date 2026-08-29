@@ -1,9 +1,11 @@
-"""Persistence-facing simulated-voting policy helpers.
+"""Deterministic simulated-voting engine and persistence helpers.
 
-The simulator itself is intentionally not part of this module.  This module
-owns the value validation and the small atomic aggregate write used by a
-worker, so policy/config semantics do not depend on either web or worker
-process memory.
+This module owns policy validation, immutable preset values, active-window
+cadence, archive/revival tail exposure, deterministic voter selection, and
+the atomic ``VoteSimulationHourly`` aggregate write. The worker calls
+``run_active_tick`` with ``dry_run=True`` for Shadow (proposals/counters only)
+or ``dry_run=False`` for Live (canonical ``Vote(source='simulated')`` writes).
+No LLM request or agent run is part of simulator work.
 """
 
 from __future__ import annotations
@@ -1051,7 +1053,12 @@ def _select_voter(
 
 
 class ActiveWindowEngine:
-    """Evaluate routine active-window proposals and optionally cast them."""
+    """Evaluate active cadence plus bounded archive/revival exposures.
+
+    ``dry_run`` returns the same deterministic decisions as Live but leaves
+    canonical votes and content state untouched; callers may use it to
+    compare policy projections safely.
+    """
 
     def __init__(
         self,
@@ -1547,7 +1554,11 @@ def run_active_tick(
     now: datetime | None = None,
     **kwargs: Any,
 ) -> TickResult:
-    """Convenience entry point used by tests and the future worker."""
+    """Worker-facing deterministic tick entry point.
+
+    ``dry_run=True`` is Shadow semantics; ``dry_run=False`` is Live semantics.
+    Both paths use the same candidate, voter, direction, and tail guardrails.
+    """
     if now is None:
         now = datetime.utcnow()
     engine_options = (

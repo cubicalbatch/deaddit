@@ -1759,9 +1759,10 @@ def analytics():
     PlatformDaily rollups written by the nightly metrics job.
     """
     from deaddit.dynamics.degeneracy import flagged_hot_authors
-    from deaddit.dynamics.metrics import daily_series
+    from deaddit.dynamics.metrics import daily_metric_row, daily_series
 
     series = daily_series(30)
+    metric_rows = [daily_metric_row(row) for row in series]
     watchlist = (
         DegeneracyFlag.query.order_by(DegeneracyFlag.created_at.desc()).limit(50).all()
     )
@@ -1774,6 +1775,7 @@ def analytics():
         "admin/analytics.html",
         series=series,
         latest=latest,
+        metric_rows=metric_rows,
         watchlist=watchlist,
         demoted_authors=flagged_hot_authors(),
         spark_cost=_sparkline(_column("llm_cost_usd")),

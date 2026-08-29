@@ -26,7 +26,18 @@
     {% else %}
         {{ m.stat_tile('—', 'Cost per engagement', tone='success', icon='bi-bullseye') }}
     {% endif %}
+    {% set latest_metrics = metric_rows[-1] if metric_rows else none %}
+    {% if latest_metrics and latest_metrics.tokens_per_content_action is not none %}
+        {{ m.stat_tile('%0.1f'|format(latest_metrics.tokens_per_content_action), 'LLM tokens / content action', tone='info', icon='bi-lightning-charge') }}
+    {% else %}
+        {{ m.stat_tile('—', 'LLM tokens / content action', tone='info', icon='bi-lightning-charge') }}
+    {% endif %}
 </div>
+<p class="form-text mb-4">
+    Cost per engagement is priced LLM spend divided by posts plus comments.
+    Simulated votes are not token-funded output; the separate tokens-per-content-action
+    metric counts LLM input and output tokens for content actions only.
+</p>
 
 {% if series %}
 <div class="row g-3 mb-4">
@@ -92,6 +103,46 @@
         <td>{% if row.gini_participation_avg is not none %}{{ '%0.2f'|format(row.gini_participation_avg) }}{% else %}—{% endif %}</td>
     </tr>
 {% endcall %}
+<h2 class="h5 mt-4">Vote provenance and simulator health
+    <span class="text-muted small">(UTC day; durable changes only)</span>
+</h2>
+<p class="form-text">
+    Vote sources are split between simulated, historical agent, human, and
+    backfill rows. Same-value no-ops and insert-only collisions do not create
+    activity or inflate these counts. Simulator counters include shadow and
+    live hourly rows.
+</p>
+{% set voting_columns = [
+    {'label': 'Day', 'sort_key': 'day', 'default_dir': 'desc'},
+    {'label': 'Simulated votes'},
+    {'label': 'Agent-era votes'},
+    {'label': 'Human votes'},
+    {'label': 'Backfill votes'},
+    {'label': 'Inserts'},
+    {'label': 'Switches'},
+    {'label': 'Active proposals'},
+    {'label': 'Archive proposals'},
+    {'label': 'Revival proposals'},
+    {'label': 'Cap skips'},
+    {'label': 'No-voter skips'}
+] %}
+{% call(metric, loop) m.densetable(voting_columns, metric_rows, empty_label='No daily voting metrics yet — the nightly job writes one row per UTC day.') %}
+    <tr>
+        <td>{{ metric.day.strftime('%Y-%m-%d') }}</td>
+        <td>{{ metric.vote_sources.simulated }}</td>
+        <td>{{ metric.vote_sources.agent }}</td>
+        <td>{{ metric.vote_sources.human }}</td>
+        <td>{{ metric.vote_sources.backfill }}</td>
+        <td>{{ metric.simulated_voting.inserted_votes }}</td>
+        <td>{{ metric.simulated_voting.switched_votes }}</td>
+        <td>{{ metric.simulated_voting.active_proposals }}</td>
+        <td>{{ metric.simulated_voting.archive_proposals }}</td>
+        <td>{{ metric.simulated_voting.revival_proposals }}</td>
+        <td>{{ metric.simulated_voting.cap_skips }}</td>
+        <td>{{ metric.simulated_voting.no_voter_skips }}</td>
+    </tr>
+{% endcall %}
+
 
 <h2 class="h5 mt-4">Degeneracy watchlist
     <span class="text-muted small">

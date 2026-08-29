@@ -13,7 +13,14 @@ The nightly job (:func:`run_nightly_rollup`, registered in
 - **Provenance** stays intact per Resolution 9: post/comment counts are
   bucketed by model marker into 'agent:*' vs 'seed' vs other and stored as
   ``provenance_json``. Rollups aggregate over BOTH agent-authored and
-  seeded/backfilled rows — nothing filters by model.
+  seeded/backfilled rows — nothing filters by model. Vote rows add a separate
+  four-way ``votes`` source split (simulated, agent, human, backfill); durable
+  rows are counted once, so same-value no-ops and insert-only collisions do not
+  become activity.
+- **Cost semantics** remain LLM-only: ``cost_per_engagement`` is priced
+  LLM spend divided by posts plus comments, never simulated votes. The additive
+  ``tokens_per_content_action`` metric uses LLM input plus output tokens over
+  posts plus comments; simulator work consumes no LLM tokens.
 - **Health trio** is computed from content tables for that day:
   median thread depth of that day's comments; per-thread dissent share
   (fraction of that day's comments in the thread scored <= 0) averaged over
@@ -49,11 +56,96 @@ import json
 import logging
 import statistics
 from datetime import date, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import case, func
 
 from deaddit.extensions import db
-from deaddit.models import ActivityEvent, Comment, LLMUsage, PlatformDaily, Post
+from deaddit.models import (
+    ActivityEvent,
+    Comment,
+    LLMUsage,
+    PlatformDaily,
+    Post,
+    Vote,
+    VoteSimulationHourly,
+)
+logger = logging.getLogger(__name__)
+
+
+#: Durable vote provenance values. Unknown historical values are deliberately
+#: not folded into a known bucket, so a malformed row cannot masquerade as a
+#: supported source.
+VOTE_SOURCES = ("simulated", "agent", "human", "backfill")
+
+#: Persisted counters owned by ``VoteSimulationHourly``. Keep this list
+#: additive and in model order so the daily JSON is stable for API consumers.
+SIMULATED_VOTING_COUNTERS = (
+    "ticks",
+    "errors",
+    "active_proposals",
+    "archive_proposals",
+    "revival_proposals",
+    "inserted_votes",
+    "switched_votes",
+    "upvotes",
+    "downvotes",
+    "cap_skips",
+    "min_gap_skips",
+    "no_voter_skips",
+    "guardrail_skips",
+)
+
+
+def _vote_source_counts(start: datetime, end: datetime) -> dict[str, int]:
+    """Count durable votes created during the UTC day by canonical source.
+
+    ``Vote`` rows are the provenance source of truth rather than
+    ``ActivityEvent`` rows: successful inserts and direction switches have a
+    durable row, while same-value re-votes and insert-only collisions do not.
+    """
+    counts = {source: 0 for source in VOTE_SOURCES}
+    rows = (
+        db.session.query(Vote.source, func.count(Vote.id))
+        .filter(Vote.created_at >= start, Vote.created_at < end)
+        .group_by(Vote.source)
+        .all()
+    )
+    for source, count in rows:
+        if source in counts:
+            counts[source] = int(count)
+    return counts
+
+
+def _simulation_counter_totals(start: datetime, end: datetime) -> dict[str, Any]:
+    """Sum simulator counters for all modes in one UTC day.
+
+    Hourly rows are mode-keyed, so a daily rollup must include both shadow and
+    live work (and retain a per-mode split for operators comparing rollout
+    phases). Missing rows and NULL-like values are represented as zero.
+    """
+    totals = {name: 0 for name in SIMULATED_VOTING_COUNTERS}
+    by_mode: dict[str, dict[str, int]] = {}
+    rows = (
+        db.session.query(VoteSimulationHourly)
+        .filter(
+            VoteSimulationHourly.hour >= start,
+            VoteSimulationHourly.hour < end,
+        )
+        .order_by(VoteSimulationHourly.mode, VoteSimulationHourly.hour)
+        .all()
+    )
+    for row in rows:
+        mode_totals = by_mode.setdefault(
+            str(row.mode),
+            {name: 0 for name in SIMULATED_VOTING_COUNTERS},
+        )
+        for name in SIMULATED_VOTING_COUNTERS:
+            value = int(getattr(row, name) or 0)
+            totals[name] += value
+            mode_totals[name] += value
+    totals["by_mode"] = by_mode
+    return totals
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +223,12 @@ def _spend(day: date) -> dict[str, float | int | None]:
 
 
 def _provenance(start: datetime, end: datetime) -> dict:
-    """Post/comment counts by Resolution-9 model marker for the day."""
+    """Return content provenance, vote-source counts, and simulator totals.
+
+    The ``posts`` and ``comments`` mappings are intentionally unchanged from
+    Resolution 9. Additive ``votes`` and ``simulated_voting`` mappings keep
+    vote provenance and worker health separate from content provenance.
+    """
 
     def _bucket(model: str | None) -> str:
         if model is None:
@@ -160,6 +257,8 @@ def _provenance(start: datetime, end: datetime) -> dict:
         .all()
     ):
         breakdown["comments"][_bucket(model)] += int(n)
+    breakdown["votes"] = _vote_source_counts(start, end)
+    breakdown["simulated_voting"] = _simulation_counter_totals(start, end)
     return breakdown
 
 
@@ -320,6 +419,54 @@ def daily_series(days: int = 30) -> list[PlatformDaily]:
     )
 
 
+def daily_metric_row(row: PlatformDaily) -> dict[str, Any]:
+    """Expose additive metrics persisted in a daily row.
+
+    ``PlatformDaily`` intentionally remains schema-stable. New simulator and
+    vote-provenance values live in its JSON payload, while this helper gives
+    admin/API callers a typed, null-safe view. Older rows naturally return
+    zero-valued counters.
+    """
+    try:
+        payload = json.loads(row.provenance_json or "{}")
+    except (TypeError, ValueError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    raw_votes = payload.get("votes", {})
+    raw_simulation = payload.get("simulated_voting", {})
+    if not isinstance(raw_votes, dict):
+        raw_votes = {}
+    if not isinstance(raw_simulation, dict):
+        raw_simulation = {}
+    vote_sources = {
+        source: int(raw_votes.get(source, 0)) for source in VOTE_SOURCES
+    }
+    simulation = {
+        name: int(raw_simulation.get(name, 0))
+        for name in SIMULATED_VOTING_COUNTERS
+    }
+    by_mode = raw_simulation.get("by_mode", {})
+    simulation["by_mode"] = by_mode if isinstance(by_mode, dict) else {}
+
+    content_actions = int(row.posts or 0) + int(row.comments or 0)
+    token_total = int(row.llm_tokens_in or 0) + int(row.llm_tokens_out or 0)
+    return {
+        "day": row.day,
+        "vote_sources": vote_sources,
+        "simulated_voting": simulation,
+        "tokens_per_content_action": (
+            round(token_total / content_actions, 4) if content_actions else None
+        ),
+    }
+
+
+def daily_metrics(days: int = 30) -> list[dict[str, Any]]:
+    """Return additive vote, simulator, and token metrics for daily rows."""
+    return [daily_metric_row(row) for row in daily_series(days)]
+
+
 def sub_gini_series(window_days: int = 7) -> dict[str, float]:
     """Per-subdeaddit participation Gini over the trailing window.
 
@@ -339,7 +486,13 @@ def sub_gini_series(window_days: int = 7) -> dict[str, float]:
 
 
 def health_snapshot(days: int = 7) -> dict:
-    """AgenticCore-facing snapshot: rollup series plus per-sub Gini map."""
+    """AgenticCore-facing snapshot: rollup series plus additive metrics.
+
+    ``cost_per_engagement`` remains the LLM-token-funded cost of content
+    production. ``tokens_per_content_action`` is reported separately, and
+    simulated voting contributes neither metric.
+    """
+    series = daily_series(days)
     return {
         "days": days,
         "series": [
@@ -349,10 +502,14 @@ def health_snapshot(days: int = 7) -> dict:
                 "actions_per_active": row.actions_per_active,
                 "llm_cost_usd": row.llm_cost_usd,
                 "cost_per_engagement": row.cost_per_engagement,
+                "tokens_per_content_action": metric["tokens_per_content_action"],
+                "vote_sources": metric["vote_sources"],
+                "simulated_voting": metric["simulated_voting"],
                 "dissent_share_avg": row.dissent_share_avg,
                 "gini_participation_avg": row.gini_participation_avg,
             }
-            for row in daily_series(days)
+            for row in series
+            for metric in (daily_metric_row(row),)
         ],
         "sub_gini": sub_gini_series(window_days=days),
     }

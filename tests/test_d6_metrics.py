@@ -9,11 +9,21 @@ from pathlib import Path
 import pytest
 
 from deaddit.dynamics.metrics import (
+    daily_metric_row,
     gini_coefficient,
+    health_snapshot,
     rollup_day,
     run_nightly_rollup,
 )
-from deaddit.models import ActivityEvent, Comment, LLMUsage, PlatformDaily, Post
+from deaddit.models import (
+    ActivityEvent,
+    Comment,
+    LLMUsage,
+    PlatformDaily,
+    Post,
+    Vote,
+    VoteSimulationHourly,
+)
 
 _DAY = date(2026, 8, 25)
 
@@ -172,6 +182,68 @@ def rollup_fixtures(app, db_session):
             estimated_cost=99.0,
         )
     )
+    db_session.add_all(
+        [
+            Vote(
+                voter="alice",
+                post_id=p_seed.id,
+                value=1,
+                source="simulated",
+                created_at=_dt(hour=12),
+            ),
+            Vote(
+                voter="carol",
+                post_id=p_seed.id,
+                value=-1,
+                source="agent",
+                created_at=_dt(hour=12),
+            ),
+            Vote(
+                voter="bob",
+                post_id=p_agent.id,
+                value=1,
+                source="human",
+                created_at=_dt(hour=12),
+            ),
+            Vote(
+                voter="carol",
+                post_id=p_agent.id,
+                value=-1,
+                source="backfill",
+                created_at=_dt(hour=12),
+            ),
+            VoteSimulationHourly(
+                hour=_dt(hour=13),
+                mode="shadow",
+                active_proposals=3,
+                archive_proposals=4,
+                revival_proposals=5,
+                inserted_votes=2,
+                switched_votes=1,
+                upvotes=2,
+                downvotes=1,
+                cap_skips=6,
+                min_gap_skips=8,
+                no_voter_skips=7,
+                guardrail_skips=9,
+            ),
+            VoteSimulationHourly(
+                hour=_dt(hour=14),
+                mode="live",
+                active_proposals=1,
+                archive_proposals=2,
+                revival_proposals=3,
+                inserted_votes=1,
+                switched_votes=2,
+                upvotes=1,
+                downvotes=2,
+                cap_skips=4,
+                min_gap_skips=5,
+                no_voter_skips=5,
+                guardrail_skips=6,
+            ),
+        ]
+    )
     db_session.commit()
     return {"p_agent": p_agent, "p_seed": p_seed}
 
@@ -219,8 +291,81 @@ class TestRollupDay:
         assert provenance["posts"] == {"agent": 1, "seed": 1, "other": 1}
         assert provenance["comments"]["seed"] == 2
         assert provenance["comments"]["other"] == 1
+        assert provenance["votes"] == {
+            "simulated": 1,
+            "agent": 1,
+            "human": 1,
+            "backfill": 1,
+        }
+        simulator = provenance["simulated_voting"]
+        assert {
+            key: simulator[key]
+            for key in (
+                "active_proposals",
+                "archive_proposals",
+                "revival_proposals",
+                "inserted_votes",
+                "switched_votes",
+                "cap_skips",
+                "no_voter_skips",
+            )
+        } == {
+            "active_proposals": 4,
+            "archive_proposals": 6,
+            "revival_proposals": 8,
+            "inserted_votes": 3,
+            "switched_votes": 3,
+            "cap_skips": 10,
+            "no_voter_skips": 12,
+        }
+        metrics = daily_metric_row(row)
+        assert metrics["tokens_per_content_action"] == pytest.approx(33.0)
+        assert metrics["vote_sources"]["simulated"] == 1
+        assert metrics["simulated_voting"]["inserted_votes"] == 3
+        snapshot = health_snapshot(days=30)
+        snapshot_row = next(
+            item for item in snapshot["series"] if item["day"] == _DAY.isoformat()
+        )
+        assert snapshot_row["vote_sources"] == provenance["votes"]
+        assert snapshot_row["simulated_voting"] == simulator
+        assert simulator["by_mode"]["shadow"]["inserted_votes"] == 2
+        assert simulator["by_mode"]["live"]["switched_votes"] == 2
 
-        # Health trio: depths are {1 (top), 2 (reply), 1 (standalone)} → 1.5;
+    def test_noop_and_collision_do_not_inflate_vote_metrics(
+        self, app, db_session, rollup_fixtures
+    ):
+        from deaddit.dynamics.votes import cast_vote
+
+        before_events = ActivityEvent.query.filter_by(event_type="vote").count()
+        noop = cast_vote(
+            "alice",
+            "post",
+            rollup_fixtures["p_seed"].id,
+            1,
+            source="simulated",
+            allow_recast=True,
+        )
+        collision = cast_vote(
+            "alice",
+            "post",
+            rollup_fixtures["p_seed"].id,
+            -1,
+            source="simulated",
+            allow_recast=False,
+        )
+        assert noop["changed"] is False
+        assert noop["change_kind"] == "same_value_noop"
+        assert collision["changed"] is False
+        assert collision["change_kind"] == "insert_only_collision"
+        assert ActivityEvent.query.filter_by(event_type="vote").count() == before_events
+
+        row = rollup_day(_DAY)
+        import json
+
+        provenance = json.loads(row.provenance_json)
+        assert row.votes == 4
+        assert provenance["votes"]["simulated"] == 1
+
         # two active threads: p_agent comments {1,-1} → share 1/2,
         # p_seed thread {-1} → share 1/1 → avg across threads = 0.75;
         # participation counts CONTENT rows: alice 1p, bob 1p+2c, carol 1p+1c
@@ -423,5 +568,7 @@ class TestMigrationAndAdminSurface:
         html = resp.get_data(as_text=True)
         assert "Active agents" in html
         assert "Cost per engagement" in html
+        assert "LLM tokens / content action" in html
+        assert "Vote provenance and simulator health" in html
         assert "Degeneracy watchlist" in html
         assert "spammer" in html
