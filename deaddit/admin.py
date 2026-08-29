@@ -5206,6 +5206,7 @@ def prompts_detail_api(name):
                     "target_kind": p.target_kind,
                     "target_key": p.target_key,
                     "version_number": p.version_number,
+                    "updated_at": p.updated_at.isoformat() if p.updated_at else None,
                 }
                 for p in PromptPin.query.filter_by(template_id=template.id)
             ],

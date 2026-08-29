@@ -62,21 +62,23 @@ def _profile_body(system_template: str | None, mix: dict[str, float]) -> str:
                 {
                     "id": "comment.short",
                     "text": "Keep the response concise and useful.",
-                    "weight": 1,
+                    # Length weights are percentages consumed against a
+                    # 0-99 quantile draw, so single-target catalogs carry 100.
+                    "weight": 100,
                 }
             ],
             "media_post": [
                 {
                     "id": "media_post.caption",
                     "text": "Add only a brief, relevant caption when useful.",
-                    "weight": 1,
+                    "weight": 100,
                 }
             ],
             "text_post": [
                 {
                     "id": "text_post.short",
                     "text": "Write one short, complete paragraph.",
-                    "weight": 1,
+                    "weight": 100,
                 }
             ],
         },
