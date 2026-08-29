@@ -5433,9 +5433,10 @@ def prompts_validate_api(name):
     from deaddit.llm.prompts import PromptError, get_template, parse_visit_profile
     from deaddit.llm.prompts import serialize_visit_profile
 
-    if get_template(name) is None:
-        return jsonify({"error": f"Unknown prompt template {name!r}"}), 404
     if name != _PROFILE_TEMPLATE:
+        # Unknown names 404; other real templates explain the restriction.
+        if get_template(name) is None:
+            return jsonify({"error": f"Unknown prompt template {name!r}"}), 404
         return jsonify(
             {"error": f"Validation supports only {_PROFILE_TEMPLATE!r}"}
         ), 400
@@ -5464,10 +5465,7 @@ def prompts_preview_api(name):
     """
     from dataclasses import replace
 
-    from deaddit.agents.prompts import (
-        DEFAULT_VISIT_PROFILE,
-        prepare_agent_visit,
-    )
+    from deaddit.agents.prompts import DEFAULT_VISIT_PROFILE, prepare_agent_visit
     from deaddit.llm.prompts import (
         PromptError,
         get_template,
@@ -5477,9 +5475,10 @@ def prompts_preview_api(name):
         serialize_visit_profile,
     )
 
-    if get_template(name) is None:
-        return jsonify({"error": f"Unknown prompt template {name!r}"}), 404
     if name != _PROFILE_TEMPLATE:
+        # Unknown names 404; other real templates explain the restriction.
+        if get_template(name) is None:
+            return jsonify({"error": f"Unknown prompt template {name!r}"}), 404
         return jsonify({"error": f"Preview supports only {_PROFILE_TEMPLATE!r}"}), 400
     data = request.get_json(silent=True) or {}
     agent_id = data.get("agent_id")
