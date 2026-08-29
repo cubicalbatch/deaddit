@@ -599,7 +599,9 @@ def _policy_record(row, *, include_config=True):
     if row.preset not in VoteCadencePolicy.VALID_PRESETS:
         raise ValueError(f"invalid policy preset {row.preset}")
     if row.algorithm_version not in SUPPORTED_ALGORITHM_VERSIONS:
-        raise ValueError(f"unsupported policy algorithm version {row.algorithm_version}")
+        raise ValueError(
+            f"unsupported policy algorithm version {row.algorithm_version}"
+        )
     config = validate_policy(row.config)
     record = {
         "id": row.id,
@@ -665,9 +667,7 @@ def _voting_preview(config):
 
 def _voting_health():
     since = datetime.utcnow() - timedelta(hours=24)
-    rows = VoteSimulationHourly.query.filter(
-        VoteSimulationHourly.hour >= since
-    ).all()
+    rows = VoteSimulationHourly.query.filter(VoteSimulationHourly.hour >= since).all()
     counters = {
         "ticks": 0,
         "errors": 0,
@@ -686,10 +686,9 @@ def _voting_health():
     for row in rows:
         for name in counters:
             counters[name] += getattr(row, name) or 0
-    latest = (
-        VoteSimulationHourly.query.order_by(VoteSimulationHourly.updated_at.desc())
-        .first()
-    )
+    latest = VoteSimulationHourly.query.order_by(
+        VoteSimulationHourly.updated_at.desc()
+    ).first()
     direction_total = counters["upvotes"] + counters["downvotes"]
     simulated_votes = counters["inserted_votes"] + counters["switched_votes"]
     latest_cap_skips = latest.cap_skips if latest else 0
@@ -704,9 +703,7 @@ def _voting_health():
         "archive": counters["archive_proposals"],
         "revival": counters["revival_proposals"],
         "upvote_share": (
-            round(counters["upvotes"] / direction_total, 4)
-            if direction_total
-            else None
+            round(counters["upvotes"] / direction_total, 4) if direction_total else None
         ),
         "skipped_by_cap": latest_cap_skips,
         "cap_skips": latest_cap_skips,
@@ -723,6 +720,7 @@ def _voting_health():
             else None
         ),
     }
+
 
 def _voting_api_payload():
     now = datetime.utcnow()
@@ -800,9 +798,10 @@ def voting_mode_api():
     if not isinstance(mode, str) or mode.strip().lower() not in _VOTING_MODES:
         return jsonify({"error": "mode must be one of off, shadow, or live"}), 400
     mode = mode.strip().lower()
-    if mode in {"shadow", "live"} and not db.session.query(
-        VoteCadencePolicy.id
-    ).first():
+    if (
+        mode in {"shadow", "live"}
+        and not db.session.query(VoteCadencePolicy.id).first()
+    ):
         return jsonify(
             {"error": f"Save a valid voting policy before enabling {mode} mode."}
         ), 400
@@ -833,9 +832,7 @@ def voting_policy_api():
         preset = "custom"
         config = payload
     else:
-        return jsonify(
-            {"error": "preset must be quiet, natural, busy, or custom"}
-        ), 400
+        return jsonify({"error": "preset must be quiet, natural, busy, or custom"}), 400
     errors = _policy_validation_errors(config)
     if errors:
         return jsonify({"error": "Validation failed", "errors": errors}), 400
@@ -851,7 +848,9 @@ def voting_policy_api():
         db.session.commit()
     except (TypeError, ValueError) as exc:
         db.session.rollback()
-        return jsonify({"error": "Validation failed", "errors": {"policy": str(exc)}}), 400
+        return jsonify(
+            {"error": "Validation failed", "errors": {"policy": str(exc)}}
+        ), 400
     return jsonify({"policy": _policy_record(policy)}), 201
 
 

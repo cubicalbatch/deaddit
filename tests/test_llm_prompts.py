@@ -300,9 +300,7 @@ class TestParityFreezeByteStability:
         assert PromptRenderAudit.query.count() == 0
 
     @pytest.mark.parametrize("tier", ("lurker", "regular", "power_user"))
-    def test_system_prompts_omit_retired_vote_action(
-        self, app, db_session, tier
-    ):
+    def test_system_prompts_omit_retired_vote_action(self, app, db_session, tier):
         agent, user = _golden_agent(app, db_session)
         agent.autonomy_tier = tier
         prompt = build_system_prompt(agent, user)

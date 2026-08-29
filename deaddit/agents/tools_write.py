@@ -7,7 +7,6 @@ Resolution 9). Write tools are rate class WRITE; ``finish`` is META.
 
 from __future__ import annotations
 
-
 from flask import current_app
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
@@ -557,8 +556,6 @@ def _create_comment(ctx: ToolContext, params: CreateCommentArgs) -> dict:
     if nudge is not None:
         result["subscribe_hint"] = nudge
     return result
-
-
 
 
 def _set_subscription(ctx: ToolContext, subdeaddit: str, *, add: bool) -> dict:

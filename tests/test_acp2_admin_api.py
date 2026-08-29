@@ -615,7 +615,9 @@ def test_bulk_delete_cascades_runs_and_keeps_persona(
     db_session.add(turn)
     db_session.flush()
     db_session.add(
-        ToolCall(run_id=run.id, turn_id=turn.id, name="view_inbox", arguments={}, result={})
+        ToolCall(
+            run_id=run.id, turn_id=turn.id, name="view_inbox", arguments={}, result={}
+        )
     )
     busy = _make_agent(db_session, "bob", enabled=True)
     busy.status = "running"

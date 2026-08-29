@@ -25,7 +25,9 @@ def test_voting_routes_require_authentication_and_are_disabled_in_production(
     monkeypatch.setattr(
         admin_module.Config,
         "get",
-        classmethod(lambda cls, key, default=None: "token" if key == "API_TOKEN" else default),
+        classmethod(
+            lambda cls, key, default=None: "token" if key == "API_TOKEN" else default
+        ),
     )
     for method, path in (
         ("get", "/admin/voting"),
@@ -39,30 +41,48 @@ def test_voting_routes_require_authentication_and_are_disabled_in_production(
     monkeypatch.setattr(
         admin_module.Config,
         "get",
-        classmethod(lambda cls, key, default=None: "true" if key == "PRODUCTION" else default),
+        classmethod(
+            lambda cls, key, default=None: "true" if key == "PRODUCTION" else default
+        ),
     )
     with client.session_transaction() as sess:
         sess["admin_authenticated"] = True
     assert client.get("/admin/voting").status_code == 404
     assert client.get("/admin/api/voting").status_code == 404
     assert client.put("/admin/api/voting/mode", json={"mode": "off"}).status_code == 404
-    assert client.post("/admin/api/voting/policies", json={"preset": "quiet"}).status_code == 404
+    assert (
+        client.post("/admin/api/voting/policies", json={"preset": "quiet"}).status_code
+        == 404
+    )
 
 
 def test_preset_save_is_server_owned_and_mode_requires_policy(seeded_db, admin_client):
-    assert admin_client.put("/admin/api/voting/mode", json={"mode": "shadow"}).status_code == 400
-    response = admin_client.post("/admin/api/voting/policies", json={"preset": "natural"})
+    assert (
+        admin_client.put("/admin/api/voting/mode", json={"mode": "shadow"}).status_code
+        == 400
+    )
+    response = admin_client.post(
+        "/admin/api/voting/policies", json={"preset": "natural"}
+    )
     assert response.status_code == 201
     policy = VoteCadencePolicy.query.one()
     assert policy.config == preset_config("natural")
-    assert admin_client.put("/admin/api/voting/mode", json={"mode": "live"}).status_code == 200
+    assert (
+        admin_client.put("/admin/api/voting/mode", json={"mode": "live"}).status_code
+        == 200
+    )
     assert Setting.get_value("SIMULATED_VOTING_MODE") == "live"
 
 
 def test_custom_save_appends_and_invalid_save_does_not_change_database(
     seeded_db, admin_client
 ):
-    assert admin_client.post("/admin/api/voting/policies", json={"preset": "quiet"}).status_code == 201
+    assert (
+        admin_client.post(
+            "/admin/api/voting/policies", json={"preset": "quiet"}
+        ).status_code
+        == 201
+    )
     original = VoteCadencePolicy.query.one()
     config = preset_config("quiet")
     config["post"]["mean_active_votes"] = 4

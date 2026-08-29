@@ -70,6 +70,7 @@ from deaddit.models import (
     Vote,
     VoteSimulationHourly,
 )
+
 logger = logging.getLogger(__name__)
 
 
@@ -104,7 +105,7 @@ def _vote_source_counts(start: datetime, end: datetime) -> dict[str, int]:
     ``ActivityEvent`` rows: successful inserts and direction switches have a
     durable row, while same-value re-votes and insert-only collisions do not.
     """
-    counts = {source: 0 for source in VOTE_SOURCES}
+    counts = dict.fromkeys(VOTE_SOURCES, 0)
     rows = (
         db.session.query(Vote.source, func.count(Vote.id))
         .filter(Vote.created_at >= start, Vote.created_at < end)
@@ -124,7 +125,7 @@ def _simulation_counter_totals(start: datetime, end: datetime) -> dict[str, Any]
     live work (and retain a per-mode split for operators comparing rollout
     phases). Missing rows and NULL-like values are represented as zero.
     """
-    totals = {name: 0 for name in SIMULATED_VOTING_COUNTERS}
+    totals = dict.fromkeys(SIMULATED_VOTING_COUNTERS, 0)
     by_mode: dict[str, dict[str, int]] = {}
     rows = (
         db.session.query(VoteSimulationHourly)
@@ -138,7 +139,7 @@ def _simulation_counter_totals(start: datetime, end: datetime) -> dict[str, Any]
     for row in rows:
         mode_totals = by_mode.setdefault(
             str(row.mode),
-            {name: 0 for name in SIMULATED_VOTING_COUNTERS},
+            dict.fromkeys(SIMULATED_VOTING_COUNTERS, 0),
         )
         for name in SIMULATED_VOTING_COUNTERS:
             value = int(getattr(row, name) or 0)
@@ -146,6 +147,7 @@ def _simulation_counter_totals(start: datetime, end: datetime) -> dict[str, Any]
             mode_totals[name] += value
     totals["by_mode"] = by_mode
     return totals
+
 
 logger = logging.getLogger(__name__)
 
@@ -440,12 +442,9 @@ def daily_metric_row(row: PlatformDaily) -> dict[str, Any]:
         raw_votes = {}
     if not isinstance(raw_simulation, dict):
         raw_simulation = {}
-    vote_sources = {
-        source: int(raw_votes.get(source, 0)) for source in VOTE_SOURCES
-    }
+    vote_sources = {source: int(raw_votes.get(source, 0)) for source in VOTE_SOURCES}
     simulation = {
-        name: int(raw_simulation.get(name, 0))
-        for name in SIMULATED_VOTING_COUNTERS
+        name: int(raw_simulation.get(name, 0)) for name in SIMULATED_VOTING_COUNTERS
     }
     by_mode = raw_simulation.get("by_mode", {})
     simulation["by_mode"] = by_mode if isinstance(by_mode, dict) else {}

@@ -56,8 +56,6 @@ def _int_config(config: dict | None, key: str, fallback: int) -> int:
         return fallback
 
 
-
-
 def _is_lurker(agent: Agent) -> bool:
     tier = getattr(agent.autonomy_tier, "value", agent.autonomy_tier)
     return tier == AutonomyTier.LURKER.value
@@ -70,10 +68,9 @@ def _reschedule_lurker(agent: Agent, now: datetime) -> None:
     max_delay = max(min_delay, _int_config(config, "max_delay", 900))
     agent.status = "idle"
     agent.last_run_at = now
-    agent.next_run_at = now + timedelta(
-        seconds=random.uniform(min_delay, max_delay)
-    )
+    agent.next_run_at = now + timedelta(seconds=random.uniform(min_delay, max_delay))
     db.session.commit()
+
 
 class WakeScheduler:
     """Daemon poller that launches due agents within their budgets."""

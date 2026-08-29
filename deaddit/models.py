@@ -652,6 +652,7 @@ class VoteCadencePolicy(db.Model):
     resolved from the future archive/revival exposure time, so changing a
     policy never rewrites existing rows.
     """
+
     id = db.Column(db.Integer, primary_key=True)
     preset = db.Column(db.String(16), nullable=False)
     algorithm_version = db.Column(db.Integer, nullable=False)
@@ -731,6 +732,7 @@ class VoteSimulationHourly(db.Model):
     Rows are additive health summaries, not a vote ledger: durable provenance
     and no-op behavior remain authoritative in :class:`Vote`.
     """
+
     hour = db.Column(db.DateTime, primary_key=True)
     mode = db.Column(db.String(16), primary_key=True)
     ticks = db.Column(db.Integer, nullable=False, server_default="0")
@@ -1001,6 +1003,7 @@ class PlatformDaily(db.Model):
     ``provenance_json``; the established post/comment model-marker buckets are
     unchanged.
     """
+
     day = db.Column(db.Date, primary_key=True)
     posts = db.Column(db.Integer, nullable=False, server_default="0")
     comments = db.Column(db.Integer, nullable=False, server_default="0")
