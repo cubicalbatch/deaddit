@@ -13,8 +13,9 @@ from deaddit.dynamics.engagement import (
     sample_attention_budget,
     select_direction,
     stable_seed,
+    tail_vote_probability,
 )
-from deaddit.models import Post, Subdeaddit, User, Vote, VoteCadencePolicy
+from deaddit.models import Comment, Post, Subdeaddit, User, Vote, VoteCadencePolicy
 
 
 def test_canonical_presets_have_shared_safety_values():
@@ -331,3 +332,168 @@ def test_attention_zero_and_heavy_tail_are_deterministic():
         for item in range(20)
     ]
     assert max(values) <= 7
+def _tail_policy(now, *, post_probability=1.0, comment_probability=1.0):
+    config = preset_config("natural")
+    config["post"].update(
+        {
+            "active_window_hours": 1,
+            "catchup_grace_hours": 1,
+            "tail_max_age_days": 30,
+            "tail_vote_probability_per_exposure": post_probability,
+        }
+    )
+    config["comment"].update(
+        {
+            "active_window_hours": 1,
+            "catchup_grace_hours": 1,
+            "tail_max_age_days": 30,
+            "tail_vote_probability_per_exposure": comment_probability,
+        }
+    )
+    return VoteCadencePolicy(
+        preset="custom",
+        algorithm_version=1,
+        config=config,
+        effective_at=now - timedelta(days=2),
+    )
+
+
+def test_archive_exposure_is_late_and_restart_stable(app, db_session, monkeypatch):
+    import deaddit.dynamics.engagement as engagement
+
+    now = datetime(2026, 1, 20, 12)
+    db_session.add_all(
+        [
+            Subdeaddit(name="tail"),
+            User(username="author"),
+            User(username="voter"),
+        ]
+    )
+    post = Post(
+        title="old",
+        user="author",
+        subdeaddit_name="tail",
+        created_at=now - timedelta(days=4),
+    )
+    db_session.add(post)
+    db_session.commit()
+    policy = _tail_policy(now)
+    db_session.add(policy)
+    db_session.commit()
+    monkeypatch.setattr(engagement, "_hash_unit", lambda *parts: 0.0)
+    engine = ActiveWindowEngine(policy, per_item_limit=1, global_limit=2)
+    result = engine.tick(now, target_type="post", target_ids=[post.id])
+    assert result.active_proposals == 0
+    assert result.archive_proposals == 1
+    assert [decision.mode for decision in result.decisions] == ["archive"]
+    assert db_session.query(Vote).filter_by(post_id=post.id).count() == 1
+    again = engine.tick(now, target_type="post", target_ids=[post.id])
+    assert not again.decisions
+
+
+def test_tail_probability_decays_and_has_hard_age_bound():
+    now = datetime(2026, 1, 20, 12)
+    policy = _tail_policy(now)
+    created = now - timedelta(days=1)
+    recent = tail_vote_probability(policy, "post", created, now)
+    older = tail_vote_probability(policy, "post", created - timedelta(days=10), now)
+    expired = tail_vote_probability(policy, "post", now - timedelta(days=30), now)
+    assert recent > older > 0
+    assert expired == 0
+
+
+def test_revival_exposes_thread_but_not_unrelated_old_comments(
+    app, db_session, monkeypatch
+):
+    import deaddit.dynamics.engagement as engagement
+
+    now = datetime(2026, 1, 20, 12)
+    db_session.add_all(
+        [
+            Subdeaddit(name="tail"),
+            User(username="author-a"),
+            User(username="author-b"),
+            User(username="commenter"),
+            User(username="voter"),
+        ]
+    )
+    posts = [
+        Post(
+            title=f"old-{suffix}",
+            user=f"author-{suffix}",
+            subdeaddit_name="tail",
+            created_at=now - timedelta(days=4),
+        )
+        for suffix in ("a", "b")
+    ]
+    db_session.add_all(posts)
+    db_session.commit()
+    unrelated = Comment(
+        post_id=posts[1].id,
+        user="commenter",
+        content="old unrelated",
+        created_at=now - timedelta(days=3),
+    )
+    trigger = Comment(
+        post_id=posts[0].id,
+        user="commenter",
+        content="new trigger",
+        created_at=now - timedelta(minutes=2),
+    )
+    db_session.add_all([unrelated, trigger])
+    db_session.add(_tail_policy(now))
+    db_session.commit()
+    monkeypatch.setattr(engagement, "_hash_unit", lambda *parts: 0.0)
+    result = ActiveWindowEngine(
+        db_session.query(VoteCadencePolicy).one(),
+        per_item_limit=1,
+        global_limit=10,
+        archive_item_limit=0,
+    ).tick(now, target_type="post", target_ids=[posts[0].id])
+    assert result.revival_threads_examined == 1
+    assert any(
+        decision.mode == "revival" and decision.target_id == posts[0].id
+        for decision in result.decisions
+    )
+    before = db_session.query(Vote).count()
+    ActiveWindowEngine(
+        db_session.query(VoteCadencePolicy).one(),
+        per_item_limit=1,
+        global_limit=10,
+        archive_item_limit=0,
+    ).tick(now, target_type="post", target_ids=[posts[0].id])
+    assert db_session.query(Vote).count() == before
+    assert db_session.query(Vote).filter_by(comment_id=unrelated.id).count() == 0
+
+
+def test_tail_work_is_bounded_before_weighting(app, db_session, monkeypatch):
+    import deaddit.dynamics.engagement as engagement
+
+    now = datetime(2026, 1, 20, 12)
+    db_session.add_all(
+        [Subdeaddit(name="tail"), User(username="author"), User(username="voter")]
+    )
+    db_session.add_all(
+        [
+            Post(
+                title=str(index),
+                user="author",
+                subdeaddit_name="tail",
+                created_at=now - timedelta(days=4),
+            )
+            for index in range(20)
+        ]
+    )
+    db_session.commit()
+    policy = _tail_policy(now)
+    db_session.add(policy)
+    db_session.commit()
+    monkeypatch.setattr(engagement, "_hash_unit", lambda *parts: 0.0)
+    result = ActiveWindowEngine(
+        policy,
+        archive_candidate_limit=3,
+        archive_item_limit=2,
+        revival_thread_limit=2,
+    ).tick(now, target_type="post")
+    assert result.archive_candidates_examined <= 3
+    assert result.archive_proposals <= 2

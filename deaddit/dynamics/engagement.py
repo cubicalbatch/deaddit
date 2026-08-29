@@ -33,6 +33,16 @@ from deaddit.models import (
 SUPPORTED_ALGORITHM_VERSIONS = frozenset({1})
 MAX_CATCHUP_GRACE_HOURS = 168
 
+# Tail work is intentionally coarse and bounded.  Keep these operational
+# controls beside the engine rather than in a worker so dry runs and future
+# schedulers have identical semantics.
+ARCHIVE_BUCKET_MINUTES = 60
+ARCHIVE_CANDIDATE_LIMIT = 100
+ARCHIVE_ITEM_LIMIT = 5
+RECENT_COMMENT_LOOKBACK_MINUTES = 10
+REVIVAL_THREAD_LIMIT = 50
+REVIVAL_VISIBLE_COMMENT_LIMIT = 5
+
 _POLICY_FIELDS = {
     "post": {
         "mean_active_votes",
@@ -734,8 +744,8 @@ def select_direction(
         policy_id if policy_id is not None else 0,
         target_type,
         target_id,
-        voter,
         target_created_at,
+        voter,
         "direction",
     )
     return -1 if unit < probability else 1
@@ -753,6 +763,7 @@ class VoteDecision:
     voter: str
     direction: int
     offset: timedelta
+    mode: str = "active"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -763,6 +774,7 @@ class VoteDecision:
             "voter": self.voter,
             "direction": self.direction,
             "offset_seconds": self.offset.total_seconds(),
+            "mode": self.mode,
         }
 
 
@@ -776,6 +788,11 @@ class TickResult:
     decisions: list[VoteDecision] = field(default_factory=list)
     casts: list[dict[str, Any]] = field(default_factory=list)
     skips: dict[str, int] = field(default_factory=dict)
+    active_proposals: int = 0
+    archive_proposals: int = 0
+    revival_proposals: int = 0
+    archive_candidates_examined: int = 0
+    revival_threads_examined: int = 0
 
     @property
     def target_budgets(self) -> dict[tuple[str, int], int]:
@@ -818,7 +835,88 @@ class TickResult:
             "decisions": [decision.to_dict() for decision in self.decisions],
             "casts": list(self.casts),
             "skips": dict(self.skips),
+            "active_proposals": self.active_proposals,
+            "archive_proposals": self.archive_proposals,
+            "revival_proposals": self.revival_proposals,
+            "archive_candidates_examined": self.archive_candidates_examined,
+            "revival_threads_examined": self.revival_threads_examined,
         }
+def tail_vote_probability(
+    policy: VoteCadencePolicy | PolicyConfig | Mapping[str, Any],
+    target_type: str,
+    created_at: datetime,
+    exposed_at: datetime,
+) -> float:
+    """Return the age-decayed chance that an exposure becomes a vote."""
+    section = _section_for(policy, target_type)
+    age_days = max(
+        0.0, (_as_utc_naive(exposed_at) - _as_utc_naive(created_at)).total_seconds()
+    ) / 86400.0
+    maximum = float(section["tail_max_age_days"])
+    if age_days >= maximum:
+        return 0.0
+    half_life = float(section["tail_half_life_days"])
+    return float(section["tail_vote_probability_per_exposure"]) * math.exp(
+        -math.log(2.0) * age_days / half_life
+    )
+
+
+calculate_tail_probability = tail_vote_probability
+
+
+def _archive_bucket(value: datetime) -> datetime:
+    """Return the deterministic UTC bucket containing an exposure time."""
+    value = _as_utc_naive(value)
+    epoch_minutes = int(value.timestamp() // 60)
+    bucket_minutes = (epoch_minutes // ARCHIVE_BUCKET_MINUTES) * ARCHIVE_BUCKET_MINUTES
+    return datetime.fromtimestamp(bucket_minutes * 60, UTC).replace(tzinfo=None)
+
+
+def _archive_query(
+    now: datetime,
+    section: Mapping[str, Any],
+    candidate_limit: int,
+    target_ids: Sequence[int] | None = None,
+) -> list[Post]:
+    """Fetch a bounded, indexed archive candidate set.
+
+    The LIMIT is deliberately part of the SQL query, before any weighting in
+    Python.  This keeps a large historical table from becoming a per-tick
+    memory scan.
+    """
+    max_age = timedelta(days=float(section["tail_max_age_days"]))
+    active_end = timedelta(
+        hours=float(section["active_window_hours"])
+        + float(section["catchup_grace_hours"])
+    )
+    query = db.session.query(Post).filter(
+        Post.created_at >= now - max_age,
+        Post.created_at < now - active_end,
+        Post.created_at <= now,
+    )
+    if target_ids is not None:
+        query = query.filter(Post.id.in_(list(target_ids)))
+    return (
+        query.order_by(Post.created_at.asc(), Post.id.asc())
+        .limit(candidate_limit)
+        .all()
+    )
+
+
+def _archive_weight(
+    post: Post,
+    policy: VoteCadencePolicy | PolicyConfig | Mapping[str, Any],
+    now: datetime,
+    subscribed_personas: int,
+) -> float:
+    section = _section_for(policy, "post")
+    age_days = max(
+        0.0, (now - _as_utc_naive(post.created_at)).total_seconds() / 86400.0
+    )
+    decay = math.exp(-math.log(2.0) * age_days / float(section["tail_half_life_days"]))
+    # vote_count is a bounded, indexed-row activity signal already present on
+    # Post.  Subscription coverage is separately counted among personas.
+    return max(0.001, (1.0 + float(post.vote_count or 0)) * (1.0 + subscribed_personas) * decay)
 
 
 def _candidate_horizon(
@@ -954,12 +1052,31 @@ class ActiveWindowEngine:
         *,
         per_item_limit: int = 2,
         global_limit: int = 100,
+        archive_candidate_limit: int = ARCHIVE_CANDIDATE_LIMIT,
+        archive_item_limit: int = ARCHIVE_ITEM_LIMIT,
+        revival_thread_limit: int = REVIVAL_THREAD_LIMIT,
+        revival_visible_comment_limit: int = REVIVAL_VISIBLE_COMMENT_LIMIT,
+        recent_comment_lookback_minutes: int = RECENT_COMMENT_LOOKBACK_MINUTES,
     ):
-        if per_item_limit < 0 or global_limit < 0:
+        limits = (
+            per_item_limit,
+            global_limit,
+            archive_candidate_limit,
+            archive_item_limit,
+            revival_thread_limit,
+            revival_visible_comment_limit,
+            recent_comment_lookback_minutes,
+        )
+        if any(limit < 0 for limit in limits):
             raise ValueError("tick limits must not be negative")
         self.policy = policy
         self.per_item_limit = per_item_limit
         self.global_limit = global_limit
+        self.archive_candidate_limit = archive_candidate_limit
+        self.archive_item_limit = archive_item_limit
+        self.revival_thread_limit = revival_thread_limit
+        self.revival_visible_comment_limit = revival_visible_comment_limit
+        self.recent_comment_lookback_minutes = recent_comment_lookback_minutes
 
     def tick(
         self,
@@ -1038,16 +1155,18 @@ class ActiveWindowEngine:
                     section["half_life_minutes"],
                     active_hours,
                 )
+                active_ordinals = range(simulated_count + 1, due + 1)
+                result.active_proposals += max(0, due - simulated_count)
                 result.due_ordinals.extend(
                     {
                         "target_type": kind,
                         "target_id": target.id,
                         "ordinal": ordinal,
                     }
-                    for ordinal in range(simulated_count + 1, due + 1)
+                    for ordinal in active_ordinals
                 )
                 selected: set[str] = set()
-                for ordinal in range(simulated_count + 1, due + 1):
+                for ordinal in active_ordinals:
                     if casts_used >= self.global_limit:
                         result.skip("global_limit")
                         continue
@@ -1102,6 +1221,7 @@ class ActiveWindowEngine:
                         voter.username,
                         direction,
                         offset,
+                        "active",
                     )
                     result.decisions.append(decision)
                     if dry_run:
@@ -1125,7 +1245,285 @@ class ActiveWindowEngine:
                         )
                     result.casts.append(cast_result)
                     casts_used += 1
+        if target_type in (None, "post"):
+            self._run_tail(
+                now,
+                result,
+                dry_run=dry_run,
+                target_ids=target_ids if target_type == "post" else None,
+                allow_downvotes=allow_downvotes,
+                casts_used=casts_used,
+            )
         return result
+    def _tail_counts(
+        self, now: datetime
+    ) -> tuple[dict[str, int], dict[str, int], dict[str, datetime]]:
+        recent_counts: dict[str, int] = {}
+        for (voter,) in db.session.query(Vote.voter).filter(
+            Vote.created_at >= now - timedelta(days=7)
+        ):
+            recent_counts[voter] = recent_counts.get(voter, 0) + 1
+        hourly_counts: dict[str, int] = {}
+        latest_votes: dict[str, datetime] = {}
+        for voter, created_at in db.session.query(Vote.voter, Vote.created_at).filter(
+            Vote.created_at >= now - timedelta(hours=1)
+        ):
+            hourly_counts[voter] = hourly_counts.get(voter, 0) + 1
+            if created_at is not None and (
+                voter not in latest_votes or created_at > latest_votes[voter]
+            ):
+                latest_votes[voter] = created_at
+        return recent_counts, hourly_counts, latest_votes
+
+    def _tail_opportunity(
+        self,
+        target: Post | Comment,
+        target_type: str,
+        policy: VoteCadencePolicy | PolicyConfig | Mapping[str, Any],
+        now: datetime,
+        source_key: object,
+        result: TickResult,
+        *,
+        mode: str,
+        dry_run: bool,
+        allow_downvotes: bool | None,
+        recent_counts: dict[str, int],
+        hourly_counts: dict[str, int],
+        latest_votes: dict[str, datetime],
+        casts_used: int,
+    ) -> int:
+        """Attempt one tail exposure, then use the normal voter/cast path."""
+        if sum(
+            decision.target_type == target_type and decision.target_id == target.id
+            for decision in result.decisions
+        ) >= self.per_item_limit:
+            result.skip("item_limit")
+            return casts_used
+        probability = tail_vote_probability(policy, target_type, target.created_at, now)
+        result.due_ordinals.append(
+            {
+                "target_type": target_type,
+                "target_id": target.id,
+                "mode": mode,
+                "probability": probability,
+            }
+        )
+        if probability <= 0 or _hash_unit(mode, source_key, "exposure") >= probability:
+            result.skip("tail_probability")
+            return casts_used
+        if casts_used >= self.global_limit:
+            result.skip("global_limit")
+            return casts_used
+        existing = _existing_votes(target_type, target.id)
+        existing_voters = {vote.voter for vote in existing}
+        if any(vote.source == "simulated" for vote in existing):
+            result.skip("prior_voter")
+            return casts_used
+        policy_id = policy.id if isinstance(policy, VoteCadencePolicy) else 0
+        algorithm_version = (
+            policy.algorithm_version if isinstance(policy, VoteCadencePolicy) else 1
+        )
+        ordinal = (
+            int(
+                _hash_unit(
+                    stable_seed(
+                        policy_id,
+                        target_type,
+                        target.id,
+                        target.created_at,
+                        algorithm_version,
+                    ),
+                    mode,
+                    source_key,
+                )
+                * 1_000_000_000
+            )
+            + 1
+        )
+        voter, reason = _select_voter(
+            target,
+            target_type,
+            ordinal,
+            policy,
+            now,
+            set(),
+            set(),
+            recent_counts,
+            hourly_counts,
+            latest_votes,
+        )
+        if voter is not None and voter.username in existing_voters:
+            result.skip("prior_voter")
+            return casts_used
+        if voter is None:
+            result.skip(reason)
+            return casts_used
+        hourly_counts[voter.username] = hourly_counts.get(voter.username, 0) + 1
+        latest_votes[voter.username] = now
+        subscribed = _target_subdeaddit(target, target_type) in _subscriptions(voter)
+        direction = select_direction(
+            policy,
+            target_type,
+            target.id,
+            voter.username,
+            policy_id=policy_id,
+            target_created_at=target.created_at,
+            subscribed=subscribed,
+            community_activity=recent_counts.get(voter.username, 0),
+            allow_downvotes=allow_downvotes,
+        )
+        decision = VoteDecision(
+            target_type,
+            target.id,
+            ordinal,
+            1,
+            voter.username,
+            direction,
+            timedelta(0),
+            mode,
+        )
+        result.decisions.append(decision)
+        if dry_run:
+            cast_result: dict[str, Any] = {
+                "status": "dry_run",
+                "target_type": target_type,
+                "target_id": target.id,
+                "voter": voter.username,
+                "value": direction,
+                "mode": mode,
+            }
+        else:
+            from deaddit.dynamics.votes import cast_vote
+
+            cast_result = dict(
+                cast_vote(
+                    voter.username,
+                    target_type,
+                    target.id,
+                    direction,
+                    source="simulated",
+                    allow_recast=False,
+                )
+            )
+            cast_result["mode"] = mode
+        result.casts.append(cast_result)
+        return casts_used + 1
+
+    def _run_tail(
+        self,
+        now: datetime,
+        result: TickResult,
+        *,
+        dry_run: bool,
+        target_ids: Sequence[int] | None,
+        allow_downvotes: bool | None,
+        casts_used: int,
+    ) -> None:
+        policy = self.policy or resolve_policy_for_tail_exposure(now)
+        if policy is None:
+            return
+        section = _section_for(policy, "post")
+        bucket = _archive_bucket(now)
+        candidates = _archive_query(
+            now, section, self.archive_candidate_limit, target_ids=target_ids
+        )
+        result.archive_candidates_examined = len(candidates)
+        eligible_users = [
+            user
+            for user in db.session.query(User).order_by(User.username.asc())
+            if _vote_cap(user, _policy_config(policy).voter["default_hourly_cap"]) > 0
+        ]
+        ranked: list[tuple[float, Post]] = []
+        for post in candidates:
+            coverage = sum(
+                user.username != post.user
+                and post.subdeaddit_name in _subscriptions(user)
+                for user in eligible_users
+            )
+            weight = _archive_weight(post, policy, now, coverage)
+            rank = -math.log(max(_hash_unit("archive", bucket, post.id), 1e-15)) / weight
+            ranked.append((rank, post))
+        ranked.sort(key=lambda item: (item[0], item[1].id))
+        recent_counts, hourly_counts, latest_votes = self._tail_counts(now)
+        for _, post in ranked[: self.archive_item_limit]:
+            result.archive_proposals += 1
+            casts_used = self._tail_opportunity(
+                post,
+                "post",
+                policy,
+                now,
+                ("archive", bucket, post.id),
+                result,
+                mode="archive",
+                dry_run=dry_run,
+                allow_downvotes=allow_downvotes,
+                recent_counts=recent_counts,
+                hourly_counts=hourly_counts,
+                latest_votes=latest_votes,
+                casts_used=casts_used,
+            )
+        recent_comments = (
+            db.session.query(Comment)
+            .filter(
+                Comment.created_at >= now
+                - timedelta(minutes=self.recent_comment_lookback_minutes),
+                Comment.created_at <= now,
+            )
+            .order_by(Comment.created_at.desc(), Comment.id.desc())
+            .limit(self.revival_thread_limit)
+            .all()
+        )
+        result.revival_threads_examined = len(recent_comments)
+        seen_posts: set[int] = set()
+        target_id_set = set(target_ids) if target_ids is not None else None
+        for trigger in recent_comments:
+            if target_id_set is not None and trigger.post_id not in target_id_set:
+                continue
+            if trigger.post_id in seen_posts:
+                continue
+            seen_posts.add(trigger.post_id)
+            post = db.session.get(Post, trigger.post_id)
+            if post is None:
+                continue
+            targets: list[tuple[str, Post | Comment]] = [("post", post)]
+            if trigger.parent_id is not None:
+                parent = db.session.get(Comment, trigger.parent_id)
+                if parent is not None:
+                    targets.append(("comment", parent))
+            visible = (
+                db.session.query(Comment)
+                .filter(
+                    Comment.post_id == post.id,
+                    Comment.parent_id.is_(None),
+                )
+                .order_by(Comment.score.desc(), Comment.created_at.desc(), Comment.id.desc())
+                .limit(self.revival_visible_comment_limit)
+                .all()
+            )
+            visible_ids = {target.id for _, target in targets}
+            targets.extend(
+                ("comment", comment)
+                for comment in visible
+                if comment.id not in visible_ids
+            )
+            for target_type, target in targets:
+                result.revival_proposals += 1
+                casts_used = self._tail_opportunity(
+                    target,
+                    target_type,
+                    policy,
+                    now,
+                    ("revival", trigger.id, target_type, target.id),
+                    result,
+                    mode="revival",
+                    dry_run=dry_run,
+                    allow_downvotes=allow_downvotes,
+                    recent_counts=recent_counts,
+                    hourly_counts=hourly_counts,
+                    latest_votes=latest_votes,
+                    casts_used=casts_used,
+                )
+
 
     run = tick
 
@@ -1138,15 +1536,20 @@ def run_active_tick(
     """Convenience entry point used by tests and the future worker."""
     if now is None:
         now = datetime.utcnow()
-    return ActiveWindowEngine(
-        policy,
-        **{
-            name: kwargs.pop(name)
-            for name in ("per_item_limit", "global_limit")
-            if name in kwargs
-        },
-    ).tick(now, **kwargs)
+    engine_options = (
+        "per_item_limit",
+        "global_limit",
+        "archive_candidate_limit",
+        "archive_item_limit",
+        "revival_thread_limit",
+        "revival_visible_comment_limit",
+        "recent_comment_lookback_minutes",
+    )
+    options = {name: kwargs.pop(name) for name in engine_options if name in kwargs}
+    return ActiveWindowEngine(policy, **options).tick(now, **kwargs)
 
 
+run_tail_tick = run_active_tick
 simulate_active_tick = run_active_tick
+simulate_tail_tick = run_active_tick
 tick_active_window = run_active_tick
