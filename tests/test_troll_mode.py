@@ -63,6 +63,7 @@ class TestPersonaGeneratorTrollMode:
         assert prompt == USER_PROMPT_TEMPLATE.format(
             count=1,
             topic_section="",
+            communities_section="",
             troll_section="",
             style_assignments="Persona 1 username style: " + _assign_styles(1)[0],
         )

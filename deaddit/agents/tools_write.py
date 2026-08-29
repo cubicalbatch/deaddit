@@ -21,6 +21,7 @@ from deaddit.agents.registry import (
     ToolContext,
     image_posts_config,
     register,
+    subscribe_nudge,
 )
 from deaddit.config import Config
 from deaddit.dynamics.votes import cast_vote
@@ -133,13 +134,17 @@ def _create_post(ctx: ToolContext, params: CreatePostArgs) -> dict:
         )
     except ContentValidationError as exc:
         return {"ok": False, "error": str(exc)}
-    return {
+    result = {
         "ok": True,
         "post_id": post.id,
         "title": post.title,
         "subdeaddit": post.subdeaddit_name,
         "hint": "Post created successfully. Call finish to conclude your visit unless you have other pending actions.",
     }
+    nudge = subscribe_nudge(ctx, post.subdeaddit_name)
+    if nudge is not None:
+        result["subscribe_hint"] = nudge
+    return result
 
 
 class CreateImagePostArgs(BaseModel):
@@ -519,7 +524,8 @@ class CreateCommentArgs(BaseModel):
 
 
 def _create_comment(ctx: ToolContext, params: CreateCommentArgs) -> dict:
-    if db.session.get(Post, params.post_id) is None:
+    post = db.session.get(Post, params.post_id)
+    if post is None:
         return {
             "ok": False,
             "error": f"post {params.post_id} not found",
@@ -544,11 +550,15 @@ def _create_comment(ctx: ToolContext, params: CreateCommentArgs) -> dict:
         )
     except ContentValidationError as exc:
         return {"ok": False, "error": str(exc)}
-    return {
+    result = {
         "ok": True,
         "comment_id": comment.id,
         "post_id": comment.post_id,
     }
+    nudge = subscribe_nudge(ctx, post.subdeaddit_name)
+    if nudge is not None:
+        result["subscribe_hint"] = nudge
+    return result
 
 
 class VoteArgs(BaseModel):

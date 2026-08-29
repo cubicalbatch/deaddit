@@ -478,4 +478,8 @@ def test_successful_call_links_run_and_turn(ctx, db_session):
     assert row.ok is True
     assert row.run_id == ctx.run.id
     assert row.turn_id == turn.id
-    assert _outcome(row)["posts"] == []
+    # E1: with no subscriptions the default feed is now the site-wide
+    # frontpage (the seeded posts) instead of an empty pool.
+    posts = _outcome(row)["posts"]
+    assert posts
+    assert {p["subdeaddit"] for p in posts} <= {"testsub", "askdeaddit"}

@@ -9,11 +9,14 @@ side effects: the default tool set is registered lazily and idempotently by
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
+
+from deaddit.extensions import db
+from deaddit.models import Subdeaddit, User
 
 if TYPE_CHECKING:
     from deaddit.llm import ToolSpec
@@ -33,6 +36,7 @@ __all__ = [
     "offered_post_tool_names",
     "register",
     "specs_for",
+    "subscribe_nudge",
     "tools_for",
     "website_posts_config",
 ]
@@ -94,7 +98,42 @@ class ToolContext:
     llm_api_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
+    #: Subdeaddit names already subscribe-nudged this run (see
+    #: :func:`subscribe_nudge`); mutable state on a frozen dataclass.
+    nudged_subs: set = field(default_factory=set)
     deadline: Any = None  # deaddit.images.types.Deadline | None
+
+
+def subscribe_nudge(ctx: ToolContext, subdeaddit_name: str) -> str | None:
+    """One-per-run hint recommending ``subscribe`` after engaging with a community.
+
+    Soft distribution lever: agents that browse, read, or post in a community
+    they are not subscribed to hear about ``subscribe`` exactly once per run,
+    so the subscription graph (which biases ``browse_feed`` and the system
+    prompt) grows organically. Returns the hint text, or ``None`` when the
+    community was already nudged this run, the persona is already subscribed,
+    the community does not exist, or the persona's tier locks it out of the
+    subscribe tool (lurkers). The community is marked as nudged whether or
+    not a hint is emitted.
+    """
+    if subdeaddit_name in ctx.nudged_subs:
+        return None
+    ctx.nudged_subs.add(subdeaddit_name)
+    tier = parse_tier(getattr(ctx.agent, "autonomy_tier", AutonomyTier.REGULAR))
+    if not tier.allows(get("subscribe").min_tier):
+        return None
+    if db.session.get(Subdeaddit, subdeaddit_name) is None:
+        return None
+    user = db.session.get(User, ctx.user_username)
+    subscriptions = ((user.agent_state if user else None) or {}).get(
+        "subscriptions"
+    ) or []
+    if subdeaddit_name in subscriptions:
+        return None
+    return (
+        f"You are not subscribed to {subdeaddit_name} - the subscribe tool "
+        "would add it to your feed for future visits."
+    )
 
 
 @dataclass(frozen=True)

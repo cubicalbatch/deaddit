@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import random
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -24,6 +25,7 @@ from deaddit.models import (
     ImageProvider,
     Notification,
     Post,
+    Subdeaddit,
     ToolCall,
     User,
     Vote,
@@ -556,6 +558,144 @@ def test_browse_feed_empty_and_sparse_hints(seeded_db, db_session):
     assert res_pop["ok"] is True
     assert len(res_pop["posts"]) == 2
     assert "create_post" in res_pop.get("hint", "")
+
+
+def _browse_ctx(db_session, username, *, tier="regular"):
+    agent = Agent(
+        user_username=username,
+        autonomy_tier=tier,
+        is_enabled=True,
+        status="idle",
+        config={},
+        state={},
+        consecutive_failures=0,
+    )
+    db_session.add(agent)
+    db_session.flush()
+    run = AgentRun(
+        agent_id=agent.id,
+        persona_username=username,
+        trigger="manual",
+        status="running",
+    )
+    db_session.add(run)
+    db_session.commit()
+    return ToolContext(agent=agent, run=run, user_username=username)
+
+
+def test_kickoff_prompt_suggests_only_real_communities(
+    seeded_db, db_session, monkeypatch
+):
+    """A1: the no-subscription fallback names only existing communities,
+    sampled from the database - never a hardcoded (possibly stale) list."""
+    from deaddit.agents.memory import generate_kickoff_prompt
+
+    monkeypatch.setattr(random, "sample", lambda population, k: population[:k])
+
+    agent = _make_agent(db_session, "alice")
+    prompt = generate_kickoff_prompt(agent, force_intent="post")
+
+    segment = prompt.split("(such as ", 1)[1].split(" or search", 1)[0]
+    suggested = [name.strip() for name in segment.split(",")]
+    existing = {name for (name,) in db_session.query(Subdeaddit.name).all()}
+    assert suggested
+    assert set(suggested) <= existing
+    # The ghost-cased hardcoded name from the old fallback must never return.
+    assert "AskDeaddit" not in suggested
+
+
+def test_kickoff_prompt_uses_subscriptions_when_present(seeded_db, db_session):
+    from deaddit.agents.memory import generate_kickoff_prompt
+
+    user = db_session.get(User, "alice")
+    user.agent_state = {"subscriptions": ["testsub"]}
+    db_session.commit()
+
+    agent = _make_agent(db_session, "alice")
+    prompt = generate_kickoff_prompt(agent, user, force_intent="post")
+    assert "(such as testsub)" in prompt
+
+
+def test_browse_feed_default_frontpage_without_subscriptions(seeded_db, db_session):
+    """E1: with no subscriptions the default feed is the site-wide frontpage
+    instead of an empty pool."""
+    ctx = _browse_ctx(db_session, "alice")
+
+    res = execute("browse_feed", {}, ctx)
+    assert res["ok"] is True
+    assert {p["subdeaddit"] for p in res["posts"]} == {"testsub", "askdeaddit"}
+
+
+def test_browse_feed_default_scoped_to_subscriptions(seeded_db, db_session):
+    """Subscriptions still personalize the default feed."""
+    user = db_session.get(User, "alice")
+    user.agent_state = {"subscriptions": ["testsub"]}
+    db_session.commit()
+    ctx = _browse_ctx(db_session, "alice")
+
+    res = execute("browse_feed", {}, ctx)
+    assert res["ok"] is True
+    assert {p["subdeaddit"] for p in res["posts"]} == {"testsub"}
+
+
+def test_subscribe_nudge_appears_once_per_run(seeded_db, db_session):
+    """E3: engaging with an unsubscribed community mentions subscribe exactly
+    once per run per community."""
+    ctx = _browse_ctx(db_session, "alice")
+
+    first = execute("browse_feed", {"subdeaddit": "testsub"}, ctx)
+    assert "subscribe_hint" in first
+    again = execute("browse_feed", {"subdeaddit": "testsub"}, ctx)
+    assert "subscribe_hint" not in again
+    other = execute("browse_feed", {"subdeaddit": "askdeaddit"}, ctx)
+    assert "subscribe_hint" in other
+
+
+def test_subscribe_nudge_skips_subscribed_ghost_and_lurkers(seeded_db, db_session):
+    # Already subscribed -> silent.
+    user = db_session.get(User, "alice")
+    user.agent_state = {"subscriptions": ["testsub"]}
+    db_session.commit()
+    ctx = _browse_ctx(db_session, "alice")
+    res = execute("browse_feed", {"subdeaddit": "testsub"}, ctx)
+    assert "subscribe_hint" not in res
+
+    # Nonexistent community -> silent (fresh context marks nothing).
+    fresh_ctx = ToolContext(
+        agent=ctx.agent, run=ctx.run, user_username=ctx.user_username
+    )
+    ghost = execute("browse_feed", {"subdeaddit": "empty_sub"}, fresh_ctx)
+    assert "subscribe_hint" not in ghost
+
+    # Lurkers cannot call subscribe, so they are never nudged.
+    lctx = _browse_ctx(db_session, "bob", tier="lurker")
+    lres = execute("browse_feed", {"subdeaddit": "testsub"}, lctx)
+    assert "subscribe_hint" not in lres
+
+
+def test_create_post_and_comment_carry_subscribe_nudge(seeded_db, db_session):
+    ctx = _browse_ctx(db_session, "alice")
+
+    post_res = execute(
+        "create_post",
+        {
+            "subdeaddit": "askdeaddit",
+            "title": "A fresh question about tests",
+            "content": "Body distinct from anything seeded.",
+        },
+        ctx,
+    )
+    assert post_res["ok"] is True
+    assert "subscribe_hint" in post_res
+
+    # Different community from the post above -> nudges too, once per run.
+    comment_res = execute(
+        "create_comment",
+        {"post_id": seeded_db["posts"][0].id, "content": "A brand-new reply."},
+        ctx,
+    )
+    assert comment_res["ok"] is True
+    assert "subscribe_hint" in comment_res
 
 
 # ---------------------------------------------------------------------------

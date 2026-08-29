@@ -20,6 +20,7 @@ from deaddit.agents.registry import (
     Tool,
     ToolContext,
     register,
+    subscribe_nudge,
 )
 from deaddit.dynamics.inbox import get_inbox, mark_inbox_read
 from deaddit.extensions import db
@@ -30,6 +31,11 @@ from deaddit.models import Comment, Post, PostImage, Subdeaddit, User
 logger = logging.getLogger(__name__)
 
 _MAX_COMMENT_DEPTH = 6
+
+#: Size of the global recent-post pool used when a persona has no
+#: subscriptions - large enough to give the requested sort a fair window,
+#: cheap for a single indexed query on ``created_at``.
+_FRONTPAGE_POOL_SIZE = 200
 
 
 def _utcnow() -> datetime:
@@ -100,22 +106,33 @@ def _browse_feed(ctx: ToolContext, params: BrowseFeedArgs) -> dict:
     targets: list[str] = []
     if params.subdeaddit is not None:
         targets.append(params.subdeaddit)
-    else:
-        # Bias toward subscribed communities first.
+    elif subscriptions:
+        # Personalized feed: subscriptions only.
         for name in subscriptions:
             if name not in targets:
                 targets.append(name)
 
     pool: dict[int, Post] = {}
-    for name in targets:
-        rows = (
-            Post.query.filter_by(subdeaddit_name=name)
-            .order_by(Post.created_at.desc())
-            .limit(100)
-            .all()
-        )
-        for post in rows:
-            pool[post.id] = post
+    if not params.subdeaddit and not subscriptions:
+        # Cold start: no subscriptions would otherwise mean an empty pool,
+        # which funneled everyone toward the few communities they already
+        # knew about. Show the site-wide frontpage instead.
+        pool = {
+            post.id: post
+            for post in Post.query.order_by(Post.created_at.desc()).limit(
+                _FRONTPAGE_POOL_SIZE
+            )
+        }
+    else:
+        for name in targets:
+            rows = (
+                Post.query.filter_by(subdeaddit_name=name)
+                .order_by(Post.created_at.desc())
+                .limit(100)
+                .all()
+            )
+            for post in rows:
+                pool[post.id] = post
 
     def _sort_key(post: Post):
         age = max(_age_hours(post.created_at), 1.0)
@@ -155,6 +172,10 @@ def _browse_feed(ctx: ToolContext, params: BrowseFeedArgs) -> dict:
             "This community has very few posts. Starting a new discussion with "
             "create_post is welcome if you have a relevant topic."
         )
+    if params.subdeaddit is not None:
+        nudge = subscribe_nudge(ctx, params.subdeaddit)
+        if nudge is not None:
+            result["subscribe_hint"] = nudge
     return result
 
 
@@ -281,7 +302,11 @@ def _read_post(ctx: ToolContext, params: ReadPostArgs) -> dict:
     }
     if post.image is not None and not post.removed:
         post_dict["image"] = _load_image_description(ctx, post)
-    return {"ok": True, "post": post_dict}
+    result: dict = {"ok": True, "post": post_dict}
+    nudge = subscribe_nudge(ctx, post.subdeaddit_name)
+    if nudge is not None:
+        result["subscribe_hint"] = nudge
+    return result
 
 
 class SearchArgs(BaseModel):

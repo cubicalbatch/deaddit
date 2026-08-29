@@ -9,7 +9,7 @@ import re
 import pytest
 
 from deaddit.extensions import db
-from deaddit.models import Agent, User
+from deaddit.models import Agent, Subdeaddit, User
 from deaddit.services.persona_generator import (
     PERSONA_BATCH_ATTEMPTS,
     PersonaGenerationError,
@@ -417,3 +417,120 @@ class TestAdminUserGeneratorAPI:
             count=3, auto_create_agent=False, troll_mode="no_troll"
         )
         assert len(result["users"]) == 3
+
+
+class TestPersonaSubscriptions:
+    """Creation-time LLM-picked subscriptions (initial condition for the
+    subscription graph; validated against real communities, never forced)."""
+
+    @pytest.fixture()
+    def subs(self, app):
+        rows = [
+            Subdeaddit(name="books", description="Books, authors, literature."),
+            Subdeaddit(name="CasualConversation", description="Casual talk."),
+            Subdeaddit(name="localllama", description="Local LLMs."),
+        ]
+        db.session.add_all(rows)
+        db.session.commit()
+        return rows
+
+    @staticmethod
+    def _persona(username, subscriptions):
+        return {
+            "username": username,
+            "bio": "A bio",
+            "age": 30,
+            "gender": "Male",
+            "subscriptions": subscriptions,
+        }
+
+    def test_subscriptions_validated_and_persisted(self, app, fake_llm, subs):
+        fake_llm.enqueue_content(
+            json.dumps(
+                [
+                    # Case canonicalization, ghost drop, dedupe.
+                    self._persona("user_a", ["Books", "askdaddit", "books"]),
+                    # Cap at 3: nosleep is a ghost, the rest survive.
+                    self._persona(
+                        "user_b",
+                        ["localllama", "CasualConversation", "books", "nosleep"],
+                    ),
+                    # Comma-separated string form with one ghost.
+                    self._persona("user_c", "books, quietthoughts"),
+                ]
+            )
+        )
+
+        result = generate_personas(
+            count=3, auto_create_agent=False, troll_mode="no_troll"
+        )
+
+        # Casing post-treatment may alter the LLM username; match ignoring
+        # case and underscores ("user_a" may be stored as "UserA").
+        by_key = {u["username"].replace("_", "").lower(): u for u in result["users"]}
+        assert by_key["usera"]["subscriptions"] == ["books"]
+        assert by_key["userb"]["subscriptions"] == [
+            "localllama",
+            "CasualConversation",
+            "books",
+        ]
+        assert by_key["userc"]["subscriptions"] == ["books"]
+
+        row_a = User.query.filter_by(username=by_key["usera"]["username"]).first()
+        row_b = User.query.filter_by(username=by_key["userb"]["username"]).first()
+        assert row_a.agent_state == {"subscriptions": ["books"]}
+        assert row_b.agent_state["subscriptions"] == [
+            "localllama",
+            "CasualConversation",
+            "books",
+        ]
+
+    def test_missing_or_empty_subscriptions_stay_empty(self, app, fake_llm, subs):
+        fake_llm.enqueue_content(
+            json.dumps(
+                [
+                    self._persona("user_d", ["ghostsub", "another_ghost"]),
+                    {"username": "user_e", "bio": "A bio", "age": 30},
+                ]
+            )
+        )
+
+        result = generate_personas(
+            count=2, auto_create_agent=False, troll_mode="no_troll"
+        )
+
+        by_key = {u["username"].replace("_", "").lower(): u for u in result["users"]}
+        assert by_key["userd"]["subscriptions"] == []
+        assert by_key["usere"]["subscriptions"] == []
+        for key in ("userd", "usere"):
+            row = User.query.filter_by(username=by_key[key]["username"]).first()
+            assert (row.agent_state or {}).get("subscriptions") in (None, [])
+
+    def test_prompt_lists_real_communities(self, app, fake_llm, subs):
+        fake_llm.enqueue_content(_personas_json(1))
+        generate_personas(count=1, auto_create_agent=False, troll_mode="no_troll")
+
+        prompt = fake_llm.requests[-1]["payload"]["messages"][1]["content"]
+        assert "The forum currently has these communities" in prompt
+        assert "- books: Books, authors, literature." in prompt
+        assert '- "subscriptions"' in prompt
+
+    def test_prompt_omits_community_section_without_subs(self, app, fake_llm):
+        fake_llm.enqueue_content(_personas_json(1))
+        generate_personas(count=1, auto_create_agent=False, troll_mode="no_troll")
+
+        prompt = fake_llm.requests[-1]["payload"]["messages"][1]["content"]
+        assert "communities" not in prompt
+        assert '"subscriptions"' not in prompt
+
+    def test_agents_created_with_subscribed_users(self, app, fake_llm, subs):
+        fake_llm.enqueue_content(
+            json.dumps([self._persona("user_f", ["books", "localllama"])])
+        )
+        result = generate_personas(
+            count=1, auto_create_agent=True, troll_mode="no_troll"
+        )
+        assert len(result["agents"]) == 1
+        stored = result["users"][0]["username"]
+        row = User.query.filter_by(username=stored).first()
+        assert row.agent_state == {"subscriptions": ["books", "localllama"]}

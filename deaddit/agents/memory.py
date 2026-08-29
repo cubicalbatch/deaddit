@@ -17,7 +17,16 @@ from deaddit.agents.registry import (
 from deaddit.dynamics.inbox import unread_count
 from deaddit.extensions import db
 from deaddit.llm import ChatRequest, LLMClient, Sampling
-from deaddit.models import Agent, AgentMemory, AgentRun, Comment, Post, ToolCall, User
+from deaddit.models import (
+    Agent,
+    AgentMemory,
+    AgentRun,
+    Comment,
+    Post,
+    Subdeaddit,
+    ToolCall,
+    User,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +54,11 @@ _KICKOFF_MOODS: tuple[tuple[str, float], ...] = (
         0.20,
     ),
 )
+
+#: How many real communities the kickoff suggests when the persona has no
+#: subscriptions. Sampled fresh from the database each run so no community
+#: is permanently anchored as the "default" place to post.
+_KICKOFF_COMMUNITY_SUGGESTIONS = 5
 
 _WEBSITE_BRIEF_HINT = (
     " If you use create_website, brief the site in website_description - "
@@ -155,11 +169,23 @@ def generate_kickoff_prompt(
         subscriptions = ((user.agent_state if user else None) or {}).get(
             "subscriptions"
         ) or []
-        sub_hint = (
-            f" (such as {', '.join(subscriptions)})"
-            if subscriptions
-            else " (such as CasualConversation, AskDeaddit, LifeProTips, quietthoughts, slowliving, or search existing communities)"
-        )
+        if subscriptions:
+            sub_hint = f" (such as {', '.join(subscriptions)})"
+        else:
+            names = [
+                row[0]
+                for row in db.session.query(Subdeaddit.name).order_by(
+                    Subdeaddit.name.asc()
+                )
+            ]
+            sample = random.sample(
+                names, min(len(names), _KICKOFF_COMMUNITY_SUGGESTIONS)
+            )
+            sub_hint = (
+                f" (such as {', '.join(sample)} or search existing communities)"
+                if sample
+                else " (search existing communities with the search tool)"
+            )
         return (
             f"You're waking up with something to share. "
             f"Think about an experience, project, observation, question, or bit of trivia related to your persona and interests. "

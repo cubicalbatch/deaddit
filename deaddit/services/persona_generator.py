@@ -17,7 +17,7 @@ from typing import Any
 from deaddit.config import Config
 from deaddit.extensions import db
 from deaddit.llm import ChatRequest, LLMClient, LLMError, Sampling, routing
-from deaddit.models import Agent, User
+from deaddit.models import Agent, Subdeaddit, User
 from deaddit.services.content import create_user
 
 logger = logging.getLogger(__name__)
@@ -39,8 +39,8 @@ USERNAME_STYLE_RULES = (
 )
 
 USER_PROMPT_TEMPLATE = (
-    "Generate {count} unique human-like user personas for the forum.{topic_section}"
-    "{troll_section}\n\n"
+    "Generate {count} unique human-like user personas for the forum."
+    "{topic_section}{communities_section}{troll_section}\n\n"
     "Each persona is assigned a username style. The username for Persona N "
     "must follow Persona N's style:\n"
     "{style_assignments}\n\n"
@@ -108,6 +108,64 @@ USERNAME_STYLE_CARDS: list[tuple[str, str]] = [
         "a single evocative word + 2-4 digit number, e.g. moonlit_4821, harbor_77, verdigris_302",
     ),
 ]
+
+#: Hard cap on LLM-picked subscriptions per persona: the prompt asks for
+#: exactly 2, validation accepts up to this many, and anything the LLM
+#: adds beyond it is dropped rather than erroring the whole persona.
+MAX_PERSONA_SUBSCRIPTIONS = 3
+
+
+def _communities_section(sub_rows: list[tuple[str, str]]) -> str:
+    """Prompt block listing real communities and requesting subscriptions.
+
+    Empty when the database has no subdeaddits (the field simply is not
+    requested then). Names and descriptions come from the database, never
+    from a hardcoded list - the persona generator must not suggest
+    communities that do not exist.
+    """
+    if not sub_rows:
+        return ""
+    listing = "\n".join(
+        f"- {name}: {' '.join((description or '').split())[:110]}"
+        for name, description in sub_rows
+    )
+    return (
+        "\nThe forum currently has these communities (name: description):\n"
+        f"{listing}\n\n"
+        "Each persona object must also include:\n"
+        '- "subscriptions": list of exactly 2 community names, copied '
+        "verbatim from the list above, where this persona would genuinely "
+        "spend time given their interests and personality - a "
+        "general-purpose community is the honest pick for a "
+        "general-interest person. Never invent or guess community names "
+        'outside the list. Example: "subscriptions": ["books", '
+        '"CasualConversation"]\n'
+    )
+
+
+def _normalize_subscriptions(raw: object, valid_sub_names: set[str]) -> list[str]:
+    """Validate LLM-picked subscriptions against real communities.
+
+    Accepts a list or comma-separated string. Unknown names are dropped
+    (a case-insensitive match resolves to the stored casing), duplicates
+    collapse preserving order, and the result is capped at
+    ``MAX_PERSONA_SUBSCRIPTIONS``. An empty result stays empty - a forced
+    fallback subscription is how ghost communities get promoted.
+    """
+    if isinstance(raw, str):
+        candidates = [part.strip() for part in raw.split(",")]
+    elif isinstance(raw, list):
+        candidates = [str(item).strip() for item in raw]
+    else:
+        return []
+    by_lower = {name.lower(): name for name in valid_sub_names}
+    picked: list[str] = []
+    for candidate in candidates:
+        canonical = by_lower.get(candidate.lower()) if candidate else None
+        if canonical is not None and canonical not in picked:
+            picked.append(canonical)
+    return picked[:MAX_PERSONA_SUBSCRIPTIONS]
+
 
 USERNAME_STYLE_RULES = (
     "lowercase; only letters, digits, underscores; 4-20 characters; "
@@ -192,7 +250,9 @@ def _extract_json(raw: str) -> list[dict]:
     )
 
 
-def _sanitize_persona(item: dict, seen_usernames: set[str]) -> dict:
+def _sanitize_persona(
+    item: dict, seen_usernames: set[str], valid_sub_names: set[str]
+) -> dict:
     """Sanitize and normalize persona dictionary fields."""
     raw_username = str(item.get("username") or "").strip()
     clean_username = re.sub(r"[^a-zA-Z0-9_]", "_", raw_username)
@@ -251,6 +311,8 @@ def _sanitize_persona(item: dict, seen_usernames: set[str]) -> dict:
         str(item.get("writing_style") or "").strip() or "Conversational and thoughtful"
     )
 
+    subscriptions = _normalize_subscriptions(item.get("subscriptions"), valid_sub_names)
+
     return {
         "username": candidate,
         "age": age,
@@ -261,6 +323,7 @@ def _sanitize_persona(item: dict, seen_usernames: set[str]) -> dict:
         "interests": interests,
         "personality_traits": traits,
         "writing_style": writing_style,
+        "subscriptions": subscriptions,
     }
 
 
@@ -277,6 +340,7 @@ def _user_to_dict(user: User) -> dict[str, Any]:
             user.get_personality_traits() if user.personality_traits else []
         ),
         "writing_style": user.writing_style,
+        "subscriptions": ((user.agent_state or {}).get("subscriptions") or []),
         "model": user.model,
         "is_troll": bool(user.is_troll),
     }
@@ -425,6 +489,14 @@ def generate_personas(
         # 20 trolls, no Bernoulli noise.
         troll_count = min(count, int(count * chance + 0.5))
 
+    sub_rows = (
+        db.session.query(Subdeaddit.name, Subdeaddit.description)
+        .order_by(Subdeaddit.name.asc())
+        .all()
+    )
+    valid_sub_names = {name for name, _ in sub_rows}
+    communities_section = _communities_section(sub_rows)
+
     seen_usernames: set[str] = set()
     created_users: list[User] = []
     created_agents: list[Agent] = []
@@ -447,6 +519,7 @@ def generate_personas(
             user_prompt = USER_PROMPT_TEMPLATE.format(
                 count=remaining,
                 topic_section=topic_section,
+                communities_section=communities_section,
                 troll_section=TROLL_SECTION if is_troll else "",
                 style_assignments="\n".join(
                     f"Persona {i + 1} username style: {style}"
@@ -488,7 +561,7 @@ def generate_personas(
             for raw_p in raw_personas:
                 if batch_created >= batch_target:
                     break
-                p = _sanitize_persona(raw_p, seen_usernames)
+                p = _sanitize_persona(raw_p, seen_usernames, valid_sub_names)
                 user = create_user(
                     username=p["username"],
                     age=p["age"],
@@ -502,6 +575,14 @@ def generate_personas(
                     model=model,
                     is_troll=is_troll,
                 )
+                if p["subscriptions"]:
+                    # LLM-picked initial subscriptions ride the existing
+                    # agent_state["subscriptions"] machinery (feed bias,
+                    # system prompt, subscribe/unsubscribe tools). Never
+                    # forced: empty stays empty.
+                    user.agent_state = {"subscriptions": p["subscriptions"]}
+                    if not auto_create_agent:
+                        db.session.commit()
                 created_users.append(user)
                 batch_created += 1
 
