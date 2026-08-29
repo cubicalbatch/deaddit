@@ -6,7 +6,7 @@ import pytest
 
 from deaddit.dynamics import votes as votes_module
 from deaddit.dynamics.votes import _downvotes_allowed, cast_vote
-from deaddit.models import Post, Setting, User, Vote
+from deaddit.models import ActivityEvent, Post, Setting, User, Vote
 
 
 def _refresh(db_session, model, pk):
@@ -277,3 +277,77 @@ def test_concurrent_duplicate_insert_rolls_back_and_resolves(
     post = db_session.get(Post, post.id)
     assert (post.score, post.vote_count) == (1, 1)
     assert db_session.get(User, "bob").post_karma == 1
+ 
+ 
+def test_simulated_insert_returns_metadata_and_emits_activity(
+    seeded_db, db_session
+):
+    post = seeded_db["posts"][1]
+    result = cast_vote(
+        "alice", "post", post.id, 1, source="simulated", allow_recast=False
+    )
+
+    assert result == {
+        "status": "ok",
+        "score": 1,
+        "changed": True,
+        "change_kind": "insert",
+    }
+    vote = db_session.query(Vote).one()
+    assert vote.source == "simulated"
+    assert db_session.get(Post, post.id).vote_count == 1
+    assert db_session.get(User, "bob").post_karma == 1
+    assert db_session.query(ActivityEvent).count() == 1
+
+
+def test_simulated_same_value_is_noop_without_activity(seeded_db, db_session):
+    post = seeded_db["posts"][1]
+    cast_vote("alice", "post", post.id, 1, source="simulated", allow_recast=False)
+    before = {
+        "score": post.score,
+        "vote_count": post.vote_count,
+        "karma": db_session.get(User, "bob").post_karma,
+        "events": db_session.query(ActivityEvent).count(),
+    }
+
+    result = cast_vote("alice", "post", post.id, 1, source="agent")
+
+    assert result["changed"] is False
+    assert result["change_kind"] == "same_value_noop"
+    db_session.expire_all()
+    assert {
+        "score": db_session.get(Post, post.id).score,
+        "vote_count": db_session.get(Post, post.id).vote_count,
+        "karma": db_session.get(User, "bob").post_karma,
+        "events": db_session.query(ActivityEvent).count(),
+    } == before
+
+
+def test_direction_switch_metadata_and_activity(seeded_db, db_session):
+    post = seeded_db["posts"][1]
+    cast_vote("alice", "post", post.id, 1, source="human")
+    result = cast_vote("alice", "post", post.id, -1, source="human")
+
+    assert result["changed"] is True
+    assert result["change_kind"] == "direction_switch"
+    assert db_session.get(Post, post.id).score == -1
+    assert db_session.get(Post, post.id).vote_count == 1
+    assert db_session.get(User, "bob").post_karma == -1
+    assert db_session.query(ActivityEvent).count() == 2
+
+
+def test_insert_only_collision_preserves_vote_and_source(seeded_db, db_session):
+    post = seeded_db["posts"][1]
+    cast_vote("alice", "post", post.id, 1, source="human")
+
+    result = cast_vote(
+        "alice", "post", post.id, -1, source="simulated", allow_recast=False
+    )
+
+    assert result["changed"] is False
+    assert result["change_kind"] == "insert_only_collision"
+    vote = db_session.query(Vote).one()
+    assert (vote.value, vote.source) == (1, "human")
+    assert (post.score, post.vote_count) == (1, 1)
+    assert db_session.get(User, "bob").post_karma == 1
+    assert db_session.query(ActivityEvent).count() == 1
