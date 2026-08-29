@@ -5268,11 +5268,19 @@ def pins_set_api():
     from deaddit.llm.prompts import PromptError, set_pin
 
     data = request.get_json(silent=True) or {}
+    target_kind = data.get("target_kind", "")
+    template_name = data.get("template", "")
+    target_key = data.get("target_key", "")
+    # The visit-profile resolver has exactly one global target key. Normalize
+    # this at the API boundary so neither a hand-written request nor an older
+    # admin page can create an inert global rollout pin.
+    if target_kind == "global" and template_name == _PROFILE_TEMPLATE:
+        target_key = _PROFILE_TEMPLATE
     try:
         set_pin(
-            data.get("target_kind", ""),
-            data.get("target_key", ""),
-            data.get("template", ""),
+            target_kind,
+            target_key,
+            template_name,
             int(data.get("version", 0)),
         )
     except (PromptError, ValueError) as exc:

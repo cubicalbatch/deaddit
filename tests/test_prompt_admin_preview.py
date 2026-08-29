@@ -31,6 +31,7 @@ from deaddit.models import (
     ToolCall,
     User,
 )
+PINS = "/admin/api/pins"
 
 PREVIEW = "/admin/api/prompts/agent.visit_profile/preview"
 VALIDATE = "/admin/api/prompts/agent.visit_profile/validate"
@@ -349,6 +350,30 @@ class TestPreviewAgainstPinnedVersions:
         body = _preview(authed_client, agent).get_json()
         assert body["plan"]["resolution_source"] == "cohort"
         assert body["effective"]["resolution_source"] == "cohort"
+
+    def test_global_profile_pin_uses_the_resolver_target_key(
+        self, app, authed_client, db_session
+    ):
+        agent, _ = _make_agent(db_session, "global_pin_case")
+        create_template(
+            "agent.visit_profile", serialize_visit_profile(DEFAULT_VISIT_PROFILE)
+        )
+        response = authed_client.post(
+            PINS,
+            json={
+                "target_kind": "global",
+                # Older UI code sent this display value. The API must map it
+                # to the sole runtime global profile target.
+                "target_key": "global",
+                "template": "agent.visit_profile",
+                "version": 1,
+            },
+        )
+        assert response.status_code == 200
+        assert response.get_json()[0]["target_key"] == "agent.visit_profile"
+
+        body = _preview(authed_client, agent).get_json()
+        assert body["plan"]["resolution_source"] == "global"
 
 
 class TestValidationApi:
