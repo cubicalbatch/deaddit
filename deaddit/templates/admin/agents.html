@@ -277,6 +277,7 @@
 
     const STATUS_BADGE = {
         idle: "bg-success",
+        queued: "bg-info",
         running: "bg-primary",
         failed: "bg-danger",
         interrupted: "bg-secondary",
@@ -706,8 +707,8 @@
             } catch (err) { alert(err.message); toggleBtn.disabled = false; }
         });
         const runBtn = el("button", "btn btn-sm btn-outline-primary ms-1", "Force Run");
-        if (agent.status === "running") runBtn.disabled = true;
-        runBtn.title = "Runs one visit synchronously (may take a few minutes)";
+        if (agent.status === "running" || agent.status === "queued") runBtn.disabled = true;
+        runBtn.title = "Queues one visit on the worker queue; the worker process runs it";
         runBtn.addEventListener("click", () => runForceRun(agent.id, runBtn));
         const editLink = el("a", "btn btn-sm btn-outline-secondary ms-1", "Edit");
         editLink.href = {{ url_for('admin.agent_detail', agent_id=0) | replace("/0", "/__ID__") | tojson }}.replace("__ID__", agent.id);
@@ -719,7 +720,7 @@
 
     async function runForceRun(agentId, btn) {
         btn.disabled = true;
-        btn.textContent = "Running…";
+        btn.textContent = "Queued…";
         try {
             await api("/admin/api/agents/" + agentId + "/force-run", {method: "POST"});
             await loadAgents();

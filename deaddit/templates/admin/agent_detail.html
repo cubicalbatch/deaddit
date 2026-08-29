@@ -11,7 +11,7 @@
     <div class="btn-toolbar">
         <button id="toggle-btn" class="btn btn-sm btn-outline-success me-2" disabled></button>
         <button id="force-run-btn" class="btn btn-sm btn-outline-primary" disabled
-                title="Runs one visit synchronously (may take a few minutes)">
+                title="Queues one visit on the worker queue; the worker process runs it">
             <i class="bi bi-lightning"></i> Force Run
         </button>
         <a href="{{ url_for('admin.agents_dashboard') }}" class="btn btn-sm btn-outline-secondary ms-2">All Agents</a>
@@ -217,6 +217,7 @@
     const AGENT_ID = {{ agent_id | tojson }};
     const STATUS_BADGE = {
         idle: "bg-success",
+        queued: "bg-info",
         running: "bg-primary",
         failed: "bg-danger",
         interrupted: "bg-secondary",
@@ -299,8 +300,7 @@
         chip.textContent = agent.status;
         toggleBtn.disabled = false;
         toggleBtn.className = "btn btn-sm me-2 " + (agent.is_enabled ? "btn-outline-warning" : "btn-outline-success");
-        toggleBtn.textContent = agent.is_enabled ? "Disable" : "Enable";
-        runBtn.disabled = agent.status === "running";
+        runBtn.disabled = agent.status === "running" || agent.status === "queued";
         if (saveBtn) saveBtn.disabled = false;
 
         if (agent.consecutive_failures > 0 || agent.status === "failed" || agent.status === "interrupted") {
@@ -665,7 +665,7 @@
         if (!agent) return;
         const btn = document.getElementById("force-run-btn");
         btn.disabled = true;
-        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Running…';
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Queued…';
         try {
             await api("/admin/api/agents/" + agent.id + "/force-run", {
                 method: "POST",
@@ -676,7 +676,7 @@
         } catch (err) {
             alert(err.message);
         } finally {
-            btn.disabled = false;
+            btn.disabled = agent != null && (agent.status === "queued" || agent.status === "running");
             btn.innerHTML = '<i class="bi bi-lightning"></i> Force Run';
         }
     });

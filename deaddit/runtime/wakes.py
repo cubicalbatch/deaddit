@@ -202,7 +202,10 @@ class WakeScheduler:
             now = datetime.utcnow()
             candidates = Agent.query.filter(
                 Agent.is_enabled.is_(True),
-                Agent.status != "running",
+                # "queued" agents have an admin-requested job pending on the
+                # worker; "running" agents have a live run. Neither may be
+                # woken until the active manual run reaches an outcome.
+                Agent.status.notin_(("queued", "running")),
                 Agent.next_run_at.isnot(None),
                 Agent.next_run_at <= now,
             ).order_by(Agent.next_run_at.asc())
