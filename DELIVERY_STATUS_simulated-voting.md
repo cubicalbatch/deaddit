@@ -1,8 +1,7 @@
-# DELIVERY STATUS simulated-voting
-- Completed: 0/8 phases
-- Last completed: none
+- Completed: 8/8 phases
+- Last completed: Phase 7 — Metrics, rollout, documentation, and cleanup at 2026-08-29 02:10
 - In flight: none
-- Next: Phase 0 — Baseline contracts and observability
+- Next: none
 - Blocked: none
 
 ## Phase notes
