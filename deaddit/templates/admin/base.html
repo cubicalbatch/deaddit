@@ -90,6 +90,13 @@
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint and request.endpoint.startswith('admin.prompts') %}active{% endif %}"
+                       href="{{ url_for('admin.prompts_page') }}">
+                        <i class="bi bi-file-earmark-code"></i>
+                        <span class="nav-text">Prompts</span>
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a class="nav-link {% if request.endpoint in ['admin.voting', 'admin.voting_api', 'admin.voting_mode_api', 'admin.voting_policy_api'] %}active{% endif %}"
                        href="{{ url_for('admin.voting') }}">
                         <i class="bi bi-bar-chart-line"></i>
