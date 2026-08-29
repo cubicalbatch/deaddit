@@ -20,26 +20,428 @@ body {
     padding: 0;
 }
 
-.header {
+/* ============================================================
+   Site header
+   A single 56px bar at every width. Wide viewports lay brand /
+   nav / search / actions on that one row; at <=900px the nav and
+   the search field wrap onto their own full-width rows - the same
+   DOM nodes, not duplicates - and stay collapsed behind their
+   toggles so the bar never costs more than one row of chrome.
+   ============================================================ */
+
+:root {
+    --header-height: 56px;
+}
+
+/* The bar is sticky, so it would otherwise sit on top of in-page
+   anchor targets (comment permalinks, the skip link's #main-content). */
+html {
+    scroll-padding-top: calc(var(--header-height) + var(--space-md));
+}
+
+.site-header {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
     background-color: var(--bg-surface);
     border-bottom: 1px solid var(--border);
-    box-shadow: var(--shadow-1);
-    /* Scoped: `all` animated background-color on theme flips, producing a
-       200ms window where axe sampled dark surface under light text (and
-       vice versa). Theme changes must be instant; only chrome edges ease. */
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+/* Translucency only where the blur that makes it legible exists;
+   without blur, content scrolling under a 85% surface just smears. */
+@supports (backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px)) {
+    .site-header {
+        background-color: color-mix(in srgb, var(--bg-surface) 86%, transparent);
+        -webkit-backdrop-filter: blur(12px) saturate(1.4);
+        backdrop-filter: blur(12px) saturate(1.4);
+    }
+}
 
-.header a {
+.site-header__bar {
+    max-width: 1200px;
+    margin: 0 auto;
+    /* 36px controls + 10px x2 = the 56px bar. No min-height: the wrapped
+       mobile rows must be free to grow the header past it. */
+    padding: 10px var(--space-lg);
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    column-gap: var(--space-sm);
+    row-gap: var(--space-sm);
+}
+
+/* --- Brand --- */
+.brand {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-shrink: 0;
+    min-width: 0;
+    padding: var(--space-xs) var(--space-sm);
+    margin-left: calc(var(--space-sm) * -1);
+    border-radius: var(--radius-md);
     color: var(--text-1);
     text-decoration: none;
-    transition: color 0.2s ease;
+    transition: background-color var(--motion-fast) ease;
 }
 
-.header a:hover {
-    color: var(--accent);
+.brand:hover {
+    background-color: var(--bg-hover-row);
 }
+
+.brand:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.brand__logo {
+    height: 28px;
+    width: auto;
+    display: block;
+    flex-shrink: 0;
+}
+
+/* The inline <head> script stamps data-theme before first paint, so the
+   swap keys off that alone. Keying off prefers-color-scheme as well would
+   serve the dark logo onto light tokens whenever JS is unavailable. */
+.brand__logo--dark {
+    display: none;
+}
+
+html[data-theme="dark"] .brand__logo--light {
+    display: none;
+}
+
+html[data-theme="dark"] .brand__logo--dark {
+    display: block;
+}
+
+.brand__name {
+    /* Pinned to text-1, not --accent: at 20px this is still body-weight
+       text and --accent only clears 3:1 (16.69:1 light / 14.23:1 dark). */
+    color: var(--text-1);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.brand__crumb {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.brand__slash {
+    color: var(--text-3);
+    flex-shrink: 0;
+}
+
+.brand__community {
+    min-width: 0;
+    color: var(--text-1);
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.brand__community:hover {
+    text-decoration: underline;
+}
+
+.brand__community:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-sm);
+}
+
+/* --- Primary nav --- */
+.primary-nav {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    flex-shrink: 0;
+    margin-left: var(--space-md);
+}
+
+.nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 7px var(--space-sm);
+    border-radius: var(--radius-md);
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    line-height: var(--line-height-tight);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease;
+}
+
+.nav-link:hover {
+    color: var(--text-1);
+    background-color: var(--bg-hover-row);
+}
+
+/* Current section. --accent-soft carries text-1 at 14.14:1 light /
+   13.83:1 dark, so the lit state stays readable in both themes. */
+.nav-link.is-active {
+    color: var(--text-1);
+    background-color: var(--accent-soft);
+}
+
+.nav-link:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* Duplicate of the GitHub icon button in the actions cluster. Each is
+   shown at exactly one breakpoint, so only one is ever in the a11y tree. */
+.nav-link--github {
+    display: none;
+}
+
+/* --- Search --- */
+.header-search {
+    flex: 1 1 180px;
+    min-width: 0;
+    max-width: 380px;
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    height: 36px;
+    background-color: var(--bg-canvas);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    transition: border-color var(--motion-fast) ease, background-color var(--motion-fast) ease;
+}
+
+.header-search:hover {
+    border-color: var(--text-3);
+}
+
+.header-search:focus-within {
+    background-color: var(--bg-elevated);
+    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
+}
+
+.header-search__submit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 999px;
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    transition: color var(--motion-fast) ease;
+}
+
+.header-search__submit:hover {
+    color: var(--text-1);
+}
+
+.header-search__submit:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.header-search input[type="search"] {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    padding: 0 var(--space-md) 0 0;
+    background: transparent;
+    border: none;
+    color: var(--text-1);
+    font-family: inherit;
+    font-size: var(--font-size-sm);
+}
+
+/* The ring lives on the wrapper via :focus-within, so the inner control
+   must not draw a second one. */
+.header-search input[type="search"]:focus {
+    outline: none;
+}
+
+/* Chrome's default placeholder gray fails AA (4.46:1 light / 3.86:1 dark);
+   pin it to a gated semantic role instead (B2 contrast matrix finding F1). */
+.header-search input[type="search"]::placeholder {
+    color: var(--text-2);
+    opacity: 1;
+}
+
+.header-search input[type="search"]::-webkit-search-cancel-button {
+    cursor: pointer;
+}
+
+/* --- Icon buttons (menu, search toggle, theme, GitHub) --- */
+.icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-md);
+    color: var(--text-2);
+    font-size: var(--font-size-lg);
+    line-height: 1;
+    text-decoration: none;
+    cursor: pointer;
+    transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease;
+}
+
+.icon-btn:hover,
+.icon-btn[aria-expanded="true"] {
+    color: var(--text-1);
+    background-color: var(--bg-hover-row);
+}
+
+.icon-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.site-header__actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    margin-right: calc(var(--space-xs) * -1);
+}
+
+/* Disclosure controls: the one-row layout needs neither. */
+.site-header__menu,
+.site-header__search-toggle {
+    display: none;
+}
+
+/* --- Collapsed layout --- */
+@media (max-width: 900px) {
+    .site-header__menu,
+    .site-header__search-toggle {
+        display: inline-flex;
+    }
+
+    /* Swap the GitHub icon for its labelled row inside the menu. */
+    .site-header__github {
+        display: none;
+    }
+
+    .nav-link--github {
+        display: inline-flex;
+    }
+
+    .site-header__bar {
+        flex-wrap: wrap;
+        padding: var(--space-sm) var(--space-md);
+    }
+
+    .icon-btn {
+        width: 40px;
+        height: 40px;
+    }
+
+    .site-header__menu {
+        order: 1;
+        margin-left: calc(var(--space-sm) * -1);
+    }
+
+    .brand {
+        order: 2;
+        margin-left: 0;
+    }
+
+    .brand__crumb {
+        order: 3;
+        flex: 1 1 0;
+        overflow: hidden;
+    }
+
+    .site-header__actions {
+        order: 4;
+        margin-left: auto;
+    }
+
+    /* Wrapped rows. Opening one toggle closes the other (see app.js), so
+       the header grows by at most a single row. */
+    .header-search {
+        order: 8;
+    }
+
+    .primary-nav {
+        order: 9;
+    }
+
+    .header-search,
+    .primary-nav {
+        display: none;
+        flex-basis: 100%;
+        max-width: none;
+        margin-left: 0;
+    }
+
+    .site-header.is-search-open .header-search {
+        display: flex;
+    }
+
+    .site-header.is-menu-open .primary-nav {
+        display: flex;
+    }
+
+    .header-search {
+        height: 44px;
+    }
+
+    .header-search__submit {
+        width: 42px;
+        height: 42px;
+        font-size: var(--font-size-base);
+    }
+
+    /* 16px keeps iOS Safari from zooming the viewport on focus. */
+    .header-search input[type="search"] {
+        font-size: var(--font-size-base);
+    }
+
+    .primary-nav {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 2px;
+    }
+
+    .nav-link {
+        min-height: 44px;
+        padding: 0 var(--space-sm);
+        font-size: var(--font-size-base);
+    }
+}
+
+@media (max-width: 480px) {
+    /* On a community page the crumb is the more useful of the two labels;
+       the logo still carries the link home. */
+    .brand:has(+ .brand__crumb) .brand__name {
+        display: none;
+    }
+}
+
 
 .content {
     max-width: 1200px;
@@ -215,73 +617,6 @@ body {
 }
 
 
-.header-content {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: var(--space-md) var(--space-lg);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-lg);
-}
-
-.logo-container {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-}
-
-.logo-title {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-}
-
-.logo-and-title {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-}
-
-.logo {
-    height: 40px;
-    width: auto;
-}
-
-.logo-dark {
-    display: none;
-}
-
-html[data-theme="dark"] .logo-light {
-    display: none;
-}
-
-html[data-theme="dark"] .logo-dark {
-    display: block;
-}
-
-@media (prefers-color-scheme: dark) {
-    html:not([data-theme="light"]) .logo-light {
-        display: none;
-    }
-    html:not([data-theme="light"]) .logo-dark {
-        display: block;
-    }
-}
-
-.site-title {
-    margin: 0;
-    font-size: var(--font-size-xl);
-    font-weight: 700;
-}
-
-.site-title a {
-    /* F2b: body-size text cannot use --accent (3.32:1 dark < 4.5); text-1 passes
-       AA at all viewports: 16.69:1 light / 14.23:1 dark on surface */
-    color: var(--text-1);
-    text-decoration: none;
-}
-
 .ai-generated {
     font-size: var(--font-size-xs);
     color: var(--text-2);
@@ -295,34 +630,6 @@ html[data-theme="dark"] .logo-dark {
 
 .ai-generated a:hover {
     color: var(--accent);
-}
-
-.right-content {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: var(--space-sm);
-}
-
-.model-selector {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-}
-.nav-links {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-}
-
-.nav-links a {
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: var(--radius-sm);
-    transition: background-color 0.2s ease;
-}
-
-.nav-links a:hover {
-    background-color: var(--bg-canvas);
 }
 
 /* Post threads use a focused reading column instead of stretching the
@@ -464,7 +771,6 @@ html[data-theme="dark"] .logo-dark {
 .post-body > :last-child {
     margin-bottom: 0;
 }
-
 
 
 /* Autolinked URLs inside formatter output otherwise render UA-default
@@ -615,43 +921,6 @@ html[data-theme="dark"] .logo-dark {
 
 /* Media query for mobile devices */
 @media (max-width: 768px) {
-    .header-content {
-        flex-direction: column;
-        align-items: stretch;
-        gap: var(--space-md);
-        padding: var(--space-md);
-    }
-
-    .logo-container {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-xs);
-    }
-
-    .logo-title {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-md);
-        position: relative;
-    }
-
-    .logo-and-title {
-        display: flex;
-        align-items: center;
-        gap: var(--space-md);
-        flex: 1;
-        min-width: 0;
-    }
-
-    .right-content {
-        align-items: stretch;
-        gap: var(--space-md);
-    }
-
-    .model-selector {
-        display: none;
-    }
 
     .mobile-filter-wrapper {
         display: block;
@@ -673,11 +942,6 @@ html[data-theme="dark"] .logo-dark {
 
     #resetFilter {
         width: 100%;
-    }
-
-    .nav-links {
-        justify-content: center;
-        text-align: center;
     }
 
     .post {
@@ -705,9 +969,6 @@ html[data-theme="dark"] .logo-dark {
 }
 
 @media (max-width: 480px) {
-    .site-title {
-        font-size: var(--font-size-lg);
-    }
 
     .post-card__title {
         font-size: var(--font-size-base);
@@ -1680,6 +1941,18 @@ a.pagenav__link:hover {
     padding: var(--space-xl) var(--space-lg);
 }
 
+/* Carried no rule of its own, so the UA default (2em, fixed) applied and a
+   single-token name like d/UnresolvedMysteries - which offers no break
+   opportunity - pushed the page wider than a phone viewport. */
+.community-hero__name {
+    margin: 0 0 var(--space-sm);
+    font-size: clamp(var(--font-size-lg), 6vw, var(--font-size-xxl));
+    font-weight: 700;
+    line-height: var(--line-height-tight);
+    color: var(--text-1);
+    overflow-wrap: anywhere;
+}
+
 .community-hero__description {
     margin: 0 0 var(--space-md);
     color: var(--text-1);
@@ -2070,124 +2343,160 @@ a.pagenav__link:hover {
     background-color: var(--status-warning);
 }
 
-/* --- Header search form --- */
-.header-search {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-}
-
-.header-search input[type="search"] {
-    background-color: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    color: var(--text-1);
-    padding: var(--space-xs) var(--space-sm);
-}
-
-.header-search input[type="search"]:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-}
-
-/* Chrome's default placeholder gray fails AA (4.46:1 light / 3.86:1 dark);
-   pin it to a gated semantic role instead (B2 contrast matrix finding F1). */
-.header-search input[type="search"]::placeholder {
-    color: var(--text-2);
-    opacity: 1;
-}
-
-.header-search button[type="submit"] {
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-md);
-    color: var(--text-2);
-    cursor: pointer;
-    padding: var(--space-xs) var(--space-sm);
-}
-
-.header-search button[type="submit"]:hover {
-    background-color: var(--bg-canvas);
-    color: var(--text-1);
-}
-
-.header-search button[type="submit"]:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-}
-
-/* Theme toggle (same id/class contract as admin.css — the public site
-   doesn't load admin.css, so the rule must live here too or the button
-   falls back to UA white `buttonface` and glares in dark mode). */
-.theme-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 2.25rem;
-    height: 2.25rem;
-    padding: 0;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text-2);
-    cursor: pointer;
-    transition: color var(--motion-fast) ease-in-out,
-                border-color var(--motion-fast) ease-in-out;
-}
-
-.theme-toggle:hover {
-    color: var(--text-1);
-    border-color: var(--text-3);
-}
-
-.theme-toggle:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-}
-
-/* --- Search results page --- */
+/* --- Search results page ---
+   Results are card lists, not bare text: Communities and People share the
+   .search-hit row so the two sections scan as one system, and Posts reuses
+   the feed's post cards below them. */
 .search-header {
-    margin-bottom: var(--space-md);
+    margin-bottom: var(--space-lg);
 }
 
-.search-header h1 {
-    margin: 0 0 var(--space-xs);
+.search-header__title {
+    margin: 0;
+    font-size: clamp(var(--font-size-xl), 5vw, var(--font-size-xxl));
+    font-weight: 700;
+    line-height: var(--line-height-tight);
     color: var(--text-1);
+    overflow-wrap: anywhere;
+}
+
+.search-header__query {
+    color: var(--text-2);
+    font-weight: 600;
+}
+
+.search-header__summary {
+    margin: var(--space-sm) 0 0;
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+}
+
+.search-section + .search-section {
+    margin-top: var(--space-xl);
 }
 
 .search-section__title {
-    margin: var(--space-lg) 0 var(--space-sm);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin: 0 0 var(--space-sm);
     font-size: var(--font-size-lg);
     color: var(--text-1);
 }
 
+.search-section__count {
+    /* text-1 on --accent-soft: 14.14:1 light / 13.83:1 dark */
+    padding: 0 var(--space-sm);
+    border-radius: var(--radius-lg);
+    background-color: var(--accent-soft);
+    color: var(--text-1);
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+}
+
+.search-hits {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-1);
+    overflow: hidden;
+}
+
 .search-hit {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: var(--space-md);
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: var(--radius-sm);
-    color: inherit;
-    text-decoration: none;
+    position: relative;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    column-gap: var(--space-md);
+    row-gap: var(--space-sm);
+    padding: var(--space-md);
+    transition: background-color var(--motion-fast) ease;
+}
+
+.search-hit + .search-hit {
+    border-top: 1px solid var(--border);
 }
 
 .search-hit:hover {
-    background-color: var(--bg-surface);
+    background-color: var(--bg-hover-row);
+}
+
+/* Sized up from the 24px feed variant: these rows are two lines tall. */
+.search-hit .avatar-circle {
+    width: 32px;
+    height: 32px;
+    font-size: var(--font-size-sm);
+}
+
+.search-hit__body {
+    min-width: 0;
 }
 
 .search-hit__title {
     color: var(--link);
+    font-weight: 600;
+    text-decoration: none;
+    overflow-wrap: anywhere;
 }
 
-.search-hit__meta {
-    font-size: var(--font-size-sm);
+/* The row is one result, so the whole row is the hit area. Keeping it on the
+   anchor rather than wrapping the <li> leaves exactly one link per result. */
+.search-hit__title::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+}
+
+.search-hit:hover .search-hit__title {
+    text-decoration: underline;
+}
+
+.search-hit__title:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-sm);
+}
+
+.search-hit__desc {
+    margin: var(--space-xs) 0 0;
     color: var(--text-2);
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-normal);
+    /* Two lines keeps every row the same height however long the bio is. */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+}
+
+.search-hit__count {
+    align-self: center;
     white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+    /* The count drops under the body rather than squeezing it to nothing. */
+    .search-hit {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .search-hit__count {
+        grid-column: 2;
+        justify-self: start;
+    }
 }
 
 /* --- UX-4 mobile adjustments --- */
 @media (max-width: 768px) {
+    .community-header.community-hero {
+        padding: var(--space-lg) var(--space-md);
+    }
+
     .profile-header {
         flex-direction: column;
         align-items: center;

@@ -1,26 +1,51 @@
 {% extends "base.html" %}
 {% import "partials/_macros.html" as m %}
 
+{#- One row of the Communities/People result lists. The title anchor stretches
+    over the whole row (see .search-hit__title::after), so each result is a
+    single link with a full-row hit area rather than a name-sized one. -#}
+{% macro hit(href, monogram, title, description, count) -%}
+<li class="search-hit">
+    {{ m.avatar(monogram) }}
+    <div class="search-hit__body">
+        <a class="search-hit__title" href="{{ href }}">{{ title }}</a>
+        {%- if description %}
+        <p class="search-hit__desc">{{ description | striptags | truncate(140) }}</p>
+        {%- endif %}
+    </div>
+    <span class="chip chip--count search-hit__count">{{ count }}</span>
+</li>
+{%- endmacro %}
+
 {% block content %}
-<div class="search-header">
-    <h1>🔍 Search Deaddit{% if q %} — “{{ q }}”{% endif %}</h1>
-    <p>{{ total_posts }} posts found</p>
-</div>
+{% set has_hits = posts or people or communities %}
+
+<header class="search-header">
+    <h1 class="search-header__title">
+        {%- if q %}Results for <span class="search-header__query">“{{ q }}”</span>{% else %}Search Deaddit{% endif -%}
+    </h1>
+    {%- if q and has_hits %}
+    <p class="search-header__summary">
+        {{ total_posts }} {{ 'post' if total_posts == 1 else 'posts' }}
+        {%- if people %} · {{ people | length }} {{ 'person' if people | length == 1 else 'people' }}{% endif %}
+        {%- if communities %} · {{ communities | length }} {{ 'community' if communities | length == 1 else 'communities' }}{% endif %}
+    </p>
+    {%- endif %}
+</header>
 
 {% if not q %}
 {{ m.empty_state('bi-search', 'Nothing to search for', 'Type something in the search box above.', url_for('web.index'), 'Back to the front page') }}
+{% elif not has_hits %}
+{{ m.empty_state('bi-search', 'No results', 'Nothing matched “' ~ q ~ '”. Try a shorter or more general term.', url_for('web.index'), 'Back to the front page') }}
 {% else %}
 
 {% if communities %}
 <section class="search-section">
-    <h2 class="search-section__title">Communities</h2>
+    <h2 class="search-section__title">Communities <span class="search-section__count">{{ communities | length }}</span></h2>
     <ul class="search-hits">
         {% for c in communities %}
-        <li class="search-hit">
-            <a href="{{ url_for('web.subdeaddit', subdeaddit_name=c.name) }}">d/{{ c.name }}</a>
-            <span class="search-hit__desc">{{ c.description | striptags | truncate(140) }}</span>
-            {{ m.chip(c.post_count ~ ' posts', 'chip--count') }}
-        </li>
+        {{ hit(url_for('web.subdeaddit', subdeaddit_name=c.name), c.name, 'd/' ~ c.name, c.description,
+               c.post_count ~ (' post' if c.post_count == 1 else ' posts')) }}
         {% endfor %}
     </ul>
 </section>
@@ -28,28 +53,23 @@
 
 {% if people %}
 <section class="search-section">
-    <h2 class="search-section__title">People</h2>
+    <h2 class="search-section__title">People <span class="search-section__count">{{ people | length }}</span></h2>
     <ul class="search-hits">
         {% for p in people %}
-        <li class="search-hit">
-            <a href="{{ url_for('web.user_profile', username=p.username) }}">u/{{ p.username }}</a>
-            <span class="search-hit__desc">{{ p.bio | striptags | truncate(140) }}</span>
-            {{ m.chip(p.post_count ~ ' posts · ' ~ p.comment_count ~ ' comments', 'chip--count') }}
-        </li>
+        {{ hit(url_for('web.user_profile', username=p.username), p.username, 'u/' ~ p.username, p.bio,
+               p.post_count ~ ' posts · ' ~ p.comment_count ~ ' comments') }}
         {% endfor %}
     </ul>
 </section>
 {% endif %}
 
+{% if posts %}
 <section class="search-section">
-    <h2 class="search-section__title">Posts</h2>
-    {% if posts %}
+    <h2 class="search-section__title">Posts <span class="search-section__count">{{ total_posts }}</span></h2>
     {% include 'partials/post_list.html' %}
     {{ m.pagenav(page, total_pages, 'Search results') }}
-    {% else %}
-    <p>No posts matched.</p>
-    {% endif %}
 </section>
+{% endif %}
 
 {% endif %}
 {% endblock %}

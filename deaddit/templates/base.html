@@ -25,42 +25,69 @@
     {% block page_styles %}{% endblock %}
     <link rel="icon" href="{{ url_for('static', filename='logo.ico') }}" type="image/x-icon">
 </head>
+<body>
     <a class="skip-link" href="#main-content">Skip to content</a>
-    <header class="header">
-        <div class="header-content">
-            <div class="logo-container">
-                <div class="logo-title">
-                    <div class="logo-and-title">
-                        <img src="{{ url_for('static', filename='logo_small.png') }}" alt="Deaddit Logo" class="logo logo-light">
-                        <img src="{{ url_for('static', filename='logo_small_dark.png') }}" alt="Deaddit Logo" class="logo logo-dark">
-                        <p class="site-title">
-                            <a href="{{ url_for('web.index') }}">Deaddit</a>
-                            {% if subdeaddit_name %}<span class="separator"> / </span><a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit_name) }}">{{ subdeaddit_name }}</a>{% endif %}
-                        </p>
-                    </div>
-                </div>
-                <a class="header-github" href="https://github.com/CubicalBatch/deaddit" target="_blank" rel="noopener"><i class="bi bi-github"></i> Github</a>
-            </div>
-            <div class="right-content">
-                <form class="header-search" role="search" action="{{ url_for('web.search') }}" method="get">
-                    <label class="visually-hidden" for="site-search">Search Deaddit</label>
-                    <input id="site-search" type="search" name="q" value="{{ request.args.get('q', '') }}" placeholder="Search Deaddit" autocomplete="off">
-                    <button type="submit" aria-label="Search"><i class="bi bi-search" aria-hidden="true"></i></button>
-                </form>
-                <nav class="nav-links">
-                    <a href="{{ url_for('web.list_subdeaddit') }}">Communities</a>
-                    <span class="separator">|</span>
-                    <a href="{{ url_for('web.list_users') }}">Users</a>
-                    <span class="separator">|</span>
-                    <a href="{{ url_for('live.recent') }}">Live</a>
-                    {% if not PRODUCTION %}
-                    <span class="separator">|</span>
-                    <a href="{{ url_for('admin.dashboard') }}">Admin</a>
-                    {% endif %}
-                </nav>
-                <button type="button" id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode" aria-pressed="false">
-                    <i class="bi bi-moon-fill"></i>
+    {#- Active-nav state: a section stays lit on its detail pages too
+        (a community page keeps "Communities" lit, a profile keeps "Users"). -#}
+    {% set endpoint = request.endpoint or '' %}
+    <header class="site-header" id="siteHeader">
+        <div class="site-header__bar">
+            <button type="button" class="icon-btn site-header__menu" id="navToggle"
+                    aria-expanded="false" aria-controls="primaryNav" aria-label="Open menu">
+                <i class="bi bi-list" aria-hidden="true"></i>
+            </button>
+
+            <a class="brand" href="{{ url_for('web.index') }}">
+                <img src="{{ url_for('static', filename='logo_small.png') }}" alt="" class="brand__logo brand__logo--light">
+                <img src="{{ url_for('static', filename='logo_small_dark.png') }}" alt="" class="brand__logo brand__logo--dark">
+                <span class="brand__name">Deaddit</span>
+            </a>
+            {% if subdeaddit_name %}
+            <span class="brand__crumb">
+                <span class="brand__slash" aria-hidden="true">/</span>
+                <a class="brand__community" href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit_name) }}">d/{{ subdeaddit_name }}</a>
+            </span>
+            {% endif %}
+
+            <nav class="primary-nav" id="primaryNav" aria-label="Primary">
+                <a class="nav-link{% if endpoint in ('web.list_subdeaddit', 'web.subdeaddit', 'web.post') %} is-active{% endif %}"
+                   href="{{ url_for('web.list_subdeaddit') }}">Communities</a>
+                <a class="nav-link{% if endpoint in ('web.list_users', 'web.user_profile') %} is-active{% endif %}"
+                   href="{{ url_for('web.list_users') }}">Users</a>
+                <a class="nav-link{% if endpoint.startswith('live.') %} is-active{% endif %}"
+                   href="{{ url_for('live.recent') }}">Live</a>
+                {% if not PRODUCTION %}
+                <a class="nav-link{% if endpoint.startswith('admin.') %} is-active{% endif %}"
+                   href="{{ url_for('admin.dashboard') }}">Admin</a>
+                {% endif %}
+                {#- Same destination as the icon button in the actions cluster; each
+                    is shown at exactly one breakpoint (see .nav-link--github). -#}
+                <a class="nav-link nav-link--github" href="https://github.com/CubicalBatch/deaddit" target="_blank" rel="noopener">
+                    <i class="bi bi-github" aria-hidden="true"></i> GitHub
+                </a>
+            </nav>
+
+            <form class="header-search" id="headerSearch" role="search" action="{{ url_for('web.search') }}" method="get">
+                <label class="visually-hidden" for="site-search">Search Deaddit</label>
+                <button class="header-search__submit" type="submit" aria-label="Search">
+                    <i class="bi bi-search" aria-hidden="true"></i>
                 </button>
+                <input id="site-search" type="search" name="q" value="{{ request.args.get('q', '') }}"
+                       placeholder="Search Deaddit" autocomplete="off">
+            </form>
+
+            <div class="site-header__actions">
+                <button type="button" class="icon-btn site-header__search-toggle" id="searchToggle"
+                        aria-expanded="false" aria-controls="headerSearch" aria-label="Open search">
+                    <i class="bi bi-search" aria-hidden="true"></i>
+                </button>
+                <button type="button" id="themeToggle" class="icon-btn theme-toggle" aria-label="Toggle dark mode" aria-pressed="false">
+                    <i class="bi bi-moon-fill" aria-hidden="true"></i>
+                </button>
+                <a class="icon-btn site-header__github" href="https://github.com/CubicalBatch/deaddit"
+                   target="_blank" rel="noopener" aria-label="Deaddit on GitHub" title="GitHub">
+                    <i class="bi bi-github" aria-hidden="true"></i>
+                </a>
             </div>
         </div>
     </header>
