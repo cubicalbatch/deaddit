@@ -1575,6 +1575,21 @@ def run_active_tick(
 
 
 run_tail_tick = run_active_tick
-simulate_active_tick = run_active_tick
-simulate_tail_tick = run_active_tick
 tick_active_window = run_active_tick
+
+
+def simulate_active_tick(
+    policy: VoteCadencePolicy | PolicyConfig | Mapping[str, Any] | None = None,
+    now: datetime | None = None,
+    **kwargs: Any,
+) -> TickResult:
+    """Analysis alias: defaults to ``dry_run=True`` so it never writes.
+
+    ``simulate_*`` promises a pure what-would-happen view; callers that want
+    live semantics must use :func:`run_active_tick` with ``dry_run=False``.
+    """
+    kwargs.setdefault("dry_run", True)
+    return run_active_tick(policy, now, **kwargs)
+
+
+simulate_tail_tick = simulate_active_tick

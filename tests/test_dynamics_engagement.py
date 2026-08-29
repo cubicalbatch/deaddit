@@ -12,6 +12,7 @@ from deaddit.dynamics.engagement import (
     preset_config,
     sample_attention_budget,
     select_direction,
+    simulate_active_tick,
     stable_seed,
     tail_vote_probability,
 )
@@ -97,6 +98,41 @@ def test_active_tick_dry_run_live_parity_and_idempotence(app, db_session):
     assert db_session.query(Vote).filter_by(source="simulated").count() == len(
         live.decisions
     )
+
+
+def test_simulate_alias_defaults_to_dry_run(app, db_session):
+    """simulate_active_tick must never persist votes without explicit opt-in."""
+    now = datetime(2026, 1, 2, 12)
+    db_session.add_all(
+        [
+            Subdeaddit(name="simeng"),
+            User(username="author"),
+            User(username="voter-a", agent_state={"subscriptions": ["simeng"]}),
+            User(username="voter-b"),
+        ]
+    )
+    db_session.commit()
+    post = Post(
+        title="Simulate target",
+        created_at=now - timedelta(hours=2),
+        user="author",
+        subdeaddit_name="simeng",
+    )
+    db_session.add(post)
+    db_session.commit()
+    policy = VoteCadencePolicy(
+        preset="natural",
+        algorithm_version=1,
+        config=preset_config("natural"),
+        effective_at=now - timedelta(days=1),
+    )
+    db_session.add(policy)
+    db_session.commit()
+
+    result = simulate_active_tick(policy, now, target_type="post", target_ids=[post.id])
+
+    assert result.decisions, "fixture should yield due ordinals"
+    assert db_session.query(Vote).filter_by(source="simulated").count() == 0
 
 
 def test_downvotes_can_be_disabled_without_attempts():
