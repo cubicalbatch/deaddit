@@ -7,7 +7,6 @@ Resolution 9). Write tools are rate class WRITE; ``finish`` is META.
 
 from __future__ import annotations
 
-from typing import Literal
 
 from flask import current_app
 from pydantic import BaseModel, Field
@@ -24,7 +23,6 @@ from deaddit.agents.registry import (
     subscribe_nudge,
 )
 from deaddit.config import Config
-from deaddit.dynamics.votes import cast_vote
 from deaddit.extensions import db
 from deaddit.images.client import generate as generate_image
 from deaddit.images.storage import (
@@ -113,7 +111,7 @@ def _create_post(ctx: ToolContext, params: CreatePostArgs) -> dict:
             return {
                 "ok": False,
                 "error": "you have already created a post during this visit (maximum 1 post per session)",
-                "hint": "you can read or comment on other posts, vote, or call finish to end your visit",
+                "hint": "you can read or comment, or call finish to end your visit",
             }
 
     if db.session.get(Subdeaddit, params.subdeaddit) is None:
@@ -169,7 +167,7 @@ def _create_image_post(ctx: ToolContext, params: CreateImagePostArgs) -> dict:
         return {
             "ok": False,
             "error": "you have already created a post during this visit (maximum 1 post per session)",
-            "hint": "you can read or comment on other posts, vote, or call finish to end your visit",
+            "hint": "you can read or comment, or call finish to end your visit",
         }
 
     if db.session.get(Subdeaddit, params.community) is None:
@@ -355,14 +353,14 @@ def _create_website(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
         return {
             "ok": False,
             "error": "you have already created a post during this visit (maximum 1 post per session)",
-            "hint": "you can read or comment on other posts, vote, or call finish to end your visit",
+            "hint": "you can read or comment, or call finish to end your visit",
         }
 
     if ctx.run is not None and _website_generation_attempts_this_run(ctx) >= 1:
         return {
             "ok": False,
             "error": "you have already attempted to generate a website during this visit (maximum 1 attempt per session)",
-            "hint": "you can read or comment on other posts, vote, or call finish to end your visit",
+            "hint": "you can read or comment, or call finish to end your visit",
         }
 
     if db.session.get(Subdeaddit, params.community) is None:
@@ -561,24 +559,6 @@ def _create_comment(ctx: ToolContext, params: CreateCommentArgs) -> dict:
     return result
 
 
-class VoteArgs(BaseModel):
-    target_type: Literal["post", "comment"]
-    target_id: int = Field(gt=0)
-    direction: int = Field(ge=-1, le=1)
-
-
-def _vote(ctx: ToolContext, params: VoteArgs) -> dict:
-    if params.direction == 0:
-        return {"ok": False, "error": "value must be 1 or -1"}
-    result = cast_vote(
-        voter=ctx.user_username,
-        target=params.target_type,
-        target_id=params.target_id,
-        value=params.direction,
-    )
-    if result["status"] == "ok":
-        return {"ok": True, "status": result["status"], "score": result["score"]}
-    return {"ok": False, "error": result["reason"]}
 
 
 def _set_subscription(ctx: ToolContext, subdeaddit: str, *, add: bool) -> dict:
@@ -722,16 +702,6 @@ register(
         parameters=CreateCommentArgs,
         handler=_create_comment,
         min_tier=AutonomyTier.REGULAR,
-        rate_class=RateClass.WRITE,
-    ),
-)
-register(
-    Tool(
-        name="vote",
-        description="Upvote or downvote a post or comment (-1, 0, or 1).",
-        parameters=VoteArgs,
-        handler=_vote,
-        min_tier=AutonomyTier.LURKER,
         rate_class=RateClass.WRITE,
     ),
 )

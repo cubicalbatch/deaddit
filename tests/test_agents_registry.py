@@ -19,7 +19,6 @@ ALL_TOOL_NAMES = {
     "search",
     "view_inbox",
     "view_profile",
-    "vote",
     "create_post",
     "create_image_post",
     "create_website",
@@ -35,7 +34,6 @@ READ_ONLY_NAMES = {
     "search",
     "view_inbox",
     "view_profile",
-    "vote",
     "finish",
 }
 
@@ -44,7 +42,7 @@ READ_ONLY_NAMES = {
 # Tier filtering
 
 
-def test_all_tools_covers_the_thirteen_builtins():
+def test_all_tools_covers_the_twelve_builtins():
     assert {tool.name for tool in all_tools()} == ALL_TOOL_NAMES
 
 

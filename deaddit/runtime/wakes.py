@@ -1,8 +1,11 @@
 """Agent wake scheduling for the dedicated worker process.
 
-Polls the ``agent`` table for due agents, dispatching by primary-key agent id,
-and launches persona-bearing :func:`deaddit.agents.loop.run_once` runs under
-global-concurrency and per-agent daily-request budgets. Also performs boot recovery:
+Polls the ``agent`` table for due agents, dispatching by primary-key agent id.
+Regular and power-user agents launch persona-bearing
+:func:`deaddit.agents.loop.run_once` runs under global-concurrency and per-agent
+daily-request budgets. Scheduled lurkers are passive simulator participants:
+their wakes only reschedule and never launch an agent run or LLM request. Also
+performs boot recovery:
 ``running`` runs are marked interrupted and enabled agents with no
 scheduled wake are armed.
 
@@ -12,6 +15,7 @@ Worker-only by law (A5): nothing here ever runs in the web process.
 from __future__ import annotations
 
 import logging
+import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -20,6 +24,7 @@ from datetime import datetime, timedelta
 from flask import Flask
 
 from deaddit.agents.loop import is_runtime_enabled, run_once
+from deaddit.agents.registry import AutonomyTier
 from deaddit.extensions import db
 from deaddit.models import Agent, AgentRun, AgentTurn, Setting
 
@@ -50,6 +55,25 @@ def _int_config(config: dict | None, key: str, fallback: int) -> int:
     except (TypeError, ValueError):
         return fallback
 
+
+
+
+def _is_lurker(agent: Agent) -> bool:
+    tier = getattr(agent.autonomy_tier, "value", agent.autonomy_tier)
+    return tier == AutonomyTier.LURKER.value
+
+
+def _reschedule_lurker(agent: Agent, now: datetime) -> None:
+    """Record a passive wake without creating a run or contacting an LLM."""
+    config = agent.config or {}
+    min_delay = _int_config(config, "min_delay", 60)
+    max_delay = max(min_delay, _int_config(config, "max_delay", 900))
+    agent.status = "idle"
+    agent.last_run_at = now
+    agent.next_run_at = now + timedelta(
+        seconds=random.uniform(min_delay, max_delay)
+    )
+    db.session.commit()
 
 class WakeScheduler:
     """Daemon poller that launches due agents within their budgets."""
@@ -194,6 +218,11 @@ class WakeScheduler:
             for agent in candidates.all():
                 if self._stop_event.is_set():
                     break
+
+                if _is_lurker(agent):
+                    _reschedule_lurker(agent, now)
+                    logger.debug("Rescheduled passive lurker agent %s", agent.id)
+                    continue
 
                 ceiling = _int_config(agent.config, "daily_request_ceiling", 0)
                 if ceiling > 0:

@@ -29,7 +29,7 @@ TIER_DESCRIPTIONS: dict[str, str] = {
         "You are a lurker: you read and browse but never post or comment."
     ),
     AutonomyTier.REGULAR.value: (
-        "You are a regular member: you may post, comment, vote, and browse."
+        "You are a regular member: you may post, comment, and browse."
     ),
     AutonomyTier.POWER_USER.value: (
         "You are a power user: like a regular member today, with extra "
@@ -48,9 +48,9 @@ _TROLL_MODE_LINE = (
 
 _TOOLS_LINE = (
     "You interact with the site through tools: use them to browse, read "
-    "posts, check your inbox, create posts, comment, vote, and act. Staying "
-    "idle and just reading is perfectly fine. When you are done, call the "
-    "finish tool with a short summary of what you did - that ends your visit."
+    "posts, check your inbox, create posts, comment, and act. Staying idle "
+    "and just reading is perfectly fine. When you are done, call the finish "
+    "tool with a short summary of what you did - that ends your visit."
 )
 _GENUINE_LINE = (
     "Be genuine. Do not spam, do not post the same thing twice, and stay "

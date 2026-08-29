@@ -204,9 +204,9 @@ def generate_kickoff_prompt(
     )
     return (
         "You're waking up. Browse your feed or search for topics of interest, "
-        "read discussions, vote on what you like, and jump into the conversation "
-        f"with a comment if something catches your eye. "
-        f"{hint_sentence}When you're done, call finish.{mood}"
+        "read discussions, and jump into the conversation with a comment if "
+        f"something catches your eye. {hint_sentence}When you're done, call "
+        f"finish.{mood}"
     )
 
 

@@ -19,10 +19,10 @@ from deaddit.models import Agent, AgentRun, AgentTurn, Setting, User
 from deaddit.runtime.wakes import CEILING_DEFER_SECONDS, WakeScheduler
 
 
-def _make_agent(db_session, username, *, enabled=True, config=None):
+def _make_agent(db_session, username, *, enabled=True, config=None, tier="regular"):
     agent = Agent(
         user_username=username,
-        autonomy_tier="regular",
+        autonomy_tier=tier,
         is_enabled=enabled,
         status="idle",
         config=config or {},
@@ -188,6 +188,35 @@ def test_poll_tick_is_flag_gated(seeded_db, db_session, app, monkeypatch):
     # Pool is never even built when the runtime is switched off.
     assert scheduler._executor is None
     assert agent.status == "idle"
+
+
+def test_scheduled_lurker_wake_reschedules_without_agent_run(
+    seeded_db, db_session, app, monkeypatch
+):
+    _set_flag("true")
+    lurker = _make_agent(
+        db_session,
+        "alice",
+        tier="lurker",
+        config={"min_delay": 60, "max_delay": 60},
+    )
+    lurker.next_run_at = datetime.utcnow() - timedelta(seconds=5)
+    db_session.commit()
+    before_runs = AgentRun.query.count()
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("scheduled lurkers must not invoke run_once")
+
+    monkeypatch.setattr(wakes, "run_once", fail_if_called)
+    scheduler = WakeScheduler(app)
+    scheduler._poll_once()
+    scheduler.stop(wait=False)
+
+    db_session.refresh(lurker)
+    assert AgentRun.query.count() == before_runs
+    assert lurker.status == "idle"
+    assert lurker.last_run_at is not None
+    assert lurker.next_run_at >= datetime.utcnow() + timedelta(seconds=59)
 
 
 # ---------------------------------------------------------------------------

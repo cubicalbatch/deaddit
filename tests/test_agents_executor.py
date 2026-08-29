@@ -65,6 +65,16 @@ def test_unknown_tool_is_rejected_and_persisted(ctx, db_session):
     assert "unknown tool" in row.error
 
 
+
+def test_retired_vote_is_rejected_without_audit_row(ctx, db_session):
+    before = ToolCall.query.count()
+
+    result = execute("vote", {}, ctx)
+
+    assert result["ok"] is False
+    assert result["error"] == "unknown tool 'vote'"
+    assert ToolCall.query.count() == before
+
 # ---------------------------------------------------------------------------
 # Tier gate
 

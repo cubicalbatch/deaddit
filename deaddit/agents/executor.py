@@ -4,7 +4,7 @@ Pipeline per :func:`execute`: unknown-tool check -> tier gate -> argument
 validation -> rate caps -> duplicate suppression -> loop detection ->
 handler dispatch. Guardrail rejections are RESULTS (``ok: False`` dicts),
 never exceptions; exactly one :class:`~deaddit.models.ToolCall` row is
-persisted per call regardless of outcome.
+persisted per recognized call regardless of outcome.
 """
 
 from __future__ import annotations
@@ -45,7 +45,6 @@ RATE_CAPS: dict[str, tuple[int, timedelta]] = {
     "create_image_post": (2, timedelta(hours=1)),
     "create_website": (2, timedelta(hours=1)),
     "create_comment": (12, timedelta(hours=1)),
-    "vote": (40, timedelta(hours=1)),
 }
 
 _RATE_CAP_MESSAGES = {
@@ -53,7 +52,6 @@ _RATE_CAP_MESSAGES = {
     "create_image_post": "you've posted a lot recently; try again later",
     "create_website": "you've posted a lot recently; try again later",
     "create_comment": "you've commented a lot recently; try again later",
-    "vote": "you've voted a lot recently; slow down a little",
 }
 
 #: Budget buckets for per-persona cap overrides: the three post tools
@@ -66,7 +64,6 @@ RATE_CAP_BUCKETS: dict[str, str] = {
     "create_image_post": "post",
     "create_website": "post",
     "create_comment": "comment",
-    "vote": "vote",
 }
 
 
@@ -79,13 +76,14 @@ def normalize_persona_rate_caps(raw: object, *, strict: bool = False) -> dict[st
     ``strict=True`` so bad input is rejected with :class:`ValueError`
     instead of being stored. Valid shape is any subset of
     ``{"post": n, "comment": n, "vote": n}`` with whole numbers >= 0;
-    ``0`` deliberately disables that action for the persona.
+    ``0`` deliberately disables that action for the persona. The vote
+    override is consumed by the simulated-voting engine, not this executor.
     """
     if not isinstance(raw, dict):
         if strict:
             raise ValueError("rate_caps must be an object")
         return {}
-    buckets = set(RATE_CAP_BUCKETS.values())
+    buckets = {"post", "comment", "vote"}
     overrides: dict[str, int] = {}
     problems: list[str] = []
     for key, value in raw.items():
@@ -425,11 +423,17 @@ def execute(name: str, raw_arguments: dict | str, ctx: ToolContext) -> dict:
     try:
         tool = get_tool(name)
     except KeyError:
+        result = _reject(f"unknown tool '{name}'")
+        # The retired vote action is deliberately not audited as a tool call:
+        # it is no longer an executor surface, and its activity belongs to
+        # the simulator's Vote rows instead.
+        if name == "vote":
+            return result
         return _persist_and_return(
             ctx,
             name,
             {},
-            _reject(f"unknown tool '{name}'"),
+            result,
             started,
         )
 
