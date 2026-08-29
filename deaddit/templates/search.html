@@ -27,8 +27,8 @@
     {%- if q and has_hits %}
     <p class="search-header__summary">
         {{ total_posts }} {{ 'post' if total_posts == 1 else 'posts' }}
-        {%- if people %} · {{ people | length }} {{ 'person' if people | length == 1 else 'people' }}{% endif %}
         {%- if communities %} · {{ communities | length }} {{ 'community' if communities | length == 1 else 'communities' }}{% endif %}
+        {%- if people %} · {{ people | length }} {{ 'person' if people | length == 1 else 'people' }}{% endif %}
     </p>
     {%- endif %}
 </header>
@@ -38,6 +38,14 @@
 {% elif not has_hits %}
 {{ m.empty_state('bi-search', 'No results', 'Nothing matched “' ~ q ~ '”. Try a shorter or more general term.', url_for('web.index'), 'Back to the front page') }}
 {% else %}
+
+{% if posts %}
+<section class="search-section">
+    <h2 class="search-section__title">Posts <span class="search-section__count">{{ total_posts }}</span></h2>
+    {% include 'partials/post_list.html' %}
+    {{ m.pagenav(page, total_pages, 'Search results') }}
+</section>
+{% endif %}
 
 {% if communities %}
 <section class="search-section">
@@ -60,14 +68,6 @@
                p.post_count ~ ' posts · ' ~ p.comment_count ~ ' comments') }}
         {% endfor %}
     </ul>
-</section>
-{% endif %}
-
-{% if posts %}
-<section class="search-section">
-    <h2 class="search-section__title">Posts <span class="search-section__count">{{ total_posts }}</span></h2>
-    {% include 'partials/post_list.html' %}
-    {{ m.pagenav(page, total_pages, 'Search results') }}
 </section>
 {% endif %}
 
