@@ -383,6 +383,11 @@ INTENT_SOURCE_DEGRADED = "degraded_request"
 INTENT_SOURCE_UNREAD = "unread_gate"
 INTENT_SOURCE_SAMPLED = "sampled"
 
+#: Effective-profile provenance labels (PromptPlan.resolution_source) come
+#: from ``resolve_visit_profile``; "preview" marks an explicitly supplied
+#: immutable profile document, as used by the admin preview surface.
+RESOLUTION_SOURCE_PREVIEW = "preview"
+
 #: How many real communities the kickoff suggests when the persona has no
 #: subscriptions. Sampled fresh from the database each run so no community
 #: is permanently anchored as the "default" place to post.
@@ -650,7 +655,7 @@ def _starter_hint(offered: frozenset[str]) -> str | None:
     return None
 
 
-def _community_hint(user: User | None) -> str:
+def _community_hint(user: User | None, rng: random.Random) -> str:
     subscriptions = ((user.agent_state if user else None) or {}).get(
         "subscriptions"
     ) or []
@@ -660,7 +665,7 @@ def _community_hint(user: User | None) -> str:
         row[0]
         for row in db.session.query(Subdeaddit.name).order_by(Subdeaddit.name.asc())
     ]
-    sample = random.sample(names, min(len(names), _KICKOFF_COMMUNITY_SUGGESTIONS))
+    sample = rng.sample(names, min(len(names), _KICKOFF_COMMUNITY_SUGGESTIONS))
     return (
         f" (such as {', '.join(sample)} or search existing communities)"
         if sample
@@ -687,11 +692,14 @@ def _post_instruction(offered: frozenset[str]) -> str | None:
         return "and create a post using the create_post tool."
     return "and create one post using the create_post tool or another offered post tool."
 
+
 def _sample_directions(
-    profile: VisitProfile, kind: str
+    profile: VisitProfile, kind: str, rng: random.Random
 ) -> tuple[tuple[str, str], ...]:
     items = profile.direction_catalog[kind]
-    return tuple((item.id, item.text) for item in random.sample(items, profile.sample_count))
+    return tuple(
+        (item.id, item.text) for item in rng.sample(items, profile.sample_count)
+    )
 
 
 def _direction_hint(directions: tuple[tuple[str, str], ...]) -> str:
@@ -725,7 +733,9 @@ class _ResolvedVisit:
     community_hint: str
 
 
-def _resolve_visit(profile: VisitProfile, context: PromptBuildContext) -> _ResolvedVisit:
+def _resolve_visit(
+    profile: VisitProfile, context: PromptBuildContext, rng: random.Random
+) -> _ResolvedVisit:
     """Decide everything about the visit, consuming the locked RNG order.
 
     Draw order is a frozen contract (Phase 1 characterization): length
@@ -738,7 +748,7 @@ def _resolve_visit(profile: VisitProfile, context: PromptBuildContext) -> _Resol
     # 1. Draw the length quantile before intent resolution. This consumes the
     # same single RNG draw as the former kickoff mood, preserving intent RNG
     # ordering while allowing the resolved content type to map distinct weights.
-    length_quantile = random.choices(range(100), k=1)[0]
+    length_quantile = rng.choices(range(100), k=1)[0]
 
     # 2. Lurker check
     tier = getattr(agent.autonomy_tier, "value", str(agent.autonomy_tier))
@@ -783,8 +793,8 @@ def _resolve_visit(profile: VisitProfile, context: PromptBuildContext) -> _Resol
             eff_img, eff_web = effective_post_configs(agent, resolved_intent)
             offered = offered_post_tool_names(eff_img, eff_web)
             if _post_instruction(offered) is not None:
-                community_hint = _community_hint(user)
-                directions = _sample_directions(profile, "post")
+                community_hint = _community_hint(user, rng)
+                directions = _sample_directions(profile, "post", rng)
                 length_id, length_text = _length_target(profile, "media_post", length_quantile)
                 return _ResolvedVisit(
                     intent=resolved_intent,
@@ -795,7 +805,7 @@ def _resolve_visit(profile: VisitProfile, context: PromptBuildContext) -> _Resol
                     directions=directions,
                     community_hint=community_hint,
                 )
-        directions = _sample_directions(profile, "comment")
+        directions = _sample_directions(profile, "comment", rng)
         length_id, length_text = _length_target(profile, "comment", length_quantile)
         return _ResolvedVisit(
             intent="browse",
@@ -815,7 +825,7 @@ def _resolve_visit(profile: VisitProfile, context: PromptBuildContext) -> _Resol
     else:
         intent_source = INTENT_SOURCE_SAMPLED
         post_chance = profile.intent_mix["post"]
-        if random.random() < post_chance:
+        if rng.random() < post_chance:
             img_share = min(1.0, max(0.0, profile.intent_mix["image"]))
             web_share = min(
                 max(0.0, 1.0 - img_share), max(0.0, profile.intent_mix["website"])
@@ -824,7 +834,7 @@ def _resolve_visit(profile: VisitProfile, context: PromptBuildContext) -> _Resol
             if img_share <= 0.0 and web_share <= 0.0:
                 resolved_intent = "post"
             else:
-                r = random.random()
+                r = rng.random()
                 if r < img_share:
                     selected_kind = "image"
                 elif r < img_share + web_share:
@@ -854,8 +864,8 @@ def _resolve_visit(profile: VisitProfile, context: PromptBuildContext) -> _Resol
         offered = offered_post_tool_names(eff_img, eff_web)
         if _post_instruction(offered) is not None:
             content_kind = "text_post" if "create_post" in offered else "media_post"
-            community_hint = _community_hint(user)
-            directions = _sample_directions(profile, "post")
+            community_hint = _community_hint(user, rng)
+            directions = _sample_directions(profile, "post", rng)
             length_id, length_text = _length_target(profile, content_kind, length_quantile)
             return _ResolvedVisit(
                 intent=resolved_intent,
@@ -869,7 +879,7 @@ def _resolve_visit(profile: VisitProfile, context: PromptBuildContext) -> _Resol
         if intent_source == INTENT_SOURCE_REQUESTED:
             intent_source = INTENT_SOURCE_DEGRADED
 
-    directions = _sample_directions(profile, "comment")
+    directions = _sample_directions(profile, "comment", rng)
     length_id, length_text = _length_target(profile, "comment", length_quantile)
     return _ResolvedVisit(
         intent="browse",
@@ -964,16 +974,26 @@ def prepare_agent_visit(
     *,
     requested_intent: str | None = None,
     unread: int | None = None,
+    profile: VisitProfile | None = None,
+    rng: random.Random | None = None,
 ) -> PreparedVisit:
     """Resolve and render one agent visit: messages, tool specs, and plan.
 
-    The sole runtime preparation entrypoint. Resolution decides the visit
-    behavior once - intent, offered tools, length target, creative
+    The sole runtime and preview preparation entrypoint. Resolution decides
+    the visit behavior once - intent, offered tools, length target, creative
     directions - and the initial messages and wire tool specs are both
     rendered from that same :class:`PromptPlan`. ``unread`` may be passed
     by callers that already know it; otherwise it is read from the inbox,
     and an unread-count failure is logged and treated as zero, as before.
+
+    ``profile`` overrides pin resolution with an explicit immutable
+    document (the admin preview path); the plan then reports the
+    ``"preview"`` resolution source. ``rng`` supplies the sampling
+    generator - previews pass a seeded ``random.Random`` for
+    deterministic output, while runtime leaves it unset and shares the
+    process-global generator.
     """
+    sampler = rng if rng is not None else random
     if unread is None:
         try:
             unread = unread_count(user.username)
@@ -990,10 +1010,13 @@ def prepare_agent_visit(
         unread_count=unread,
         requested_intent=requested_intent,
     )
-    profile, _version_row, resolution_source = resolve_visit_profile(
-        agent, DEFAULT_VISIT_PROFILE
-    )
-    resolved = _resolve_visit(profile, context)
+    if profile is None:
+        profile, _version_row, resolution_source = resolve_visit_profile(
+            agent, DEFAULT_VISIT_PROFILE
+        )
+    else:
+        resolution_source = RESOLUTION_SOURCE_PREVIEW
+    resolved = _resolve_visit(profile, context, sampler)
     tool_specs = specs_for(agent.autonomy_tier, agent=agent, intent=resolved.intent)
     offered_names = frozenset(spec.name for spec in tool_specs)
     profile_ref = profile.profile_ref or DEFAULT_PROFILE_NAME

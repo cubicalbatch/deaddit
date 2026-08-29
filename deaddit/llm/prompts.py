@@ -258,6 +258,11 @@ def parse_visit_profile(body: str | dict) -> VisitProfile:
         kind: _catalog_items(raw_lengths[kind], f"length_catalog.{kind}", direction=False)
         for kind in sorted(_PROFILE_CONTENT_KINDS)
     }
+    for kind, items in length_catalog.items():
+        # Length weights are percentages consumed against a 0-99 quantile
+        # draw; any other total would leave high quantiles unresolved.
+        if abs(math.fsum(item.weight for item in items) - 100.0) > 1e-6:
+            raise _profile_error(f"length_catalog.{kind} weights must total 100")
     raw_directions = document["direction_catalog"]
     if not isinstance(raw_directions, dict) or set(raw_directions) != _PROFILE_DIRECTION_KINDS:
         raise _profile_error("direction_catalog has incompatible content kinds")

@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import os
+import random
 import re
 import threading
 from datetime import datetime, timedelta
@@ -5217,8 +5218,10 @@ def prompts_detail_api(name):
 @admin_required
 def prompts_create_version_api(name):
     """Create version n+1; existing versions are immutable and queryable."""
-    from deaddit.llm.prompts import PromptError, create_version
+    from deaddit.llm.prompts import PromptError, create_version, get_template
 
+    if get_template(name) is None:
+        return jsonify({"error": f"Unknown prompt template {name!r}"}), 404
     data = request.get_json(silent=True) or {}
     body = data.get("body")
     if not body or not isinstance(body, str):
@@ -5226,9 +5229,9 @@ def prompts_create_version_api(name):
     try:
         row = create_version(name, body, created_by=data.get("created_by"))
     except PromptError as exc:
-        return jsonify({"error": str(exc)}), 404
+        # The template exists; failure here is body validation.
+        return jsonify({"error": str(exc)}), 400
     return jsonify(_version_dict(row)), 201
-
 
 @admin_bp.route("/api/pins")
 @production_disabled
@@ -5316,4 +5319,269 @@ def prompt_renders_api():
             }
             for r in rows
         ]
+    )
+
+
+# --- Prompt-builder Phase 5: visit-profile validation, preview, rollout ---
+#
+# ``agent.visit_profile`` is the only template with preview semantics: its
+# versions are validated immutable documents, and the preview endpoint runs
+# the exact runtime preparation path (``prepare_agent_visit``) with a seeded
+# RNG and no persistence, so a reviewer can inspect behavior before pinning.
+
+_PROFILE_TEMPLATE = "agent.visit_profile"
+_PREVIEW_INTENTS = frozenset({"browse", "post", "image", "website"})
+
+
+def _profile_leaf_diff(path, effective, preview):
+    """One leaf-level change entry, or None when the values are equal."""
+    if effective == preview:
+        return None
+    return {"path": path, "change": "modified", "effective": effective, "preview": preview}
+
+
+def _profile_diff(effective, preview, path=""):
+    """Structural diff of two canonical profile documents.
+
+    Lists of ``{"id": ...}`` items diff by stable id, so reordering or
+    editing one catalog entry yields one keyed entry instead of an
+    index-shifted cascade. Other leaves compare wholesale.
+    """
+    if isinstance(effective, dict) and isinstance(preview, dict):
+        entries = []
+        for key in sorted(set(effective) | set(preview)):
+            child = f"{path}.{key}" if path else str(key)
+            if key not in effective:
+                entries.append(
+                    {"path": child, "change": "added", "preview": preview[key]}
+                )
+            elif key not in preview:
+                entries.append(
+                    {"path": child, "change": "removed", "effective": effective[key]}
+                )
+            else:
+                entries.extend(
+                    _profile_diff(effective[key], preview[key], child)
+                )
+        return entries
+    if (
+        isinstance(effective, list)
+        and isinstance(preview, list)
+        and all(isinstance(i, dict) and "id" in i for i in effective + preview)
+    ):
+        effective_by_id = {item["id"]: item for item in effective}
+        preview_by_id = {item["id"]: item for item in preview}
+        entries = []
+        for item_id in sorted(set(effective_by_id) | set(preview_by_id)):
+            child = f"{path}[{item_id}]"
+            if item_id not in effective_by_id:
+                entries.append(
+                    {"path": child, "change": "added", "preview": preview_by_id[item_id]}
+                )
+            elif item_id not in preview_by_id:
+                entries.append(
+                    {
+                        "path": child,
+                        "change": "removed",
+                        "effective": effective_by_id[item_id],
+                    }
+                )
+            else:
+                entries.extend(
+                    _profile_diff(
+                        effective_by_id[item_id], preview_by_id[item_id], child
+                    )
+                )
+        return entries
+    entry = _profile_leaf_diff(path or "$", effective, preview)
+    return [entry] if entry else []
+
+
+def _preview_warnings(plan, requested_intent):
+    """Derive the same conditions runtime logs as reviewer-facing warnings."""
+    warnings = []
+    if requested_intent in ("image", "website") and plan.intent != requested_intent:
+        warnings.append(
+            f"Requested intent '{requested_intent}' is ineligible for this "
+            f"agent; at runtime it degrades to '{plan.intent}'."
+        )
+    if (
+        requested_intent not in (None, "browse")
+        and plan.intent == "browse"
+        and plan.intent_source in ("requested", "degraded_request")
+    ):
+        warnings.append(
+            "No post tool can be offered for this agent's capability "
+            "configuration; the visit falls back to browsing."
+        )
+    return warnings
+
+
+@admin_bp.route("/prompts")
+@production_disabled
+@admin_required
+def prompts_page():
+    """Prompt profile administration: versions, pins/rollout, and preview."""
+    return render_template("admin/prompts.html")
+
+
+@admin_bp.route("/api/prompts/<name>/validate", methods=["POST"])
+@production_disabled
+@admin_required
+def prompts_validate_api(name):
+    """Dry-run visit-profile validation without storing anything."""
+    from deaddit.llm.prompts import PromptError, get_template, parse_visit_profile
+    from deaddit.llm.prompts import serialize_visit_profile
+
+    if get_template(name) is None:
+        return jsonify({"error": f"Unknown prompt template {name!r}"}), 404
+    if name != _PROFILE_TEMPLATE:
+        return jsonify(
+            {"error": f"Validation supports only {_PROFILE_TEMPLATE!r}"}
+        ), 400
+    data = request.get_json(silent=True) or {}
+    body = data.get("body")
+    if not body or not isinstance(body, str):
+        return jsonify({"error": "Field 'body' (non-empty string) is required"}), 400
+    try:
+        canonical = serialize_visit_profile(parse_visit_profile(body))
+    except PromptError as exc:
+        return jsonify({"valid": False, "error": str(exc)})
+    return jsonify({"valid": True, "error": None, "normalized_body": canonical})
+
+
+@admin_bp.route("/api/prompts/<name>/preview", methods=["POST"])
+@production_disabled
+@admin_required
+def prompts_preview_api(name):
+    """Deterministic, side-effect-free visit preview through the runtime path.
+
+    Body: ``{agent_id, seed, requested_intent?, unread_count?, version?}``.
+    ``version`` selects a stored immutable ``agent.visit_profile`` version
+    to preview; without it the agent's effective profile (pin precedence
+    agent > cohort > global > source default) is previewed. The diff is
+    always computed against that effective profile.
+    """
+    from dataclasses import replace
+
+    from deaddit.agents.prompts import (
+        DEFAULT_VISIT_PROFILE,
+        prepare_agent_visit,
+    )
+    from deaddit.llm.prompts import (
+        PromptError,
+        get_template,
+        get_version,
+        parse_visit_profile,
+        resolve_visit_profile,
+        serialize_visit_profile,
+    )
+
+    if get_template(name) is None:
+        return jsonify({"error": f"Unknown prompt template {name!r}"}), 404
+    if name != _PROFILE_TEMPLATE:
+        return jsonify({"error": f"Preview supports only {_PROFILE_TEMPLATE!r}"}), 400
+    data = request.get_json(silent=True) or {}
+    agent_id = data.get("agent_id")
+    seed = data.get("seed")
+    if isinstance(agent_id, bool) or not isinstance(agent_id, int):
+        return jsonify({"error": "Field 'agent_id' (integer) is required"}), 400
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        return jsonify({"error": "Field 'seed' (integer) is required"}), 400
+    requested_intent = data.get("requested_intent")
+    if requested_intent is not None and requested_intent not in _PREVIEW_INTENTS:
+        return jsonify(
+            {
+                "error": "Field 'requested_intent' must be one of "
+                "browse, post, image, website, or null"
+            }
+        ), 400
+    unread_count = data.get("unread_count", 0)
+    if isinstance(unread_count, bool) or not isinstance(unread_count, int) or unread_count < 0:
+        return jsonify({"error": "Field 'unread_count' must be an integer >= 0"}), 400
+    version = data.get("version")
+    if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
+        return jsonify({"error": "Field 'version' must be an integer or null"}), 400
+
+    agent = db.session.get(Agent, agent_id)
+    if agent is None:
+        return jsonify({"error": f"No agent with id {agent_id}"}), 404
+    user = db.session.get(User, agent.user_username)
+    if user is None:
+        return jsonify(
+            {"error": f"Agent {agent_id} has no persona user {agent.user_username!r}"}
+        ), 404
+
+    effective_profile, _effective_row, effective_source = resolve_visit_profile(
+        agent, DEFAULT_VISIT_PROFILE
+    )
+    if version is None:
+        profile = None  # prepare_agent_visit re-resolves the effective pins
+    else:
+        version_row = get_version(_PROFILE_TEMPLATE, version)
+        if version_row is None:
+            return jsonify(
+                {"error": f"Unknown version {version} of {_PROFILE_TEMPLATE!r}"}
+            ), 404
+        try:
+            profile = replace(
+                parse_visit_profile(version_row.body),
+                profile_version=version_row.version,
+                profile_ref=f"{_PROFILE_TEMPLATE}:v{version_row.version}",
+            )
+        except PromptError as exc:
+            return jsonify(
+                {"error": f"Stored version {version} is invalid: {exc}"}
+            ), 409
+
+    visit = prepare_agent_visit(
+        agent,
+        user,
+        requested_intent=requested_intent,
+        unread=unread_count,
+        profile=profile,
+        rng=random.Random(seed),
+    )
+    plan = visit.plan
+    effective_doc = json.loads(serialize_visit_profile(effective_profile))
+    preview_doc = json.loads(serialize_visit_profile(plan.profile))
+    cohort = (agent.config or {}).get("cohort")
+    return jsonify(
+        {
+            "agent": {
+                "id": agent.id,
+                "username": agent.user_username,
+                "label": _agent_display_label(agent),
+                "tier": getattr(agent.autonomy_tier, "value", agent.autonomy_tier),
+                "cohort": cohort,
+            },
+            "requested": {
+                "intent": requested_intent,
+                "unread_count": unread_count,
+                "seed": seed,
+                "version": version,
+            },
+            "plan": {
+                "intent": plan.intent,
+                "intent_source": plan.intent_source,
+                "content_kind": plan.content_kind,
+                "offered_tool_names": sorted(plan.offered_tool_names),
+                "length_target_id": plan.length_target_id,
+                "direction_ids": list(plan.direction_ids),
+                "profile_name": plan.profile_name,
+                "profile_version": plan.profile_version,
+                "profile_ref": plan.profile_ref,
+                "resolution_source": plan.resolution_source,
+            },
+            "messages": [dict(message) for message in visit.messages],
+            "tools": [spec.to_openai_tool() for spec in visit.tool_specs],
+            "warnings": _preview_warnings(plan, requested_intent),
+            "effective": {
+                "profile_name": effective_profile.profile_ref.split(":v", 1)[0],
+                "profile_version": effective_profile.profile_version,
+                "profile_ref": effective_profile.profile_ref,
+                "resolution_source": effective_source,
+            },
+            "diff": _profile_diff(effective_doc, preview_doc),
+        }
     )
