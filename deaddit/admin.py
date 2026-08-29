@@ -26,6 +26,7 @@ from sqlalchemy import desc, func
 from sqlalchemy.exc import SQLAlchemyError
 
 from deaddit import db
+from deaddit.agents.executor import normalize_persona_rate_caps
 from deaddit.config import Config
 from deaddit.images import client as image_client
 from deaddit.images import service as media_service
@@ -717,6 +718,9 @@ def _user_payload(user):
         "personality_traits": user.personality_traits or "",
         "writing_style": user.writing_style or "",
         "is_troll": bool(user.is_troll),
+        "rate_caps": normalize_persona_rate_caps(
+            (user.agent_state or {}).get("rate_caps")
+        ),
         "posts_count": Post.query.filter_by(user=user.username).count(),
         "comments_count": Comment.query.filter_by(user=user.username).count(),
     }
@@ -761,6 +765,15 @@ def api_update_user(username):
     user = User.query.get_or_404(username)
     data = request.json
 
+    # Validate the per-persona rate-cap override before touching the row:
+    # malformed input is a 400, not a silent drop or a 500.
+    rate_caps = None
+    if "rate_caps" in data:
+        try:
+            rate_caps = normalize_persona_rate_caps(data["rate_caps"], strict=True)
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+
     try:
         user.age = data.get("age", user.age)
         user.gender = data.get("gender", user.gender)
@@ -773,6 +786,16 @@ def api_update_user(username):
         )
         user.writing_style = data.get("writing_style", user.writing_style)
         user.is_troll = bool(data.get("is_troll", user.is_troll))
+        if rate_caps is not None:
+            # agent_state is persona-owned (subscriptions live here too):
+            # replace only the rate_caps namespace, reassign the column so
+            # the JSON mutation is tracked without flag_modified.
+            state = dict(user.agent_state or {})
+            if rate_caps:
+                state["rate_caps"] = rate_caps
+            else:
+                state.pop("rate_caps", None)
+            user.agent_state = state
 
         db.session.commit()
         return jsonify({"success": True})

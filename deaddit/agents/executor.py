@@ -31,9 +31,9 @@ from deaddit.agents.registry import (
 )
 from deaddit.extensions import db
 from deaddit.llm import SchemaValidationError, ToolSpec, validate_tool_args
-from deaddit.models import AgentRun, AgentTurn, Comment, Post, ToolCall
+from deaddit.models import AgentRun, AgentTurn, Comment, Post, ToolCall, User
 
-__all__ = ["ExecutorError", "execute"]
+__all__ = ["ExecutorError", "execute", "normalize_persona_rate_caps"]
 
 
 class ExecutorError(Exception):
@@ -55,6 +55,53 @@ _RATE_CAP_MESSAGES = {
     "create_comment": "you've commented a lot recently; try again later",
     "vote": "you've voted a lot recently; slow down a little",
 }
+
+#: Budget buckets for per-persona cap overrides: the three post tools
+#: publish from one shared bucket (plan 4B), so an override keys the
+#: bucket, never an individual tool - otherwise create_post/
+#: create_image_post/create_website would each grow its own ceiling
+#: against the same shared count.
+RATE_CAP_BUCKETS: dict[str, str] = {
+    "create_post": "post",
+    "create_image_post": "post",
+    "create_website": "post",
+    "create_comment": "comment",
+    "vote": "vote",
+}
+
+
+def normalize_persona_rate_caps(raw: object, *, strict: bool = False) -> dict[str, int]:
+    """Normalize a persona's per-hour rate-cap overrides.
+
+    Single source of truth for both readers: the executor calls this
+    leniently - anything malformed sitting in ``User.agent_state`` is
+    dropped, never fatal - while the admin user API calls it with
+    ``strict=True`` so bad input is rejected with :class:`ValueError`
+    instead of being stored. Valid shape is any subset of
+    ``{"post": n, "comment": n, "vote": n}`` with whole numbers >= 0;
+    ``0`` deliberately disables that action for the persona.
+    """
+    if not isinstance(raw, dict):
+        if strict:
+            raise ValueError("rate_caps must be an object")
+        return {}
+    buckets = set(RATE_CAP_BUCKETS.values())
+    overrides: dict[str, int] = {}
+    problems: list[str] = []
+    for key, value in raw.items():
+        if key not in buckets:
+            problems.append(f"unknown cap {key!r}")
+            continue
+        if value is None:
+            continue  # explicit "no override" (the admin UI sends null for blank)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            problems.append(f"cap {key!r} must be a whole number >= 0")
+            continue
+        overrides[key] = value
+    if strict and problems:
+        raise ValueError("; ".join(problems))
+    return overrides
+
 
 _MAX_RESULT_CHARS = 4096
 _LOOP_WINDOW = 8
@@ -170,22 +217,38 @@ def _parse_raw_arguments(raw_arguments: dict | str) -> dict:
         except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
-    return {}
+
+
+def _persona_rate_cap(name: str, ctx: ToolContext) -> tuple[int, timedelta]:
+    """Default cap for *name*, raised/lowered by the persona's override."""
+    cap, window = RATE_CAPS[name]
+    bucket = RATE_CAP_BUCKETS.get(name)
+    if bucket is None:
+        return cap, window
+    persona = db.session.get(User, ctx.user_username)
+    state = persona.agent_state if persona is not None else None
+    raw = state.get("rate_caps") if isinstance(state, dict) else None
+    override = normalize_persona_rate_caps(raw).get(bucket)
+    if override is not None:
+        cap = override
+    return cap, window
 
 
 def _check_rate_cap(name: str, ctx: ToolContext) -> str | None:
-    cap_entry = RATE_CAPS.get(name)
-    if cap_entry is None:
+    if name not in RATE_CAPS:
         return None
-    cap, window = cap_entry
+    cap, window = _persona_rate_cap(name, ctx)
     window_start = datetime.utcnow() - window
-    # create_post and create_image_post share one hourly post bucket.
+    # Caps model how often one simulated human would act, so they key on
+    # the run's persona - not on the Agent row, whose single bucket every
+    # persona of a random-persona agent would otherwise collide on. The
+    # three post tools still share one bucket within the persona.
     names = POST_TOOL_NAMES if name in POST_TOOL_NAMES else (name,)
     recent_count = (
         db.session.query(ToolCall.id)
         .join(AgentRun, AgentRun.id == ToolCall.run_id)
         .filter(
-            AgentRun.agent_id == ctx.agent.id,
+            AgentRun.persona_username == ctx.user_username,
             ToolCall.name.in_(names),
             ToolCall.ok.is_(True),  # rejected attempts don't consume the quota
             ToolCall.created_at >= window_start,

@@ -94,30 +94,46 @@ def test_parse_tier_rejects_unknown_values():
 def test_package_import_is_side_effect_free(monkeypatch):
     # Purge every previously loaded deaddit.agents* module so this test sees
     # a genuinely fresh package import, wherever it runs in the session.
-    for name in [
-        name
-        for name in list(sys.modules)
+    saved = {
+        name: module
+        for name, module in sys.modules.items()
         if name == "deaddit.agents" or name.startswith("deaddit.agents.")
-    ]:
+    }
+    for name in saved:
         monkeypatch.delitem(sys.modules, name)
 
-    importlib.import_module("deaddit.agents")
+    try:
+        importlib.import_module("deaddit.agents")
 
-    # Neither the registry nor anything that schedules or registers tools is
-    # loaded by the bare package import.
-    assert "deaddit.agents.registry" not in sys.modules
-    assert "deaddit.agents.loop" not in sys.modules
-    assert "deaddit.agents.tools_read" not in sys.modules
-    assert "deaddit.agents.tools_write" not in sys.modules
+        # Neither the registry nor anything that schedules or registers tools
+        # is loaded by the bare package import.
+        assert "deaddit.agents.registry" not in sys.modules
+        assert "deaddit.agents.loop" not in sys.modules
+        assert "deaddit.agents.tools_read" not in sys.modules
+        assert "deaddit.agents.tools_write" not in sys.modules
 
-    # Touching the lazy attribute loads only the registry module, still with
-    # an empty tool registry...
-    registry = importlib.import_module("deaddit.agents.registry")
-    assert registry.TOOL_REGISTRY == {}
+        # Touching the lazy attribute loads only the registry module, still
+        # with an empty tool registry...
+        registry = importlib.import_module("deaddit.agents.registry")
+        assert registry.TOOL_REGISTRY == {}
 
-    # ...and only an actual lookup self-registers the builtins.
-    registry.get("finish")
-    assert set(registry.TOOL_REGISTRY) == ALL_TOOL_NAMES
+        # ...and only an actual lookup self-registers the builtins.
+        registry.get("finish")
+        assert set(registry.TOOL_REGISTRY) == ALL_TOOL_NAMES
+    finally:
+        # The fresh deaddit.agents* copies this test imported are throwaway:
+        # leaving them in sys.modules would pin every later lazy re-import
+        # (tools_read/tools_write especially) to the discarded registry copy,
+        # leaving the restored registry's TOOL_REGISTRY permanently empty in
+        # this xdist worker. Purge them so monkeypatch's restore of the
+        # originals is the final word and later lookups re-register.
+        for name in [
+            name
+            for name in list(sys.modules)
+            if name == "deaddit.agents" or name.startswith("deaddit.agents.")
+        ]:
+            if name not in saved:
+                del sys.modules[name]
 
 
 # ---------------------------------------------------------------------------

@@ -285,10 +285,12 @@ class ContentManager {
             document.getElementById('editUserEducation').value = user.education || '';
             document.getElementById('editUserBio').value = user.bio || '';
             document.getElementById('editUserInterests').value = user.interests || '';
-            document.getElementById('editUserPersonality').value = user.personality_traits || '';
             document.getElementById('editUserWritingStyle').value = user.writing_style || '';
+            const caps = user.rate_caps || {};
+            document.getElementById('editUserRatePost').value = caps.post ?? '';
+            document.getElementById('editUserRateComment').value = caps.comment ?? '';
+            document.getElementById('editUserRateVote').value = caps.vote ?? '';
             document.getElementById('editUserTroll').checked = Boolean(user.is_troll);
-
             // Show modal
             new bootstrap.Modal(document.getElementById('editUserModal')).show();
         } catch (error) {
@@ -308,7 +310,12 @@ class ContentManager {
             interests: document.getElementById('editUserInterests').value,
             personality_traits: document.getElementById('editUserPersonality').value,
             writing_style: document.getElementById('editUserWritingStyle').value,
-            is_troll: document.getElementById('editUserTroll').checked
+            is_troll: document.getElementById('editUserTroll').checked,
+            rate_caps: {
+                post: this.capInput('editUserRatePost'),
+                comment: this.capInput('editUserRateComment'),
+                vote: this.capInput('editUserRateVote')
+            }
         };
 
         try {
@@ -330,6 +337,13 @@ class ContentManager {
             console.error('Error saving user:', error);
             this.showAlert('Error saving user', 'danger');
         }
+    }
+
+    capInput(id) {
+        const raw = document.getElementById(id).value.trim();
+        if (raw === '') return null;
+        const parsed = parseInt(raw, 10);
+        return (Number.isNaN(parsed) || parsed < 0) ? null : parsed;
     }
 
     deleteUser(username) {

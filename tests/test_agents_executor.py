@@ -8,7 +8,7 @@ import pytest
 
 from deaddit.agents.executor import execute
 from deaddit.agents.registry import ToolContext
-from deaddit.models import Agent, AgentRun, Comment, Post, ToolCall
+from deaddit.models import Agent, AgentRun, Comment, Post, ToolCall, User
 
 
 @pytest.fixture()
@@ -184,6 +184,112 @@ def test_per_run_post_limit_rejects_second_post_in_same_run(ctx, db_session):
     assert second["ok"] is False
     assert "already created a post" in second["error"]
     assert Post.query.count() == 4  # 3 seeded + 1 created
+
+
+# ---------------------------------------------------------------------------
+# Per-persona rate caps
+
+
+def _persona_ctx(db_session, agent, username):
+    """A fresh run for *username* under an existing agent row."""
+    run = AgentRun(
+        agent_id=agent.id,
+        persona_username=username,
+        trigger="manual",
+        status="running",
+    )
+    db_session.add(run)
+    db_session.commit()
+    return ToolContext(agent=agent, run=run, user_username=username)
+
+
+def test_rate_caps_are_per_persona_not_per_agent(ctx, db_session):
+    """One persona exhausting its cap leaves the agent's other personas full."""
+    payloads = [
+        {"subdeaddit": "testsub", "title": f"Post {i}", "content": f"Unique body {i}"}
+        for i in range(4)
+    ]
+
+    assert execute("create_post", payloads[0], ctx)["ok"] is True
+    alice_second = execute("create_post", payloads[1], _new_run_ctx(ctx, db_session))
+    assert alice_second["ok"] is True
+    alice_third = execute("create_post", payloads[2], _new_run_ctx(ctx, db_session))
+    assert alice_third["ok"] is False  # alice's own bucket is spent
+    assert "recently" in alice_third["error"]
+
+    # bob - a different persona of the SAME agent row - keeps a full bucket
+    bob_ctx = _persona_ctx(db_session, ctx.agent, "bob")
+    bob = execute("create_post", payloads[3], bob_ctx)
+    assert bob["ok"] is True
+    assert Post.query.count() == 6  # 3 seeded + 2 alice + 1 bob
+
+
+def test_persona_rate_cap_override_raises_post_cap(ctx, db_session):
+    user = db_session.get(User, "alice")
+    user.agent_state = {"rate_caps": {"post": 3}}
+    db_session.commit()
+
+    outcomes = []
+    run_ctx = ctx
+    for i in range(4):
+        outcomes.append(
+            execute(
+                "create_post",
+                {
+                    "subdeaddit": "testsub",
+                    "title": f"Post {i}",
+                    "content": f"Unique body {i}",
+                },
+                run_ctx,
+            )["ok"]
+        )
+        run_ctx = _new_run_ctx(ctx, db_session)
+
+    assert outcomes == [True, True, True, False]
+
+
+def test_persona_rate_cap_zero_blocks_posting(ctx, db_session):
+    user = db_session.get(User, "alice")
+    user.agent_state = {"rate_caps": {"post": 0}}
+    db_session.commit()
+
+    result = execute(
+        "create_post",
+        {"subdeaddit": "testsub", "title": "Blocked", "content": "Never lands"},
+        ctx,
+    )
+
+    assert result["ok"] is False
+    assert "recently" in result["error"]
+    assert Post.query.count() == 3
+
+
+def test_persona_rate_cap_garbage_is_ignored(ctx, db_session):
+    user = db_session.get(User, "alice")
+    user.agent_state = {
+        "rate_caps": {"post": "many", "comment": -1, "bogus": 9, "vote": True}
+    }
+    db_session.commit()
+
+    first = execute(
+        "create_post",
+        {"subdeaddit": "testsub", "title": "Post 1", "content": "Unique body 1"},
+        ctx,
+    )
+    second = execute(
+        "create_post",
+        {"subdeaddit": "testsub", "title": "Post 2", "content": "Unique body 2"},
+        _new_run_ctx(ctx, db_session),
+    )
+    third = execute(
+        "create_post",
+        {"subdeaddit": "testsub", "title": "Post 3", "content": "Unique body 3"},
+        _new_run_ctx(ctx, db_session),
+    )
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert third["ok"] is False  # default cap of 2 still applies
 
 
 # ---------------------------------------------------------------------------
