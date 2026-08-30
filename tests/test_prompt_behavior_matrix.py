@@ -677,8 +677,8 @@ def test_automatic_sampled_intent_uses_current_categorical_slices(
 @pytest.mark.parametrize(
     "intent,quantile,needle",
     (
-        ("browse", 0, "no more than about 20 words"),
-        ("browse", 99, "180-400 words"),
+        ("browse", 0, "no more than 20 words"),
+        ("browse", 99, "120-250 words"),
         ("post", 0, "one sentence or a very short question"),
         ("post", 99, "four to six short paragraphs"),
         ("image", 0, "omit the optional post body"),

@@ -415,7 +415,7 @@ logger = logging.getLogger(__name__)
 #: Source-controlled default visit profile. Phase 4 replaces this single
 #: constant with pinned per-agent profile documents.
 DEFAULT_PROFILE_NAME = "agent_visit_default"
-DEFAULT_PROFILE_VERSION = 1
+DEFAULT_PROFILE_VERSION = 2
 
 #: How the resolved intent was decided (PromptPlan.intent_source).
 INTENT_SOURCE_LURKER = "lurker"
@@ -638,27 +638,27 @@ _LENGTH_TARGETS: dict[str, tuple[_LengthTarget, ...]] = {
     "comment": (
         _LengthTarget(
             "comment.snippet",
-            "Length target for this comment: a few words or one sentence, no more "
-            "than about 20 words. Make the point without setup.",
-            30,
+            "Length target for this comment: no more than one sentence and no more "
+            "than 20 words. State the point directly; do not add setup, a conclusion, or padding.",
+            35,
         ),
         _LengthTarget(
             "comment.short",
-            "Length target for this comment: one or two sentences, about 20-80 "
-            "words. Stop once the point is clear.",
+            "Length target for this comment: exactly 2 or 3 sentences and 20-60 words. "
+            "Make every sentence useful; do not add setup, a conclusion, or padding.",
             50,
         ),
         _LengthTarget(
             "comment.medium",
-            "Length target for this comment: one compact paragraph, about 80-180 "
-            "words. Do not pad it with a summary or conclusion.",
-            15,
+            "Length target for this comment: one compact paragraph of 60-120 words. "
+            "Use only relevant detail; do not add setup, a conclusion, or padding.",
+            12,
         ),
         _LengthTarget(
             "comment.long",
-            "Length target for this comment: two to four short paragraphs, about "
-            "180-400 words. Use this room only for a genuinely substantial reply.",
-            5,
+            "Length target for this comment: 2 or 3 short paragraphs of 120-250 words. "
+            "Make the extra detail earn its space; do not add setup, a conclusion, or padding.",
+            3,
         ),
     ),
     "media_post": (

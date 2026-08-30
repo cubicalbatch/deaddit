@@ -19,15 +19,18 @@ import pytest
 import deaddit.agents.loop as loop_module
 from deaddit.agents.loop import run_once
 from deaddit.agents.prompts import (
+    _COMMENT_DIRECTIONS,
     _LENGTH_TARGETS,
     _POST_DIRECTIONS,
     DEFAULT_PROFILE_NAME,
     DEFAULT_PROFILE_VERSION,
+    DEFAULT_VISIT_PROFILE,
     INTENT_SOURCE_DEGRADED,
     INTENT_SOURCE_LURKER,
     INTENT_SOURCE_REQUESTED,
     INTENT_SOURCE_SAMPLED,
     INTENT_SOURCE_UNREAD,
+    _length_target,
     prepare_agent_visit,
 )
 from deaddit.agents.registry import (
@@ -235,6 +238,46 @@ def test_plan_records_sampled_length_and_direction_ids(app, db_session):
         visit = prepare_agent_visit(agent, user, requested_intent="browse", unread=0)
     assert visit.plan.length_target_id == "comment.long"
     assert _LENGTH_TARGETS["comment"][-1].text in _kickoff(visit)
+
+
+def test_comment_length_catalog_has_reddit_short_distribution():
+    targets = _LENGTH_TARGETS["comment"]
+    assert sum(target.weight for target in targets) == 100
+    assert [(target.id, target.weight) for target in targets] == [
+        ("comment.snippet", 35),
+        ("comment.short", 50),
+        ("comment.medium", 12),
+        ("comment.long", 3),
+    ]
+
+    for quantile in range(85):
+        target_id, _text = _length_target(DEFAULT_VISIT_PROFILE, "comment", quantile)
+        assert target_id in {"comment.snippet", "comment.short"}
+
+
+def test_comment_length_target_is_rendered_in_browse_kickoff(app, db_session):
+    agent, user = _make_agent(db_session, "comment_target")
+
+    with patch("deaddit.agents.prompts.random.choices", return_value=[35]):
+        visit = prepare_agent_visit(agent, user, requested_intent="browse", unread=0)
+
+    target = next(
+        target for target in _LENGTH_TARGETS["comment"] if target.id == "comment.short"
+    )
+    assert (
+        "Length target for this comment: exactly 2 or 3 sentences and 20-60 words."
+        in _kickoff(visit)
+    )
+    assert target.text in _kickoff(visit)
+
+
+def test_comment_direction_catalog_keeps_ten_distinct_directions():
+    ids = [direction.id for direction in _COMMENT_DIRECTIONS]
+    assert len(ids) == 10
+    assert len(set(ids)) == 10
+    assert [
+        item.id for item in DEFAULT_VISIT_PROFILE.direction_catalog["comment"]
+    ] == ids
 
 
 def test_sampled_backstage_visit_has_reserved_text_destination(app, db_session):

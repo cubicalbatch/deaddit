@@ -211,3 +211,265 @@ def test_profile_data_migrations_upgrade_legacy_documents(tmp_path):
     assert parsed.intent_mix["backstage"] == 0.10
     assert parsed.layouts["backstage"] == "{directions}"
     assert len(parsed.direction_catalog["backstage"]) >= parsed.sample_count
+
+
+_ROLLOUT_PREDECESSOR = "e7f1a3b5c9d2"
+_ROLLOUT_REVISION = "f4c8e2a6b0d1"
+
+
+def test_comment_profile_rollout_clones_active_sources_and_restores_on_downgrade(
+    tmp_path,
+):
+    """Only active legacy sources are cloned; their immutable history survives."""
+    db_path = tmp_path / "comment-rollout.db"
+    app = create_app(
+        {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_path}", "TESTING": True}
+    )
+    runner = app.test_cli_runner()
+    assert runner.invoke(args=["db", "upgrade", _ROLLOUT_PREDECESSOR]).exit_code == 0
+
+    conn = sqlite3.connect(db_path)
+    try:
+        template_id = conn.execute(
+            "SELECT id FROM prompt_template WHERE name = 'agent.visit_profile'"
+        ).fetchone()[0]
+        source_version = 1
+        source_body = conn.execute(
+            "SELECT body FROM prompt_template_version "
+            "WHERE template_id = ? AND version = ?",
+            (template_id, source_version),
+        ).fetchone()[0]
+        custom = json.loads(source_body)
+        custom["length_catalog"]["comment"] = [
+            {
+                "id": "comment.short",
+                "text": "Operator-selected concise response.",
+                "weight": 100,
+            }
+        ]
+        custom["direction_catalog"]["comment"] = [
+            {
+                "id": "comment.honest_reaction",
+                "text": "Operator-selected reaction.",
+                "weight": 2,
+            },
+            {
+                "id": "comment.relevant_fact",
+                "text": "Operator-selected fact.",
+                "weight": 3,
+            },
+            {
+                "id": "comment.follow_up_question",
+                "text": "Operator-selected question.",
+                "weight": 5,
+            },
+        ]
+        custom_version = conn.execute(
+            "SELECT COALESCE(MAX(version), 0) + 1 "
+            "FROM prompt_template_version WHERE template_id = ?",
+            (template_id,),
+        ).fetchone()[0]
+        custom_body = json.dumps(custom, sort_keys=True, separators=(",", ":"))
+        conn.execute(
+            "INSERT INTO prompt_template_version "
+            "(template_id, version, body, created_by, created_at) "
+            "VALUES (?, ?, ?, 'operator', CURRENT_TIMESTAMP)",
+            (template_id, custom_version, custom_body),
+        )
+        unreferenced_version = custom_version + 1
+        conn.execute(
+            "INSERT INTO prompt_template_version "
+            "(template_id, version, body, created_by, created_at) "
+            "VALUES (?, ?, ?, 'operator', CURRENT_TIMESTAMP)",
+            (template_id, unreferenced_version, source_body),
+        )
+        conn.executemany(
+            "INSERT INTO prompt_pin "
+            "(target_kind, target_key, template_id, version_number, updated_at) "
+            "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            [
+                ("agent", "101", template_id, source_version),
+                ("cohort", "quiet", template_id, source_version),
+                ("agent", "102", template_id, custom_version),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert runner.invoke(args=["db", "upgrade"]).exit_code == 0
+
+    conn = sqlite3.connect(db_path)
+    try:
+        source_after_upgrade = conn.execute(
+            "SELECT body FROM prompt_template_version "
+            "WHERE template_id = ? AND version = ?",
+            (template_id, source_version),
+        ).fetchone()[0]
+        assert source_after_upgrade == source_body
+        assert (
+            conn.execute(
+                "SELECT body FROM prompt_template_version "
+                "WHERE template_id = ? AND version = ?",
+                (template_id, custom_version),
+            ).fetchone()[0]
+            == custom_body
+        )
+        assert (
+            conn.execute(
+                "SELECT body FROM prompt_template_version "
+                "WHERE template_id = ? AND version = ?",
+                (template_id, unreferenced_version),
+            ).fetchone()[0]
+            == source_body
+        )
+
+        clones = conn.execute(
+            "SELECT version, body, created_by FROM prompt_template_version "
+            "WHERE template_id = ? AND created_by LIKE 'migration:visit_profile_v2:%' "
+            "ORDER BY version",
+            (template_id,),
+        ).fetchall()
+        assert len(clones) == 2
+        clone_by_source = {
+            int(row[2].rsplit("=", 1)[1]): (row[0], row[1], json.loads(row[1]))
+            for row in clones
+        }
+        assert set(clone_by_source) == {source_version, custom_version}
+        source_clone_version, migrated_raw, migrated = clone_by_source[source_version]
+        custom_clone_version, _custom_raw, migrated_custom = clone_by_source[
+            custom_version
+        ]
+
+        pins = conn.execute(
+            "SELECT target_kind, target_key, version_number FROM prompt_pin "
+            "WHERE template_id = ? ORDER BY target_kind, target_key",
+            (template_id,),
+        ).fetchall()
+        assert pins == [
+            ("agent", "101", source_clone_version),
+            ("agent", "102", custom_clone_version),
+            ("cohort", "quiet", source_clone_version),
+        ]
+        source_clone_id = conn.execute(
+            "SELECT id FROM prompt_template_version "
+            "WHERE template_id = ? AND version = ?",
+            (template_id, source_clone_version),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO prompt_render_audit "
+            "(id, created_at, template_id, template_version_id, subject_kind, "
+            "subject_key, rendered_sha256, variables_json) "
+            "VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)",
+            (
+                9001,
+                template_id,
+                source_clone_id,
+                "agent",
+                "101",
+                "a" * 64,
+                "{}",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    assert migrated_raw == json.dumps(migrated, sort_keys=True, separators=(",", ":"))
+
+    assert [item["id"] for item in migrated["length_catalog"]["comment"]] == [
+        "comment.snippet",
+        "comment.short",
+        "comment.medium",
+        "comment.long",
+    ]
+    from deaddit.agents.prompts import _LENGTH_TARGETS
+
+    assert [item["text"] for item in migrated["length_catalog"]["comment"]] == [
+        target.text for target in _LENGTH_TARGETS["comment"]
+    ]
+    assert [item["weight"] for item in migrated["length_catalog"]["comment"]] == [
+        35,
+        50,
+        12,
+        3,
+    ]
+    assert [item["id"] for item in migrated["direction_catalog"]["comment"]] == [
+        "comment.honest_reaction",
+        "comment.relevant_fact",
+        "comment.related_anecdote",
+        "comment.answer_or_advice",
+        "comment.follow_up_question",
+        "comment.agree_with_angle",
+        "comment.counterpoint",
+        "comment.joke_or_aside",
+        "comment.clarify_detail",
+        "comment.recommend_resource",
+    ]
+    for name in ("browse", "post"):
+        assert "{directions}" in migrated["layouts"][name]
+        assert "sampled direction" in migrated["layouts"][name].replace(
+            "{directions}", "sampled direction"
+        )
+
+    # A custom catalog is not recognized as legacy and is copied byte-for-byte
+    # along with the layout fix that made this source active for migration.
+    assert (
+        migrated_custom["length_catalog"]["comment"]
+        == custom["length_catalog"]["comment"]
+    )
+    assert (
+        migrated_custom["direction_catalog"]["comment"]
+        == custom["direction_catalog"]["comment"]
+    )
+
+    assert runner.invoke(args=["db", "downgrade", _ROLLOUT_PREDECESSOR]).exit_code == 0
+    conn = sqlite3.connect(db_path)
+    try:
+        restored_pins = conn.execute(
+            "SELECT target_kind, target_key, version_number FROM prompt_pin "
+            "WHERE template_id = ? ORDER BY target_kind, target_key",
+            (template_id,),
+        ).fetchall()
+        assert restored_pins == [
+            ("agent", "101", source_version),
+            ("agent", "102", custom_version),
+            ("cohort", "quiet", source_version),
+        ]
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM prompt_template_version "
+                "WHERE template_id = ? AND created_by LIKE 'migration:visit_profile_v2:%'",
+                (template_id,),
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM prompt_render_audit "
+                "WHERE template_id = ? AND template_version_id = ("
+                "SELECT id FROM prompt_template_version "
+                "WHERE template_id = ? AND version = ?"
+                ")",
+                (template_id, template_id, source_clone_version),
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM prompt_template_version "
+                "WHERE template_id = ? AND version = ?",
+                (template_id, custom_clone_version),
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            conn.execute(
+                "SELECT body FROM prompt_template_version "
+                "WHERE template_id = ? AND version = ?",
+                (template_id, source_version),
+            ).fetchone()[0]
+            == source_body
+        )
+    finally:
+        conn.close()
+    assert _ROLLOUT_REVISION in [rev.revision for rev in _script().walk_revisions()]
