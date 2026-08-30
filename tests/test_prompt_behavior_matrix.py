@@ -279,6 +279,17 @@ def test_subscriptions_and_prompt_prose_sections_are_stable(app, db_session):
         "particular site feel distinctive. Never mention prompting or "
         "generation."
     )
+    expected_image_diversity_guidance = (
+        "\n\nWhen you brief an image, deliberately vary framing, camera distance "
+        "and angle, lighting situation, palette and mood, visual medium, and "
+        "setting or surface from images you have described before. Do not "
+        "default to one habitual scene shape; let those choices make each "
+        "requested subject and context distinctive while keeping it plausible "
+        "for your persona. Never mention prompting or generation."
+    )
+    assert variables["image_guidance_section"].endswith(
+        expected_image_diversity_guidance
+    )
     assert variables["website_guidance_section"].endswith(
         expected_website_diversity_guidance
     )
@@ -330,6 +341,26 @@ def test_website_guidance_contains_no_concrete_genre_example():
         + agent_prompts._WEBSITE_GUIDANCE_WEBSITE_ONLY
     ).lower()
     assert not any(genre in guidance for genre in concrete_genres)
+
+
+def test_image_guidance_contains_no_concrete_scene_example():
+    """Static image guidance must not anchor prompts to one concrete scene."""
+    concrete_scenes = (
+        "workbench",
+        "desk",
+        "counter",
+        "receipt",
+        "notebook",
+        "coffee",
+        "spreadsheet",
+        "index card",
+        "flowchart",
+    )
+    guidance = (
+        agent_prompts._IMAGE_GUIDANCE_OPTIONAL
+        + agent_prompts._IMAGE_GUIDANCE_IMAGE_ONLY
+    ).lower()
+    assert not any(scene in guidance for scene in concrete_scenes)
 
 
 def test_kickoff_requested_intent_and_unread_matrix(app, db_session):

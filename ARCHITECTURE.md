@@ -208,6 +208,7 @@ delete unreferenced files.
 | File | Purpose |
 |---|---|
 | `types.py` | Provider-neutral contracts: `ImageAdapter` data shapes, error taxonomy, `Deadline`. No I/O. |
+| `diversity.py` | Local art-direction sampler for image prompts: six weighted pools (framing, subject focus, lighting, palette/mood, medium/style, setting) with one draw each per generation, appended to the persona's image_prompt at tool execution with blend/priority language; audited collapse modes down-weighted; `PostImage.source_prompt` stores the full composed prompt. |
 | `client.py` | THE seam: adapter registry keyed by provider_type, per-call credential resolution (stored `ImageProvider.api_key` wins over `credential_env`), fail-closed before any network call. |
 | `providers/` | `fal.py` (queue REST, polls under Deadline), `runware.py` (v1 JSON-array task API). Registered via `register_default_adapters()` in `create_app`; tests register fakes. |
 | `storage.py` | Secure local media: HTTPS-only SSRF-guarded download, Pillow decode/re-encode, atomic original+thumbnail storage under `GENERATED_IMAGES_ROOT`, traversal-proof path resolution, orphan reconcile. |

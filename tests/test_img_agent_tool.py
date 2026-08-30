@@ -10,9 +10,11 @@ egress attempt anyway.
 
 from __future__ import annotations
 
+import random
 import time
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -24,6 +26,11 @@ from deaddit.agents import tools_write
 from deaddit.agents.executor import execute
 from deaddit.agents.registry import ToolContext
 from deaddit.images.client import register_adapter, reset_adapters
+from deaddit.images.diversity import (
+    diversity_ids,
+    render_image_diversity,
+    sample_image_diversity,
+)
 from deaddit.images.types import (
     Deadline,
     ImageGenerationResult,
@@ -235,7 +242,8 @@ def test_image_post_succeeds_and_gating_is_enforced_independently_of_tool_offeri
     assert Post.query.count() == 1
     image = PostImage.query.one()
     assert image.alt_text == IMAGE_ARGS["alt_text"]
-    assert image.source_prompt == IMAGE_ARGS["image_prompt"]
+    captured_prompt = fake_adapter.generate_calls[0]["prompt"]
+    assert image.source_prompt == captured_prompt
     assert image.provider_snapshot == "Fal"
     assert image.provider_id == provider.id
     assert image.request_snapshot == "req-42"
@@ -262,6 +270,82 @@ def test_image_post_succeeds_and_gating_is_enforced_independently_of_tool_offeri
     )
     assert text["ok"] is True
     assert Post.query.count() == 2 and PostImage.query.count() == 1
+
+
+def test_image_post_appends_diversity_suffix_and_records_full_prompt_and_ids(
+    app, db_session, fake_adapter
+):
+    provider = _make_provider(db_session)
+    agent = _image_agent(db_session, provider)
+    run = _new_run(db_session, agent)
+    fake_adapter.enqueue_generate(_generation())
+
+    result = execute(
+        "create_image_post",
+        IMAGE_ARGS,
+        _ctx(agent, run, deadline=Deadline.after(60)),
+    )
+
+    assert result["ok"] is True
+    matrix = sample_image_diversity(random.Random(run.id))
+    expected_suffix = render_image_diversity(matrix)
+    captured_prompt = fake_adapter.generate_calls[0]["prompt"]
+    assert captured_prompt == f"{IMAGE_ARGS['image_prompt']}\n\n{expected_suffix}"
+    assert captured_prompt.startswith(IMAGE_ARGS["image_prompt"] + "\n\n")
+    assert PostImage.query.one().source_prompt == captured_prompt
+    assert result["image_diversity_ids"] == diversity_ids(matrix)
+
+
+def test_image_post_run_id_makes_composed_prompt_deterministic(
+    app, db_session, fake_adapter, monkeypatch
+):
+    provider = _make_provider(db_session)
+    agent = _image_agent(db_session, provider)
+    run = SimpleNamespace(id=8675309)
+    ctx = _ctx(agent, run)
+
+    monkeypatch.setattr(tools_write, "_posts_created_this_run", lambda _: 0)
+    monkeypatch.setattr(
+        tools_write,
+        "store_variants",
+        lambda data, root: SimpleNamespace(
+            original_path="original.png",
+            thumbnail_path="thumbnail.png",
+            mime_type="image/png",
+            width=32,
+            height=32,
+            original_size=len(data),
+        ),
+    )
+    monkeypatch.setattr(
+        tools_write,
+        "create_image_post",
+        lambda **kwargs: SimpleNamespace(
+            id=1,
+            title=kwargs["title"],
+            subdeaddit_name=kwargs["subdeaddit"],
+        ),
+    )
+    fake_adapter.enqueue_generate(_generation(request_id="req-1"))
+    fake_adapter.enqueue_generate(_generation(request_id="req-2"))
+    global_state = random.getstate()
+    first = tools_write._create_image_post(
+        ctx, tools_write.CreateImagePostArgs(**IMAGE_ARGS)
+    )
+    assert random.getstate() == global_state
+    second = tools_write._create_image_post(
+        ctx, tools_write.CreateImagePostArgs(**IMAGE_ARGS)
+    )
+    assert random.getstate() == global_state
+
+    matrix = sample_image_diversity(random.Random(run.id))
+    expected_prompt = (
+        f"{IMAGE_ARGS['image_prompt']}\n\n{render_image_diversity(matrix)}"
+    )
+    assert fake_adapter.generate_calls[0]["prompt"] == expected_prompt
+    assert fake_adapter.generate_calls[1]["prompt"] == expected_prompt
+    assert first["image_diversity_ids"] == diversity_ids(matrix)
+    assert second["image_diversity_ids"] == diversity_ids(matrix)
 
 
 def test_image_post_null_provider_uses_current_default(app, db_session, fake_adapter):

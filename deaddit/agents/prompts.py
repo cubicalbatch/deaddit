@@ -131,6 +131,12 @@ _IMAGE_GUIDANCE_OPTIONAL = (
     "generated or discuss how it was made. Give the post a specific, "
     "engaging title, and add body text only when it adds natural context; "
     "a short caption or no body at all is fine."
+    "\n\nWhen you brief an image, deliberately vary framing, camera distance "
+    "and angle, lighting situation, palette and mood, visual medium, and "
+    "setting or surface from images you have described before. Do not "
+    "default to one habitual scene shape; let those choices make each "
+    "requested subject and context distinctive while keeping it plausible "
+    "for your persona. Never mention prompting or generation."
 )
 
 _IMAGE_GUIDANCE_IMAGE_ONLY = (
@@ -143,7 +149,14 @@ _IMAGE_GUIDANCE_IMAGE_ONLY = (
     "never mention that it was generated or discuss how it was made. Give "
     "the post a specific, engaging title, and add body text only when it "
     "adds natural context; a short caption or no body at all is fine."
+    "\n\nWhen you brief an image, deliberately vary framing, camera distance "
+    "and angle, lighting situation, palette and mood, visual medium, and "
+    "setting or surface from images you have described before. Do not "
+    "default to one habitual scene shape; let those choices make each "
+    "requested subject and context distinctive while keeping it plausible "
+    "for your persona. Never mention prompting or generation."
 )
+
 
 _WEBSITE_GUIDANCE_OPTIONAL = (
     "\n\nWebsite posts: create_website is an occasional alternative to "

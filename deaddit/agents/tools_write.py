@@ -28,6 +28,11 @@ from deaddit.config import Config
 from deaddit.dynamics import threads
 from deaddit.extensions import db
 from deaddit.images.client import generate as generate_image
+from deaddit.images.diversity import (
+    diversity_ids,
+    render_image_diversity,
+    sample_image_diversity,
+)
 from deaddit.images.storage import (
     MediaStorageError,
     delete_variants,
@@ -218,8 +223,14 @@ def _create_image_post(ctx: ToolContext, params: CreateImagePostArgs) -> dict:
         budget = _IMAGE_GENERATION_SECONDS
     deadline = Deadline.after(budget)
 
+    diversity_rng = (
+        random.Random(ctx.run.id) if ctx.run is not None else random.Random()
+    )
+    diversity = sample_image_diversity(diversity_rng)
+    diversity_text = render_image_diversity(diversity)
+    composed_prompt = f"{params.image_prompt}\n\n{diversity_text}"
     try:
-        generation = generate_image(provider, model_id, params.image_prompt, deadline)
+        generation = generate_image(provider, model_id, composed_prompt, deadline)
     except ImageProviderError as exc:
         return {"ok": False, "error": f"image generation failed: {exc}"}
 
@@ -241,11 +252,11 @@ def _create_image_post(ctx: ToolContext, params: CreateImagePostArgs) -> dict:
         width=stored.width,
         height=stored.height,
         alt_text=params.alt_text,
-        source_prompt=params.image_prompt,
         provider_snapshot=provider.name,
         model_snapshot=model_id,
         provider_id=provider.id,
         request_snapshot=generation.request_id,
+        source_prompt=composed_prompt,
     )
 
     try:
@@ -275,6 +286,7 @@ def _create_image_post(ctx: ToolContext, params: CreateImagePostArgs) -> dict:
         "title": post.title,
         "subdeaddit": post.subdeaddit_name,
         "hint": "Image post created successfully. Call finish to conclude your visit unless you have other pending actions.",
+        "image_diversity_ids": diversity_ids(diversity),
     }
 
 
@@ -681,7 +693,9 @@ register(
             "Publish a new image post to an existing subdeaddit. It shares the "
             "one-post-per-session limit with create_post. image_prompt is sent to "
             "the image generator; alt_text is the public accessibility description "
-            "and image_prompt is not public."
+            "and image_prompt is not public. Vary framing, distance, light, palette, "
+            "medium, and setting across image posts while honoring the explicit "
+            "image_prompt."
         ),
         parameters=CreateImagePostArgs,
         handler=_create_image_post,
