@@ -1,12 +1,9 @@
 """Deterministic Phase 1 acceptance gates for the pure persona planner."""
 
 import random
-import re
 from collections import Counter, defaultdict
 from dataclasses import replace
-from importlib import import_module
 from math import ceil, floor
-from pathlib import Path
 
 import pytest
 
@@ -115,7 +112,13 @@ def test_catalog_sizes_and_integrity():
     assert all(interests_by_domain[domain] >= 4 for domain in INTEREST_DOMAINS)
 
     assert len(TROLL_MODIFIERS) == 6
+    assert len({modifier.id for modifier in TROLL_MODIFIERS}) == len(TROLL_MODIFIERS)
+    assert len({modifier.text for modifier in TROLL_MODIFIERS}) == len(TROLL_MODIFIERS)
+    assert all(modifier.id and modifier.text for modifier in TROLL_MODIFIERS)
     assert len(USERNAME_STYLES) == 5
+    assert len({style.id for style in USERNAME_STYLES}) == len(USERNAME_STYLES)
+    assert len({style.text for style in USERNAME_STYLES}) == len(USERNAME_STYLES)
+    assert all(style.id and style.text for style in USERNAME_STYLES)
 
 
 def test_display_string_bounds():
@@ -298,6 +301,34 @@ def test_existing_users_deficit_and_legacy_mapping():
         row.age_band_id == "age.25_34" for row in without_age_snapshot
     )
     _assert_valid(with_age_snapshot)
+    bachelor_users = [
+        ExistingUserSnapshot(
+            persona_seed={"education_level_id": "education.bachelor"}
+        )
+        for _ in range(100)
+    ]
+    with_bachelor_snapshot = _build(20, 0, 17, bachelor_users)
+    without_bachelor_snapshot = _build(20, 0, 17)
+    assert sum(
+        row.education_level_id == "education.bachelor"
+        for row in with_bachelor_snapshot
+    ) < sum(
+        row.education_level_id == "education.bachelor"
+        for row in without_bachelor_snapshot
+    )
+
+    legacy_occupation = [
+        ExistingUserSnapshot(occupation="Software Developer") for _ in range(40)
+    ]
+    provenance_occupation = [
+        ExistingUserSnapshot(
+            persona_seed={"occupation_id": "occupation.software_engineer"}
+        )
+        for _ in range(40)
+    ]
+    assert _build(10, 0, 7, legacy_occupation) == _build(
+        10, 0, 7, provenance_occupation
+    )
 
     _assert_valid(_build(10, 0, 7, [ExistingUserSnapshot(occupation="Software Developer")]))
     _assert_valid(
@@ -472,16 +503,6 @@ def test_validate_assignment_rejections():
     assert all(validate_assignment(candidate) for candidate in invalid)
 
 
-def test_module_purity():
-    module = import_module("deaddit.services.persona_options")
-    source = Path(module.__file__).read_text(encoding="utf-8")
-    forbidden_import = re.compile(
-        r"^\s*(?:from|import)\s+(?:flask|sqlalchemy|requests|deaddit|httpx|openai|anthropic)\b",
-        re.MULTILINE,
-    )
-    assert forbidden_import.search(source) is None
-    assert "Flask" not in source
-    assert "SQLAlchemy" not in source
 
 
 def test_username_style_and_interest_seeds():

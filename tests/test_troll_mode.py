@@ -183,6 +183,8 @@ class TestPersonaGeneratorTrollMode:
         assert "- occupation: matrix job 1 (full-time)" in prompt
         assert "- required traits: trait one 1; blunt; methodical; quirk 1" in prompt
         assert result["users"][0]["is_troll"] is True
+        stored = User.query.filter_by(username=result["users"][0]["username"]).first()
+        assert stored.agent_state["persona_seed"]["troll_modifier_id"] == "troll.pedantic"
 
     def test_normal_matrix_rows_carry_no_troll_flavor(
         self, app, fake_llm, monkeypatch

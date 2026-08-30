@@ -393,7 +393,7 @@ class TestMatrixPromptAndIdResolution:
         assert set(traits) <= {t.text for t in po.TRAITS}
         # The demographic JSON example anchor is gone and reuse is banned
         assert "example_user" not in prompt
-        assert "Never copy any example" in prompt
+        assert "Never copy any example username, phrase, or name" in prompt
         assert "Rows are not interchangeable" in prompt
         assert "exactly the occupation" in prompt
 
@@ -461,6 +461,20 @@ class TestMatrixPromptAndIdResolution:
         assert "- occupation: matrix job 2 (full-time)" in prompts[1]
         assert "- username style: username style card 2" in prompts[0]
         assert "- username style: username style card 2" in prompts[1]
+        for fact in (
+            "- age: 32",
+            "- occupation: matrix job 2 (full-time)",
+            '- education: "degree 2"',
+            "- required traits: trait one 2; blunt; methodical; quirk 2",
+            '- writing style: "style card 2"',
+            "- interest seeds: seed 2a; seed 2b",
+            "- username style: username style card 2",
+        ):
+            assert fact in prompts[0]
+            assert fact in prompts[1]
+        assert "matrix job 1" not in prompts[1]
+        assert "degree 1" not in prompts[1]
+        assert "seed 1a" not in prompts[1]
         assert User.query.count() == 2
 
     def test_partial_resolution_keeps_partial_success_contract(
@@ -645,6 +659,21 @@ class TestAuthoritativePersonaMerge:
         assert seed["education_level_id"] == assignment.education_level_id
         assert seed["trait_ids"] == list(assignment.trait_ids)
         assert seed["writing_style_id"] == assignment.writing_style_id
+        assert seed == {
+            "catalog_version": pg.PERSONA_CATALOG_VERSION,
+            "assignment_id": assignment.id,
+            "age_band_id": assignment.age_band_id,
+            "occupation_id": assignment.occupation_id,
+            "occupation_sector": assignment.occupation_sector,
+            "employment_context_id": assignment.employment_context_id,
+            "education_level_id": assignment.education_level_id,
+            "trait_ids": list(assignment.trait_ids),
+            "writing_style_id": assignment.writing_style_id,
+            "interest_seed_ids": [None, None],
+            "troll_modifier_id": None,
+            "username_style_id": None,
+        }
+        assert user.agent_state == {"persona_seed": seed, "subscriptions": []}
 
     @pytest.mark.parametrize("auto_create_agent", [False, True])
     def test_provenance_commit_with_or_without_agent(
@@ -720,6 +749,10 @@ class TestAdminUserGeneratorAPI:
         assert set(data) == {"success", "users", "agents", "skipped"}
         assert len(data["users"]) == 2
         assert len(data["agents"]) == 2
+        assert all(
+            "assignment_id" not in user and "persona_seed" not in user
+            for user in data["users"]
+        )
 
         # Verify agent tier and config
         for agent in data["agents"]:
