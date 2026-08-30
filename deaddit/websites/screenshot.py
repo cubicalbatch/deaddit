@@ -74,7 +74,26 @@ def _is_snap_confined(binary_path: str) -> bool:
     """
 
     try:
-        return os.path.realpath(binary_path).startswith("/snap/")
+        path_str = str(binary_path)
+        if path_str.startswith(("/snap/", "/var/lib/snapd/")):
+            return True
+        real = os.path.realpath(path_str)
+        if real.startswith(("/snap/", "/var/lib/snapd/")):
+            return True
+        if Path(real).name == "snap" or real in {"/usr/bin/snap", "/bin/snap"}:
+            return True
+        path = Path(path_str)
+        if path.is_file() and not path.is_symlink():
+            try:
+                with path.open("rb") as f:
+                    head = f.read(2048)
+                    if head.startswith(b"#!") and (
+                        b"/snap/" in head or b"snap " in head or b"snap\n" in head
+                    ):
+                        return True
+            except OSError:
+                pass
+        return False
     except OSError:
         return False
 

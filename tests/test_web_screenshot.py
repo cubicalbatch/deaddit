@@ -148,13 +148,15 @@ def test_resolve_binary_probe_order_and_configured_path(monkeypatch, tmp_path):
     assert resolve_chrome_binary() == str(configured)
 
 
-def test_resolve_binary_skips_snap_confined_candidates(monkeypatch):
-    # Regression (live E2E 2026-08-28): Ubuntu's chromium-browser is a snap
-    # wrapper that exits cleanly but writes the PNG into its private
-    # namespace, so the probe must fall through to a host browser.
+def test_resolve_binary_skips_snap_confined_candidates(monkeypatch, tmp_path):
+    # Regression (live E2E 2026-08-28 & 2026-08-29): Ubuntu's chromium-browser is a snap
+    # wrapper and /snap/bin/chromium is a symlink to /usr/bin/snap that exits cleanly
+    # but writes the PNG into its private namespace, so the probe must fall through
+    # to a host browser.
     invalidate_binary_cache()
     monkeypatch.delenv("DEADDIT_CHROME_BINARY", raising=False)
 
+    # 1. Direct /snap/ prefix
     def fake_which(candidate):
         if candidate == "chromium":
             return "/snap/chromium/3507/usr/lib/chromium-browser/chromium"
@@ -163,6 +165,41 @@ def test_resolve_binary_skips_snap_confined_candidates(monkeypatch):
         return None
 
     monkeypatch.setattr(screenshot.shutil, "which", fake_which)
+    assert resolve_chrome_binary() == "/usr/bin/google-chrome"
+
+    # 2. Symlink to snap binary (e.g. /snap/bin/chromium -> /usr/bin/snap)
+    snap_bin = _executable(tmp_path / "snap")
+    snap_symlink = tmp_path / "chromium-snap-symlink"
+    snap_symlink.symlink_to(snap_bin)
+
+    invalidate_binary_cache()
+
+    def fake_which_snap_symlink(candidate):
+        if candidate == "chromium":
+            return str(snap_symlink)
+        if candidate == "google-chrome":
+            return "/usr/bin/google-chrome"
+        return None
+
+    monkeypatch.setattr(screenshot.shutil, "which", fake_which_snap_symlink)
+    assert resolve_chrome_binary() == "/usr/bin/google-chrome"
+
+    # 3. Wrapper script referencing /snap/ or snap
+    wrapper_script = _executable(
+        tmp_path / "chromium-wrapper",
+        content='#!/bin/sh\nexec /snap/bin/chromium "$@"\n',
+    )
+
+    invalidate_binary_cache()
+
+    def fake_which_wrapper(candidate):
+        if candidate == "chromium":
+            return str(wrapper_script)
+        if candidate == "google-chrome":
+            return "/usr/bin/google-chrome"
+        return None
+
+    monkeypatch.setattr(screenshot.shutil, "which", fake_which_wrapper)
     assert resolve_chrome_binary() == "/usr/bin/google-chrome"
 
 
