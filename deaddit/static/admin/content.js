@@ -1,11 +1,13 @@
 // ============================================================
 // Admin Content Management
 //
-// Structured per entity on top of a small shared core:
 //   - Core:        state, list loading, pagination, selection,
 //                  bulk delete, alerts
-//   - Users / Subdeaddits / Posts / Comments: one section each,
-//     owning its row rendering + edit/save flow
+//   - Selection:   the header checkbox selects the current page and
+//                  reveals a banner offering "select all pages"; in
+//                  that mode bulk delete posts {all: true, search,
+//                  subdeaddit} and the server resolves the full
+//                  filtered set (see admin.py bulk-delete endpoints).
 //
 // Every edit flow fetches exactly one row through the targeted
 // single-item GET endpoints:
@@ -26,7 +28,10 @@ class ContentManager {
         this.searchTerm = '';
         this.perPage = 25;
         this.selectedItems = new Set();
-
+        // Select-all-pages mode: bulk actions apply to every item matching
+        // the current search/filter, not just this page's selection.
+        this.selectAllPages = false;
+        this.currentTotals = {};
         this.init();
     }
 
@@ -54,7 +59,7 @@ class ContentManager {
             if (searchInput) {
                 searchInput.addEventListener('input', (e) => {
                     this.searchTerm = e.target.value;
-                    this.currentPage = 1;
+                    this.resetSelection();
                     this.loadContent(type);
                 });
             }
@@ -84,7 +89,7 @@ class ContentManager {
         const postsFilter = document.getElementById('postsSubdeadditFilter');
         if (postsFilter) {
             postsFilter.addEventListener('change', () => {
-                this.currentPage = 1;
+                this.resetSelection();
                 this.loadContent('posts');
             });
         }
@@ -100,9 +105,10 @@ class ContentManager {
     }
 
     switchTab(tabId) {
+        // Clear the outgoing tab's header checkbox/banner before switching.
+        this.resetSelection();
         this.currentTab = tabId;
         this.currentPage = 1;
-        this.selectedItems.clear();
         this.searchTerm = '';
 
         // Clear search
@@ -143,6 +149,8 @@ class ContentManager {
             }
 
             this.renderPagination(type, data);
+            this.currentTotals[type] = data.total || 0;
+            this.renderSelectAllBanner(type);
         } catch (error) {
             console.error('Error loading content:', error);
             this.showAlert('Error loading content', 'danger');
@@ -185,27 +193,40 @@ class ContentManager {
 
     goToPage(page) {
         this.currentPage = page;
+        this.resetSelection();
         this.loadContent(this.currentTab);
     }
 
+    // Row checkboxes are always addressed through the active tab's table:
+    // hidden panes keep their old rows in the DOM, and a global
+    // `.item-checkbox` query would contaminate the selection with them.
+    tableCheckboxes(type = this.currentTab) {
+        return document.querySelectorAll(`#${type}Table .item-checkbox`);
+    }
+
     setupItemCheckboxes() {
-        document.querySelectorAll('.item-checkbox').forEach(checkbox => {
+        this.tableCheckboxes().forEach(checkbox => {
             checkbox.addEventListener('change', (e) => {
                 const id = e.target.getAttribute('data-id');
                 if (e.target.checked) {
                     this.selectedItems.add(id);
                 } else {
                     this.selectedItems.delete(id);
-                    // Uncheck select all if any item is unchecked
+                    // Uncheck select all if any item is unchecked; a
+                    // partial selection always drops all-pages mode.
                     const selectAllCheckbox = document.getElementById(`selectAll${this.capitalize(this.currentTab)}`);
                     if (selectAllCheckbox) selectAllCheckbox.checked = false;
+                    if (this.selectAllPages) {
+                        this.selectAllPages = false;
+                        this.renderSelectAllBanner();
+                    }
                 }
             });
         });
     }
 
     selectAll(type, checked) {
-        document.querySelectorAll('.item-checkbox').forEach(checkbox => {
+        this.tableCheckboxes(type).forEach(checkbox => {
             checkbox.checked = checked;
             const id = checkbox.getAttribute('data-id');
             if (checked) {
@@ -214,6 +235,61 @@ class ContentManager {
                 this.selectedItems.delete(id);
             }
         });
+        if (!checked) this.selectAllPages = false;
+        this.renderSelectAllBanner(type);
+    }
+
+    // Clear every trace of a selection: row checkboxes, the header
+    // checkbox, all-pages mode, and the banner for the active tab.
+    resetSelection() {
+        this.selectedItems.clear();
+        this.selectAllPages = false;
+        const selectAllCheckbox = document.getElementById(`selectAll${this.capitalize(this.currentTab)}`);
+        if (selectAllCheckbox) selectAllCheckbox.checked = false;
+        this.tableCheckboxes().forEach(checkbox => {
+            checkbox.checked = false;
+        });
+        this.renderSelectAllBanner();
+    }
+
+    // Banner under the table controls. Hidden unless the header checkbox
+    // selected the page; then it offers "select all pages" and, once
+    // active, a way back out.
+    renderSelectAllBanner(type = this.currentTab) {
+        const banner = document.getElementById(`${type}SelectAllBanner`);
+        if (!banner) return;
+
+        const total = this.currentTotals[type] || 0;
+        const header = document.getElementById(`selectAll${this.capitalize(type)}`);
+        const headerChecked = header ? header.checked : false;
+
+        if (!headerChecked || total === 0 || this.currentTab !== type) {
+            banner.style.display = 'none';
+            return;
+        }
+
+        banner.style.display = 'flex';
+        if (this.selectAllPages) {
+            const filteredNote = this.searchTerm ? ' matching the current search' : '';
+            banner.innerHTML = `
+                <span>All <strong>${total.toLocaleString()}</strong> ${type}${filteredNote} are selected (every page).</span>
+                <a href="#" class="banner-clear">Clear selection</a>
+            `;
+            banner.querySelector('.banner-clear').addEventListener('click', (e) => {
+                e.preventDefault();
+                this.resetSelection();
+            });
+        } else {
+            banner.innerHTML = `
+                <span>All ${this.selectedItems.size} ${type} on this page are selected.</span>
+                <a href="#" class="banner-all-pages">Select all ${total.toLocaleString()} ${type} across all pages</a>
+            `;
+            banner.querySelector('.banner-all-pages').addEventListener('click', (e) => {
+                e.preventDefault();
+                this.selectAllPages = true;
+                this.renderSelectAllBanner(type);
+            });
+        }
     }
 
     truncate(text, length) {
@@ -596,6 +672,21 @@ class ContentManager {
 
     // ---------------- Deletion (shared) ----------------
     bulkDelete(type) {
+        // All-pages mode: the server resolves every item matching the
+        // current search/filter, so no id list is sent.
+        if (this.selectAllPages && type === this.currentTab) {
+            const total = (this.currentTotals[type] || 0).toLocaleString();
+            const message = `Are you sure you want to delete ALL ${total} ${type} across every page?`;
+            const impacts = {
+                users: 'This will permanently delete every matching user, plus ALL their posts, comments, votes, and agent history.',
+                subdeaddits: 'This will permanently delete every matching subdeaddit, plus ALL their posts and comments.',
+                posts: 'This will permanently delete every matching post, plus ALL its comments, images, and websites.',
+                comments: 'This will permanently delete every matching comment, plus ALL replies to them.'
+            };
+            this.showDeleteConfirmation(`bulk-all-${type}`, null, message, impacts[type]);
+            return;
+        }
+
         if (this.selectedItems.size === 0) {
             this.showAlert('No items selected', 'warning');
             return;
@@ -606,14 +697,17 @@ class ContentManager {
         this.showDeleteConfirmation(`bulk-${type}`, Array.from(this.selectedItems), message);
     }
 
-    showDeleteConfirmation(type, id, message) {
+    showDeleteConfirmation(type, id, message, impactText = null) {
         this.pendingDelete = { type, id };
 
         document.getElementById('deleteConfirmMessage').textContent = message;
 
         // Show impact warning for cascading deletes
         const warningDiv = document.getElementById('deleteImpactWarning');
-        if (type === 'user' || type === 'subdeaddit' || type === 'post' || type === 'comment') {
+        if (impactText) {
+            warningDiv.style.display = 'block';
+            document.getElementById('deleteImpactText').textContent = impactText;
+        } else if (type === 'user' || type === 'subdeaddit' || type === 'post' || type === 'comment') {
             warningDiv.style.display = 'block';
             if (type === 'user') {
                 document.getElementById('deleteImpactText').textContent = 'This will also delete all posts and comments by this user.';
@@ -637,7 +731,23 @@ class ContentManager {
         try {
             let response;
 
-            if (type.startsWith('bulk-')) {
+            if (type.startsWith('bulk-all-')) {
+                // Server-side resolution of the full filtered set.
+                const bulkType = type.replace('bulk-all-', '');
+                const endpoint = `/admin/api/${bulkType}/bulk-delete`;
+                const body = {all: true};
+                if (this.searchTerm) body.search = this.searchTerm;
+                if (bulkType === 'posts') {
+                    const subdeadditFilter = document.getElementById('postsSubdeadditFilter')?.value;
+                    if (subdeadditFilter) body.subdeaddit = subdeadditFilter;
+                }
+
+                response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body)
+                });
+            } else if (type.startsWith('bulk-')) {
                 const bulkType = type.replace('bulk-', '');
                 const endpoint = `/admin/api/${bulkType}/bulk-delete`;
                 const bodyKey = bulkType === 'users' ? 'usernames' :
@@ -662,7 +772,7 @@ class ContentManager {
             const result = await response.json();
             if (result.success) {
                 bootstrap.Modal.getInstance(document.getElementById('deleteConfirmModal')).hide();
-                this.selectedItems.clear();
+                this.resetSelection();
                 this.loadContent(this.currentTab);
 
                 let message = 'Deleted successfully';

@@ -1030,6 +1030,48 @@ def content():
 # CRUD API endpoints for content management
 
 
+def _users_query(search=""):
+    """User filter shared by the list API and all-pages bulk delete."""
+    query = User.query
+    if search:
+        query = query.filter(
+            User.username.contains(search)
+            | User.occupation.contains(search)
+            | User.bio.contains(search)
+        )
+    return query
+
+
+def _subdeaddits_query(search=""):
+    """Subdeaddit filter shared by the list API and all-pages bulk delete."""
+    query = Subdeaddit.query
+    if search:
+        query = query.filter(
+            Subdeaddit.name.contains(search) | Subdeaddit.description.contains(search)
+        )
+    return query
+
+
+def _posts_query(search="", subdeaddit=""):
+    """Post filter shared by the list API and all-pages bulk delete."""
+    query = Post.query
+    if search:
+        query = query.filter(
+            Post.title.contains(search) | Post.content.contains(search)
+        )
+    if subdeaddit:
+        query = query.filter(Post.subdeaddit_name == subdeaddit)
+    return query
+
+
+def _comments_query(search=""):
+    """Comment filter shared by the list API and all-pages bulk delete."""
+    query = Comment.query
+    if search:
+        query = query.filter(Comment.content.contains(search))
+    return query
+
+
 def _user_payload(user):
     """Serialize a user row for the admin content API."""
     return {
@@ -1061,16 +1103,10 @@ def api_users():
     per_page = request.args.get("per_page", 25, type=int)
     search = request.args.get("search", "")
 
-    query = User.query
-    if search:
-        query = query.filter(
-            User.username.contains(search)
-            | User.occupation.contains(search)
-            | User.bio.contains(search)
-        )
-
-    users = query.order_by(User.username).paginate(
-        page=page, per_page=per_page, error_out=False
+    users = (
+        _users_query(search)
+        .order_by(User.username)
+        .paginate(page=page, per_page=per_page, error_out=False)
     )
 
     return jsonify(
@@ -1228,18 +1264,25 @@ def api_delete_user(username):
 @production_disabled
 @admin_required
 def api_bulk_delete_users():
-    """Delete multiple users."""
-    usernames = request.json.get("usernames", [])
-    if not usernames:
-        return jsonify({"success": False, "error": "No usernames provided"}), 400
-
-    try:
+    """Delete listed users, or every user matching the current filter."""
+    data = request.get_json(silent=True) or {}
+    if data.get("all"):
+        existing_usernames = [
+            row.username
+            for row in _users_query(data.get("search", "")).with_entities(User.username)
+        ]
+    else:
+        usernames = data.get("usernames") or []
+        if not usernames:
+            return jsonify({"success": False, "error": "No usernames provided"}), 400
         existing_usernames = [
             row.username
             for row in User.query.filter(User.username.in_(usernames)).with_entities(
                 User.username
             )
         ]
+
+    try:
         res = _delete_users_cascade(existing_usernames)
         db.session.commit()
         media_service.delete_media_files(current_app, res["media_paths"])
@@ -1280,14 +1323,10 @@ def api_subdeaddits():
     per_page = request.args.get("per_page", 25, type=int)
     search = request.args.get("search", "")
 
-    query = Subdeaddit.query
-    if search:
-        query = query.filter(
-            Subdeaddit.name.contains(search) | Subdeaddit.description.contains(search)
-        )
-
-    subdeaddits = query.order_by(Subdeaddit.name).paginate(
-        page=page, per_page=per_page, error_out=False
+    subdeaddits = (
+        _subdeaddits_query(search)
+        .order_by(Subdeaddit.name)
+        .paginate(page=page, per_page=per_page, error_out=False)
     )
 
     return jsonify(
@@ -1389,10 +1428,19 @@ def api_delete_subdeaddit(name):
 @production_disabled
 @admin_required
 def api_bulk_delete_subdeaddits():
-    """Delete multiple subdeaddits."""
-    names = request.json.get("names", [])
-    if not names:
-        return jsonify({"success": False, "error": "No names provided"}), 400
+    """Delete listed subdeaddits, or every subdeaddit matching the filter."""
+    data = request.get_json(silent=True) or {}
+    if data.get("all"):
+        names = [
+            row.name
+            for row in _subdeaddits_query(data.get("search", "")).with_entities(
+                Subdeaddit.name
+            )
+        ]
+    else:
+        names = data.get("names") or []
+        if not names:
+            return jsonify({"success": False, "error": "No names provided"}), 400
 
     try:
         deleted_count = 0
@@ -1478,16 +1526,10 @@ def api_posts():
     search = request.args.get("search", "")
     subdeaddit_filter = request.args.get("subdeaddit", "")
 
-    query = Post.query
-    if search:
-        query = query.filter(
-            Post.title.contains(search) | Post.content.contains(search)
-        )
-    if subdeaddit_filter:
-        query = query.filter(Post.subdeaddit_name == subdeaddit_filter)
-
-    posts = query.order_by(desc(Post.created_at)).paginate(
-        page=page, per_page=per_page, error_out=False
+    posts = (
+        _posts_query(search, subdeaddit_filter)
+        .order_by(desc(Post.created_at))
+        .paginate(page=page, per_page=per_page, error_out=False)
     )
 
     return jsonify(
@@ -1560,18 +1602,29 @@ def api_delete_post(post_id):
 @production_disabled
 @admin_required
 def api_bulk_delete_posts():
-    """Delete multiple posts."""
-    post_ids = request.json.get("post_ids", [])
-    if not post_ids:
-        return jsonify({"success": False, "error": "No post IDs provided"}), 400
-
-    try:
+    """Delete listed posts, or every post matching the current filter."""
+    data = request.get_json(silent=True) or {}
+    if data.get("all"):
+        existing_post_ids = [
+            row.id
+            for row in _posts_query(
+                data.get("search", ""), data.get("subdeaddit", "")
+            ).with_entities(Post.id)
+        ]
+    else:
+        post_ids = data.get("post_ids") or []
+        if not post_ids:
+            return jsonify({"success": False, "error": "No post IDs provided"}), 400
         existing_post_ids = [
             row.id
             for row in Post.query.filter(Post.id.in_(post_ids)).with_entities(Post.id)
         ]
-        media_paths = media_service.media_paths_for_posts(existing_post_ids)
-        website_paths = website_service.website_paths_for_posts(existing_post_ids)
+    try:
+        media_paths = []
+        website_paths = []
+        for chunk in _chunked(existing_post_ids):
+            media_paths.extend(media_service.media_paths_for_posts(chunk))
+            website_paths.extend(website_service.website_paths_for_posts(chunk))
         posts_count, comments_count = _delete_posts_cascade(existing_post_ids)
 
         db.session.commit()
@@ -1619,12 +1672,10 @@ def api_comments():
     per_page = request.args.get("per_page", 25, type=int)
     search = request.args.get("search", "")
 
-    query = Comment.query
-    if search:
-        query = query.filter(Comment.content.contains(search))
-
-    comments = query.order_by(desc(Comment.created_at)).paginate(
-        page=page, per_page=per_page, error_out=False
+    comments = (
+        _comments_query(search)
+        .order_by(desc(Comment.created_at))
+        .paginate(page=page, per_page=per_page, error_out=False)
     )
 
     return jsonify(
@@ -1695,18 +1746,27 @@ def api_delete_comment(comment_id):
 @production_disabled
 @admin_required
 def api_bulk_delete_comments():
-    """Delete multiple comments."""
-    comment_ids = request.json.get("comment_ids", [])
-    if not comment_ids:
-        return jsonify({"success": False, "error": "No comment IDs provided"}), 400
-
-    try:
+    """Delete listed comments, or every comment matching the current filter."""
+    data = request.get_json(silent=True) or {}
+    if data.get("all"):
+        existing_comment_ids = [
+            row.id
+            for row in _comments_query(data.get("search", "")).with_entities(Comment.id)
+        ]
+    else:
+        comment_ids = data.get("comment_ids") or []
+        if not comment_ids:
+            return (
+                jsonify({"success": False, "error": "No comment IDs provided"}),
+                400,
+            )
         existing_comment_ids = [
             row.id
             for row in Comment.query.filter(Comment.id.in_(comment_ids)).with_entities(
                 Comment.id
             )
         ]
+    try:
         all_ids = _get_comment_ids_with_descendants(existing_comment_ids)
         deleted_count = len(existing_comment_ids)
         total_children = max(0, len(all_ids) - deleted_count)
@@ -3148,9 +3208,7 @@ def _setup_status():
         "configured": configured,
         "api_url": api_url,
         "model": model,
-        "api_key_set": bool(
-            (Config.get_api_key_for_endpoint(api_url) or "").strip()
-        ),
+        "api_key_set": bool((Config.get_api_key_for_endpoint(api_url) or "").strip()),
         "has_content": post_count > 0 or user_count > 0 or subdeaddit_count > 0,
         "subdeaddit_count": subdeaddit_count,
         "user_count": user_count,
@@ -3178,7 +3236,9 @@ def setup_page():
             last_seen = datetime.fromisoformat(status["worker_last_seen_iso"])
             if last_seen.tzinfo is None:
                 last_seen = last_seen.replace(tzinfo=UTC)
-            worker_age_seconds = max(0, round((datetime.now(UTC) - last_seen).total_seconds()))
+            worker_age_seconds = max(
+                0, round((datetime.now(UTC) - last_seen).total_seconds())
+            )
         except (TypeError, ValueError):
             pass
     return render_template(

@@ -81,6 +81,32 @@
     .stats-card {
         min-height: 80px;
     }
+
+    /* Select-all-pages banner shown under the controls when the header
+       checkbox selects the page (and optionally every page). Styled with
+       the site's semantic tokens so it follows light/dark themes. */
+    .select-all-pages-banner {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.35rem;
+        padding: 0.5rem 0.75rem;
+        margin-bottom: 0.75rem;
+        font-size: 0.875rem;
+        color: var(--text-2);
+        background: var(--highlight-bg);
+        border: 1px solid var(--border);
+        border-radius: 0.375rem;
+    }
+
+    .select-all-pages-banner strong {
+        color: var(--text-1);
+    }
+
+    .select-all-pages-banner a {
+        color: var(--link);
+        font-weight: 500;
+    }
     
     /* Improved tab styling */
     .nav-tabs .nav-link {
@@ -162,6 +188,7 @@
                             </div>
                         </div>
                         <div class="card-body">
+                            <div class="select-all-pages-banner" id="usersSelectAllBanner" style="display: none;"></div>
                             <div class="table-responsive">
                                 <table class="table dt" id="usersTable">
                                     <thead>
@@ -210,6 +237,7 @@
                             </div>
                         </div>
                         <div class="card-body">
+                            <div class="select-all-pages-banner" id="subdeadditsSelectAllBanner" style="display: none;"></div>
                             <div class="table-responsive">
                                 <table class="table dt" id="subdeadditsTable">
                                     <thead>
@@ -264,6 +292,7 @@
                             </div>
                         </div>
                         <div class="card-body">
+                            <div class="select-all-pages-banner" id="postsSelectAllBanner" style="display: none;"></div>
                             <div class="table-responsive">
                                 <table class="table dt" id="postsTable">
                                     <thead>
@@ -312,6 +341,7 @@
                             </div>
                         </div>
                         <div class="card-body">
+                            <div class="select-all-pages-banner" id="commentsSelectAllBanner" style="display: none;"></div>
                             <div class="table-responsive">
                                 <table class="table dt" id="commentsTable">
                                     <thead>
