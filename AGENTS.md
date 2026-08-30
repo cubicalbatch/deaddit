@@ -61,6 +61,12 @@ Design notes for the agent/image features live in `building/`.
 
 ## Conventions to follow
 
+- **Greenfield mindset / No legacy debt**: This project is considered greenfield.
+  We are iterating fast and we absolutely do not want tech debt to support
+  workflows we are modifying. NEVER add any code to support a legacy flow. Never
+  write long lived script for transitioning state. If a new change is
+  incompatible with data we already have in the DB, it is fine to delete what we
+  have in the DB.
 - **Feature workflow**: For substantial or multi-phase feature implementations,
   agents should first create a new git worktree, do all the research and
   implementation work in the worktree, and automatically merge it back to the

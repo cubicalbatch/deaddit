@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import func, select
 
 from deaddit.models import (
     Agent,
@@ -414,3 +415,55 @@ def test_delete_comment_cascades_responses_and_votes(
     assert db_session.get(Comment, c2_id) is None
     assert db_session.get(Comment, c3_id) is None
     assert db_session.get(Vote, v_id) is None
+
+
+def test_bulk_delete_all_users_with_thread_over_500_comments(
+    seeded_db, admin_client, db_session
+):
+    """Bulk-deleting every user works when the comment thread exceeds one chunk.
+
+    Comment ids are collected into a set (unordered) and deleted in chunks of
+    500. Regression test: a parent comment landing in an earlier chunk than
+    its child used to trip the self-referential comment.parent_id FK
+    (sqlite3.IntegrityError on DELETE FROM comment).
+    """
+    users = [User(username=f"chain_user_{i}", bio="", interests="[]") for i in range(3)]
+    db_session.add_all(users)
+    sub = Subdeaddit.query.first()
+    post = Post(
+        title="Deep thread",
+        content="",
+        user=users[0].username,
+        subdeaddit_name=sub.name,
+    )
+    db_session.add(post)
+    db_session.commit()
+    pre_count = Comment.query.count()
+    base = db_session.execute(select(func.max(Comment.id))).scalar() or 0
+    total = 1200
+    db_session.execute(
+        Comment.__table__.insert(),
+        [
+            {
+                "id": base + i,
+                "post_id": post.id,
+                "parent_id": (base + i - 1) if i > 1 else None,
+                "user": users[i % 3].username,
+                "content": f"chain {i}",
+            }
+            for i in range(1, total + 1)
+        ],
+    )
+    db_session.commit()
+    assert Comment.query.count() == pre_count + total
+
+    resp = admin_client.post("/admin/api/users/bulk-delete", json={"all": True})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["success"] is True
+    assert body["deleted"]["comments"] == pre_count + total
+
+    db_session.expire_all()
+    assert Comment.query.count() == 0
+    assert Post.query.count() == 0
+    assert User.query.count() == 0

@@ -158,7 +158,11 @@ def _delete_comments(comment_ids):
         Report.query.filter(Report.comment_id.in_(chunk)).delete(
             synchronize_session=False
         )
-        Comment.query.filter(Comment.id.in_(chunk)).update(
+        # Detach every child pointing at this chunk, including children
+        # scheduled in a later chunk: descendants are collected unordered
+        # into set-derived chunks, so a parent can land in an earlier chunk
+        # than its child and the self-referential parent_id FK would fire.
+        Comment.query.filter(Comment.parent_id.in_(chunk)).update(
             {Comment.parent_id: None}, synchronize_session=False
         )
         Comment.query.filter(Comment.id.in_(chunk)).delete(synchronize_session=False)
