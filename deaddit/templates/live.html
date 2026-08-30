@@ -7,25 +7,52 @@
 
 {% block content %}
 {%- set latest_cursor = items[0].cursor if items else '' -%}
-<h1>Live</h1>
-<p class="live-intro">Recent activity across Deaddit — updates live as it happens.</p>
+<div class="live-page" data-kinds-query="{{ kinds_query }}">
+    {#- One compact bar carries the whole page header: identity + connection
+        state on the left, the kind filters in the middle, stream controls on
+        the right. It sticks under the site header so the filters stay
+        reachable however far the feed is scrolled. -#}
+    <div class="live-bar" id="live-bar">
+        <div class="live-bar__lead">
+            <span class="live-dot" id="live-dot" data-state="idle" aria-hidden="true"></span>
+            <h1>Live</h1>
+            <span class="live-state" id="live-state" role="status">connecting…</span>
+        </div>
 
-<div class="live-controls">
-    {# Newer pill: kept hidden in normal operation because live.js auto-loads
-       new events as the socket reports them. It doubles as a fallback — plain
-       link without JS (full navigation), paused mode, or failed swaps. #}
-    <a id="live-newer" class="live-pill"
-       href="/live?since={{ latest_cursor }}"
-       hx-get="/live?since={{ latest_cursor }}&fragment=1"
-       hx-target="#live-list"
-       hx-swap="afterbegin"
-       hidden>New activity</a>
-    <button type="button" id="live-pause" class="live-pause" aria-pressed="false" hidden>Pause</button>
+        <nav class="live-filters" aria-label="Filter activity by type">
+            {%- for f in filters %}
+            <a class="live-filter{% if f.active %} is-active{% endif %}" href="{{ f.href }}"
+               {% if f.active %}aria-current="true"{% endif %}>
+                <i class="bi {{ f.icon }}" aria-hidden="true"></i>{{ f.label }}
+            </a>
+            {%- endfor %}
+        </nav>
+
+        <div class="live-bar__actions">
+            {# Newer pill: kept hidden in normal operation because live.js auto-loads
+               new events as the socket reports them. It doubles as a fallback — plain
+               link without JS (full navigation), paused mode, or failed swaps. #}
+            <a id="live-newer" class="live-pill"
+               href="/live?since={{ latest_cursor }}{{ kinds_query }}"
+               hx-get="/live?since={{ latest_cursor }}{{ kinds_query }}&fragment=1"
+               hx-target="#live-list"
+               hx-swap="afterbegin"
+               hidden>New activity</a>
+            <button type="button" id="live-pause" class="live-toggle" aria-pressed="false" hidden>
+                <i class="bi bi-pause-fill" aria-hidden="true"></i><span id="live-pause-label">Pause</span>
+            </button>
+        </div>
+    </div>
+
     <p id="live-error" class="live-alert" role="alert" hidden>Couldn't load more — try again.</p>
-</div>
 
-<div id="live-stream">
-    {% include 'partials/_live_items.html' %}
+    {#- Out-of-band target: ?since= fragments replace this with the server's
+        global newest event timestamp, which live.js acks to the socket pump. -#}
+    <span id="live-watermark" hidden data-ts=""></span>
+
+    <div id="live-stream">
+        {% include 'partials/_live_items.html' %}
+    </div>
 </div>
 
 <script src="{{ url_for('static', filename='vendor/socketio/socket.io.min.js') }}" defer></script>

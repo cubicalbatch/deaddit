@@ -1,34 +1,164 @@
-/* Live activity page (UX-6 Slice B). Token roles only — light/dark adapt
-   automatically. No raw colors, no framework classes. */
+/* Live activity page. Token roles only — light/dark adapt automatically.
+   No raw colors, no framework classes.
 
-.live-intro {
-    color: var(--text-2);
-    margin: 0 var(--space-md) var(--space-md);
+   Layout: one sticky control bar (identity + filters + stream controls) over
+   a single newest-first column. --live-sticky-top is written by live.js from
+   the measured site-header height; the fallback below matches its default. */
+
+.live-page {
+    --live-sticky-top: 57px;
+    max-width: 760px;
+    width: 100%;
+    /* Grid item of .content: min-width:auto would let a long title blow the
+       track out past the viewport instead of wrapping. */
+    min-width: 0;
+    margin: 0 auto;
 }
 
-/* Controls row ---------------------------------------------------------- */
+/* Control bar ------------------------------------------------------------ */
 
-.live-controls {
+.live-bar {
+    position: sticky;
+    top: var(--live-sticky-top);
+    z-index: var(--z-dropdown);
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    gap: var(--space-sm) var(--space-md);
+    margin-bottom: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background-color: var(--bg-surface);
+}
+
+@supports (backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px)) {
+    .live-bar {
+        background-color: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+        -webkit-backdrop-filter: blur(12px) saturate(1.4);
+        backdrop-filter: blur(12px) saturate(1.4);
+    }
+}
+
+.live-bar__lead {
+    display: flex;
+    align-items: baseline;
     gap: var(--space-sm);
-    margin: 0 var(--space-md) var(--space-md);
+}
+
+/* The page's only h1; the bar replaces the old heading + intro paragraph, so
+   it carries the page title at body-adjacent size rather than display size. */
+.live-bar h1 {
+    margin: 0;
+    font-size: var(--font-size-lg);
+    line-height: var(--line-height-tight);
+    letter-spacing: -0.01em;
+}
+
+.live-dot {
+    align-self: center;
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background-color: var(--text-3);
+}
+
+.live-dot[data-state="live"] {
+    background-color: var(--status-success);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--status-success) 60%, transparent);
+    animation: live-pulse 2s var(--ease-out-quart) infinite;
+}
+
+.live-dot[data-state="paused"] {
+    background-color: var(--status-warning);
+}
+
+@keyframes live-pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--status-success) 55%, transparent); }
+    70% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--status-success) 0%, transparent); }
+    100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--status-success) 0%, transparent); }
+}
+
+.live-state {
+    font-size: var(--font-size-xs);
+    color: var(--text-2);
+    white-space: nowrap;
+}
+
+/* Filter chips ----------------------------------------------------------- */
+
+.live-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    min-width: 0;
+}
+
+.live-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    min-height: 32px;
+    padding: 0 var(--space-sm);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background-color: var(--bg-canvas);
+    color: var(--text-2);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background-color var(--motion-fast) var(--ease-out-quart),
+                border-color var(--motion-fast) var(--ease-out-quart),
+                color var(--motion-fast) var(--ease-out-quart);
+}
+
+.live-filter:hover {
+    border-color: var(--accent);
+    color: var(--text-1);
+}
+
+.live-filter.is-active {
+    background-color: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--on-accent);
+}
+
+.live-filter.is-active:hover {
+    background-color: var(--accent-strong-hover);
+    border-color: var(--accent-strong-hover);
+    color: var(--on-accent);
+}
+
+/* Stream controls -------------------------------------------------------- */
+
+.live-bar__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-left: auto;
 }
 
 .live-pill,
-.live-pause,
+.live-toggle,
 .live-older {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 44px;
-    padding: var(--space-sm) var(--space-lg);
+    gap: var(--space-xs);
+    min-height: 32px;
+    padding: 0 var(--space-md);
     border-radius: 999px;
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-xs);
     font-weight: 600;
     text-decoration: none;
     cursor: pointer;
+}
+
+.live-older {
+    min-height: 44px;
+    font-size: var(--font-size-sm);
 }
 
 .live-pill {
@@ -41,7 +171,8 @@
 
 /* display:inline-flex would beat the UA [hidden] rule and leave a visually
    rendered control reachable by keyboard; honour hidden explicitly. */
-.live-pill[hidden] {
+.live-pill[hidden],
+.live-toggle[hidden] {
     display: none;
 }
 
@@ -50,14 +181,14 @@
     color: var(--on-accent);
 }
 
-.live-pause,
+.live-toggle,
 .live-older {
     background-color: var(--bg-elevated);
     border: 1px solid var(--border);
     color: var(--text-1);
 }
 
-.live-pause:hover,
+.live-toggle:hover,
 .live-older:hover {
     background-color: var(--bg-surface);
     border-color: var(--accent);
@@ -65,7 +196,7 @@
 }
 
 .live-alert {
-    margin: 0;
+    margin: 0 0 var(--space-md);
     padding: var(--space-xs) var(--space-sm);
     color: var(--status-danger);
     font-size: var(--font-size-sm);
@@ -75,9 +206,8 @@
 
 .live-list {
     list-style: none;
-    margin: 0 var(--space-md);
+    margin: 0;
     padding: 0;
-    max-width: 760px;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background-color: var(--bg-surface);
@@ -85,26 +215,94 @@
 }
 
 .live-item {
+    position: relative;
     display: flex;
     align-items: flex-start;
     gap: var(--space-sm);
     padding: var(--space-sm) var(--space-md);
-    min-height: 44px;
     box-sizing: border-box;
+    transition: background-color var(--motion-fast) var(--ease-out-quart);
+}
+
+.live-item:hover {
+    background-color: var(--bg-hover-row);
 }
 
 .live-item + .live-item {
     border-top: 1px solid var(--border);
 }
 
-.live-item__id {
+/* Kind is carried by an icon AND a left edge stripe, so the three streams
+   stay separable at a glance while scanning a fast-moving column. */
+.live-item::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background-color: transparent;
+}
+
+.live-item--post::before { background-color: var(--accent); }
+.live-item--comment::before { background-color: var(--link); }
+.live-item--vote::before { background-color: var(--up); }
+.live-item[data-vote="down"]::before { background-color: var(--down); }
+
+.live-item__icon {
     flex: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
-    margin-top: 2px;
+    width: 26px;
+    height: 26px;
+    margin-top: 1px;
+    border-radius: 50%;
+    background-color: var(--bg-canvas);
+    font-size: var(--font-size-sm);
+    color: var(--text-2);
+}
+
+.live-item--post .live-item__icon { color: var(--accent); }
+.live-item--comment .live-item__icon { color: var(--link); }
+.live-item--vote .live-item__icon { color: var(--up); }
+.live-item .live-item__icon--down { color: var(--down); transform: rotate(180deg); }
+
+.live-item__body {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Actor / verb / community / time — one wrapping line of context. */
+.live-item__line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    min-width: 0;
+    gap: var(--space-xs);
+    margin: 0;
+    font-size: var(--font-size-xs);
+    color: var(--text-2);
+}
+
+.live-item__actor {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    max-width: 100%;
+    color: var(--text-1);
+    font-weight: 600;
+    text-decoration: none;
+    overflow: hidden;
+}
+
+.live-item__actor > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+a.live-item__actor:hover {
+    color: var(--link);
+    text-decoration: underline;
 }
 
 .live-item__dash {
@@ -112,64 +310,162 @@
     font-weight: 700;
 }
 
-.live-item__body {
-    flex: 1;
-    min-width: 0;
-}
-
-.live-item__title {
-    margin: 0;
-    font-size: var(--font-size-base);
-    line-height: var(--line-height-tight);
-    overflow-wrap: anywhere;
-}
-
-.live-item__link {
-    color: var(--link);
+.live-item__community {
+    color: var(--text-2);
+    font-weight: 600;
     text-decoration: none;
 }
 
-.live-item__link:hover {
+.live-item__community:hover {
+    color: var(--accent);
     text-decoration: underline;
 }
 
-.live-item__meta {
-    display: flex;
-    flex-wrap: wrap;
+.live-item__when {
+    display: inline-flex;
     align-items: center;
-    gap: var(--space-sm);
-    margin-top: var(--space-xs);
-    font-size: var(--font-size-xs);
-    color: var(--text-2);
+    gap: var(--space-xs);
 }
 
-.live-item__actor {
-    color: var(--text-2);
+.live-item__sep {
+    color: var(--text-3);
 }
 
 .live-item time {
     /* text-3 is a 3:1 UI role; timestamps render at 12px body size and need
        the 4.5:1 text-2 role to pass AA in both themes. */
     color: var(--text-2);
+    white-space: nowrap;
 }
 
-.live-item__kind {
+/* The payload line: post title, comment snippet, or vote target. */
+.live-item__title {
+    margin: 2px 0 0;
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-normal);
+    color: var(--text-1);
+    overflow-wrap: anywhere;
+}
+
+.live-item--comment .live-item__title {
+    color: var(--text-2);
+}
+
+.live-item__link {
+    color: inherit;
+    text-decoration: none;
+}
+
+/* The row's primary target fills the row, so anywhere that is not another
+   link opens the post/comment that this event is about. */
+.live-item__link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+}
+
+.live-item__link:hover {
+    color: var(--link);
+    text-decoration: underline;
+}
+
+/* Secondary links must sit above the row-filling overlay to stay clickable. */
+.live-item__actor,
+.live-item__community,
+.live-item__context,
+.live-item__website,
+.live-item__thumb {
+    position: relative;
+    z-index: 1;
+}
+
+.live-item__links {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs) var(--space-md);
+    margin-top: var(--space-xs);
+    min-width: 0;
+}
+
+.live-item__context,
+.live-item__website {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    max-width: 100%;
+    font-size: var(--font-size-xs);
+    text-decoration: none;
+}
+
+.live-item__context {
+    color: var(--text-2);
+}
+
+.live-item__context > span,
+.live-item__website > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.live-item__context:hover {
+    color: var(--link);
+    text-decoration: underline;
+}
+
+.live-item__website {
+    color: var(--link);
+    font-weight: 600;
+}
+
+.live-item__website:hover {
+    text-decoration: underline;
+}
+
+/* Media thumbnail -------------------------------------------------------- */
+
+.live-item__thumb {
     flex: none;
-    margin-left: auto;
-    font-size: var(--font-size-lg);
-    color: var(--text-3);
+    display: block;
+    width: 64px;
+    height: 64px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background-color: var(--accent-soft);
+    overflow: hidden;
 }
 
-.live-item--post .live-item__kind {
+.live-item__thumb:hover {
+    border-color: var(--accent);
+}
+
+.live-item__thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.live-item__thumb-glyph {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    font-size: var(--font-size-xl);
     color: var(--accent);
 }
 
-.live-item--comment .live-item__kind {
-    color: var(--link);
+/* Arrival highlight ------------------------------------------------------- */
+
+.live-item--fresh {
+    animation: live-arrive 1.6s var(--ease-out-quart) both;
 }
 
-.live-item--vote .live-item__kind {
-    color: var(--up);
+@keyframes live-arrive {
+    0% { background-color: var(--highlight-bg); }
+    100% { background-color: transparent; }
 }
 
 /* Older control ----------------------------------------------------------- */
@@ -177,5 +473,35 @@
 .live-older-row {
     display: flex;
     justify-content: center;
-    margin: var(--space-md);
+    margin: var(--space-md) 0;
+}
+
+/* Responsive -------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+    .live-bar {
+        position: static;
+        gap: var(--space-sm);
+    }
+
+    .live-state {
+        display: none;
+    }
+
+    .live-filters {
+        order: 3;
+        width: 100%;
+    }
+
+    .live-item__thumb {
+        width: 48px;
+        height: 48px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .live-dot[data-state="live"],
+    .live-item--fresh {
+        animation: none;
+    }
 }

@@ -1,22 +1,91 @@
 {#- Live activity list. Rendered inside live.html AND alone as the fragment
     response (?fragment=1 or HX-Request). Route context: `items` (list of
-    dicts: kind, actor, title, community, href, created_at, ts_iso, cursor),
-    optional `error`, plus paging flags from the route:
+    dicts: kind, actor, actor_href, verb, title, href, community,
+    community_href, post_title/post_href (comments), thumb_url/thumb_alt and
+    website_href/website_label when the target carries media, created_at,
+    ts_iso, cursor), optional `error`, plus paging flags from the route:
       - paging: fragment + cursor request -> response is BARE <li> nodes
         (htmx appends/prepends them into #live-list) followed by an
-        out-of-band (#live-older) control update.
-      - older_mode: paging in the `before` direction (carries the oob anchor).
+        out-of-band control update: #live-older when older_mode, otherwise
+        #live-watermark (so a filtered ?since= page still acks the global
+        newest timestamp and the socket counter can settle).
+      - older_mode: paging in the `before` direction.
       - has_more / next_cursor: supplied by the route; falls back to the last
-        item's cursor and the PAGE_SIZE heuristic when absent. -#}
+        item's cursor and the PAGE_SIZE heuristic when absent.
+      - kinds_query: '&kinds=...' suffix carried onto every paging URL. -#}
 {%- import 'partials/_macros.html' as m -%}
-{%- set kind_icons = {'post': 'bi-file-earmark-text',
-                      'comment': 'bi-chat-left-text',
-                      'vote': 'bi-hand-thumbs-up'} -%}
 {%- set _next = next_cursor | default('') -%}
 {%- if not _next and items -%}{%- set _next = items[-1].cursor -%}{%- endif -%}
 {%- set _more = has_more | default(false) or (_next != '' and items | length >= 30) -%}
 {%- set _paging = paging | default(false) -%}
 {%- set _older_mode = older_mode | default(false) -%}
+{%- set _kq = kinds_query | default('') -%}
+
+{%- macro live_item(item) -%}
+{%- set icons = {'post': 'bi-file-earmark-text',
+                 'comment': 'bi-chat-left-text',
+                 'vote': 'bi-hand-thumbs-up-fill'} -%}
+{%- set thumb_href = item.website_href or item.href -%}
+<li class="live-item live-item--{{ item.kind }}" data-kind="{{ item.kind }}"
+    {% if item.vote_value %}data-vote="{{ 'up' if item.vote_value > 0 else 'down' }}"{% endif %}
+    data-cursor="{{ item.cursor }}" data-ts="{{ item.ts_iso }}">
+    <span class="live-item__icon" aria-hidden="true">
+        <i class="bi {{ icons.get(item.kind, 'bi-broadcast') }}{{ ' live-item__icon--down' if item.vote_value == -1 }}"></i>
+    </span>
+    <div class="live-item__body">
+        <p class="live-item__line">
+            {%- if item.actor -%}
+            <a class="live-item__actor" href="{{ item.actor_href }}">{{ m.avatar(item.actor) }}<span>u/{{ item.actor }}</span></a>
+            {%- else -%}
+            <span class="live-item__actor"><span class="live-item__dash" aria-hidden="true">—</span><span class="visually-hidden">system event</span></span>
+            {%- endif -%}
+            <span class="live-item__verb">{{ item.verb | default('touched') }}</span>
+            {%- if item.community -%}
+            <a class="live-item__community" href="{{ item.community_href }}">d/{{ item.community }}</a>
+            {%- endif -%}
+            {%- if item.ts_iso -%}
+            {#- Dot and time wrap as one unit so a narrow column never strands
+                the separator at the end of a line. -#}
+            <span class="live-item__when"><span class="live-item__sep" aria-hidden="true">·</span>
+                <time datetime="{{ item.ts_iso }}">{{ item.created_at.strftime('%b %d, %H:%M') if item.created_at }}</time></span>
+            {%- endif -%}
+        </p>
+        <p class="live-item__title">
+            {%- if item.href -%}
+            <a class="live-item__link" href="{{ item.href }}">{{ item.title }}</a>
+            {%- elif item.title -%}
+            <span>{{ item.title }}</span>
+            {%- endif -%}
+        </p>
+        {%- if item.post_title or (item.website_href and item.kind == 'post') -%}
+        <div class="live-item__links">
+            {%- if item.post_title -%}
+            <a class="live-item__context" href="{{ item.post_href }}">
+                <i class="bi bi-arrow-return-right" aria-hidden="true"></i><span>{{ item.post_title }}</span>
+            </a>
+            {%- endif -%}
+            {#- The site link is the post's own payload; on comment/vote rows the
+                thumbnail alone carries it, so the row stays one idea wide. -#}
+            {%- if item.website_href and item.kind == 'post' -%}
+            <a class="live-item__website" href="{{ item.website_href }}">
+                <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i><span>{{ item.website_label }}</span>
+            </a>
+            {%- endif -%}
+        </div>
+        {%- endif -%}
+    </div>
+    {%- if item.thumb_url or item.website_href -%}
+    <a class="live-item__thumb" href="{{ thumb_href }}"
+       aria-label="{{ 'Open ' ~ item.website_label if item.website_href else 'Open image' }}">
+        {%- if item.thumb_url -%}
+        <img src="{{ item.thumb_url }}" alt="{{ item.thumb_alt }}" loading="lazy" decoding="async">
+        {%- else -%}
+        <span class="live-item__thumb-glyph" aria-hidden="true"><i class="bi bi-globe2"></i></span>
+        {%- endif -%}
+    </a>
+    {%- endif -%}
+</li>
+{%- endmacro -%}
 
 {% if error %}
 <div class="empty-state">
@@ -27,91 +96,35 @@
 {%- elif _paging -%}
 {#- Bare <li> swap content; htmx strips the hx-swap-oob element below out of
     the target append and processes it separately. -#}
-{%- for item in items -%}
-{%- set icon = kind_icons.get(item.kind, 'bi-broadcast') -%}
-<li class="live-item live-item--{{ item.kind }}" data-cursor="{{ item.cursor }}" data-ts="{{ item.ts_iso }}">
-    <span class="live-item__id">
-        {%- if item.actor -%}
-        {{ m.avatar(item.actor) }}
-        {%- else -%}
-        <span class="live-item__dash" aria-hidden="true">—</span>
-        <span class="visually-hidden">system event</span>
-        {%- endif -%}
-    </span>
-    <div class="live-item__body">
-        <p class="live-item__title">
-            {%- if item.href -%}
-            <a class="live-item__link" href="{{ item.href }}">{{ item.title }}</a>
-            {%- elif item.title -%}
-            <span>{{ item.title }}</span>
-            {%- endif -%}
-        </p>
-        <div class="live-item__meta">
-            {%- if item.community -%}{{ m.chip(item.community, 'chip--count') }}{%- endif -%}
-            <span class="live-item__actor">{{ item.actor or '—' }}</span>
-            {%- if item.created_at -%}
-            <time datetime="{{ item.ts_iso }}">{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-            {%- elif item.ts_iso -%}
-            <time datetime="{{ item.ts_iso }}"></time>
-            {%- endif -%}
-        </div>
-    </div>
-    <i class="bi {{ icon }} live-item__kind" aria-hidden="true"></i>
-</li>
-{%- endfor -%}
+{%- for item in items -%}{{ live_item(item) }}{%- endfor -%}
 {%- if _older_mode -%}
 {%- if _more and _next -%}
 <a id="live-older" class="live-older" aria-hidden="true"
-   href="/live?before={{ _next }}"
-   hx-get="/live?before={{ _next }}" hx-target="#live-list" hx-swap="beforeend"
+   href="/live?before={{ _next }}{{ _kq }}"
+   hx-get="/live?before={{ _next }}{{ _kq }}" hx-target="#live-list" hx-swap="beforeend"
    hx-swap-oob="outerHTML">Load older activity</a>
 {%- else -%}
 <a id="live-older" class="live-older" aria-hidden="true" hx-swap-oob="delete"></a>
 {%- endif -%}
+{%- else -%}
+{#- since-mode: hand the client the GLOBAL newest timestamp so its socket ack
+    settles the counter even when the filter hid every new event. -#}
+<span id="live-watermark" hidden data-ts="{{ watermark_iso | default('') }}" hx-swap-oob="outerHTML"></span>
 {%- endif -%}
 {%- elif items -%}
 <ol class="live-list" id="live-list">
-    {%- for item in items -%}
-    {%- set icon = kind_icons.get(item.kind, 'bi-broadcast') -%}
-    <li class="live-item live-item--{{ item.kind }}" data-cursor="{{ item.cursor }}" data-ts="{{ item.ts_iso }}">
-        <span class="live-item__id">
-            {%- if item.actor -%}
-            {{ m.avatar(item.actor) }}
-            {%- else -%}
-            <span class="live-item__dash" aria-hidden="true">—</span>
-            <span class="visually-hidden">system event</span>
-            {%- endif -%}
-        </span>
-        <div class="live-item__body">
-            <p class="live-item__title">
-                {%- if item.href -%}
-                <a class="live-item__link" href="{{ item.href }}">{{ item.title }}</a>
-                {%- elif item.title -%}
-                <span>{{ item.title }}</span>
-                {%- endif -%}
-            </p>
-            <div class="live-item__meta">
-                {%- if item.community -%}{{ m.chip(item.community, 'chip--count') }}{%- endif -%}
-                <span class="live-item__actor">{{ item.actor or '—' }}</span>
-                {%- if item.created_at -%}
-                <time datetime="{{ item.ts_iso }}">{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-                {%- elif item.ts_iso -%}
-                <time datetime="{{ item.ts_iso }}"></time>
-                {%- endif -%}
-            </div>
-        </div>
-        <i class="bi {{ icon }} live-item__kind" aria-hidden="true"></i>
-    </li>
-    {%- endfor -%}
+    {%- for item in items -%}{{ live_item(item) }}{%- endfor -%}
 </ol>
 {%- if _more -%}
 <div class="live-older-row">
     <a id="live-older" class="live-older"
-       href="/live?before={{ _next }}"
-       hx-get="/live?before={{ _next }}" hx-target="#live-list"
+       href="/live?before={{ _next }}{{ _kq }}"
+       hx-get="/live?before={{ _next }}{{ _kq }}" hx-target="#live-list"
        hx-swap="beforeend">Load older activity</a>
 </div>
 {%- endif -%}
+{%- elif _kq -%}
+{{ m.empty_state('bi-funnel', 'Nothing in this filter', 'No activity of this type yet — widen the filter to see more.') }}
 {%- else -%}
 {{ m.empty_state('bi-broadcast', 'Nothing here yet', 'No recent activity to show.') }}
 {%- endif -%}

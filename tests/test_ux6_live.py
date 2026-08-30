@@ -20,7 +20,9 @@ from deaddit.models import (
     AgentRun,
     AgentTurn,
     Comment,
+    GeneratedWebsite,
     Post,
+    PostImage,
     Subdeaddit,
     ToolCall,
     User,
@@ -424,6 +426,290 @@ def test_removed_posts_and_comments_never_appear(app, client):
     assert "Removed post unique-zz" not in html
     assert "removed comment zz" not in html
     assert "orphan under removed post yy" not in html
+
+
+# ---------------------------------------------------------------------------
+# 3b. Kind filter (?kinds=)
+# ---------------------------------------------------------------------------
+
+_KIND_RE = re.compile(r'data-kind="([a-z]+)"')
+
+
+def _rendered_kinds(html: str) -> set[str]:
+    return set(_KIND_RE.findall(html))
+
+
+@pytest.mark.parametrize(
+    ("param", "expected"),
+    [
+        ("post", {"post"}),
+        ("comment", {"comment"}),
+        ("vote", {"vote"}),
+        ("post,comment", {"post", "comment"}),
+        ("vote,post", {"post", "vote"}),
+    ],
+)
+def test_kinds_param_renders_only_selected_sources(app, client, param, expected):
+    with app.app_context():
+        _seed_activity_events(_db.session)
+    html = client.get(f"/live?fragment=1&kinds={param}").get_data(as_text=True)
+    assert _rendered_kinds(html) == expected
+
+
+@pytest.mark.parametrize("param", ["", "  ", "bogus", "bogus,alsobad", ",,,"])
+def test_unusable_kinds_param_falls_back_to_every_source(app, client, param):
+    """An empty/garbage selection must never render a permanently blank feed."""
+    with app.app_context():
+        _seed_activity_events(_db.session)
+    html = client.get(f"/live?fragment=1&kinds={param}").get_data(as_text=True)
+    assert _rendered_kinds(html) == {"post", "comment", "vote"}
+    assert live_mod.parse_kinds(param or None) == live_mod.KINDS
+
+
+def test_kind_filter_survives_before_paging(app, client):
+    """The older-page control carries the active selection forward."""
+    with app.app_context():
+        _seed_activity_events(_db.session)
+    # Two kinds so the seeded volume still fills a full page.
+    first = client.get("/live?fragment=1&kinds=comment,vote").get_data(as_text=True)
+    keys = _fragment_keys(first)
+    assert len(keys) == live_mod.PAGE_SIZE
+    assert "kinds=comment%2Cvote" in first or "kinds=comment,vote" in first
+    page2 = client.get(
+        "/live?fragment=1&kinds=comment,vote&before="
+        + live_mod.encode_cursor(*keys[-1])
+    ).get_data(as_text=True)
+    assert _rendered_kinds(page2) == {"comment", "vote"}
+    assert all(k < keys[-1] for k in _fragment_keys(page2))
+
+
+def test_filter_chips_isolate_from_all_and_toggle_off_back_to_all(app, client):
+    with app.test_request_context("/live"):
+        assert live_mod._filter_links(live_mod.KINDS) == [
+            {
+                "key": "all",
+                "label": "All",
+                "icon": "bi-broadcast",
+                "active": True,
+                "href": "/live",
+            },
+            # From "All" a chip isolates its own kind.
+            {
+                "key": "post",
+                "label": "Posts",
+                "icon": "bi-file-earmark-text",
+                "active": False,
+                "href": "/live?kinds=post",
+            },
+            {
+                "key": "comment",
+                "label": "Comments",
+                "icon": "bi-chat-left-text",
+                "active": False,
+                "href": "/live?kinds=comment",
+            },
+            {
+                "key": "vote",
+                "label": "Votes",
+                "icon": "bi-hand-thumbs-up",
+                "active": False,
+                "href": "/live?kinds=vote",
+            },
+        ]
+
+        by_key = {link["key"]: link for link in live_mod._filter_links(("post",))}
+        assert by_key["post"]["active"] is True
+        # Turning the only active chip off returns to the unfiltered feed...
+        assert by_key["post"]["href"] == "/live"
+        # ...and an inactive chip adds itself to the selection.
+        assert by_key["comment"]["href"] == "/live?kinds=comment,post"
+        assert by_key["all"]["active"] is False
+
+
+def test_since_fragment_carries_out_of_band_watermark(app, client):
+    """A filtered ?since= page still hands back the GLOBAL newest timestamp.
+
+    Without it the socket pump's watermark would stall on events the filter
+    chose not to render and re-report them on every tick.
+    """
+    with app.app_context():
+        _seed_activity_events(_db.session)
+        newest = live_mod.max_event_ts()
+        walked = _walk_before_pages(client)
+
+    pivot = walked[5]
+    html = client.get(
+        f"/live?fragment=1&kinds=post&since={live_mod.encode_cursor(*pivot)}"
+    ).get_data(as_text=True)
+    assert 'id="live-watermark"' in html
+    assert f'data-ts="{newest.isoformat()}"' in html
+    assert 'hx-swap-oob="outerHTML"' in html
+    # The filter still applies to the rendered rows themselves.
+    assert _rendered_kinds(html) <= {"post"}
+
+
+def test_filtered_empty_feed_states_the_filter(app, client):
+    html = client.get("/live?fragment=1&kinds=vote").get_data(as_text=True)
+    assert "Nothing in this filter" in html
+
+
+# ---------------------------------------------------------------------------
+# 3c. Row targets and media thumbnails
+# ---------------------------------------------------------------------------
+
+
+def _seed_media_activity(db_session):
+    """One image post and one website post, each with a comment and votes."""
+    db_session.add_all(
+        [User(username=n) for n in ("alice", "bob")]
+        + [Subdeaddit(name="mediasub", description="media seed")]
+    )
+    image_post = Post(
+        title="Image post",
+        content="c",
+        user="alice",
+        subdeaddit_name="mediasub",
+        model="m",
+        created_at=_BASE - timedelta(minutes=1),
+    )
+    site_post = Post(
+        title="Website post",
+        content="c",
+        user="alice",
+        subdeaddit_name="mediasub",
+        model="m",
+        created_at=_BASE - timedelta(minutes=2),
+    )
+    db_session.add_all([image_post, site_post])
+    db_session.flush()
+    db_session.add_all(
+        [
+            PostImage(
+                post_id=image_post.id,
+                original_path="originals/full.png",
+                thumbnail_path="thumbnails/thumb.png",
+                mime_type="image/png",
+                byte_size=1,
+                width=8,
+                height=8,
+                alt_text="Alt text for the generated image",
+                source_prompt="p",
+                provider_snapshot="prov",
+                model_snapshot="mod",
+            ),
+            GeneratedWebsite(
+                post_id=site_post.id,
+                public_path="example.test/landing.html",
+                storage_path="pages/one.html",
+                hostname="example.test",
+                page_name="landing",
+                source_description="d",
+                byte_size=1,
+                sha256="0" * 64,
+                creator_username_snapshot="alice",
+                api_url_snapshot="http://api.test/v1",
+                model_snapshot="mod",
+            ),
+        ]
+    )
+    comment = Comment(
+        post_id=image_post.id,
+        content="A comment under the image post",
+        user="bob",
+        model="m",
+        created_at=_BASE - timedelta(minutes=3),
+    )
+    db_session.add(comment)
+    db_session.flush()
+    db_session.add_all(
+        [
+            Vote(
+                voter="bob",
+                post_id=site_post.id,
+                value=1,
+                source="human",
+                created_at=_BASE - timedelta(minutes=4),
+            ),
+            Vote(
+                voter="alice",
+                comment_id=comment.id,
+                value=-1,
+                source="human",
+                created_at=_BASE - timedelta(minutes=5),
+            ),
+        ]
+    )
+    db_session.commit()
+    return image_post, site_post, comment
+
+
+def test_media_thumbnails_render_for_every_kind_touching_the_post(app, client):
+    with app.app_context():
+        image_post, site_post, comment = _seed_media_activity(_db.session)
+        html = client.get("/live?fragment=1").get_data(as_text=True)
+
+    # The image post AND every row hanging off it show the same thumbnail:
+    # the post, its comment, and the downvote on that comment.
+    assert html.count("thumbnail/thumb.png") == 3
+    assert 'alt="Alt text for the generated image"' in html
+    # The website post and the vote on it both get a clickable site tile...
+    assert html.count("live-item__thumb-glyph") == 2
+    assert "example.test/landing" in html
+    # ...but only the post row spells the destination out; rows that merely
+    # touch it keep the tile alone so they stay one idea wide.
+    assert html.count("live-item__website") == 1
+
+
+def test_media_lookup_batches_regardless_of_page_size(app, client):
+    """Thumbnails cost two queries per page, not two per row."""
+    from sqlalchemy import event as sa_event
+
+    with app.app_context():
+        _seed_media_activity(_db.session)
+        statements = []
+
+        def _record(conn, cursor, statement, *args):
+            statements.append(statement)
+
+        sa_event.listen(_db.engine, "before_cursor_execute", _record)
+        try:
+            client.get("/live?fragment=1")
+        finally:
+            sa_event.remove(_db.engine, "before_cursor_execute", _record)
+
+    assert sum(1 for s in statements if "post_image" in s) == 1
+    assert sum(1 for s in statements if "generated_website" in s) == 1
+
+
+def test_rows_link_to_the_thing_the_event_is_about(app, client):
+    with app.test_request_context("/live"):
+        image_post, site_post, comment = _seed_media_activity(_db.session)
+        image_post_id, comment_id = image_post.id, comment.id
+        items = live_mod._collect_events(newer=False, cursor=None)
+
+    by_kind = {}
+    for item in items:
+        by_kind.setdefault(item["kind"], []).append(item)
+
+    # A comment event deep-links to the comment and offers its post as context.
+    comment_item = by_kind["comment"][0]
+    assert comment_item["href"].endswith(f"#comment-{comment_id}")
+    assert comment_item["post_title"] == "Image post"
+    assert comment_item["post_href"] == f"/d/mediasub/{image_post_id}"
+
+    # A vote on a comment leads with the comment text, deep-links to it, and
+    # keeps the parent post as the context line.
+    comment_vote = next(v for v in by_kind["vote"] if "comment" in v["verb"])
+    assert comment_vote["verb"] == "downvoted a comment in"
+    assert comment_vote["title"] == "A comment under the image post"
+    assert comment_vote["post_title"] == "Image post"
+    assert comment_vote["href"].endswith(f"#comment-{comment_id}")
+
+    # A vote on a post leads with the post title and needs no context line.
+    post_vote = next(v for v in by_kind["vote"] if "post" in v["verb"])
+    assert post_vote["verb"] == "upvoted a post in"
+    assert post_vote["title"] == "Website post"
+    assert "post_title" not in post_vote
 
 
 # ---------------------------------------------------------------------------

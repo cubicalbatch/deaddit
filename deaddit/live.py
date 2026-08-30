@@ -6,7 +6,8 @@ page) or ``partials/_live_items.html`` (fragment mode).
 
 Pagination is keyset-based: each item carries an opaque cursor encoding
 ``(created_at, kind, id)``; ``?before=`` returns strictly older items,
-``?since=`` strictly newer ones. The socket pump in
+``?since=`` strictly newer ones. ``?kinds=post,comment`` narrows which
+sources contribute (default: all three). The socket pump in
 ``deaddit/runtime/live_pump.py`` reuses the source predicates/count helpers
 below -- do not duplicate their SQL.
 """
@@ -25,7 +26,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import aliased
 
 from deaddit.extensions import db
-from deaddit.models import Comment, Post, Vote
+from deaddit.models import Comment, GeneratedWebsite, Post, PostImage, Vote
 from deaddit.utils import process_post_title
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,14 @@ NEWER_LIMIT = 50
 _COMMENT_SNIPPET_LEN = 140
 
 KINDS = ("comment", "post", "vote")
+
+# Filter chips, in display order (distinct from KINDS, which is the cursor
+# tie-break order and must stay alphabetical).
+KIND_FILTERS = (
+    ("post", "Posts", "bi-file-earmark-text"),
+    ("comment", "Comments", "bi-chat-left-text"),
+    ("vote", "Votes", "bi-hand-thumbs-up"),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +77,74 @@ def decode_cursor(raw: str | None) -> tuple[datetime, str, int] | None:
     if kind not in KINDS or ts.tzinfo is not None:
         return None
     return ts, kind, id_
+
+
+# ---------------------------------------------------------------------------
+# Kind filter (?kinds=post,vote)
+# ---------------------------------------------------------------------------
+
+
+def parse_kinds(raw: str | None) -> tuple[str, ...]:
+    """Selected sources in KINDS order; anything unparseable -> all kinds.
+
+    An empty selection is meaningless for a feed, so it also falls back to
+    all three rather than rendering a permanently blank page.
+    """
+    if not raw:
+        return KINDS
+    wanted = {part.strip().lower() for part in raw.split(",") if part.strip()}
+    selected = tuple(kind for kind in KINDS if kind in wanted)
+    return selected or KINDS
+
+
+def _kinds_query(kinds: tuple[str, ...]) -> str:
+    """``&kinds=...`` suffix for paging URLs; empty when nothing is filtered."""
+    if set(kinds) == set(KINDS):
+        return ""
+    return "&kinds=" + ",".join(kinds)
+
+
+def _filter_href(kinds: tuple[str, ...]) -> str:
+    if not kinds or set(kinds) == set(KINDS):
+        return url_for("live.recent")
+    return url_for("live.recent", kinds=",".join(kinds))
+
+
+def _filter_links(active: tuple[str, ...]) -> list[dict]:
+    """Chip descriptors for the header filter row.
+
+    From the unfiltered "All" state a chip *isolates* its kind (the common
+    intent); from a narrowed state it toggles in/out of the selection, and
+    clearing the last one returns to All.
+    """
+    all_active = set(active) == set(KINDS)
+    links = [
+        {
+            "key": "all",
+            "label": "All",
+            "icon": "bi-broadcast",
+            "active": all_active,
+            "href": url_for("live.recent"),
+        }
+    ]
+    for key, label, icon in KIND_FILTERS:
+        is_on = not all_active and key in active
+        if all_active:
+            nxt: tuple[str, ...] = (key,)
+        elif is_on:
+            nxt = tuple(k for k in active if k != key)
+        else:
+            nxt = tuple(k for k in KINDS if k in set(active) | {key})
+        links.append(
+            {
+                "key": key,
+                "label": label,
+                "icon": icon,
+                "active": is_on,
+                "href": _filter_href(nxt),
+            }
+        )
+    return links
 
 
 # ---------------------------------------------------------------------------
@@ -173,8 +250,10 @@ def _post_events(newer: bool, cursor) -> list[_EventRow]:
             r.id,
             {
                 "actor": r.user,
+                "verb": "posted in",
                 "title": process_post_title(r.title),
                 "community": r.subdeaddit_name,
+                "post_id": r.id,
                 "href": url_for(
                     "web.post",
                     subdeaddit_name=r.subdeaddit_name,
@@ -197,6 +276,7 @@ def _comment_events(newer: bool, cursor) -> list[_EventRow]:
             Comment.user,
             Post.subdeaddit_name,
             Post.id.label("post_id"),
+            Post.title.label("post_title"),
         ),
         lambda s: s.join(Post, Comment.post_id == Post.id),
         Comment.created_at,
@@ -206,29 +286,33 @@ def _comment_events(newer: bool, cursor) -> list[_EventRow]:
         cursor,
         "comment",
     )
-    return [
-        (
-            r.created_at,
-            "comment",
-            r.id,
-            {
-                "actor": r.user,
-                "title": _plain_snippet(r.content),
-                "community": r.subdeaddit_name,
-                "href": url_for(
-                    "web.post",
-                    subdeaddit_name=r.subdeaddit_name,
-                    post_id=r.post_id,
-                )
-                + f"#comment-{r.id}",
-            },
+    events = []
+    for r in rows:
+        post_href = url_for(
+            "web.post", subdeaddit_name=r.subdeaddit_name, post_id=r.post_id
         )
-        for r in rows
-    ]
+        events.append(
+            (
+                r.created_at,
+                "comment",
+                r.id,
+                {
+                    "actor": r.user,
+                    "verb": "commented in",
+                    "title": _plain_snippet(r.content),
+                    "community": r.subdeaddit_name,
+                    "post_id": r.post_id,
+                    "post_title": process_post_title(r.post_title),
+                    "post_href": post_href,
+                    "href": f"{post_href}#comment-{r.id}",
+                },
+            )
+        )
+    return events
 
 
 def _vote_events(newer: bool, cursor) -> list[_EventRow]:
-    """Votes on posts ('voted on "<title>"') and on comments of a post."""
+    """Votes on posts, and on comments (which deep-link to the comment)."""
     vp = aliased(Post)
     vc = aliased(Comment)
     vpc = aliased(Post)
@@ -237,6 +321,8 @@ def _vote_events(newer: bool, cursor) -> list[_EventRow]:
         Vote.created_at,
         Vote.voter,
         Vote.value,
+        Vote.comment_id,
+        vc.content.label("comment_content"),
         vp.title.label("post_title"),
         vp.subdeaddit_name.label("post_sub"),
         vp.id.label("post_pk"),
@@ -258,34 +344,95 @@ def _vote_events(newer: bool, cursor) -> list[_EventRow]:
     )
     events: list[_EventRow] = []
     for r in rows:
-        title = r.post_title if r.post_title is not None else r.c_post_title
-        community = r.post_sub if r.post_sub is not None else r.c_post_sub
-        post_pk = r.post_pk if r.post_pk is not None else r.c_post_pk
+        on_post = r.post_title is not None
+        title = r.post_title if on_post else r.c_post_title
+        community = r.post_sub if on_post else r.c_post_sub
+        post_pk = r.post_pk if on_post else r.c_post_pk
         if title is None or community is None or post_pk is None:
             # Vote whose target (and its post) was hard-deleted: unrenderable.
             continue
-        phrase = (
-            f'voted on "{process_post_title(title)}"'
-            if r.post_title is not None
-            else f'voted on a comment on "{process_post_title(title)}"'
-        )
-        value = "+1" if r.value > 0 else "-1"
-        events.append(
-            (
-                r.created_at,
-                "vote",
-                r.id,
-                {
-                    "actor": r.voter,
-                    "title": f"{phrase} ({value})",
-                    "community": community,
-                    "href": url_for(
-                        "web.post", subdeaddit_name=community, post_id=post_pk
-                    ),
-                },
-            )
-        )
+        post_href = url_for("web.post", subdeaddit_name=community, post_id=post_pk)
+        direction = "upvoted" if r.value > 0 else "downvoted"
+        fields = {
+            "actor": r.voter,
+            "vote_value": 1 if r.value > 0 else -1,
+            "community": community,
+            "post_id": post_pk,
+            "href": post_href,
+        }
+        if on_post:
+            fields["verb"] = f"{direction} a post in"
+            fields["title"] = process_post_title(title)
+        else:
+            # Lead with what was actually voted on; the post it lives under
+            # becomes the context line, exactly like a comment event.
+            fields["verb"] = f"{direction} a comment in"
+            fields["title"] = _plain_snippet(r.comment_content)
+            fields["post_title"] = process_post_title(title)
+            fields["post_href"] = post_href
+            fields["href"] = f"{post_href}#comment-{r.comment_id}"
+        events.append((r.created_at, "vote", r.id, fields))
     return events
+
+
+_SOURCES = {
+    "post": _post_events,
+    "comment": _comment_events,
+    "vote": _vote_events,
+}
+
+
+# ---------------------------------------------------------------------------
+# Media enrichment (thumbnails)
+# ---------------------------------------------------------------------------
+
+
+def _attach_media(items: list[dict]) -> None:
+    """Add image/website thumbnail fields to a PAGE of items (<= 50 rows).
+
+    Done as two batched lookups keyed on the already-selected post ids rather
+    than as joins on each source query: votes alone would need four more
+    outer joins across two post aliases, all to decorate at most PAGE_SIZE
+    rows out of the FETCH_PER_SOURCE the sources scan.
+    """
+    post_ids = {item["post_id"] for item in items if item.get("post_id")}
+    if not post_ids:
+        return
+    images = {
+        row.post_id: row
+        for row in db.session.execute(
+            select(
+                PostImage.post_id, PostImage.thumbnail_path, PostImage.alt_text
+            ).where(PostImage.post_id.in_(post_ids))
+        ).all()
+    }
+    websites = {
+        row.post_id: row
+        for row in db.session.execute(
+            select(
+                GeneratedWebsite.post_id,
+                GeneratedWebsite.hostname,
+                GeneratedWebsite.page_name,
+            ).where(GeneratedWebsite.post_id.in_(post_ids))
+        ).all()
+    }
+    for item in items:
+        image = images.get(item.get("post_id"))
+        if image is not None:
+            # Stored paths are media-root-relative; the guarded media routes
+            # only accept the bare filename (same contract as _macros.html).
+            item["thumb_url"] = url_for(
+                "media.thumbnail", filename=image.thumbnail_path.rsplit("/", 1)[-1]
+            )
+            item["thumb_alt"] = image.alt_text
+        website = websites.get(item.get("post_id"))
+        if website is not None:
+            item["website_href"] = url_for(
+                "websites.page",
+                hostname=website.hostname,
+                page_name=website.page_name,
+            )
+            item["website_label"] = f"{website.hostname}/{website.page_name}"
 
 
 # ---------------------------------------------------------------------------
@@ -293,13 +440,12 @@ def _vote_events(newer: bool, cursor) -> list[_EventRow]:
 # ---------------------------------------------------------------------------
 
 
-def _collect_events(newer: bool, cursor) -> list[dict]:
-    """Merge all three sources into uniform template-context dicts."""
+def _collect_events(newer: bool, cursor, kinds: tuple[str, ...] = KINDS) -> list[dict]:
+    """Merge the selected sources into uniform template-context dicts."""
     ts_c, kind_c, id_c = cursor if cursor is not None else (None, None, None)
     rows: list[_EventRow] = []
-    rows.extend(_post_events(newer, cursor))
-    rows.extend(_comment_events(newer, cursor))
-    rows.extend(_vote_events(newer, cursor))
+    for kind in kinds:
+        rows.extend(_SOURCES[kind](newer, cursor))
     if not newer and cursor is not None:
         # The per-source SQL prefilter only sees each source's own (ts, id);
         # cross-kind ties at identical timestamps are decided by the global
@@ -324,7 +470,18 @@ def _collect_events(newer: bool, cursor) -> list[dict]:
         item["created_at"] = dt
         item["ts_iso"] = dt.isoformat() if dt else ""
         item["cursor"] = encode_cursor(dt, kind, id_)
+        item["actor_href"] = (
+            url_for("web.user_profile", username=item["actor"])
+            if item.get("actor")
+            else None
+        )
+        item["community_href"] = (
+            url_for("web.subdeaddit", subdeaddit_name=item["community"])
+            if item.get("community")
+            else None
+        )
         items.append(item)
+    _attach_media(items)
     return items
 
 
@@ -336,6 +493,7 @@ def recent():
         request.args.get("fragment") == "1"
         or request.headers.get("HX-Request") == "true"
     )
+    kinds = parse_kinds(request.args.get("kinds"))
 
     if before_raw and since_raw:
         error = "Use either 'before' or 'since', not both."
@@ -351,19 +509,30 @@ def recent():
     since = decode_cursor(since_raw)
     before = decode_cursor(before_raw)
 
+    # Read BEFORE collecting so the watermark can never run ahead of the rows
+    # in this response: acking it may re-report an event, never skip one. It
+    # is deliberately unfiltered -- the socket pump counts every kind, so a
+    # filtered view still has to advance past the events it chose not to show.
+    watermark = max_event_ts() if since is not None else None
+
     if since is not None:
-        items = _collect_events(newer=True, cursor=since)
+        items = _collect_events(newer=True, cursor=since, kinds=kinds)
     elif before is not None:
-        items = _collect_events(newer=False, cursor=before)
+        items = _collect_events(newer=False, cursor=before, kinds=kinds)
     else:
-        items = _collect_events(newer=False, cursor=None)
+        items = _collect_events(newer=False, cursor=None, kinds=kinds)
 
     # Fragment + cursor = htmx paging mode: the response is bare <li> nodes
     # (appended/prepended into #live-list) plus an out-of-band older-control
-    # update. Full-page and cursor-less renders keep the wrapped structure.
+    # (before) or watermark (since) update. Full-page and cursor-less renders
+    # keep the wrapped structure.
     ctx = {
         "items": items,
         "title": "Live",
+        "kinds": kinds,
+        "kinds_query": _kinds_query(kinds),
+        "filters": _filter_links(kinds),
+        "watermark_iso": watermark.isoformat() if watermark else "",
         "paging": is_fragment and (before is not None or since is not None),
         "older_mode": before is not None,
         "has_more": len(items) == PAGE_SIZE and since is None,

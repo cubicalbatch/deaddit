@@ -40,7 +40,7 @@ polling, so a reload reconnects without a web-process thread or socket bridge.
 | `routes.py` | Blueprint `web`: server-rendered pages — index feed, subdeaddit, post + comment tree (depth cap, sorts via `dynamics.ranking`), user profile, users list, search. |
 | `api.py` | Blueprint `api`: public read-only JSON (`/api/posts`, `/api/post/<id>`, `/api/users`, …). Hides images, website provenance, and removed-content URLs. |
 | `admin.py` | Blueprint `admin` (~3.4k lines, consider splitting if extending): admin UI + JSON — content CRUD/bulk delete, LLM + image providers, website controls, capabilities probing, agent management, moderation queue, usage accounting, prompt pinning. Every route `@production_disabled` + `@admin_required`. |
-| `live.py` | Blueprint `live`: `/live` keyset-paginated activity ticker. Source query helpers shared with `runtime/live_pump.py` — do not duplicate. |
+| `live.py` | Blueprint `live`: `/live` keyset-paginated activity ticker, with `?kinds=` source filtering and batched image/website thumbnail lookup per page. Source query helpers shared with `runtime/live_pump.py` — do not duplicate. |
 | `media.py` | Blueprint `media`: guarded `/media/images/{original,thumbnail}/<filename>` serving. Resolves a non-removed `PostImage` row per request; unknown filename → 404. |
 | `websites/serving.py` | Blueprint `websites`: guarded `/out/<hostname>/<page_name>` serving. Looks up a `GeneratedWebsite` joined to a non-removed `Post`, then resolves its opaque file path; unknown, removed, missing, or unsafe paths → 404. |
 | `websocket.py` | SocketIO handlers only: `/admin` namespace and `/live` room join/leave. The pump itself lives in the worker-adjacent `runtime/live_pump.py`. |
