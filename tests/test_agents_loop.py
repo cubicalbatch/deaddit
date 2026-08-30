@@ -415,77 +415,57 @@ def test_kickoff_prompt_browse_intent_guides_browsing(seeded_db, db_session):
     assert "finish" in prompt.lower()
 
 
-def test_kickoff_prompt_samples_only_three_post_suggestions(
+def test_kickoff_prompt_selects_one_weighted_post_direction(
     seeded_db, db_session, monkeypatch
 ):
-    from deaddit.agents.prompts import (
-        _POST_DIRECTIONS,
-        _SUGGESTIONS_PER_PROMPT,
-        DEFAULT_VISIT_PROFILE,
+    from deaddit.agents.prompts import _POST_DIRECTIONS, DEFAULT_VISIT_PROFILE
+
+    assert len(_POST_DIRECTIONS) >= 16
+    assert len({direction.id for direction in _POST_DIRECTIONS}) == len(
+        _POST_DIRECTIONS
     )
-
-    assert len(_POST_DIRECTIONS) == 10
-    assert len({direction.id for direction in _POST_DIRECTIONS}) == 10
-    assert len({direction.text for direction in _POST_DIRECTIONS}) == 10
-    assert _SUGGESTIONS_PER_PROMPT == 3
+    assert len({direction.text for direction in _POST_DIRECTIONS}) == len(
+        _POST_DIRECTIONS
+    )
     pool = DEFAULT_VISIT_PROFILE.direction_catalog["post"]
-    selected = pool[3:6]
+    selected = pool[-1]
 
-    def sample(population, k):
+    def choices(population, weights=None, k=1):
         if tuple(population) == pool:
-            assert k == 3
-            return list(selected)
-        return list(population)[:k]
+            assert k == 1
+            return [selected]
+        return [population[0]]
 
-    monkeypatch.setattr(random, "sample", sample)
+    monkeypatch.setattr(random, "choices", choices)
     user = db_session.get(User, "alice")
     user.agent_state = {"subscriptions": ["testsub"]}
     db_session.commit()
-    agent = _make_agent(
-        db_session,
-        "alice",
-        config={
-            "image_posts": {
-                "enabled": True,
-                "policy": "optional",
-                "provider_id": 1,
-                "model": None,
-            }
-        },
-    )
+    agent = _make_agent(db_session, "alice")
+    prompt, intent = _kickoff(db_session, agent, user, requested_intent="post")
 
-    prompts = [
-        _kickoff(db_session, agent, user, requested_intent="post")[0],
-        _kickoff(db_session, agent, user, unread=2, requested_intent="image")[0],
-    ]
-
-    for prompt in prompts:
-        assert all(item.text in prompt for item in selected)
-        assert all(item.text not in prompt for item in pool if item not in selected)
+    assert intent == "post"
+    assert selected.text in prompt
+    assert sum(item.text in prompt for item in pool) == 1
 
 
 @pytest.mark.parametrize("unread", (0, 2))
-def test_kickoff_prompt_samples_only_three_comment_suggestions(
+def test_kickoff_prompt_selects_one_comment_direction_and_focus(
     seeded_db, db_session, monkeypatch, unread
 ):
-    from deaddit.agents.prompts import (
-        _COMMENT_DIRECTIONS,
-        _SUGGESTIONS_PER_PROMPT,
-        DEFAULT_VISIT_PROFILE,
-    )
+    from deaddit.agents.prompts import _COMMENT_DIRECTIONS, DEFAULT_VISIT_PROFILE
 
-    assert len(_COMMENT_DIRECTIONS) == 10
-    assert len({direction.id for direction in _COMMENT_DIRECTIONS}) == 10
-    assert len({direction.text for direction in _COMMENT_DIRECTIONS}) == 10
-    assert _SUGGESTIONS_PER_PROMPT == 3
+    assert len(_COMMENT_DIRECTIONS) >= 12
+    assert len({direction.id for direction in _COMMENT_DIRECTIONS}) == len(
+        _COMMENT_DIRECTIONS
+    )
     pool = DEFAULT_VISIT_PROFILE.direction_catalog["comment"]
-    selected = pool[4:7]
+    selected = pool[4]
     monkeypatch.setattr(
         random,
-        "sample",
-        lambda population, k: list(selected)
-        if tuple(population) == pool and k == 3
-        else list(population)[:k],
+        "choices",
+        lambda population, weights=None, k=1: (
+            [selected] if tuple(population) == pool else [population[0]]
+        ),
     )
     agent = _make_agent(db_session, "alice")
 
@@ -494,8 +474,9 @@ def test_kickoff_prompt_samples_only_three_comment_suggestions(
     )
 
     assert intent == "browse"
-    assert all(item.text in prompt for item in selected)
-    assert all(item.text not in prompt for item in pool if item not in selected)
+    assert selected.text in prompt
+    assert sum(item.text in prompt for item in pool) == 1
+    assert "Engagement focus:" in prompt
 
 
 def test_length_target_weights_cover_every_percentile():
@@ -778,23 +759,19 @@ def _browse_ctx(db_session, username, *, tier="regular"):
     return ToolContext(agent=agent, run=run, user_username=username)
 
 
-def test_kickoff_prompt_suggests_only_real_communities(
-    seeded_db, db_session, monkeypatch
-):
-    """A1: the no-subscription fallback names only existing communities,
-    sampled from the database - never a hardcoded (possibly stale) list."""
-    monkeypatch.setattr(random, "sample", lambda population, k: population[:k])
-
+def test_kickoff_prompt_reserves_one_real_community(seeded_db, db_session):
+    """A1: the no-subscription fallback reserves exactly one existing,
+    non-Backstage community sampled from the database - never a hardcoded
+    (possibly stale) list."""
     agent = _make_agent(db_session, "alice")
     prompt, _ = _kickoff(db_session, agent, requested_intent="post")
 
-    segment = prompt.split("(such as ", 1)[1].split(" or search", 1)[0]
-    suggested = [name.strip() for name in segment.split(",")]
+    marker = "Publish exactly one post in d/"
+    assert marker in prompt
+    reserved = prompt.split(marker, 1)[1].split(";", 1)[0]
     existing = {name for (name,) in db_session.query(Subdeaddit.name).all()}
-    assert suggested
-    assert set(suggested) <= existing
-    # The ghost-cased hardcoded name from the old fallback must never return.
-    assert "AskDeaddit" not in suggested
+    assert reserved in existing
+    assert reserved != "BetweenRobots"
 
 
 def test_kickoff_prompt_uses_subscriptions_when_present(seeded_db, db_session):
@@ -804,7 +781,7 @@ def test_kickoff_prompt_uses_subscriptions_when_present(seeded_db, db_session):
 
     agent = _make_agent(db_session, "alice")
     prompt, _ = _kickoff(db_session, agent, user, requested_intent="post")
-    assert "(such as testsub)" in prompt
+    assert "Publish exactly one post in d/testsub;" in prompt
 
 
 def test_browse_feed_default_frontpage_without_subscriptions(seeded_db, db_session):

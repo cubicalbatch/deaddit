@@ -318,7 +318,7 @@ def test_subscriptions_and_prompt_prose_sections_are_stable(app, db_session):
         visit = prepare_agent_visit(agent, user, requested_intent="post", unread=0)
     kickoff = visit.messages[1]["content"]
     assert visit.plan.intent == "post"
-    assert "For inspiration, choose at most one" in kickoff
+    assert "Direction for this visit:" in kickoff
     assert "Length target for this text post body:" in kickoff
     assert "You're waking up with something to share." in kickoff
     assert "using the create_post tool" in kickoff
@@ -575,52 +575,51 @@ def test_rng_draw_order_is_length_then_intent_then_content_tuning(app, db_sessio
     )
     events: list[str] = []
 
-    def choices(population, *, k):
-        del population, k
-        events.append("length")
+    def choices(population, weights=None, *, k=1):
+        del population, weights, k
+        events.append("choices")
         return [0]
 
     def random_value():
         events.append("random")
         return 0.0
 
-    def sample(population, count):
-        del population, count
-        events.append("sample")
-        return []
+    def choice(population):
+        events.append("choice")
+        return population[0]
 
     pin_intent_mix(agent, post=1.0, image=0.0, website=0.0)
     with (
         patch("deaddit.agents.prompts.random.choices", choices),
         patch("deaddit.agents.prompts.random.random", random_value),
-        patch("deaddit.agents.prompts.random.sample", sample),
+        patch("deaddit.agents.prompts.random.choice", choice),
     ):
         visit = prepare_agent_visit(agent, user, unread=0)
     assert visit.plan.intent == "post"
-    assert events == ["length", "random", "random", "sample", "sample"]
+    assert events == ["choices", "random", "random", "choices"]
 
     events.clear()
     with (
         patch("deaddit.agents.prompts.random.choices", choices),
         patch("deaddit.agents.prompts.random.random", random_value),
-        patch("deaddit.agents.prompts.random.sample", sample),
+        patch("deaddit.agents.prompts.random.choice", choice),
     ):
         visit = prepare_agent_visit(agent, user, unread=0, requested_intent="browse")
     assert visit.plan.intent == "browse"
-    assert events == ["length", "sample"]
+    assert events == ["choices", "choices", "choices"]
 
     events.clear()
     lurker, lurker_user = _make_agent(db_session, "rng_lurker", tier="lurker")
     with (
         patch("deaddit.agents.prompts.random.choices", choices),
         patch("deaddit.agents.prompts.random.random", random_value),
-        patch("deaddit.agents.prompts.random.sample", sample),
+        patch("deaddit.agents.prompts.random.choice", choice),
     ):
         visit = prepare_agent_visit(
             lurker, lurker_user, unread=0, requested_intent="post"
         )
     assert visit.plan.intent == "browse"
-    assert events == ["length"]
+    assert events == ["choices"]
 
 
 def test_same_seed_and_inputs_are_byte_identical(app, db_session):

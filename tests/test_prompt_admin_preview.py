@@ -297,22 +297,25 @@ class TestPreviewScenarios:
         assert not set(offered) & {"create_post", "create_image_post", "create_website"}
         assert _kickoff(body).startswith("You're waking up. Browse the community feeds")
 
-    def test_unsubscribed_persona_gets_community_suggestions(
+    def test_unsubscribed_persona_gets_one_reserved_community(
         self, app, authed_client, seeded_db, db_session
     ):
         agent, _ = _make_agent(db_session, "no_subs", subscriptions=[])
         body = _preview(authed_client, agent, requested_intent="post").get_json()
-        assert "(such as" in _kickoff(body)
+        kickoff = _kickoff(body)
+        assert "Publish exactly one post in d/" in kickoff
+        reserved = kickoff.split("Publish exactly one post in d/", 1)[1].split(";", 1)[
+            0
+        ]
+        assert reserved in {"testsub", "askdeaddit"}
 
     def test_subscribed_persona_names_its_subscriptions(
-        self, app, authed_client, db_session
+        self, app, authed_client, seeded_db, db_session
     ):
-        agent, _ = _make_agent(
-            db_session, "has_subs", subscriptions=["general", "tech"]
-        )
+        agent, _ = _make_agent(db_session, "has_subs", subscriptions=["testsub"])
         body = _preview(authed_client, agent, requested_intent="post").get_json()
         kickoff = _kickoff(body)
-        assert "(such as general, tech)" in kickoff
+        assert "Publish exactly one post in d/testsub;" in kickoff
 
     def test_exclusive_media(self, app, authed_client, db_session):
         agent, _ = _make_agent(db_session, "exclusive_case", image=_IMAGE_ONLY_CONFIG)

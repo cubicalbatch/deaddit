@@ -168,7 +168,7 @@ def test_plan_records_intent_source_and_content_kind(app, db_session):
         INTENT_SOURCE_REQUESTED,
     )
     assert visit.plan.content_kind == "comment"
-
+    assert isinstance(visit.plan.engagement_focus_id, str)
     # Ineligible special request degrades to post and says so.
     visit = prepare_agent_visit(agent, user, requested_intent="image", unread=0)
     assert (visit.plan.intent, visit.plan.intent_source) == (
@@ -218,7 +218,7 @@ def test_plan_records_intent_source_and_content_kind(app, db_session):
     )
 
 
-def test_plan_records_sampled_length_and_direction_ids(app, db_session):
+def test_plan_records_sampled_length_and_direction_ids(seeded_db, db_session):
     agent, user = _make_agent(
         db_session, "plan_ids", image_mode="optional", website_mode="optional"
     )
@@ -228,10 +228,13 @@ def test_plan_records_sampled_length_and_direction_ids(app, db_session):
         visit = prepare_agent_visit(agent, user, requested_intent="post", unread=0)
     assert visit.plan.length_target_id == "text_post.very_short"
     assert visit.plan.length_target_id in post_ids
-    assert len(visit.plan.direction_ids) == 3
+    assert len(visit.plan.direction_ids) == 1
     assert set(visit.plan.direction_ids) <= {
         direction.id for direction in _POST_DIRECTIONS
     }
+    assert visit.plan.target_subdeaddit is not None
+    assert visit.plan.target_subdeaddit != BACKSTAGE_SUBDEADDIT_NAME
+    assert f"d/{visit.plan.target_subdeaddit}" in _kickoff(visit)
     assert _LENGTH_TARGETS["text_post"][0].text in _kickoff(visit)
 
     with patch("deaddit.agents.prompts.random.choices", return_value=[99]):
@@ -271,13 +274,68 @@ def test_comment_length_target_is_rendered_in_browse_kickoff(app, db_session):
     assert target.text in _kickoff(visit)
 
 
-def test_comment_direction_catalog_keeps_ten_distinct_directions():
-    ids = [direction.id for direction in _COMMENT_DIRECTIONS]
-    assert len(ids) == 10
-    assert len(set(ids)) == 10
-    assert [
-        item.id for item in DEFAULT_VISIT_PROFILE.direction_catalog["comment"]
-    ] == ids
+def test_direction_catalogs_are_broad_and_media_specific():
+    assert len(_POST_DIRECTIONS) >= 16
+    assert len(_COMMENT_DIRECTIONS) >= 12
+    assert DEFAULT_VISIT_PROFILE.sample_count == 1
+    for kind, prefix in (
+        ("post", "post."),
+        ("comment", "comment."),
+        ("image", "image."),
+        ("website", "website."),
+        ("backstage", "backstage."),
+    ):
+        assert DEFAULT_VISIT_PROFILE.direction_catalog[kind]
+        assert all(
+            item.id.startswith(prefix)
+            for item in DEFAULT_VISIT_PROFILE.direction_catalog[kind]
+        )
+    assert [item.id for item in DEFAULT_VISIT_PROFILE.direction_catalog["image"]] == [
+        "image.candid_snapshot",
+        "image.object_closeup",
+        "image.place_observation",
+        "image.process_documentation",
+        "image.finished_result",
+        "image.before_after",
+        "image.archival_artifact",
+        "image.food_photo",
+        "image.pet_wildlife",
+        "image.macro_detail",
+        "image.diagram_infographic",
+        "image.artwork_craft",
+    ]
+    assert [item.id for item in DEFAULT_VISIT_PROFILE.direction_catalog["website"]] == [
+        "website.news_report",
+        "website.magazine_feature",
+        "website.personal_blog",
+        "website.community_portal",
+        "website.event_program",
+        "website.local_business",
+        "website.nonprofit_campaign",
+        "website.product_page",
+        "website.catalog",
+        "website.reference",
+        "website.data_dashboard",
+        "website.interactive_utility",
+        "website.fan_archive",
+        "website.travel_guide",
+        "website.portfolio",
+        "website.experimental_microsite",
+    ]
+
+
+def test_media_intents_select_their_own_direction_catalog(app, db_session):
+    agent, user = _make_agent(
+        db_session, "media_direction", image_mode="optional", website_mode="optional"
+    )
+    image_visit = prepare_agent_visit(agent, user, requested_intent="image", unread=0)
+    website_visit = prepare_agent_visit(
+        agent, user, requested_intent="website", unread=0
+    )
+    assert len(image_visit.plan.direction_ids) == 1
+    assert image_visit.plan.direction_ids[0].startswith("image.")
+    assert len(website_visit.plan.direction_ids) == 1
+    assert website_visit.plan.direction_ids[0].startswith("website.")
 
 
 def test_sampled_backstage_visit_has_reserved_text_destination(app, db_session):
