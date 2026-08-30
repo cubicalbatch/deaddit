@@ -1217,8 +1217,12 @@ def build_persona_assignments(count: int, troll_count: int,
             styles = _style_bag(rng)
         style = styles.pop()
         related = SECTOR_RELATED_DOMAINS.get(sector, frozenset())
-        first_domain = _least_used([d for d in INTEREST_DOMAINS if d not in related], interest_uses, rng, lambda d: d)
-        second_domain = _least_used([d for d in INTEREST_DOMAINS if d != first_domain], interest_uses, rng, lambda d: d)
+        first_domain: str = _least_used(
+            [d for d in INTEREST_DOMAINS if d not in related], interest_uses, rng, lambda d: d
+        )
+        second_domain: str = _least_used(
+            [d for d in INTEREST_DOMAINS if d != first_domain], interest_uses, rng, lambda d: d
+        )
         seeds = []
         for domain in (first_domain, second_domain):
             if not interest_bags[domain]:

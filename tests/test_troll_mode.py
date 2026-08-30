@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import random
 import sqlite3
 
 import pytest
@@ -15,27 +16,81 @@ from deaddit.models import Agent, User
 from deaddit.services.content import create_user
 from deaddit.services.persona_generator import (
     TROLL_SECTION,
-    USER_PROMPT_TEMPLATE,
     _assign_styles,
     _batch_plan,
     _user_to_dict,
     generate_personas,
 )
+from deaddit.services.persona_options import PersonaAssignment
 
 
-def _one_response(username: str = "generated") -> str:
-    return json.dumps(
-        [{"username": username, "bio": "A bio", "age": 30, "gender": "Male"}]
+def _row(assignment_id: str, username: str) -> dict:
+    return {
+        "assignment_id": assignment_id,
+        "username": username,
+        "bio": "A bio",
+        "age": 30,
+        "gender": "Male",
+    }
+
+
+def _one_response(username: str = "generated", assignment_id: str = "a1") -> str:
+    return json.dumps([_row(assignment_id, username)])
+
+
+def _ids_response(ids: list[str]) -> str:
+    return json.dumps([_row(aid, f"user_{aid[1:]}") for aid in ids])
+
+
+def _fixed_assignment(index: int, *, troll: bool = False) -> PersonaAssignment:
+    """Deterministic assignment row with per-index-unique prompt facts."""
+    return PersonaAssignment(
+        id=f"a{index}",
+        age=30 + index,
+        age_band_id="age.25_34",
+        occupation_id=f"occupation.fixture_{index}",
+        occupation=f"matrix job {index}",
+        occupation_sector="sector.fixture",
+        employment_context_id="context.full_time",
+        employment_context="full-time",
+        education_level_id="education.bachelor",
+        education=f"degree {index}",
+        trait_ids=(
+            "trait.fixture_1",
+            "trait.fixture_2",
+            "trait.fixture_3",
+            "trait.fixture_4",
+        ),
+        traits=(f"trait one {index}", "blunt", "methodical", f"quirk {index}"),
+        writing_style_id="style.fixture",
+        writing_style=f"style card {index}",
+        interest_seeds=(f"seed {index}a", f"seed {index}b"),
+        troll_modifier_id="troll.pedantic" if troll else None,
+        troll_modifier="pedantic" if troll else None,
+        username_style=f"username style card {index}",
     )
 
 
-def _n_response(prefix: str, n: int) -> str:
-    return json.dumps(
-        [
-            {"username": f"{prefix}_{i}", "bio": "A bio", "age": 30, "gender": "Male"}
-            for i in range(n)
-        ]
+def _fix_plan(monkeypatch, count: int, troll_count: int = 0) -> tuple:
+    """Freeze planning: normals a1..aN then exactly ``troll_count`` trolls."""
+    normals = count - troll_count
+    rows = [_fixed_assignment(i) for i in range(1, normals + 1)]
+    rows += [
+        _fixed_assignment(normals + k, troll=True)
+        for k in range(1, troll_count + 1)
+    ]
+    frozen = tuple(rows)
+    monkeypatch.setattr(generator, "build_persona_assignments", lambda *a, **k: frozen)
+    monkeypatch.setattr(
+        generator,
+        "_assign_styles",
+        lambda n, rng=None: [f"username style card {i}" for i in range(1, n + 1)],
     )
+    return frozen
+
+
+def _prompt(request_record) -> str:
+    return request_record["payload"]["messages"][1]["content"]
 
 
 @pytest.fixture()
@@ -46,28 +101,25 @@ def admin_client(client):
 
 
 class TestPersonaGeneratorTrollMode:
-    def test_chance_extremes_and_legacy_prompt_parity(self, app, fake_llm, monkeypatch):
+    def test_chance_extremes_and_matrix_prompt_sections(
+        self, app, fake_llm, monkeypatch
+    ):
         Config.set("TROLL_USER_CHANCE", "1.0")
         fake_llm.enqueue_content(_one_response("all_troll"))
         result = generate_personas(count=1, auto_create_agent=False)
         assert result["users"][0]["is_troll"] is True
-        assert (
-            TROLL_SECTION in fake_llm.requests[0]["payload"]["messages"][1]["content"]
-        )
+        troll_prompt = _prompt(fake_llm.requests[0])
+        assert TROLL_SECTION in troll_prompt
+        assert "- troll expression:" in troll_prompt
+
         Config.set("TROLL_USER_CHANCE", "0.0")
-        # Freeze the style-card draw so the parity check is deterministic
-        monkeypatch.setattr(generator.random, "choices", lambda seq, k: [seq[0]] * k)
         fake_llm.enqueue_content(_one_response("all_normal"))
         generate_personas(count=1, auto_create_agent=False)
-        prompt = fake_llm.requests[1]["payload"]["messages"][1]["content"]
-        assert prompt == USER_PROMPT_TEMPLATE.format(
-            count=1,
-            topic_section="",
-            communities_section="",
-            troll_section="",
-            style_assignments="Persona 1 username style: " + _assign_styles(1)[0],
-        )
-        assert TROLL_SECTION not in prompt
+        normal_prompt = _prompt(fake_llm.requests[1])
+        assert TROLL_SECTION not in normal_prompt
+        assert "troll expression" not in normal_prompt
+        # The normal prompt is the same matrix contract minus troll flavor
+        assert "[assignment_id a1]" in normal_prompt
 
     @pytest.mark.parametrize(
         ("mode", "expected"), [("troll", True), ("no_troll", False)]
@@ -84,32 +136,83 @@ class TestPersonaGeneratorTrollMode:
         user = User(username="serialized", is_troll=True)
         assert _user_to_dict(user)["is_troll"] is True
 
-    def test_chance_quota_is_exact_and_spread(self, app, fake_llm):
+    def test_chance_quota_is_exact_and_spread(self, app, fake_llm, monkeypatch):
         Config.set("TROLL_USER_CHANCE", "0.1")
         # 25 personas at 10% -> exactly 3 trolls (round-half-up), with the
         # troll batch scheduled after the three normal batches.
-        fake_llm.enqueue_content(_n_response("normal", 10))
-        fake_llm.enqueue_content(_n_response("normal", 10))
-        fake_llm.enqueue_content(_n_response("normal", 2))
-        fake_llm.enqueue_content(_n_response("troll", 3))
+        _fix_plan(monkeypatch, count=25, troll_count=3)
+        for ids in (
+            [f"a{i}" for i in range(1, 11)],
+            [f"a{i}" for i in range(11, 21)],
+            ["a21", "a22"],
+            ["a23", "a24", "a25"],
+        ):
+            fake_llm.enqueue_content(_ids_response(ids))
         result = generate_personas(count=25, auto_create_agent=False)
         assert result["skipped"] == 0
         assert [u["is_troll"] for u in result["users"]] == [False] * 22 + [True] * 3
-        prompts = [r["payload"]["messages"][1]["content"] for r in fake_llm.requests]
+        prompts = [_prompt(r) for r in fake_llm.requests]
         assert [TROLL_SECTION in p for p in prompts] == [False, False, False, True]
 
-    def test_chance_mixed_batch_uses_homogeneous_requests(self, app, fake_llm):
+    def test_chance_mixed_batch_uses_homogeneous_requests(
+        self, app, fake_llm, monkeypatch
+    ):
         Config.set("TROLL_USER_CHANCE", "0.5")
         # 2 personas at 50% -> exactly 1 troll; the normal batch is scheduled
         # first, so troll and normal personas never share one request.
-        fake_llm.enqueue_content(_one_response("mixed_normal"))
-        fake_llm.enqueue_content(_one_response("mixed_troll"))
+        _fix_plan(monkeypatch, count=2, troll_count=1)
+        fake_llm.enqueue_content(_one_response("mixed_normal", "a1"))
+        fake_llm.enqueue_content(_one_response("mixed_troll", "a2"))
         result = generate_personas(count=2, auto_create_agent=False)
         assert len(fake_llm.requests) == 2
-        prompts = [r["payload"]["messages"][1]["content"] for r in fake_llm.requests]
+        prompts = [_prompt(r) for r in fake_llm.requests]
         assert TROLL_SECTION not in prompts[0]
         assert TROLL_SECTION in prompts[1]
         assert [u["is_troll"] for u in result["users"]] == [False, True]
+
+    def test_troll_matrix_row_keeps_varied_traits(self, app, fake_llm, monkeypatch):
+        _fix_plan(monkeypatch, count=1, troll_count=1)
+        fake_llm.enqueue_content(_one_response("troll_row"))
+        result = generate_personas(count=1, auto_create_agent=False, troll_mode="troll")
+
+        prompt = _prompt(fake_llm.requests[0])
+        assert TROLL_SECTION in prompt
+        assert "- troll expression: pedantic" in prompt
+        # The modifier flavors argumentativeness only: demographics and
+        # trait anchors stay as assigned, not troll-flavored.
+        assert "- occupation: matrix job 1 (full-time)" in prompt
+        assert "- required traits: trait one 1; blunt; methodical; quirk 1" in prompt
+        assert result["users"][0]["is_troll"] is True
+
+    def test_normal_matrix_rows_carry_no_troll_flavor(
+        self, app, fake_llm, monkeypatch
+    ):
+        _fix_plan(monkeypatch, count=2, troll_count=0)
+        fake_llm.enqueue_content(_ids_response(["a1", "a2"]))
+        generate_personas(count=2, auto_create_agent=False, troll_mode="no_troll")
+
+        prompt = _prompt(fake_llm.requests[0])
+        assert TROLL_SECTION not in prompt
+        assert "troll expression" not in prompt
+
+
+class TestAssignStylesCatalogDelegation:
+    def test_styles_come_from_the_catalog(self):
+        from deaddit.services.persona_options import USERNAME_STYLES
+
+        styles = _assign_styles(6, random.Random(5))
+        texts = {style.text for style in USERNAME_STYLES}
+        assert len(styles) == 6
+        assert set(styles) <= texts
+
+    def test_default_drawer_is_the_module_random(self, monkeypatch):
+        from deaddit.services.persona_options import USERNAME_STYLES
+
+        first = USERNAME_STYLES[0].text
+        monkeypatch.setattr(
+            generator.random, "choices", lambda seq, k: [seq[0]] * k
+        )
+        assert _assign_styles(2) == [first, first]
 
 
 class TestBatchPlan:
