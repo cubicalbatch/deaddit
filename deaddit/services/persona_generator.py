@@ -25,6 +25,7 @@ from deaddit.llm import ChatRequest, LLMClient, LLMError, Sampling, routing
 from deaddit.models import Agent, Subdeaddit, User
 from deaddit.services.content import create_user
 from deaddit.services.persona_options import (
+    INTERESTS,
     USERNAME_STYLES,
     ExistingUserSnapshot,
     PersonaAssignment,
@@ -99,6 +100,32 @@ TROLL_SECTION = (
 #: exactly 2, validation accepts up to this many, and anything the LLM
 #: adds beyond it is dropped rather than erroring the whole persona.
 MAX_PERSONA_SUBSCRIPTIONS = 3
+
+#: Version of the source-controlled catalogs recorded with each generated user.
+PERSONA_CATALOG_VERSION = "persona_options.v1"
+
+_INTEREST_ID_BY_TEXT = {option.text: option.id for option in INTERESTS}
+_USERNAME_STYLE_ID_BY_TEXT = {option.text: option.id for option in USERNAME_STYLES}
+
+
+def _persona_seed(assignment: PersonaAssignment) -> dict[str, Any]:
+    """Return immutable catalog provenance in JSON-compatible containers."""
+    return {
+        "catalog_version": PERSONA_CATALOG_VERSION,
+        "assignment_id": assignment.id,
+        "age_band_id": assignment.age_band_id,
+        "occupation_id": assignment.occupation_id,
+        "occupation_sector": assignment.occupation_sector,
+        "employment_context_id": assignment.employment_context_id,
+        "education_level_id": assignment.education_level_id,
+        "trait_ids": list(assignment.trait_ids),
+        "writing_style_id": assignment.writing_style_id,
+        "interest_seed_ids": [
+            _INTEREST_ID_BY_TEXT.get(seed) for seed in assignment.interest_seeds
+        ],
+        "troll_modifier_id": assignment.troll_modifier_id,
+        "username_style_id": _USERNAME_STYLE_ID_BY_TEXT.get(assignment.username_style),
+    }
 
 
 def _communities_section(sub_rows: list[tuple[str, str]]) -> str:
@@ -181,16 +208,21 @@ def _existing_snapshots() -> list[ExistingUserSnapshot]:
     rows = db.session.query(
         User.agent_state, User.age, User.occupation, User.education
     ).all()
-    return [
-        ExistingUserSnapshot(
-            persona_seed=(state or {}).get("persona_seed"),
-            age=age,
-            occupation=occupation,
-            education=education,
+    snapshots: list[ExistingUserSnapshot] = []
+    for state, age, occupation, education in rows:
+        persona_seed = state.get("persona_seed") if isinstance(state, dict) else None
+        snapshots.append(
+            ExistingUserSnapshot(
+                persona_seed=persona_seed
+                if isinstance(persona_seed, dict)
+                else None,
+                age=age,
+                occupation=occupation,
+                education=education,
+            )
         )
-        for state, age, occupation, education in rows
-    ]
 
+    return snapshots
 
 def _normalize_subscriptions(raw: object, valid_sub_names: set[str]) -> list[str]:
     """Validate LLM-picked subscriptions against real communities.
@@ -301,9 +333,12 @@ def _extract_json(raw: str) -> list[dict]:
 
 
 def _sanitize_persona(
-    item: dict, seen_usernames: set[str], valid_sub_names: set[str]
+    item: dict,
+    seen_usernames: set[str],
+    valid_sub_names: set[str],
+    assignment: PersonaAssignment | None = None,
 ) -> dict:
-    """Sanitize and normalize persona dictionary fields."""
+    """Sanitize LLM-authored fields and merge any source-owned assignment facts."""
     raw_username = str(item.get("username") or "").strip()
     clean_username = re.sub(r"[^a-zA-Z0-9_]", "_", raw_username)
     clean_username = re.sub(r"_+", "_", clean_username).strip("_")
@@ -324,18 +359,25 @@ def _sanitize_persona(
         suffix += 1
     seen_usernames.add(candidate.lower())
 
-    try:
-        age = int(item.get("age", 25))
-    except (TypeError, ValueError):
-        age = 25
-    age = max(18, min(age, 99))
+    if assignment is None:
+        try:
+            age = int(item.get("age", 25))
+        except (TypeError, ValueError):
+            age = 25
+        age = max(18, min(age, 99))
+    else:
+        age = assignment.age
 
     raw_gender = str(item.get("gender") or "").strip().lower()
     gender = "Female" if "female" in raw_gender or raw_gender == "f" else "Male"
 
     bio = str(item.get("bio") or "").strip() or "Deaddit community member."
-    occupation = str(item.get("occupation") or "").strip() or "Community Member"
-    education = str(item.get("education") or "").strip() or "Self-taught"
+    if assignment is None:
+        occupation = str(item.get("occupation") or "").strip() or "Community Member"
+        education = str(item.get("education") or "").strip() or "Self-taught"
+    else:
+        occupation = assignment.occupation
+        education = assignment.education
 
     raw_interests = item.get("interests")
     if isinstance(raw_interests, list):
@@ -345,21 +387,40 @@ def _sanitize_persona(
     else:
         interests = []
     if not interests:
-        interests = ["general discussion", "technology"]
+        interests = list(assignment.interest_seeds) if assignment else [
+            "general discussion",
+            "technology",
+        ]
 
     raw_traits = item.get("personality_traits")
     if isinstance(raw_traits, list):
-        traits = [str(x).strip() for x in raw_traits if str(x).strip()]
+        llm_traits = [str(x).strip() for x in raw_traits if str(x).strip()]
     elif isinstance(raw_traits, str) and raw_traits.strip():
-        traits = [x.strip() for x in raw_traits.split(",") if x.strip()]
+        llm_traits = [x.strip() for x in raw_traits.split(",") if x.strip()]
     else:
-        traits = []
-    if not traits:
-        traits = ["curious", "friendly"]
+        llm_traits = []
+    if assignment is None:
+        traits = llm_traits or ["curious", "friendly"]
+    else:
+        # Required anchors are authoritative and retain their catalog order.
+        # LLM additions are case-insensitively deduped and capped at two.
+        traits = list(assignment.traits)
+        seen_traits = {trait.casefold() for trait in traits}
+        for trait in llm_traits:
+            normalized = trait.casefold()
+            if normalized not in seen_traits:
+                traits.append(trait)
+                seen_traits.add(normalized)
+            if len(traits) >= len(assignment.traits) + 2:
+                break
 
-    writing_style = (
-        str(item.get("writing_style") or "").strip() or "Conversational and thoughtful"
-    )
+    if assignment is None:
+        writing_style = (
+            str(item.get("writing_style") or "").strip()
+            or "Conversational and thoughtful"
+        )
+    else:
+        writing_style = assignment.writing_style
 
     subscriptions = _normalize_subscriptions(item.get("subscriptions"), valid_sub_names)
 
@@ -619,19 +680,19 @@ def generate_personas(
             except (LLMError, PersonaGenerationError) as exc:
                 last_error = exc
                 logger.warning(
-                    "Persona batch attempt %d/%d failed: %s",
+                    "Persona batch attempt %d/%d failed for assignment IDs %s",
                     attempt,
                     PERSONA_BATCH_ATTEMPTS,
-                    exc,
+                    [assignment.id for assignment in pending],
                 )
                 continue
-
             if not raw_personas:
                 last_error = PersonaGenerationError("LLM returned empty personas list")
                 logger.warning(
-                    "Persona batch attempt %d/%d returned no personas",
+                    "Persona batch attempt %d/%d returned no personas for assignment IDs %s",
                     attempt,
                     PERSONA_BATCH_ATTEMPTS,
+                    [assignment.id for assignment in pending],
                 )
                 continue
 
@@ -645,7 +706,9 @@ def generate_personas(
                     # is prompted for again on the next attempt.
                     continue
                 resolved.add(assignment.id)
-                p = _sanitize_persona(raw_p, seen_usernames, valid_sub_names)
+                p = _sanitize_persona(
+                    raw_p, seen_usernames, valid_sub_names, assignment
+                )
                 user = create_user(
                     username=p["username"],
                     age=p["age"],
@@ -656,17 +719,16 @@ def generate_personas(
                     education=p["education"],
                     writing_style=p["writing_style"],
                     personality_traits=p["personality_traits"],
-                    model=model,
                     is_troll=is_troll,
+                    model=model,
                 )
-                if p["subscriptions"]:
-                    # LLM-picked initial subscriptions ride the existing
-                    # agent_state["subscriptions"] machinery (feed bias,
-                    # system prompt, subscribe/unsubscribe tools). Never
-                    # forced: empty stays empty.
-                    user.agent_state = {"subscriptions": p["subscriptions"]}
-                    if not auto_create_agent:
-                        db.session.commit()
+                # ``agent_state`` is a plain JSON column. Build and assign a
+                # complete new dictionary so provenance and subscriptions are
+                # persisted together without mutating state in place.
+                user.agent_state = {
+                    "persona_seed": _persona_seed(assignment),
+                    "subscriptions": list(p["subscriptions"]),
+                }
                 created_users.append(user)
                 batch_created += 1
 
@@ -695,8 +757,9 @@ def generate_personas(
             pending = [
                 assignment for assignment in pending if assignment.id not in resolved
             ]
-            if created_agents:
-                db.session.commit()
+            # Commit provenance even for non-agent users and empty
+            # subscriptions; the old branch only committed non-empty ones.
+            db.session.commit()
 
         if batch_created == 0:
             raise PersonaGenerationError(
@@ -723,8 +786,8 @@ def generate_personas(
         except PersonaGenerationError as exc:
             last_batch_error = exc
             logger.warning(
-                "Skipping batch of %d personas after repeated failures",
-                len(batch_rows),
+                "Skipping batch after repeated failures for assignment IDs %s",
+                [assignment.id for assignment in batch_rows],
             )
 
     if not created_users and last_batch_error is not None:

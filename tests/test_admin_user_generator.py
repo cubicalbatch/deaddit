@@ -27,8 +27,8 @@ def admin_client(client):
     return client
 
 
-#: Rich, well-formed rows echoing assignment IDs a1/a2. Demographics come
-#: from the LLM row until Phase 3 makes assignments authoritative.
+#: Rich, well-formed rows echoing assignment IDs a1/a2. Demographics are
+#: intentionally drifted by Phase 3 tests to ensure source assignments win.
 SAMPLE_PERSONAS = [
     {
         "assignment_id": "a1",
@@ -157,18 +157,18 @@ class TestPersonaGeneratorService:
         # Casing post-treatment may alter the LLM username; use stored values
         name1, name2 = (u["username"] for u in result["users"])
 
-        # Verify DB persistence of users
         u1 = User.query.filter(db.func.lower(User.username) == name1.lower()).first()
-        assert u1.age == 29
+        assert 18 <= u1.age <= 99
         assert u1.gender == "Male"
-        assert u1.occupation == "Software Architect"
-        assert u1.education == "M.S. Computer Science"
-        assert u1.get_interests() == ["specialty coffee", "rust", "rock climbing"]
-        assert u1.get_personality_traits() == ["analytical", "methodical", "curious"]
+        assert u1.occupation
+        assert u1.education
+        assert u1.writing_style
+        assert 4 <= len(u1.get_personality_traits()) <= 6
+        assert u1.agent_state["persona_seed"]["assignment_id"] == "a1"
 
         u2 = User.query.filter(db.func.lower(User.username) == name2.lower()).first()
         assert u2.gender == "Female"
-        assert u2.age == 34
+        assert u2.agent_state["persona_seed"]["assignment_id"] == "a2"
 
         # Verify Agent auto-enrollment with default config requirements
         a1 = Agent.query.filter(
@@ -416,9 +416,12 @@ class TestMatrixPromptAndIdResolution:
         assert "- occupation: matrix job 1 (" not in prompts[1]
         assert "- occupation: matrix job 10 (" not in prompts[1]
 
-    def test_rows_pair_by_assignment_id_not_position(self, app, fake_llm):
-        # Returned rows arrive reversed: demographics follow the ID, so a
-        # positional pairing would swap them.
+    def test_rows_pair_by_assignment_id_not_position(
+        self, app, fake_llm, monkeypatch
+    ):
+        # Returned rows arrive reversed: demographics follow the ID, while
+        # source-owned fields come from the matching assignment.
+        assignments = _install_fixed_plan(monkeypatch, count=2)
         fake_llm.enqueue_content(
             json.dumps(
                 [
@@ -432,8 +435,8 @@ class TestMatrixPromptAndIdResolution:
         )
 
         by_key = {u["username"].replace("_", "").lower(): u for u in result["users"]}
-        assert by_key["userone"]["age"] == 33
-        assert by_key["usertwo"]["age"] == 44
+        assert by_key["userone"]["age"] == assignments[0].age
+        assert by_key["usertwo"]["age"] == assignments[1].age
 
     def test_missing_ids_are_retried_without_rerolling(
         self, app, fake_llm, monkeypatch
@@ -495,12 +498,10 @@ class TestMatrixPromptAndIdResolution:
         # The first row for an ID wins; the duplicate never creates a user
         assert len(fake_llm.requests) == 1
         assert User.query.count() == 2
-        created = {u["username"].replace("_", "").lower() for u in result["users"]}
-        assert created == {"userone", "usertwo"}
-
     def test_unknown_ids_are_ignored_not_positionally_mapped(
-        self, app, fake_llm
+        self, app, fake_llm, monkeypatch
     ):
+        assignments = _install_fixed_plan(monkeypatch, count=2)
         fake_llm.enqueue_content(
             json.dumps(
                 [
@@ -516,9 +517,9 @@ class TestMatrixPromptAndIdResolution:
         )
 
         by_key = {u["username"].replace("_", "").lower(): u for u in result["users"]}
-        # a99's payload never lands on a1 by position
-        assert by_key["userone"]["age"] == 33
-        assert by_key["usertwo"]["age"] == 44
+        # a99's payload never lands on a1 by position; each row uses its ID.
+        assert by_key["userone"]["age"] == assignments[0].age
+        assert by_key["usertwo"]["age"] == assignments[1].age
         assert "ghostrow" not in by_key
         assert User.query.count() == 2
 
@@ -586,6 +587,89 @@ class TestUsernameDiversityLive:
         assert len({shape(n) for n in all_names}) >= 3
 
 
+class TestAuthoritativePersonaMerge:
+    def test_assignment_facts_traits_and_interest_fallback_win(
+        self, app, fake_llm, monkeypatch
+    ):
+        assignments = _install_fixed_plan(monkeypatch, count=1)
+        monkeypatch.setattr(pg, "_apply_casing", lambda name: name)
+        fake_llm.enqueue_content(
+            json.dumps(
+                [
+                    _persona_row(
+                        "a1",
+                        "drifted_user",
+                        age=99,
+                        occupation="Unassigned occupation",
+                        education="Unassigned education",
+                        writing_style="Unassigned style",
+                        interests=[],
+                        personality_traits=[
+                            "BLUNT",
+                            "new trait",
+                            "new trait",
+                            "another trait",
+                            "ignored trait",
+                        ],
+                    )
+                ]
+            )
+        )
+
+        result = generate_personas(
+            count=1, auto_create_agent=False, troll_mode="no_troll"
+        )
+        user = User.query.filter_by(username=result["users"][0]["username"]).first()
+        assignment = assignments[0]
+
+        assert user.age == assignment.age
+        assert user.occupation == assignment.occupation
+        assert user.education == assignment.education
+        assert user.writing_style == assignment.writing_style
+        assert user.get_interests() == list(assignment.interest_seeds)
+        assert user.get_personality_traits() == [
+            "trait one 1",
+            "blunt",
+            "methodical",
+            "quirk 1",
+            "new trait",
+            "another trait",
+        ]
+
+        seed = user.agent_state["persona_seed"]
+        assert seed["catalog_version"] == pg.PERSONA_CATALOG_VERSION
+        assert seed["assignment_id"] == assignment.id
+        assert seed["age_band_id"] == assignment.age_band_id
+        assert seed["occupation_id"] == assignment.occupation_id
+        assert seed["employment_context_id"] == assignment.employment_context_id
+        assert seed["education_level_id"] == assignment.education_level_id
+        assert seed["trait_ids"] == list(assignment.trait_ids)
+        assert seed["writing_style_id"] == assignment.writing_style_id
+
+    @pytest.mark.parametrize("auto_create_agent", [False, True])
+    def test_provenance_commit_with_or_without_agent(
+        self, app, fake_llm, monkeypatch, auto_create_agent
+    ):
+        assignments = _install_fixed_plan(monkeypatch, count=1)
+        monkeypatch.setattr(pg, "_apply_casing", lambda name: name)
+        fake_llm.enqueue_content(
+            json.dumps(
+                [_persona_row("a1", "committed_user", subscriptions=[])]
+            )
+        )
+
+        result = generate_personas(
+            count=1,
+            auto_create_agent=auto_create_agent,
+            troll_mode="no_troll",
+        )
+        user = User.query.filter_by(username=result["users"][0]["username"]).first()
+
+        assert user.agent_state["subscriptions"] == []
+        assert user.agent_state["persona_seed"]["assignment_id"] == assignments[0].id
+        assert len(result["agents"]) == int(auto_create_agent)
+
+
 class TestAdminUserGeneratorAPI:
     def test_unauthenticated_request_rejected(self, client, monkeypatch):
         monkeypatch.setenv("API_TOKEN", "unit-test-admin-token")
@@ -633,6 +717,7 @@ class TestAdminUserGeneratorAPI:
         assert resp.status_code == 201
         data = resp.get_json()
         assert data["success"] is True
+        assert set(data) == {"success", "users", "agents", "skipped"}
         assert len(data["users"]) == 2
         assert len(data["agents"]) == 2
 
@@ -751,7 +836,8 @@ class TestPersonaSubscriptions:
 
         row_a = User.query.filter_by(username=by_key["usera"]["username"]).first()
         row_b = User.query.filter_by(username=by_key["userb"]["username"]).first()
-        assert row_a.agent_state == {"subscriptions": ["books"]}
+        assert row_a.agent_state["subscriptions"] == ["books"]
+        assert row_a.agent_state["persona_seed"]["assignment_id"] == "a1"
         assert row_b.agent_state["subscriptions"] == [
             "localllama",
             "CasualConversation",
@@ -777,7 +863,8 @@ class TestPersonaSubscriptions:
         assert by_key["usere"]["subscriptions"] == []
         for key in ("userd", "usere"):
             row = User.query.filter_by(username=by_key[key]["username"]).first()
-            assert (row.agent_state or {}).get("subscriptions") in (None, [])
+            assert row.agent_state["subscriptions"] == []
+            assert row.agent_state["persona_seed"]["assignment_id"] in {"a1", "a2"}
 
     def test_prompt_lists_real_communities(self, app, fake_llm, subs):
         fake_llm.enqueue_content(_personas_json(1))
@@ -806,4 +893,5 @@ class TestPersonaSubscriptions:
         assert len(result["agents"]) == 1
         stored = result["users"][0]["username"]
         row = User.query.filter_by(username=stored).first()
-        assert row.agent_state == {"subscriptions": ["books", "localllama"]}
+        assert row.agent_state["subscriptions"] == ["books", "localllama"]
+        assert row.agent_state["persona_seed"]["assignment_id"] == "a1"
