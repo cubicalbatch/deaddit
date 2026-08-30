@@ -118,6 +118,7 @@ class User(db.Model):
 
 class JobType(Enum):
     BATCH_OPERATION = "batch_operation"
+    AGENT_RUN = "agent_run"
 
 
 class JobStatus(Enum):
@@ -146,6 +147,29 @@ class Job(db.Model):
     heartbeat_at = db.Column(db.DateTime)
 
     __table_args__ = (db.Index("ix_job_status_priority", "status", "priority"),)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "type": self.type.value if self.type else None,
+            "status": self.status.value if self.status else None,
+            "priority": self.priority,
+            "progress": self.progress,
+            "total_items": self.total_items,
+            "parameters": self.parameters,
+            "result": self.result,
+            "error_message": self.error_message,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat()
+            if self.completed_at
+            else None,
+            "claimed_at": self.claimed_at.isoformat() if self.claimed_at else None,
+            "worker_id": self.worker_id,
+            "heartbeat_at": self.heartbeat_at.isoformat()
+            if self.heartbeat_at
+            else None,
+        }
 
 
 class ApiModel(db.Model):

@@ -461,6 +461,34 @@ def test_worker_dispatches_agent_ids_not_usernames(
     scheduler.stop(wait=False)
 
 
+def test_poll_tick_skips_queued_agents(seeded_db, db_session, app, monkeypatch):
+    """A queued manual job owns the agent; the scheduler must not double-book it."""
+    _set_flag("true")
+    queued = _make_agent(db_session, "alice")
+    due = _make_agent(db_session, "bob")
+    now = datetime.utcnow()
+    queued.status = "queued"  # admin queued an AGENT_RUN job moments ago
+    queued.next_run_at = now - timedelta(seconds=10)
+    due.next_run_at = now - timedelta(seconds=10)
+    db_session.commit()
+
+    calls: list[tuple[int, str]] = []
+    lock = threading.Lock()
+
+    def fake_run_once(agent_id, *, trigger="schedule"):
+        with lock:
+            calls.append((agent_id, trigger))
+
+    monkeypatch.setattr(wakes, "run_once", fake_run_once)
+    scheduler = WakeScheduler(app)
+    scheduler._poll_once()
+
+    assert _wait_until(lambda: len(calls) == 1)
+    scheduler._executor.shutdown(wait=True)
+    assert [agent_id for agent_id, _ in calls] == [due.id]
+    scheduler.stop(wait=False)
+
+
 def test_random_agent_ceiling_deferral(seeded_db, db_session, app, monkeypatch):
     _set_flag("true")
     agent = _make_random_agent(db_session, config={"daily_request_ceiling": 2})

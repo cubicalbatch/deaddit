@@ -454,29 +454,34 @@ def _agent_with_memory(db_session, username):
     return agent
 
 
-def test_prepared_visit_includes_memory_then_unread_notice(seeded_db, db_session):
+def test_prepared_visit_keeps_memory_in_system_prompt_and_adds_unread_notice(
+    seeded_db, db_session
+):
     agent = _agent_with_memory(db_session, "alice")
     _seed_inbox(db_session, "alice", 2)
 
     messages = prepare_agent_visit(agent, db_session.get(User, "alice")).messages
-    system = messages[0]["content"]
+    system_prompt = messages[0]["content"]
     kickoff = messages[-1]["content"]
 
-    assert "Your memory:" in system
-    assert "Recent visits:" in system
+    assert "Your memory:" in system_prompt
+    assert "Recent visits:" in system_prompt
     assert "You have 2 unread replies" in kickoff
     assert "view_inbox" in kickoff
+    # The system prompt is sent before the kickoff and supplies the memory.
+    assert messages[0]["role"] == "system"
+    assert messages[-1]["role"] == "user"
 
 
 def test_prepared_visit_omits_notice_when_nothing_unread(seeded_db, db_session):
     agent = _agent_with_memory(db_session, "alice")
-
     messages = prepare_agent_visit(agent, db_session.get(User, "alice")).messages
-    system = messages[0]["content"]
+
+    system_prompt = messages[0]["content"]
     kickoff = messages[-1]["content"]
 
-    assert "Your memory:" in system
-    assert "Recent visits:" in system
+    assert "Your memory:" in system_prompt
+    assert "Recent visits:" in system_prompt
     assert "unread" not in kickoff
 
 

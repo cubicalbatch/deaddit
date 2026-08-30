@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 import pytest
 
 import deaddit.admin as admin_module
+import deaddit.jobs as jobs
 import deaddit.llm.capabilities as capabilities
 from deaddit.agents.memory import (
     BACKFILL_PREFIX,
@@ -28,6 +29,9 @@ from deaddit.models import (
     AgentRun,
     AgentTurn,
     Comment,
+    Job,
+    JobStatus,
+    JobType,
     ToolCall,
     User,
 )
@@ -343,32 +347,245 @@ def test_force_run_unknown_agent_404(seeded_db, admin_client):
     assert admin_client.post("/admin/api/agents/9999/force-run").status_code == 404
 
 
-def test_force_run_executes_a_full_visit(seeded_db, admin_client, db_session, fake_llm):
+def test_force_run_queues_job_without_running_the_visit(
+    seeded_db, admin_client, db_session
+):
+    """POST returns 202 with a pending worker job; the web process runs no visit."""
+    agent = _make_agent(db_session, "alice", config={"min_delay": 0, "max_delay": 0})
+
+    resp = admin_client.post(f"/admin/api/agents/{agent.id}/force-run")
+
+    assert resp.status_code == 202
+    job = resp.get_json()["job"]
+    assert job["type"] == "agent_run"
+    assert job["status"] == "pending"
+    assert job["priority"] >= 8  # claimed ahead of routine batch work
+    assert job["parameters"] == {"agent_id": agent.id, "requested_intent": None}
+
+    db_session.expire_all()
+    assert agent.status == "queued"
+    manual = agent.state["manual_run"]
+    assert manual["job_id"] == job["id"]
+    assert manual["requested_intent"] is None
+    assert manual["previous_status"] == "idle"
+    # The web request only queued work: nothing was reserved or executed.
+    assert AgentRun.query.filter_by(agent_id=agent.id).count() == 0
+
+
+def test_force_run_conflict_while_queued(seeded_db, admin_client, db_session):
+    agent = _make_agent(db_session, "alice")
+    agent.status = "queued"
+    db_session.commit()
+
+    resp = admin_client.post(f"/admin/api/agents/{agent.id}/force-run")
+    assert resp.status_code == 409
+    assert "already has a run in progress" in resp.get_json()["error"]
+
+
+def test_force_run_rejects_unknown_intent(seeded_db, admin_client, db_session):
+    agent = _make_agent(db_session, "alice")
+
+    resp = admin_client.post(
+        f"/admin/api/agents/{agent.id}/force-run", json={"intent": "comment"}
+    )
+
+    assert resp.status_code == 400
+    assert "intent" in resp.get_json()["error"]
+    assert Job.query.count() == 0
+
+
+@pytest.mark.parametrize(
+    ("intent", "config", "tier"),
+    [
+        ("image", {}, "regular"),  # image posts not enabled
+        ("website", {}, "regular"),  # website posts not enabled
+        # Both media kinds enabled, but lurkers may never post either.
+        (
+            "image",
+            {
+                "image_posts": {"enabled": True, "policy": "optional"},
+                "website_posts": {"enabled": True, "policy": "optional"},
+            },
+            "lurker",
+        ),
+        (
+            "website",
+            {
+                "image_posts": {"enabled": True, "policy": "optional"},
+                "website_posts": {"enabled": True, "policy": "optional"},
+            },
+            "lurker",
+        ),
+    ],
+)
+def test_force_run_rejects_ineligible_media_intent(
+    seeded_db, admin_client, db_session, intent, config, tier
+):
+    """Ineligible media requests fail before queueing instead of degrading."""
+    agent = _make_agent(db_session, "alice", config=config)
+    agent.autonomy_tier = tier
+    db_session.commit()
+
+    resp = admin_client.post(
+        f"/admin/api/agents/{agent.id}/force-run", json={"intent": intent}
+    )
+
+    assert resp.status_code == 422
+    assert resp.get_json()["error"]
+    assert agent.status == "idle"
+    assert Job.query.count() == 0
+
+
+def test_force_run_worker_dispatch_executes_a_full_visit(
+    app, seeded_db, admin_client, db_session, fake_llm
+):
     agent = _make_agent(db_session, "alice", config={"min_delay": 0, "max_delay": 0})
     # Plain content twice: first answer triggers a nudge, second force-finishes.
     fake_llm.enqueue_content("Just looking around.")
     fake_llm.enqueue_content("Done, finishing.")
 
-    resp = admin_client.post(f"/admin/api/agents/{agent.id}/force-run")
-    assert resp.status_code == 200
-    run = resp.get_json()["run"]
-    assert run["agent_id"] == agent.id
-    assert run["persona_username"] == "alice"
-    assert run["trigger"] == "manual"
-    assert run["status"] == "completed"
-    assert run["turn_count"] == 2
-    persisted = AgentRun.query.filter_by(agent_id=agent.id).one()
-    assert persisted.persona_username == run["persona_username"]
+    queued = admin_client.post(f"/admin/api/agents/{agent.id}/force-run").get_json()[
+        "job"
+    ]
 
-    db.session.refresh(agent)
+    result = jobs.execute_job(queued["id"], app=app)  # the worker lane entrypoint
+
+    assert result["agent_id"] == agent.id
+    assert result["requested_intent"] is None
+    assert result["run_status"] == "completed"
+
+    db_session.expire_all()
+    persisted = AgentRun.query.filter_by(agent_id=agent.id).one()
+    assert persisted.id == result["run_id"]
+    assert persisted.persona_username == "alice"
+    assert persisted.trigger == "manual"
+    assert persisted.status == "completed"
+    assert persisted.turn_count == 2
     assert agent.status == "idle"
     assert agent.last_run_at is not None
+    assert "manual_run" not in (agent.state or {})
+    job = db_session.get(Job, queued["id"])
+    assert job.status == JobStatus.COMPLETED
+    assert job.result["run_id"] == persisted.id
     episode = AgentMemory.query.filter_by(kind="episode").one()
     assert "without taking any tool actions" in episode.content
 
 
+def test_force_run_worker_dispatch_resolves_requested_media_intent(
+    app, seeded_db, admin_client, db_session, fake_llm
+):
+    """An image request dispatches run_once(requested_intent='image')."""
+    agent = _make_agent(
+        db_session,
+        "alice",
+        config={
+            "min_delay": 0,
+            "max_delay": 0,
+            "image_posts": {"enabled": True, "policy": "optional"},
+        },
+    )
+    fake_llm.enqueue_content("Just looking around.")
+    fake_llm.enqueue_content("Done, finishing.")
+
+    queued = admin_client.post(
+        f"/admin/api/agents/{agent.id}/force-run", json={"intent": "image"}
+    ).get_json()["job"]
+    assert queued["parameters"] == {
+        "agent_id": agent.id,
+        "requested_intent": "image",
+    }
+
+    result = jobs.execute_job(queued["id"], app=app)
+
+    assert result["requested_intent"] == "image"
+    assert result["resolved_intent"] == "image"
+    assert result["run_status"] == "completed"
+
+    db_session.expire_all()
+    run = AgentRun.query.filter_by(agent_id=agent.id).one()
+    assert run.intent == "image"
+    assert run.prompt_metadata["intent_source"] == "requested"
+
+
+@pytest.mark.parametrize("intent", ["image", "website"])
+def test_force_run_worker_delegates_selected_intent_once(
+    app, seeded_db, admin_client, db_session, monkeypatch, intent
+):
+    """The worker forwards a requested media intent to exactly one normal visit."""
+    agent = _make_agent(
+        db_session,
+        "alice",
+        config={
+            "image_posts": {"enabled": True, "policy": "optional"},
+            "website_posts": {"enabled": True, "policy": "optional"},
+        },
+    )
+    queued = admin_client.post(
+        f"/admin/api/agents/{agent.id}/force-run", json={"intent": intent}
+    ).get_json()["job"]
+    calls = []
+
+    def run_once(agent_id, *, trigger, requested_intent=None):
+        calls.append((agent_id, trigger, requested_intent))
+        run = AgentRun(
+            agent_id=agent_id,
+            persona_username="alice",
+            trigger=trigger,
+            intent=requested_intent,
+            status="completed",
+            started_at=datetime.utcnow(),
+            finished_at=datetime.utcnow(),
+        )
+        db.session.add(run)
+        agent.status = "idle"
+        db.session.commit()
+        return run
+
+    monkeypatch.setattr("deaddit.agents.loop.run_once", run_once)
+
+    result = jobs.execute_job(queued["id"], app=app)
+
+    assert calls == [(agent.id, "manual", intent)]
+    assert result["agent_id"] == agent.id
+    assert result["requested_intent"] == intent
+    assert result["resolved_intent"] == intent
+    assert result["run_status"] == "completed"
+    assert result["run_id"] == AgentRun.query.filter_by(agent_id=agent.id).one().id
+    db_session.expire_all()
+    assert db_session.get(Job, queued["id"]).result == result
+    assert "manual_run" not in (agent.state or {})
+
+
+def test_force_run_worker_failure_before_run_restores_previous_status(
+    app, seeded_db, admin_client, db_session, monkeypatch
+):
+    """A dispatch that fails before reserving a run frees the queued agent."""
+    import deaddit.agents.loop as loop
+
+    agent = _make_agent(db_session, "alice", config={"min_delay": 0, "max_delay": 0})
+    queued = admin_client.post(f"/admin/api/agents/{agent.id}/force-run").get_json()[
+        "job"
+    ]
+
+    def boom(agent_id, *, trigger, requested_intent=None):
+        raise ValueError("persona pool exhausted")
+
+    monkeypatch.setattr(loop, "run_once", boom)
+
+    with pytest.raises(ValueError, match="persona pool exhausted"):
+        jobs.execute_job(queued["id"], app=app)
+
+    db_session.expire_all()
+    job = db_session.get(Job, queued["id"])
+    assert job.status == JobStatus.FAILED
+    assert "persona pool exhausted" in job.error_message
+    assert agent.status == "idle"  # previous_status restored
+    assert "manual_run" not in (agent.state or {})
+    assert AgentRun.query.filter_by(agent_id=agent.id).count() == 0
+
+
 def test_random_force_run_snapshots_selected_persona(
-    seeded_db, admin_client, db_session, fake_llm, monkeypatch
+    app, seeded_db, admin_client, db_session, fake_llm, monkeypatch
 ):
     monkeypatch.setattr(capabilities, "ensure_tools_allowed", _noop_tools_allowed)
     agent = _make_random_agent(
@@ -377,13 +594,14 @@ def test_random_force_run_snapshots_selected_persona(
     fake_llm.enqueue_content("Just looking around.")
     fake_llm.enqueue_content("Done, finishing.")
 
-    response = admin_client.post(f"/admin/api/agents/{agent.id}/force-run")
-    assert response.status_code == 200
-    run = response.get_json()["run"]
-    assert run["agent_id"] == agent.id
-    assert run["persona_username"] in {"alice", "bob"}
+    queued = admin_client.post(f"/admin/api/agents/{agent.id}/force-run").get_json()[
+        "job"
+    ]
+    result = jobs.execute_job(queued["id"], app=app)
+
     persisted = AgentRun.query.filter_by(agent_id=agent.id).one()
-    assert persisted.persona_username == run["persona_username"]
+    assert persisted.id == result["run_id"]
+    assert persisted.persona_username in {"alice", "bob"}
 
 
 def test_persona_identity_is_immutable_but_current_mode_is_idempotent(
@@ -636,37 +854,40 @@ def test_bulk_delete_cascades_runs_and_keeps_persona(
     assert db_session.query(AgentRun).count() == 0
     assert db_session.query(AgentTurn).count() == 0
     assert db_session.query(ToolCall).count() == 0
-    assert db_session.get(User, "alice") is not None  # persona account survives
-    assert db_session.get(Agent, busy.id) is not None  # running agent untouched
 
 
-def test_bulk_force_run_queues_idle_and_skips_running(
-    seeded_db, admin_client, db_session, monkeypatch
+def test_bulk_force_run_enqueues_jobs_and_skips_active(
+    seeded_db, admin_client, db_session
 ):
     idle = _make_agent(db_session, "alice")
     busy = _make_agent(db_session, "bob")
     busy.status = "running"
     db_session.commit()
 
-    captured = []
-    monkeypatch.setattr(
-        admin_module, "_bulk_force_run_worker", lambda app, ids: captured.append(ids)
-    )
-
     body = admin_client.post(
         "/admin/api/agents/bulk",
         json={"action": "force_run", "agent_ids": [idle.id, busy.id, 9999]},
     ).get_json()
+
     assert body["affected"] == [idle.id]
     assert {s["id"] for s in body["skipped"]} == {busy.id, 9999}
     errors = {s["id"]: s["error"] for s in body["skipped"]}
     assert "run in progress" in errors[busy.id]
     assert errors[9999] == "agent not found"
-    assert captured == [[idle.id]]
+
+    # One generic AGENT_RUN job was queued for the idle agent; nothing ran.
+    assert body["jobs"] == [{"agent_id": idle.id, "job_id": body["jobs"][0]["job_id"]}]
+    job = Job.query.one()
+    assert job.id == body["jobs"][0]["job_id"]
+    assert job.type == JobType.AGENT_RUN
+    assert job.status == JobStatus.PENDING
+    assert job.parameters == {"agent_id": idle.id, "requested_intent": None}
+    assert AgentRun.query.count() == 0
+    assert not hasattr(admin_module, "_bulk_force_run_worker")  # web thread removed
 
 
-def test_bulk_force_run_worker_runs_each_agent_sequentially(
-    app, seeded_db, db_session, fake_llm, monkeypatch
+def test_bulk_force_run_jobs_execute_through_the_worker(
+    app, seeded_db, admin_client, db_session, fake_llm, monkeypatch
 ):
     monkeypatch.setattr(capabilities, "ensure_tools_allowed", _noop_tools_allowed)
     one = _make_agent(db_session, "alice", config={"min_delay": 0, "max_delay": 0})
@@ -676,10 +897,18 @@ def test_bulk_force_run_worker_runs_each_agent_sequentially(
         fake_llm.enqueue_content("Just looking around.")
         fake_llm.enqueue_content("Done, finishing.")
 
-    admin_module._bulk_force_run_worker(app, [one.id, two.id, 9999])
+    body = admin_client.post(
+        "/admin/api/agents/bulk",
+        json={"action": "force_run", "agent_ids": [one.id, two.id]},
+    ).get_json()
+    for entry in body["jobs"]:
+        jobs.execute_job(entry["job_id"], app=app)
 
+    db_session.expire_all()
     statuses = {r.agent_id: r.status for r in db_session.query(AgentRun).all()}
     assert statuses == {one.id: "completed", two.id: "completed"}
+    for entry in body["jobs"]:
+        assert db_session.get(Job, entry["job_id"]).status == JobStatus.COMPLETED
 
 
 def test_bulk_action_validation_errors(seeded_db, admin_client):
@@ -709,7 +938,7 @@ def test_dashboard_pages_render_and_register_endpoints(
     endpoints = {rule.endpoint for rule in app.url_map.iter_rules()}
     assert "admin.agents_dashboard" in endpoints
     assert "admin.agent_detail" in endpoints
-
+    assert "admin.api_job_status" in endpoints
     agent = _make_agent(db_session, "alice")
     assert admin_client.get("/admin/agents").status_code == 200
     assert admin_client.get(f"/admin/agents/{agent.id}").status_code == 200
@@ -722,9 +951,12 @@ def test_admin_gate_redirects_anonymous_visitors(app, client, monkeypatch):
     assert resp.status_code == 302
     assert "/admin/login" in resp.headers["Location"]
 
+    assert client.get("/admin/api/jobs/1").status_code == 302
+
     with client.session_transaction() as sess:
         sess["admin_authenticated"] = True
     assert client.get("/admin/api/agents").status_code == 200
+    assert client.get("/admin/api/jobs/1").status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -869,7 +1101,7 @@ def test_backfill_falls_back_to_extractive_when_provider_raises(
 
 
 # ---------------------------------------------------------------------------
-# Memory: kickoff injection
+# Memory: system-prompt injection
 
 
 def test_prepared_visit_injects_backfills_and_recent_episodes(seeded_db, db_session):

@@ -686,7 +686,7 @@ register(
             "one-page generated website. It shares the one-post-per-session limit "
             "with create_post. website_description is the generator brief, not "
             "post content, and must specify the site's purpose, audience, "
-            "information architecture, visual language, actual content, "
+            "information architecture, visual language, thorough concrete actual content, "
             "interactions, and the specific rendered page. hostname_hint and "
             "page_name_hint are fitting fictional URL hints and may be adjusted "
             "to meet storage rules."

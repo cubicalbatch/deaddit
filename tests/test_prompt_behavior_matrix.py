@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
+import deaddit.agents.prompts as agent_prompts
 from deaddit.agents.prompts import (
     build_system_prompt,
     prepare_agent_visit,
@@ -381,8 +382,8 @@ def test_initial_messages_freeze_unread_notice_and_system_kickoff_roles(
     app, db_session, monkeypatch
 ):
     agent, user = _make_agent(db_session, "initial_messages")
-    monkeypatch.setattr("deaddit.agents.prompts.unread_count", lambda username: 2)
-    monkeypatch.setattr("deaddit.agents.prompts.visit_memories", lambda username: None)
+    monkeypatch.setattr(agent_prompts, "unread_count", lambda username: 2)
+    monkeypatch.setattr(agent_prompts, "visit_memories", lambda username: None)
     with (
         patch("deaddit.agents.prompts.random.choices", return_value=[0]),
         patch(

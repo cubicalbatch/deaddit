@@ -8,7 +8,6 @@ import logging
 import os
 import random
 import re
-import threading
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -4343,23 +4342,165 @@ def api_toggle_agent(agent_id):
     return jsonify({"agent": _agent_json(agent)})
 
 
+def _has_active_run(agent) -> bool:
+    """True when the agent is queued for, or already executing, a run."""
+    return agent.status in ("queued", "running") or (
+        AgentRun.query.filter_by(agent_id=agent.id, status="running").first()
+        is not None
+    )
+
+
+def _manual_intent_error(agent, intent) -> str | None:
+    """Eligibility error for a requested media intent, or None when allowed.
+
+    Reuses the registry's static post-tool truth table — the same helpers the
+    visit planner and executor use — so admin validation can never drift
+    from runtime policy. Reasons mirror the agent-detail menu: lurker tier,
+    a conflicting static post-only policy, or the media kind not enabled.
+    """
+    from deaddit.agents.registry import (
+        AutonomyTier,
+        image_posts_config,
+        offered_post_tool_names,
+        website_posts_config,
+    )
+
+    if intent not in ("image", "website"):
+        return None
+    tier = getattr(agent.autonomy_tier, "value", agent.autonomy_tier)
+    if tier == AutonomyTier.LURKER.value:
+        return "lurker-tier agents cannot make image or website posts"
+    image_cfg = image_posts_config(agent)
+    website_cfg = website_posts_config(agent)
+    if (
+        image_cfg["enabled"]
+        and image_cfg["policy"] == "image_only"
+        and website_cfg["enabled"]
+        and website_cfg["policy"] == "website_only"
+    ):
+        # The truth table fails closed to no post tools for this combination;
+        # name the conflict rather than the downstream "not enabled" symptom.
+        return (
+            "conflicting static post-only policy (image_only and website_only): "
+            "no media run can be offered"
+        )
+    static_offered = offered_post_tool_names(image_cfg, website_cfg)
+    if intent == "image" and "create_image_post" not in static_offered:
+        return "image posts are not enabled for this agent"
+    if intent == "website" and "create_website" not in static_offered:
+        return "website posts are not enabled for this agent"
+    return None
+
+
+def _enqueue_agent_run(agent, requested_intent):
+    """Atomically claim an idle agent and queue an AGENT_RUN job for it.
+
+    Returns the queued :class:`~deaddit.models.Job`, or ``None`` when a
+    concurrent request claimed the agent first. The conditional UPDATE is
+    the queue-ownership gate; the job insert, ``status='queued'``, and the
+    ``state.manual_run`` marker land in a single transaction.
+    """
+    from sqlalchemy import update
+
+    from deaddit.jobs import AGENT_RUN_JOB_PRIORITY
+    from deaddit.models import JobStatus, JobType
+
+    job = Job(
+        type=JobType.AGENT_RUN,
+        status=JobStatus.PENDING,
+        priority=AGENT_RUN_JOB_PRIORITY,
+        total_items=1,
+        parameters={"agent_id": agent.id, "requested_intent": requested_intent},
+    )
+    db.session.add(job)
+    db.session.flush()  # assign job.id for the manual-run marker
+
+    state = dict(agent.state or {})
+    state["manual_run"] = {
+        "job_id": job.id,
+        "requested_intent": requested_intent,
+        "queued_at": datetime.utcnow().isoformat(),
+        "previous_status": agent.status or "idle",
+    }
+    claimed = db.session.execute(
+        update(Agent)
+        .where(Agent.id == agent.id, Agent.status.notin_(("queued", "running")))
+        .values(status="queued", state=state)
+    ).rowcount
+    if not claimed:
+        db.session.rollback()
+        return None
+    db.session.commit()
+    logger.info(
+        "Queued AGENT_RUN job %s for agent %s (requested_intent=%r)",
+        job.id,
+        agent.id,
+        requested_intent,
+    )
+    return job
+
+
 @admin_bp.route("/api/agents/<int:agent_id>/force-run", methods=["POST"])
 @production_disabled
 @admin_required
 def api_force_run(agent_id):
-    """Run one agent visit synchronously; bounded by its max_run_seconds budget."""
-    from deaddit.agents.loop import run_once
-    from deaddit.models import Agent
+    """Queue one manual agent visit as a high-priority worker job.
 
+    Returns 202 immediately; the worker process owns execution through
+    ``run_once()`` — the web process never runs an LLM turn. ``intent`` is
+    ``null``/absent for the existing generic visit, or ``"image"`` /
+    ``"website"`` for a requested media intent.
+    """
     agent = db.session.get(Agent, agent_id)
     if agent is None:
         return jsonify({"success": False, "error": "agent not found"}), 404
-    try:
-        run = run_once(agent_id, trigger="manual")
-    except ValueError as exc:
-        # Already running / no agent registered.
-        return jsonify({"success": False, "error": str(exc)}), 409
-    return jsonify({"run": _run_json(run)})
+
+    intent = (request.get_json(silent=True) or {}).get("intent")
+    if intent not in (None, "image", "website"):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "intent must be null, 'image', or 'website'",
+                }
+            ),
+            400,
+        )
+
+    if _has_active_run(agent):
+        return (
+            jsonify({"success": False, "error": "agent already has a run in progress"}),
+            409,
+        )
+
+    error = _manual_intent_error(agent, intent)
+    if error:
+        return jsonify({"success": False, "error": error}), 422
+
+    job = _enqueue_agent_run(agent, intent)
+    if job is None:
+        # Lost the atomic claim to a concurrent request.
+        return (
+            jsonify({"success": False, "error": "agent already has a run in progress"}),
+            409,
+        )
+    return jsonify({"job": job.to_dict(), "agent": _agent_json(agent)}), 202
+
+
+@admin_bp.route("/api/jobs/<int:job_id>")
+@production_disabled
+@admin_required
+def api_job_status(job_id):
+    """One queue job by ID (generic queue-status lookup).
+
+    Lets the agent-detail live panel distinguish pending, claimed, completed,
+    and failed jobs while no ``AgentRun`` row exists yet. Returns the job's
+    own ``to_dict`` serialization — no second activity representation.
+    """
+    job = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"success": False, "error": "job not found"}), 404
+    return jsonify({"job": job.to_dict()})
 
 
 @admin_bp.route("/api/agents/<int:agent_id>/runs")
@@ -4494,32 +4635,6 @@ _BULK_AGENT_ACTIONS = frozenset(
 )
 
 
-def _bulk_force_run_worker(app, agent_ids):
-    """Run each selected agent once, sequentially, on a daemon thread.
-
-    A synchronous loop would hold the HTTP worker for minutes per agent
-    (gunicorn timeout is 120s), so the endpoint validates the batch and
-    hands the ids here. Each agent gets its own app context - and therefore
-    its own session - so one agent's failure or stale identity map never
-    poisons the rest.
-    """
-    from deaddit.agents.loop import run_once
-    from deaddit.models import Agent
-
-    for agent_id in agent_ids:
-        try:
-            with app.app_context():
-                agent = db.session.get(Agent, agent_id)
-                if agent is None:
-                    continue
-                if agent.status == "running":
-                    logger.info("Bulk force-run skipped agent %s: running", agent_id)
-                    continue
-                run_once(agent_id, trigger="manual")
-        except Exception:
-            logger.exception("Bulk force-run of agent %s failed", agent_id)
-
-
 def _bulk_flag_posts(agent, key, enable, resolver):
     """Flip one agent's ``image_posts``/``website_posts`` flag in place.
 
@@ -4559,12 +4674,12 @@ def api_agents_bulk():
 
     Flag actions (enable/disable, image/website toggles, delete) are plain
     DB updates committed once. ``force_run`` validates the batch, skips
-    agents that are already running, and queues the rest on a daemon
-    thread that runs them sequentially via run_once(trigger="manual").
-    Per-agent failures (e.g. enabling images on a lurker) are reported as
-    ``skipped`` entries and never abort the rest of the batch.
+    agents that are already queued or running, and enqueues one generic
+    AGENT_RUN job per remaining agent on the worker queue; the response
+    reports the queued job IDs. Per-agent failures (e.g. enabling images on
+    a lurker) are reported as ``skipped`` entries and never abort the rest
+    of the batch.
     """
-    from deaddit.models import Agent
 
     payload = request.get_json(silent=True) or {}
     action = payload.get("action")
@@ -4604,6 +4719,7 @@ def api_agents_bulk():
     ]
     affected = []
     errors = []
+    queued_jobs = []
 
     for agent_id in agent_ids:
         agent = agents.get(agent_id)
@@ -4628,8 +4744,14 @@ def api_agents_bulk():
                 agent.next_run_at = None
                 agent.status = "idle"
         elif action == "force_run":
-            if agent.status == "running":
+            if _has_active_run(agent):
                 error = "already has a run in progress"
+            else:
+                job = _enqueue_agent_run(agent, None)
+                if job is None:
+                    error = "already has a run in progress"
+                else:
+                    queued_jobs.append({"agent_id": agent.id, "job_id": job.id})
         elif action == "enable_image":
             error = _bulk_flag_posts(agent, "image_posts", True, _resolve_image_posts)
         elif action == "disable_image":
@@ -4656,19 +4778,12 @@ def api_agents_bulk():
             errors.append({"id": agent_id, "label": label, "error": error})
 
     if action == "force_run":
-        if affected:
-            app = current_app._get_current_object()
-            threading.Thread(
-                target=_bulk_force_run_worker,
-                args=(app, list(affected)),
-                daemon=True,
-                name="bulk-force-run",
-            ).start()
         return jsonify(
             {
                 "success": True,
                 "action": action,
                 "affected": affected,
+                "jobs": queued_jobs,
                 "skipped": skipped + errors,
             }
         )
@@ -5313,6 +5428,7 @@ def prompts_page():
 @production_disabled
 @admin_required
 def prompts_validate_api(name):
+    """Dry-run visit-profile validation without storing anything."""
     from deaddit.llm.prompts import (
         PromptError,
         get_template,
