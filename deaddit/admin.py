@@ -4598,7 +4598,10 @@ def api_force_run(agent_id):
     if intent not in (None, "image", "website"):
         return (
             jsonify(
-                {"success": False, "error": "intent must be null, 'image', or 'website'"}
+                {
+                    "success": False,
+                    "error": "intent must be null, 'image', or 'website'",
+                }
             ),
             400,
         )
@@ -4621,6 +4624,7 @@ def api_force_run(agent_id):
             409,
         )
     return jsonify({"job": job.to_dict(), "agent": _agent_json(agent)}), 202
+
 
 @admin_bp.route("/api/jobs/<int:job_id>")
 @production_disabled
@@ -5348,6 +5352,7 @@ def prompts_create_version_api(name):
         return jsonify({"error": str(exc)}), 400
     return jsonify(_version_dict(row)), 201
 
+
 @admin_bp.route("/api/pins")
 @production_disabled
 @admin_required
@@ -5460,7 +5465,12 @@ def _profile_leaf_diff(path, effective, preview):
     """One leaf-level change entry, or None when the values are equal."""
     if effective == preview:
         return None
-    return {"path": path, "change": "modified", "effective": effective, "preview": preview}
+    return {
+        "path": path,
+        "change": "modified",
+        "effective": effective,
+        "preview": preview,
+    }
 
 
 def _profile_diff(effective, preview, path=""):
@@ -5483,9 +5493,7 @@ def _profile_diff(effective, preview, path=""):
                     {"path": child, "change": "removed", "effective": effective[key]}
                 )
             else:
-                entries.extend(
-                    _profile_diff(effective[key], preview[key], child)
-                )
+                entries.extend(_profile_diff(effective[key], preview[key], child))
         return entries
     if (
         isinstance(effective, list)
@@ -5499,7 +5507,11 @@ def _profile_diff(effective, preview, path=""):
             child = f"{path}[{item_id}]"
             if item_id not in effective_by_id:
                 entries.append(
-                    {"path": child, "change": "added", "preview": preview_by_id[item_id]}
+                    {
+                        "path": child,
+                        "change": "added",
+                        "preview": preview_by_id[item_id],
+                    }
                 )
             elif item_id not in preview_by_id:
                 entries.append(
@@ -5553,8 +5565,12 @@ def prompts_page():
 @admin_required
 def prompts_validate_api(name):
     """Dry-run visit-profile validation without storing anything."""
-    from deaddit.llm.prompts import PromptError, get_template, parse_visit_profile
-    from deaddit.llm.prompts import serialize_visit_profile
+    from deaddit.llm.prompts import (
+        PromptError,
+        get_template,
+        parse_visit_profile,
+        serialize_visit_profile,
+    )
 
     if name != _PROFILE_TEMPLATE:
         # Unknown names 404; other real templates explain the restriction.
@@ -5619,10 +5635,16 @@ def prompts_preview_api(name):
             }
         ), 400
     unread_count = data.get("unread_count", 0)
-    if isinstance(unread_count, bool) or not isinstance(unread_count, int) or unread_count < 0:
+    if (
+        isinstance(unread_count, bool)
+        or not isinstance(unread_count, int)
+        or unread_count < 0
+    ):
         return jsonify({"error": "Field 'unread_count' must be an integer >= 0"}), 400
     version = data.get("version")
-    if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
+    if version is not None and (
+        isinstance(version, bool) or not isinstance(version, int)
+    ):
         return jsonify({"error": "Field 'version' must be an integer or null"}), 400
 
     agent = db.session.get(Agent, agent_id)

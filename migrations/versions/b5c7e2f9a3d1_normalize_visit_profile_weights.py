@@ -42,7 +42,7 @@ def _rescale(document: dict) -> bool:
         if not isinstance(items, list) or not items:
             continue
         weights = [item.get("weight") for item in items]
-        if not all(isinstance(w, (int, float)) for w in weights):
+        if not all(isinstance(w, int | float) for w in weights):
             continue
         total = math.fsum(weights)
         if 0 < total <= 1.0 + 1e-9 and all(w <= 1.0 + 1e-9 for w in weights):
@@ -70,9 +70,7 @@ def upgrade():
         if not isinstance(document, dict) or not _rescale(document):
             continue
         conn.execute(
-            sa.text(
-                "UPDATE prompt_template_version SET body = :body WHERE id = :id"
-            ),
+            sa.text("UPDATE prompt_template_version SET body = :body WHERE id = :id"),
             {
                 "body": json.dumps(document, sort_keys=True, separators=(",", ":")),
                 "id": row_id,

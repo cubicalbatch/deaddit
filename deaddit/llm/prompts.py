@@ -29,10 +29,11 @@ import hashlib
 import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from types import MappingProxyType
-from typing import Mapping
+
 from sqlalchemy import event
 
 from deaddit.extensions import db
@@ -171,7 +172,7 @@ def _catalog_items(
         text = _profile_string(item["text"], f"{item_path}.text")
         _validate_profile_variables(text, f"{item_path}.text")
         weight = item["weight"]
-        if isinstance(weight, bool) or not isinstance(weight, (int, float)):
+        if isinstance(weight, bool) or not isinstance(weight, int | float):
             raise _profile_error(f"{item_path}.weight must be numeric")
         if not math.isfinite(float(weight)) or float(weight) <= 0:
             raise _profile_error(f"{item_path}.weight must be finite and positive")
@@ -179,11 +180,12 @@ def _catalog_items(
             raise _profile_error(f"duplicate stable id {item_id!r}")
         expected_prefix = f"{path.rsplit('.', 1)[-1]}."
         if not item_id.startswith(expected_prefix):
-            raise _profile_error(f"{item_path}.id is incompatible with its content kind")
+            raise _profile_error(
+                f"{item_path}.id is incompatible with its content kind"
+            )
         ids.add(item_id)
         result.append(WeightedCatalogItem(item_id, text, float(weight)))
     return tuple(result)
-
 
 
 def parse_visit_profile(body: str | dict) -> VisitProfile:
@@ -213,7 +215,9 @@ def parse_visit_profile(body: str | dict) -> VisitProfile:
         "browse",
         "post",
     }:
-        raise _profile_error("layouts must contain exactly system, lurker, browse, and post")
+        raise _profile_error(
+            "layouts must contain exactly system, lurker, browse, and post"
+        )
     layouts = {}
     for name in ("system", "lurker", "browse", "post"):
         layouts[name] = _profile_string(raw_layouts[name], f"layouts.{name}")
@@ -242,7 +246,7 @@ def parse_visit_profile(body: str | dict) -> VisitProfile:
     intent_mix: dict[str, float] = {}
     for name in sorted(_PROFILE_INTENTS):
         value = raw_mix[name]
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if isinstance(value, bool) or not isinstance(value, int | float):
             raise _profile_error(f"intent_mix.{name} must be numeric")
         value = float(value)
         if not math.isfinite(value) or not 0 <= value <= 1:
@@ -255,7 +259,9 @@ def parse_visit_profile(body: str | dict) -> VisitProfile:
     if not isinstance(raw_lengths, dict) or set(raw_lengths) != _PROFILE_CONTENT_KINDS:
         raise _profile_error("length_catalog has incompatible content kinds")
     length_catalog = {
-        kind: _catalog_items(raw_lengths[kind], f"length_catalog.{kind}", direction=False)
+        kind: _catalog_items(
+            raw_lengths[kind], f"length_catalog.{kind}", direction=False
+        )
         for kind in sorted(_PROFILE_CONTENT_KINDS)
     }
     for kind, items in length_catalog.items():
@@ -264,10 +270,15 @@ def parse_visit_profile(body: str | dict) -> VisitProfile:
         if abs(math.fsum(item.weight for item in items) - 100.0) > 1e-6:
             raise _profile_error(f"length_catalog.{kind} weights must total 100")
     raw_directions = document["direction_catalog"]
-    if not isinstance(raw_directions, dict) or set(raw_directions) != _PROFILE_DIRECTION_KINDS:
+    if (
+        not isinstance(raw_directions, dict)
+        or set(raw_directions) != _PROFILE_DIRECTION_KINDS
+    ):
         raise _profile_error("direction_catalog has incompatible content kinds")
     direction_catalog = {
-        kind: _catalog_items(raw_directions[kind], f"direction_catalog.{kind}", direction=True)
+        kind: _catalog_items(
+            raw_directions[kind], f"direction_catalog.{kind}", direction=True
+        )
         for kind in sorted(_PROFILE_DIRECTION_KINDS)
     }
     stable_ids = {block.id for block in blocks}
@@ -331,7 +342,9 @@ def serialize_visit_profile(profile: VisitProfile) -> str:
     if not isinstance(profile, VisitProfile):
         raise TypeError("profile must be a VisitProfile")
     validated = parse_visit_profile(_profile_document(profile))
-    return json.dumps(_profile_document(validated), sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        _profile_document(validated), sort_keys=True, separators=(",", ":")
+    )
 
 
 class PromptError(Exception):
@@ -418,6 +431,8 @@ def create_template(
     db.session.add(row)
     db.session.commit()
     return row
+
+
 def create_version(
     name_or_template: str | PromptTemplate,
     body: str,

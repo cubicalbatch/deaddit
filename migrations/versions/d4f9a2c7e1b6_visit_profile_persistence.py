@@ -118,11 +118,10 @@ def _profile_body(system_template: str | None, mix: dict[str, float]) -> str:
                 },
             ],
         },
-
-
         "sample_count": 3,
     }
     return json.dumps(document, sort_keys=True, separators=(",", ":"))
+
 
 def _profile_template(conn) -> int:
     row = conn.execute(
@@ -169,7 +168,9 @@ def _next_profile_version(conn, template_id: int) -> int:
 
 def _read_mix(conn) -> tuple[dict[str, float], bool]:
     rows = conn.execute(
-        sa.text("SELECT key, value FROM setting WHERE key IN (:post, :image, :website)"),
+        sa.text(
+            "SELECT key, value FROM setting WHERE key IN (:post, :image, :website)"
+        ),
         {
             "post": _MIX_KEYS[0],
             "image": _MIX_KEYS[1],
@@ -284,7 +285,11 @@ def upgrade():
                     "UPDATE prompt_pin SET template_id = :template_id, "
                     "version_number = :version, updated_at = CURRENT_TIMESTAMP WHERE id = :id"
                 ),
-                {"template_id": profile_template_id, "version": profile_version, "id": existing[0]},
+                {
+                    "template_id": profile_template_id,
+                    "version": profile_version,
+                    "id": existing[0],
+                },
             )
         else:
             conn.execute(
@@ -293,7 +298,11 @@ def upgrade():
                     "(target_kind, target_key, template_id, version_number, updated_at) "
                     "VALUES ('global', :target_key, :template_id, :version, CURRENT_TIMESTAMP)"
                 ),
-                {"target_key": _PROFILE_NAME, "template_id": profile_template_id, "version": profile_version},
+                {
+                    "target_key": _PROFILE_NAME,
+                    "template_id": profile_template_id,
+                    "version": profile_version,
+                },
             )
         conn.execute(
             sa.text("DELETE FROM setting WHERE key IN (:post, :image, :website)"),

@@ -21,6 +21,13 @@ LLM requests. Web and worker share one SQLite database — no broker.
   maintenance, and the simulated-voting engagement scheduler. The web process
   never schedules jobs.
 
+Admin-requested agent visits are also worker-owned: the web process atomically
+records a high-priority `AGENT_RUN` job and marks the agent `queued`, then
+returns. `JobRunner` durably polls and claims it; it alone calls
+`agents.loop.run_once(..., trigger="manual", requested_intent=...)`. The admin
+detail page follows the durable job, agent, run, turn, and tool-call rows by
+polling, so a reload reconnects without a web-process thread or socket bridge.
+
 ## Top-level (`deaddit/`)
 
 | File | Purpose |
@@ -37,7 +44,7 @@ LLM requests. Web and worker share one SQLite database — no broker.
 | `media.py` | Blueprint `media`: guarded `/media/images/{original,thumbnail}/<filename>` serving. Resolves a non-removed `PostImage` row per request; unknown filename → 404. |
 | `websites/serving.py` | Blueprint `websites`: guarded `/out/<hostname>/<page_name>` serving. Looks up a `GeneratedWebsite` joined to a non-removed `Post`, then resolves its opaque file path; unknown, removed, missing, or unsafe paths → 404. |
 | `websocket.py` | SocketIO handlers only: `/admin` namespace and `/live` room join/leave. The pump itself lives in the worker-adjacent `runtime/live_pump.py`. |
-| `jobs.py` | DB-backed jobs: `create_job`, `execute_job` (BATCH_OPERATION fans out sub-jobs). Claiming/heartbeats live in `runtime/`. |
+| `jobs.py` | DB-backed jobs: `create_job`, `execute_job` (BATCH_OPERATION fans out sub-jobs; AGENT_RUN delegates one manual visit to `run_once`), and thread-local progress updates. Claiming/heartbeats and durable polling live in `runtime/`. |
 | `cli.py` | `deaddit` Click group: `agent` (agents/cli.py), `images` (images/cli.py), `websites` (websites/cli.py), `dynamics seed-history` (all mutating commands guarded against prod DB). |
 | `utils.py` | `production_disabled` decorator, bulk comment counts (cached), `format_content_html` — the sole sanctioned sanitizer producing `|safe` HTML. |
 | `logging_config.py` | stdlib dictConfig; rotating file at `instance/deaddit.log` unless `DEADDIT_LOG_FILE` set. |

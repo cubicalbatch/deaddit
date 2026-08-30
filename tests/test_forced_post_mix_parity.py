@@ -11,7 +11,6 @@ from unittest.mock import patch
 
 from deaddit.agents.prompts import prepare_agent_visit
 from deaddit.models import Agent, User
-
 from tests.visit_profiles import pin_intent_mix
 
 

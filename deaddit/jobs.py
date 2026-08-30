@@ -187,8 +187,7 @@ def _execute_agent_run(job: Job) -> dict[str, Any]:
     requested_intent = params.get("requested_intent")
     if requested_intent not in (None, "image", "website"):
         raise ValueError(
-            f"AGENT_RUN job {job.id} has invalid requested_intent "
-            f"{requested_intent!r}"
+            f"AGENT_RUN job {job.id} has invalid requested_intent {requested_intent!r}"
         )
 
     if db.session.get(Agent, agent_id) is None:

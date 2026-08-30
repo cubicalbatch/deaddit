@@ -21,14 +21,15 @@ from __future__ import annotations
 import logging
 import random
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Mapping
+from typing import TYPE_CHECKING
 
 from deaddit.agents.memory import VisitMemories, visit_memories
 from deaddit.agents.registry import (
-    AutonomyTier,
     POST_TOOL_NAMES,
+    AutonomyTier,
     effective_post_configs,
     image_posts_config,
     offered_post_tool_names,
@@ -47,7 +48,6 @@ from deaddit.models import Agent, Subdeaddit, User
 
 if TYPE_CHECKING:
     from deaddit.llm import ToolSpec
-
 
 
 TIER_DESCRIPTIONS: dict[str, str] = {
@@ -265,7 +265,7 @@ def _memory_section(memories: VisitMemories | None) -> str:
         lines.extend(f"- {content}" for content in memories.episodes)
     return "\n\n" + "\n".join(lines)
 
- 
+
 def _profile_behavior_rules(profile: VisitProfile) -> str:
     return "\n".join(block.text for block in profile.behavior_blocks)
 
@@ -287,17 +287,18 @@ def system_prompt_variables(
     tools_line = _TOOLS_LINE
     genuine_line = _GENUINE_LINE
     quality_rules = _profile_behavior_rules(profile)
-    capability_guidance = (
-        _image_guidance_section(agent, intent, offered_tool_names=offered_tool_names)
-        + _website_guidance_section(agent, intent, offered_tool_names=offered_tool_names)
-    )
+    capability_guidance = _image_guidance_section(
+        agent, intent, offered_tool_names=offered_tool_names
+    ) + _website_guidance_section(agent, intent, offered_tool_names=offered_tool_names)
     persona = _persona_block(user)
     tier = _tier_line(agent)
     subscriptions = _subscriptions_section(user)
     return {
         "persona": persona,
         "persona_block": persona,
-        "autonomy_tier": str(getattr(agent.autonomy_tier, "value", agent.autonomy_tier)),
+        "autonomy_tier": str(
+            getattr(agent.autonomy_tier, "value", agent.autonomy_tier)
+        ),
         "tier_line": tier,
         "rules_block": quality_rules,
         "tools": tools_line,
@@ -329,7 +330,9 @@ def system_prompt_variables(
     }
 
 
-def _render_profile_layout(profile: VisitProfile, layout: str, variables: Mapping[str, str]) -> str:
+def _render_profile_layout(
+    profile: VisitProfile, layout: str, variables: Mapping[str, str]
+) -> str:
     names = set(re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", layout))
     return render(layout, {name: variables[name] for name in names})
 
@@ -355,10 +358,6 @@ def build_system_prompt(
         memory_section=memory_section,
     )
     return _render_profile_layout(profile, profile.layouts["system"], variables)
-
-
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -465,7 +464,9 @@ _POST_DIRECTIONS: tuple[_Direction, ...] = (
         "post.personal_experience",
         "share a personal experience connected to your interests",
     ),
-    _Direction("post.everyday_observation", "describe something you noticed in everyday life"),
+    _Direction(
+        "post.everyday_observation", "describe something you noticed in everyday life"
+    ),
     _Direction(
         "post.project_in_progress",
         "show or discuss a project, hobby, or work in progress",
@@ -497,15 +498,15 @@ _COMMENT_DIRECTIONS: tuple[_Direction, ...] = (
     _Direction("comment.honest_reaction", "give a brief, honest reaction"),
     _Direction("comment.relevant_fact", "add a relevant fact or missing context"),
     _Direction("comment.related_anecdote", "share a related personal anecdote"),
-    _Direction("comment.answer_or_advice", "answer a question or offer practical advice"),
+    _Direction(
+        "comment.answer_or_advice", "answer a question or offer practical advice"
+    ),
     _Direction("comment.follow_up_question", "ask a genuine follow-up question"),
     _Direction("comment.agree_with_angle", "agree while adding a new angle"),
     _Direction("comment.counterpoint", "offer a respectful counterpoint"),
     _Direction("comment.joke_or_aside", "make a joke or playful aside"),
     _Direction("comment.clarify_detail", "clarify or correct one specific detail"),
-    _Direction(
-        "comment.recommend_resource", "recommend a related resource or example"
-    ),
+    _Direction("comment.recommend_resource", "recommend a related resource or example"),
 )
 
 
@@ -595,7 +596,6 @@ _LENGTH_TARGETS: dict[str, tuple[_LengthTarget, ...]] = {
         ),
     ),
 }
-
 
 
 _DEFAULT_PROFILE_DOCUMENT = {
@@ -690,7 +690,9 @@ def _post_instruction(offered: frozenset[str]) -> str | None:
         return None
     if offered == frozenset({"create_post"}):
         return "and create a post using the create_post tool."
-    return "and create one post using the create_post tool or another offered post tool."
+    return (
+        "and create one post using the create_post tool or another offered post tool."
+    )
 
 
 def _sample_directions(
@@ -795,7 +797,9 @@ def _resolve_visit(
             if _post_instruction(offered) is not None:
                 community_hint = _community_hint(user, rng)
                 directions = _sample_directions(profile, "post", rng)
-                length_id, length_text = _length_target(profile, "media_post", length_quantile)
+                length_id, length_text = _length_target(
+                    profile, "media_post", length_quantile
+                )
                 return _ResolvedVisit(
                     intent=resolved_intent,
                     intent_source=INTENT_SOURCE_REQUESTED,
@@ -847,9 +851,7 @@ def _resolve_visit(
                 )
                 if selected_kind == "image" and "create_image_post" in static_offered:
                     resolved_intent = "image"
-                elif (
-                    selected_kind == "website" and "create_website" in static_offered
-                ):
+                elif selected_kind == "website" and "create_website" in static_offered:
                     resolved_intent = "website"
                 else:
                     resolved_intent = "post"
@@ -866,7 +868,9 @@ def _resolve_visit(
             content_kind = "text_post" if "create_post" in offered else "media_post"
             community_hint = _community_hint(user, rng)
             directions = _sample_directions(profile, "post", rng)
-            length_id, length_text = _length_target(profile, content_kind, length_quantile)
+            length_id, length_text = _length_target(
+                profile, content_kind, length_quantile
+            )
             return _ResolvedVisit(
                 intent=resolved_intent,
                 intent_source=intent_source,
@@ -963,9 +967,9 @@ def _render_kickoff(
             "content_kind": plan.content_kind,
         }
     )
-    return _render_profile_layout(profile, profile.layouts[layout_name], variables), variables
-
-
+    return _render_profile_layout(
+        profile, profile.layouts[layout_name], variables
+    ), variables
 
 
 def prepare_agent_visit(
@@ -1027,7 +1031,9 @@ def prepare_agent_visit(
         content_kind=resolved.content_kind,
         offered_tool_names=offered_names,
         length_target_id=resolved.length_target_id,
-        direction_ids=tuple(direction_id for direction_id, _text in resolved.directions),
+        direction_ids=tuple(
+            direction_id for direction_id, _text in resolved.directions
+        ),
         profile_name=profile_name,
         profile_version=profile.profile_version or DEFAULT_PROFILE_VERSION,
         profile_ref=profile_ref,

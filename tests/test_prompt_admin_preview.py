@@ -14,7 +14,6 @@ import pytest
 
 from deaddit.agents.loop import run_once
 from deaddit.agents.prompts import DEFAULT_VISIT_PROFILE
-from deaddit.extensions import db
 from deaddit.llm.prompts import (
     create_template,
     create_version,
@@ -31,6 +30,7 @@ from deaddit.models import (
     ToolCall,
     User,
 )
+
 PINS = "/admin/api/pins"
 
 PREVIEW = "/admin/api/prompts/agent.visit_profile/preview"
@@ -174,23 +174,24 @@ class TestPreviewContract:
     def test_previewed_tools_equal_real_run_tools(
         self, app, authed_client, seeded_db, db_session, fake_llm
     ):
-        agent, _ = _make_agent(
-            db_session, "parity_runner", image=_IMAGE_CONFIG
-        )
+        agent, _ = _make_agent(db_session, "parity_runner", image=_IMAGE_CONFIG)
         for requested in ("post", "image"):
             fake_llm.enqueue(
                 {
                     "choices": [
-                        {"message": {"role": "assistant", "tool_calls": [_finish_call()]}}
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "tool_calls": [_finish_call()],
+                            }
+                        }
                     ]
                 }
             )
             run = run_once(agent.id, requested_intent=requested)
             assert run.status == "completed"
             meta = run.prompt_metadata
-            body = _preview(
-                authed_client, agent, requested_intent=requested
-            ).get_json()
+            body = _preview(authed_client, agent, requested_intent=requested).get_json()
             assert body["plan"]["offered_tool_names"] == meta["offered_tool_names"]
             assert body["plan"]["intent"] == run.intent
             assert {t["function"]["name"] for t in body["tools"]} == set(
@@ -203,7 +204,9 @@ class TestPreviewContract:
         assert (
             authed_client.post(PREVIEW, json={"agent_id": agent.id}).status_code == 400
         )
-        assert _preview(authed_client, agent, requested_intent="dance").status_code == 400
+        assert (
+            _preview(authed_client, agent, requested_intent="dance").status_code == 400
+        )
         assert _preview(authed_client, agent, unread_count=-1).status_code == 400
         assert _preview(authed_client, agent, version=True).status_code == 400
         assert _preview(authed_client, agent, agent_id=99999).status_code == 404
@@ -312,7 +315,9 @@ class TestPreviewAgainstPinnedVersions:
     ):
         agent, _ = _make_agent(db_session, "diff_case")
         document = _default_document()
-        create_template("agent.visit_profile", serialize_visit_profile(DEFAULT_VISIT_PROFILE))
+        create_template(
+            "agent.visit_profile", serialize_visit_profile(DEFAULT_VISIT_PROFILE)
+        )
         pinned = set_pin("agent", str(agent.id), "agent.visit_profile", 1)
         assert pinned.version_number == 1
         document["intent_mix"]["post"] = 0.9
@@ -333,7 +338,9 @@ class TestPreviewAgainstPinnedVersions:
         self, app, authed_client, db_session
     ):
         agent, _ = _make_agent(db_session, "effective_case")
-        create_template("agent.visit_profile", serialize_visit_profile(DEFAULT_VISIT_PROFILE))
+        create_template(
+            "agent.visit_profile", serialize_visit_profile(DEFAULT_VISIT_PROFILE)
+        )
         set_pin("agent", str(agent.id), "agent.visit_profile", 1)
         body = _preview(authed_client, agent).get_json()
         assert body["plan"]["profile_version"] == 1
@@ -345,7 +352,9 @@ class TestPreviewAgainstPinnedVersions:
         self, app, authed_client, db_session
     ):
         agent, _ = _make_agent(db_session, "cohort_case", cohort="beta")
-        create_template("agent.visit_profile", serialize_visit_profile(DEFAULT_VISIT_PROFILE))
+        create_template(
+            "agent.visit_profile", serialize_visit_profile(DEFAULT_VISIT_PROFILE)
+        )
         set_pin("cohort", "beta", "agent.visit_profile", 1)
         body = _preview(authed_client, agent).get_json()
         assert body["plan"]["resolution_source"] == "cohort"
@@ -410,7 +419,9 @@ class TestValidationApi:
     ):
         create_template("alpha", "A {x}")
         assert (
-            authed_client.post(VALIDATE.replace("agent.visit_profile", "nope"), json={"body": "x"}).status_code
+            authed_client.post(
+                VALIDATE.replace("agent.visit_profile", "nope"), json={"body": "x"}
+            ).status_code
             == 404
         )
         assert (
@@ -421,9 +432,12 @@ class TestValidationApi:
             == 400
         )
 
+
 class TestVersionCreationValidation:
     def test_valid_profile_body_creates_immutable_version(self, app, authed_client):
-        row = create_template("agent.visit_profile", serialize_visit_profile(DEFAULT_VISIT_PROFILE))
+        row = create_template(
+            "agent.visit_profile", serialize_visit_profile(DEFAULT_VISIT_PROFILE)
+        )
         assert row.version == 1
         document = _default_document()
         document["intent_mix"] = {"post": 1.0, "image": 0.0, "website": 0.0}

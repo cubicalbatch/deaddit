@@ -16,11 +16,11 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.visit_profiles import pin_intent_mix
-
 import deaddit.agents.loop as loop_module
 from deaddit.agents.loop import run_once
 from deaddit.agents.prompts import (
+    _LENGTH_TARGETS,
+    _POST_DIRECTIONS,
     DEFAULT_PROFILE_NAME,
     DEFAULT_PROFILE_VERSION,
     INTENT_SOURCE_DEGRADED,
@@ -28,12 +28,11 @@ from deaddit.agents.prompts import (
     INTENT_SOURCE_REQUESTED,
     INTENT_SOURCE_SAMPLED,
     INTENT_SOURCE_UNREAD,
-    _LENGTH_TARGETS,
-    _POST_DIRECTIONS,
     prepare_agent_visit,
 )
 from deaddit.agents.registry import POST_TOOL_NAMES, specs_for
 from deaddit.models import Agent, User
+from tests.visit_profiles import pin_intent_mix
 
 _IMAGE_CONFIG = {
     "optional": {
@@ -117,9 +116,7 @@ def test_prepared_tool_specs_match_plan_exactly(
     assert len(names) == len(set(names))
     # The prepared specs are the registry's own specs for the same intent -
     # one resolution pass drives both, with no drift possible.
-    assert [
-        (s.name, s.description, s.parameters_model) for s in visit.tool_specs
-    ] == [
+    assert [(s.name, s.description, s.parameters_model) for s in visit.tool_specs] == [
         (s.name, s.description, s.parameters_model)
         for s in specs_for(agent.autonomy_tier, agent=agent, intent=visit.plan.intent)
     ]
@@ -137,17 +134,13 @@ def test_messages_never_name_unavailable_post_tools(
         image_mode=image_mode,
         website_mode=website_mode,
     )
-    visit = prepare_agent_visit(
-        agent, user, requested_intent=requested, unread=unread
-    )
+    visit = prepare_agent_visit(agent, user, requested_intent=requested, unread=unread)
     offered = visit.plan.offered_tool_names
     for message in visit.messages:
         # The image-only guidance may explicitly NEGATE create_post ("...
         # create_post is not available to you"); that is the one allowed
         # mention of a tool the plan does not offer.
-        content = message["content"].replace(
-            "create_post is not available to you", ""
-        )
+        content = message["content"].replace("create_post is not available to you", "")
         named = {name for name in POST_TOOL_NAMES if name in content}
         assert named <= offered, (image_mode, website_mode, requested, unread)
 

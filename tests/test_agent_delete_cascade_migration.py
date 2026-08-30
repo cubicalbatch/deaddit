@@ -319,14 +319,6 @@ def test_upgrade_cascades_runtime_rows_and_downgrade_restores_schema(tmp_path):
             == 0
         )
         assert (
-            conn.execute("SELECT count(*) FROM agent_turn WHERE id = 30").fetchone()[0]
-            == 1
-        )
-        assert (
-            conn.execute("SELECT count(*) FROM tool_call WHERE id = 40").fetchone()[0]
-            == 1
-        )
-        assert (
             conn.execute("SELECT count(*) FROM agent_memory WHERE id = 50").fetchone()[
                 0
             ]

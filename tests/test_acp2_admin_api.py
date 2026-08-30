@@ -487,12 +487,9 @@ def test_force_run_worker_dispatch_resolves_requested_media_intent(
     fake_llm.enqueue_content("Just looking around.")
     fake_llm.enqueue_content("Done, finishing.")
 
-    queued = (
-        admin_client.post(
-            f"/admin/api/agents/{agent.id}/force-run", json={"intent": "image"}
-        )
-        .get_json()["job"]
-    )
+    queued = admin_client.post(
+        f"/admin/api/agents/{agent.id}/force-run", json={"intent": "image"}
+    ).get_json()["job"]
     assert queued["parameters"] == {
         "agent_id": agent.id,
         "requested_intent": "image",
@@ -508,6 +505,55 @@ def test_force_run_worker_dispatch_resolves_requested_media_intent(
     run = AgentRun.query.filter_by(agent_id=agent.id).one()
     assert run.intent == "image"
     assert run.prompt_metadata["intent_source"] == "requested"
+
+
+@pytest.mark.parametrize("intent", ["image", "website"])
+def test_force_run_worker_delegates_selected_intent_once(
+    app, seeded_db, admin_client, db_session, monkeypatch, intent
+):
+    """The worker forwards a requested media intent to exactly one normal visit."""
+    agent = _make_agent(
+        db_session,
+        "alice",
+        config={
+            "image_posts": {"enabled": True, "policy": "optional"},
+            "website_posts": {"enabled": True, "policy": "optional"},
+        },
+    )
+    queued = admin_client.post(
+        f"/admin/api/agents/{agent.id}/force-run", json={"intent": intent}
+    ).get_json()["job"]
+    calls = []
+
+    def run_once(agent_id, *, trigger, requested_intent=None):
+        calls.append((agent_id, trigger, requested_intent))
+        run = AgentRun(
+            agent_id=agent_id,
+            persona_username="alice",
+            trigger=trigger,
+            intent=requested_intent,
+            status="completed",
+            started_at=datetime.utcnow(),
+            finished_at=datetime.utcnow(),
+        )
+        db.session.add(run)
+        agent.status = "idle"
+        db.session.commit()
+        return run
+
+    monkeypatch.setattr("deaddit.agents.loop.run_once", run_once)
+
+    result = jobs.execute_job(queued["id"], app=app)
+
+    assert calls == [(agent.id, "manual", intent)]
+    assert result["agent_id"] == agent.id
+    assert result["requested_intent"] == intent
+    assert result["resolved_intent"] == intent
+    assert result["run_status"] == "completed"
+    assert result["run_id"] == AgentRun.query.filter_by(agent_id=agent.id).one().id
+    db_session.expire_all()
+    assert db_session.get(Job, queued["id"]).result == result
+    assert "manual_run" not in (agent.state or {})
 
 
 def test_force_run_worker_failure_before_run_restores_previous_status(
@@ -810,7 +856,9 @@ def test_bulk_delete_cascades_runs_and_keeps_persona(
     assert db_session.query(ToolCall).count() == 0
 
 
-def test_bulk_force_run_enqueues_jobs_and_skips_active(seeded_db, admin_client, db_session):
+def test_bulk_force_run_enqueues_jobs_and_skips_active(
+    seeded_db, admin_client, db_session
+):
     idle = _make_agent(db_session, "alice")
     busy = _make_agent(db_session, "bob")
     busy.status = "running"
@@ -890,7 +938,7 @@ def test_dashboard_pages_render_and_register_endpoints(
     endpoints = {rule.endpoint for rule in app.url_map.iter_rules()}
     assert "admin.agents_dashboard" in endpoints
     assert "admin.agent_detail" in endpoints
-
+    assert "admin.api_job_status" in endpoints
     agent = _make_agent(db_session, "alice")
     assert admin_client.get("/admin/agents").status_code == 200
     assert admin_client.get(f"/admin/agents/{agent.id}").status_code == 200
@@ -903,9 +951,12 @@ def test_admin_gate_redirects_anonymous_visitors(app, client, monkeypatch):
     assert resp.status_code == 302
     assert "/admin/login" in resp.headers["Location"]
 
+    assert client.get("/admin/api/jobs/1").status_code == 302
+
     with client.session_transaction() as sess:
         sess["admin_authenticated"] = True
     assert client.get("/admin/api/agents").status_code == 200
+    assert client.get("/admin/api/jobs/1").status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -1050,7 +1101,7 @@ def test_backfill_falls_back_to_extractive_when_provider_raises(
 
 
 # ---------------------------------------------------------------------------
-# Memory: kickoff injection
+# Memory: system-prompt injection
 
 
 def test_prepared_visit_injects_backfills_and_recent_episodes(seeded_db, db_session):
@@ -1075,19 +1126,17 @@ def test_prepared_visit_injects_backfills_and_recent_episodes(seeded_db, db_sess
     visit = prepare_agent_visit(agent, db.session.get(User, "alice"))
     messages = visit.messages
     assert messages[0]["role"] == "system"
-    kickoff = messages[-1]["content"]
-    assert "Your memory:" in kickoff
-    assert f"- {BACKFILL_PREFIX} she posted often" in kickoff
-    assert "Recent visits:" in kickoff
-    assert "- busy visit" in kickoff  # newest episode listed first
-    assert "- quiet visit" in kickoff
+    system_prompt = messages[0]["content"]
+    assert "Your memory:" in system_prompt
+    assert f"- {BACKFILL_PREFIX} she posted often" in system_prompt
+    assert "Recent visits:" in system_prompt
+    assert "- busy visit" in system_prompt  # newest episode listed first
+    assert "- quiet visit" in system_prompt
 
 
 def test_prepared_visit_has_no_memory_section_when_empty(seeded_db, db_session):
     agent = _make_agent(db_session, "alice")
 
-    messages = prepare_agent_visit(
-        agent, db.session.get(User, "alice")
-    ).messages
+    messages = prepare_agent_visit(agent, db.session.get(User, "alice")).messages
 
-    assert "Your memory:" not in messages[-1]["content"]
+    assert "Your memory:" not in messages[0]["content"]

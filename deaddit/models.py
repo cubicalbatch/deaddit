@@ -127,6 +127,7 @@ class JobType(Enum):
     BATCH_OPERATION = "batch_operation"
     AGENT_RUN = "agent_run"
 
+
 class JobStatus(Enum):
     PENDING = "pending"
     RUNNING = "running"

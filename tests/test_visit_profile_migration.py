@@ -6,10 +6,10 @@ import json
 import sqlite3
 from pathlib import Path
 
-import deaddit
 from alembic.config import Config as AlembicConfig
 from alembic.script import ScriptDirectory
 
+import deaddit
 from deaddit import create_app
 
 _PREDECESSOR = "a7c3e9f5b1d8"
@@ -19,7 +19,8 @@ _PROFILE_REVISION = "d4f9a2c7e1b6"
 def _script() -> ScriptDirectory:
     cfg = AlembicConfig()
     cfg.set_main_option(
-        "script_location", str(Path(deaddit.__file__).resolve().parent.parent / "migrations")
+        "script_location",
+        str(Path(deaddit.__file__).resolve().parent.parent / "migrations"),
     )
     return ScriptDirectory.from_config(cfg)
 
@@ -75,9 +76,7 @@ def test_phase4_upgrade_migrates_legacy_pin_and_mix(tmp_path):
             "SELECT target_kind, target_key, template_id, version_number FROM prompt_pin"
         ).fetchall()
         assert any(
-            kind == "agent"
-            and key == "42"
-            and template_id == profile_template_id
+            kind == "agent" and key == "42" and template_id == profile_template_id
             for kind, key, template_id, _version in pins
         )
         profile_bodies = [
@@ -87,7 +86,9 @@ def test_phase4_upgrade_migrates_legacy_pin_and_mix(tmp_path):
                 (profile_template_id,),
             )
         ]
-        legacy_profiles = [p for p in profile_bodies if p["system_template"] == old_system]
+        legacy_profiles = [
+            p for p in profile_bodies if p["system_template"] == old_system
+        ]
         assert legacy_profiles
         assert all(p["layouts"]["system"] == old_system for p in legacy_profiles)
         assert any(
@@ -103,16 +104,18 @@ def test_phase4_upgrade_migrates_legacy_pin_and_mix(tmp_path):
             for kind, items in parsed.length_catalog.items():
                 assert sum(item.weight for item in items) == 100.0, (kind, profile)
         columns = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(agent_run)").fetchall()
+            row[1] for row in conn.execute("PRAGMA table_info(agent_run)").fetchall()
         }
         assert "prompt_metadata" in columns
         setting_keys = {row[0] for row in conn.execute("SELECT key FROM setting")}
-        assert not {
-            "AGENT_POST_INTENT_CHANCE",
-            "AGENT_FORCED_IMAGE_CHANCE",
-            "AGENT_FORCED_WEBSITE_CHANCE",
-        } & setting_keys
+        assert (
+            not {
+                "AGENT_POST_INTENT_CHANCE",
+                "AGENT_FORCED_IMAGE_CHANCE",
+                "AGENT_FORCED_WEBSITE_CHANCE",
+            }
+            & setting_keys
+        )
     finally:
         conn.close()
 
@@ -142,8 +145,7 @@ def test_weight_normalization_rescales_fractional_documents(tmp_path):
         "intent_mix": {"post": 0.3, "image": 0.0, "website": 0.0},
         "length_catalog": {
             kind: [
-                {"id": f"{kind}.short", "text": "short", "weight": 1}
-                for _ in range(1)
+                {"id": f"{kind}.short", "text": "short", "weight": 1} for _ in range(1)
             ]
             for kind in ("comment", "media_post", "text_post")
         },
@@ -168,13 +170,11 @@ def test_weight_normalization_rescales_fractional_documents(tmp_path):
         template_id = conn.execute(
             "SELECT id FROM prompt_template WHERE name = 'agent.visit_profile'"
         ).fetchone()[0]
-        inserted_version = (
-            conn.execute(
-                "SELECT COALESCE(MAX(version), 0) + 1 "
-                "FROM prompt_template_version WHERE template_id = ?",
-                (template_id,),
-            ).fetchone()[0]
-        )
+        inserted_version = conn.execute(
+            "SELECT COALESCE(MAX(version), 0) + 1 "
+            "FROM prompt_template_version WHERE template_id = ?",
+            (template_id,),
+        ).fetchone()[0]
         conn.execute(
             "INSERT INTO prompt_template_version "
             "(template_id, version, body, created_by, created_at) "
@@ -199,5 +199,5 @@ def test_weight_normalization_rescales_fractional_documents(tmp_path):
     finally:
         conn.close()
     parsed = parse_visit_profile(body)
-    for kind, items in parsed.length_catalog.items():
+    for _kind, items in parsed.length_catalog.items():
         assert sum(item.weight for item in items) == 100.0
