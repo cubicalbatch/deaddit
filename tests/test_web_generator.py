@@ -187,15 +187,30 @@ class TestWebsiteDiversityPrompt:
         assert result.diversity_ids
         assert result.diversity_ids == diversity_ids(matrix)
         assert expected in user_prompt
-        assert (
-            "Art direction matrix for this generation (use it to steer the visual "
-            "and structural result; do not mention the matrix in the page):\n"
-            in user_prompt
-        )
-        assert "Genre / site archetype (sample 2):" not in user_prompt
-        assert (
-            "A publication-like site organized around timely stories, headlines, "
-            "categories, and editorial prominence." not in user_prompt
+        assert "Website art direction (one authoritative direction; follow every selected axis):" in user_prompt
+        assert "Direction and site archetype" in user_prompt
+        assert "Imagery and decoration strategy" in user_prompt
+        assert "Site archetypes:" not in user_prompt
+        assert "sample 2" not in user_prompt
+        assert matrix.genres[0].text in user_prompt
+
+    def test_pinned_direction_is_sent_and_preserved_in_result(self, app, fake_llm):
+        from deaddit.websites.diversity import diversity_ids, sample_website_diversity
+
+        with app.app_context():
+            fake_llm.enqueue_content(VALID_HTML, finish_reason="stop")
+            result = _generate(
+                fake_llm,
+                rng=random.Random(31),
+                direction_id="website.data_dashboard",
+            )
+
+        assert result.diversity_ids["genres"] == ("website.data_dashboard",)
+        assert "website.data_dashboard" in fake_llm.requests[0]["payload"]["messages"][1]["content"]
+        assert result.diversity_ids == diversity_ids(
+            sample_website_diversity(
+                random.Random(31), direction_id="website.data_dashboard"
+            )
         )
 
     def test_system_prompt_allows_multi_section_inert_navigation(self):
