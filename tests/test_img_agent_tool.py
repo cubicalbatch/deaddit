@@ -159,7 +159,7 @@ def _image_agent(db_session, provider, *, policy="optional", model=None):
     return _make_agent(db_session, config=config)
 
 
-def _new_run(db_session, agent) -> AgentRun:
+def _new_run(db_session, agent, *, prompt_metadata=None) -> AgentRun:
     for prev in AgentRun.query.filter_by(agent_id=agent.id, status="running").all():
         prev.status = "completed"
     run = AgentRun(
@@ -167,6 +167,7 @@ def _new_run(db_session, agent) -> AgentRun:
         persona_username=agent.user_username,
         trigger="manual",
         status="running",
+        prompt_metadata=prompt_metadata,
     )
     db_session.add(run)
     db_session.commit()
@@ -293,6 +294,64 @@ def test_image_post_appends_diversity_suffix_and_records_full_prompt_and_ids(
     assert captured_prompt == f"{IMAGE_ARGS['image_prompt']}\n\n{expected_suffix}"
     assert captured_prompt.startswith(IMAGE_ARGS["image_prompt"] + "\n\n")
     assert PostImage.query.one().source_prompt == captured_prompt
+    assert result["image_diversity_ids"] == diversity_ids(matrix)
+
+
+@pytest.mark.parametrize(
+    ("direction_id", "is_photographic"),
+    [("image.candid_snapshot", True), ("image.artwork_craft", False)],
+)
+def test_planned_image_direction_controls_downstream_medium(
+    app, db_session, fake_adapter, direction_id, is_photographic
+):
+    provider = _make_provider(db_session)
+    agent = _image_agent(db_session, provider)
+    run = _new_run(
+        db_session,
+        agent,
+        prompt_metadata={"direction_ids": [direction_id]},
+    )
+    fake_adapter.enqueue_generate(_generation())
+
+    result = execute(
+        "create_image_post",
+        IMAGE_ARGS,
+        _ctx(agent, run, deadline=Deadline.after(60)),
+    )
+
+    assert result["ok"] is True
+    matrix = sample_image_diversity(
+        random.Random(run.id),
+        direction_id=direction_id,
+        source_prompt=IMAGE_ARGS["image_prompt"],
+    )
+    assert matrix.is_photographic is is_photographic
+    assert result["image_diversity_ids"] == diversity_ids(matrix)
+    assert fake_adapter.generate_calls[0]["prompt"].endswith(
+        render_image_diversity(matrix)
+    )
+
+
+def test_malformed_image_plan_uses_seeded_default_direction(
+    app, db_session, fake_adapter
+):
+    provider = _make_provider(db_session)
+    agent = _image_agent(db_session, provider)
+    run = _new_run(
+        db_session, agent, prompt_metadata={"direction_ids": ["image.unknown"]}
+    )
+    fake_adapter.enqueue_generate(_generation())
+
+    result = execute(
+        "create_image_post",
+        IMAGE_ARGS,
+        _ctx(agent, run, deadline=Deadline.after(60)),
+    )
+
+    assert result["ok"] is True
+    matrix = sample_image_diversity(
+        random.Random(run.id), source_prompt=IMAGE_ARGS["image_prompt"]
+    )
     assert result["image_diversity_ids"] == diversity_ids(matrix)
 
 

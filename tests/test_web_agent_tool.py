@@ -146,7 +146,7 @@ def _website_agent(
     )
 
 
-def _new_run(db_session, agent) -> AgentRun:
+def _new_run(db_session, agent, *, prompt_metadata=None) -> AgentRun:
     for prev in AgentRun.query.filter_by(agent_id=agent.id, status="running").all():
         prev.status = "completed"
     run = AgentRun(
@@ -154,6 +154,7 @@ def _new_run(db_session, agent) -> AgentRun:
         persona_username=agent.user_username,
         trigger="manual",
         status="running",
+        prompt_metadata=prompt_metadata,
     )
     db_session.add(run)
     db_session.commit()
@@ -319,7 +320,11 @@ def test_website_post_succeeds_and_gating_is_enforced_independently_of_tool_offe
 
 def test_create_website_provenance_records_diversity_ids(app, db_session, monkeypatch):
     agent = _website_agent(db_session)
-    run = _new_run(db_session, agent)
+    run = _new_run(
+        db_session,
+        agent,
+        prompt_metadata={"direction_ids": ["website.personal_blog"]},
+    )
     diversity_ids = {
         "genres": ("genre.newsroom", "genre.portfolio"),
         "layouts": ("layout.editorial_grid", "layout.split_hero"),
@@ -330,6 +335,7 @@ def test_create_website_provenance_records_diversity_ids(app, db_session, monkey
 
     def fake_generate(**kwargs):
         assert kwargs["rng"].getstate() == random.Random(run.id).getstate()
+        assert kwargs["direction_id"] == "website.personal_blog"
         return WebsiteGenerationResult(
             html=VALID_HTML,
             request_id="website-request-1",
@@ -359,6 +365,40 @@ def test_create_website_provenance_records_diversity_ids(app, db_session, monkey
     )
     assert website.source_description == f"{_DESCRIPTION}\n\n{provenance}"
     assert website.source_description.endswith(f"\n\n{provenance}")
+
+
+
+def test_malformed_website_plan_uses_sampler_default(
+    app, db_session, monkeypatch
+):
+    agent = _website_agent(db_session)
+    run = _new_run(
+        db_session,
+        agent,
+        prompt_metadata={"direction_ids": ["website.unknown"]},
+    )
+
+    def fake_generate(**kwargs):
+        assert kwargs["direction_id"] is None
+        return WebsiteGenerationResult(
+            html=VALID_HTML,
+            request_id="website-request-default",
+            prompt_tokens=1,
+            completion_tokens=1,
+            total_tokens=2,
+            finish_reason="stop",
+            api_url=API_URL,
+            model=MODEL,
+            diversity_ids={},
+        )
+
+    monkeypatch.setattr(tools_write, "generate_website_html", fake_generate)
+    result = execute(
+        "create_website",
+        WEBSITE_ARGS,
+        _ctx(agent, run, deadline=Deadline.after(120)),
+    )
+    assert result["ok"] is True
 
 
 def test_website_post_failures_leave_no_post_no_files_and_share_the_post_budget(

@@ -89,6 +89,63 @@ def _provenance(ctx: ToolContext) -> str:
     return f"agent:{ctx.user_username}"
 
 
+_PLANNED_MEDIA_DIRECTION_IDS = {
+    "image.": frozenset(
+        {
+            "image.candid_snapshot",
+            "image.object_closeup",
+            "image.place_observation",
+            "image.process_documentation",
+            "image.finished_result",
+            "image.before_after",
+            "image.archival_artifact",
+            "image.food_photo",
+            "image.pet_wildlife",
+            "image.macro_detail",
+            "image.diagram_infographic",
+            "image.artwork_craft",
+        }
+    ),
+    "website.": frozenset(
+        {
+            "website.news_report",
+            "website.magazine_feature",
+            "website.personal_blog",
+            "website.community_portal",
+            "website.event_program",
+            "website.local_business",
+            "website.nonprofit_campaign",
+            "website.product_page",
+            "website.catalog",
+            "website.reference",
+            "website.data_dashboard",
+            "website.interactive_utility",
+            "website.fan_archive",
+            "website.travel_guide",
+            "website.portfolio",
+            "website.experimental_microsite",
+        }
+    ),
+}
+
+
+def _planned_media_direction(ctx: ToolContext, prefix: str) -> str | None:
+    """Return the sole known planned direction for a media tool."""
+    run = ctx.run
+    metadata = getattr(run, "prompt_metadata", None) if run is not None else None
+    if not isinstance(metadata, dict):
+        return None
+    direction_ids = metadata.get("direction_ids")
+    if not isinstance(direction_ids, list) or len(direction_ids) != 1:
+        return None
+    direction_id = direction_ids[0]
+    if not isinstance(direction_id, str):
+        return None
+    if direction_id not in _PLANNED_MEDIA_DIRECTION_IDS.get(prefix, ()):
+        return None
+    return direction_id
+
+
 class CreatePostArgs(BaseModel):
     subdeaddit: str = Field(min_length=1, max_length=50)
     title: str = Field(min_length=1, max_length=300)
@@ -226,7 +283,11 @@ def _create_image_post(ctx: ToolContext, params: CreateImagePostArgs) -> dict:
     diversity_rng = (
         random.Random(ctx.run.id) if ctx.run is not None else random.Random()
     )
-    diversity = sample_image_diversity(diversity_rng)
+    diversity = sample_image_diversity(
+        diversity_rng,
+        direction_id=_planned_media_direction(ctx, "image."),
+        source_prompt=params.image_prompt,
+    )
     diversity_text = render_image_diversity(diversity)
     composed_prompt = f"{params.image_prompt}\n\n{diversity_text}"
     try:
@@ -423,6 +484,7 @@ def _create_website(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
             settings=settings,
             rng=random.Random(ctx.run.id) if ctx.run is not None else random.Random(),
             run_deadline_remaining=run_deadline_remaining,
+            direction_id=_planned_media_direction(ctx, "website."),
         )
     except WebsiteGenerationTruncatedError:
         return {
