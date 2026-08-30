@@ -14,6 +14,22 @@
         </button>
     </div>
 </div>
+<div id="agent-status-strip" class="mb-4" role="region" aria-label="Agent runtime status" aria-live="polite">
+    <div id="agent-runtime-paused" class="alert alert-warning d-flex justify-content-between align-items-center gap-3 mb-2">
+        <span><i class="bi bi-pause-circle me-1"></i>Agent runtime is paused — scheduled visits will not run.</span>
+        <button type="button" id="enable-runtime-btn" class="btn btn-sm btn-warning text-nowrap">Enable runtime</button>
+    </div>
+    <div id="agent-runtime-enabled" class="alert alert-success mb-2" hidden>
+        <i class="bi bi-check-circle me-1"></i>Agent runtime enabled
+    </div>
+    <div id="agent-worker-offline" class="alert alert-danger mb-0">
+        <i class="bi bi-exclamation-triangle me-1"></i>No worker heartbeat — scheduled and queued runs will not execute. Start it with <code>uv run deaddit-worker</code> (or <code>make worker</code>).
+    </div>
+    <div id="agent-worker-online" class="alert alert-success mb-0" hidden>
+        <i class="bi bi-heart-pulse me-1"></i>Worker alive (last seen <span id="agent-worker-age">?</span>s ago)
+    </div>
+</div>
+
 
 <!-- Generate Personas & Agents -->
 <div class="card mb-4">
@@ -307,6 +323,39 @@
         }
         return data;
     }
+    const setupStatusUrl = "{{ url_for('admin.setup_status_api') }}";
+    const runtimeToggleUrl = "{{ url_for('admin.agent_runtime_api') }}";
+
+    function workerAgeSeconds(iso) {
+        const timestamp = iso ? Date.parse(iso) : NaN;
+        if (Number.isNaN(timestamp)) return null;
+        return Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+    }
+
+    function renderAgentStatus(status) {
+        const runtimeEnabled = Boolean(status.runtime_enabled);
+        const runtimePaused = document.getElementById("agent-runtime-paused");
+        const runtimeEnabledLine = document.getElementById("agent-runtime-enabled");
+        runtimePaused.hidden = runtimeEnabled;
+        runtimeEnabledLine.hidden = !runtimeEnabled;
+
+        const workerAlive = Boolean(status.worker_alive);
+        const workerOffline = document.getElementById("agent-worker-offline");
+        const workerOnline = document.getElementById("agent-worker-online");
+        const workerAge = workerAgeSeconds(status.worker_last_seen_iso);
+        workerOffline.hidden = workerAlive;
+        workerOnline.hidden = !workerAlive;
+        document.getElementById("agent-worker-age").textContent = workerAge === null ? "?" : workerAge;
+    }
+
+    async function refreshAgentStatus() {
+        try {
+            renderAgentStatus(await api(setupStatusUrl));
+        } catch (err) {
+            console.error("Failed to refresh agent runtime status:", err);
+        }
+    }
+
 
     async function loadPresets() {
         try {
@@ -973,6 +1022,7 @@
             alertContainer.innerHTML = html;
             alertContainer.style.display = "block";
 
+
             await loadAgents();
             await loadCandidates();
         } catch (err) {
@@ -1005,6 +1055,24 @@
         } catch (err) { alert(err.message); }
         event.target.disabled = false;
     });
+    document.getElementById("enable-runtime-btn").addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            await api(runtimeToggleUrl, {
+                method: "POST",
+                body: JSON.stringify({enabled: true}),
+            });
+            await refreshAgentStatus();
+        } catch (err) {
+            alert("Could not enable agent runtime: " + err.message);
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    refreshAgentStatus();
+    window.setInterval(refreshAgentStatus, 5000);
 
     loadPresets();
     loadProviders();

@@ -2242,6 +2242,114 @@ a.chip:hover {
     background-color: var(--status-warning);
 }
 
+.setup-step__body {
+    flex: 1;
+    min-width: 0;
+}
+
+.setup-step__header,
+.setup-form__actions,
+.setup-progress__steps {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.setup-step__header {
+    justify-content: space-between;
+}
+
+.setup-step__header h2 {
+    margin: 0;
+}
+
+.setup-progress {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.setup-progress__label {
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+}
+
+.setup-progress__steps {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    flex-wrap: wrap;
+}
+
+.setup-progress__step--done .chip {
+    background-color: var(--status-success-soft);
+    color: var(--status-success);
+}
+
+.setup-state-chip {
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.setup-step--done .setup-state-chip {
+    color: var(--status-success);
+}
+
+.setup-form__field {
+    margin-bottom: var(--space-sm);
+}
+
+.setup-form__field label,
+.setup-form__checkbox {
+    display: block;
+    margin-bottom: var(--space-xs);
+    font-weight: 600;
+}
+
+.setup-form__field input,
+.setup-form__field select {
+    width: 100%;
+    max-width: 36rem;
+}
+
+.setup-form__checkbox {
+    margin: var(--space-sm) 0;
+}
+
+.setup-form__checkbox input {
+    margin-right: var(--space-xs);
+}
+
+.setup-status--success,
+.setup-key-status {
+    color: var(--status-success);
+}
+
+.setup-status--error {
+    color: var(--status-danger);
+}
+
+.setup-status:empty {
+    display: none;
+}
+
+.setup-form__actions {
+    flex-wrap: wrap;
+}
+
+
+@media (max-width: 540px) {
+    .setup-progress {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
 /* --- Search results page ---
    Results are card lists, not bare text: Communities and People share the
    .search-hit row so the two sections scan as one system, and Posts reuses

@@ -48,11 +48,9 @@ def index():
         openai_url and openai_url != "http://localhost/v1"
     )
 
-    # Show setup message only if database is empty AND configuration is not set
-    if (
-        total_posts == 0 and total_users == 0 and total_subdeaddits == 0
-    ) and not is_configured:
-        needs_setup = True
+    # Keep the wizard visible until the database has starter content, even
+    # when the endpoint was configured in an earlier step.
+    needs_setup = total_posts == 0 and total_users == 0 and total_subdeaddits == 0
 
     if needs_setup:
         return render_template(
@@ -61,6 +59,12 @@ def index():
             description="Welcome to Deaddit! Initial setup required.",
             has_content=total_posts > 0 or total_users > 0 or total_subdeaddits > 0,
             is_configured=is_configured,
+            api_url=openai_url,
+            model=Config.get("OPENAI_MODEL"),
+            key_set=bool((Config.get_api_key_for_endpoint(openai_url) or "").strip()),
+            subdeaddit_count=total_subdeaddits,
+            user_count=total_users,
+            post_count=total_posts,
         )
 
     page = request.args.get("page", default=1, type=int)
