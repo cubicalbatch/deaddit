@@ -8,7 +8,7 @@ import logging
 import os
 import random
 import re
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from functools import wraps
 
 from flask import (
@@ -79,6 +79,7 @@ from deaddit.models import (
     VoteCadencePolicy,
     VoteSimulationHourly,
 )
+from deaddit.runtime.claim import WORKER_LIVENESS_SETTING_KEY
 from deaddit.services.content import (
     ContentValidationError,
     create_subdeaddit,
@@ -1940,7 +1941,7 @@ def system_info_api():
 def save_config_api():
     """API endpoint to save configuration to database."""
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or request.form.to_dict()
 
         # Save configuration values to database
         endpoint_url = None
@@ -1958,7 +1959,6 @@ def save_config_api():
             try:
                 if endpoint_url:
                     Config.set_api_key_for_endpoint(endpoint_url, openai_key)
-                else:
                     # If no endpoint URL, use current endpoint
                     current_endpoint = Config.get("OPENAI_API_URL")
                     if current_endpoint:
@@ -3119,6 +3119,135 @@ def clear_jobs_api():
         return jsonify(
             {"success": False, "message": f"Failed to clear jobs history: {str(e)}"}
         )
+
+
+def _setup_status():
+    """Return the live state needed by the first-run setup wizard."""
+    api_url = Config.get("OPENAI_API_URL")
+    model = Config.get("OPENAI_MODEL")
+    subdeaddit_count = Subdeaddit.query.count()
+    user_count = User.query.count()
+    post_count = Post.query.count()
+    agent_count = Agent.query.count()
+    enabled_agent_count = Agent.query.filter(Agent.is_enabled.is_(True)).count()
+    configured = LLMProvider.query.count() > 0 or bool(
+        api_url and api_url != "http://localhost/v1"
+    )
+    heartbeat = Setting.get_value(WORKER_LIVENESS_SETTING_KEY)
+    worker_alive = False
+    if heartbeat:
+        try:
+            last_seen = datetime.fromisoformat(str(heartbeat))
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=UTC)
+            worker_alive = (datetime.now(UTC) - last_seen).total_seconds() < 90
+        except (TypeError, ValueError):
+            pass
+
+    return {
+        "configured": configured,
+        "api_url": api_url,
+        "model": model,
+        "api_key_set": bool(
+            (Config.get_api_key_for_endpoint(api_url) or "").strip()
+        ),
+        "has_content": post_count > 0 or user_count > 0 or subdeaddit_count > 0,
+        "subdeaddit_count": subdeaddit_count,
+        "user_count": user_count,
+        "post_count": post_count,
+        "agent_count": agent_count,
+        "enabled_agent_count": enabled_agent_count,
+        "runtime_enabled": str(
+            Setting.get_value("AGENT_RUNTIME_ENABLED", "false")
+        ).lower()
+        in {"true", "1", "yes", "on"},
+        "worker_last_seen_iso": str(heartbeat) if heartbeat else None,
+        "worker_alive": worker_alive,
+    }
+
+
+@admin_bp.route("/setup")
+@production_disabled
+@admin_required
+def setup_page():
+    """Render the setup wizard on demand from any database state."""
+    status = _setup_status()
+    worker_age_seconds = None
+    if status["worker_alive"] and status["worker_last_seen_iso"]:
+        try:
+            last_seen = datetime.fromisoformat(status["worker_last_seen_iso"])
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=UTC)
+            worker_age_seconds = max(0, round((datetime.now(UTC) - last_seen).total_seconds()))
+        except (TypeError, ValueError):
+            pass
+    return render_template(
+        "setup.html",
+        description="Configure Deaddit and start its autonomous agents.",
+        is_configured=status["configured"],
+        worker_age_seconds=worker_age_seconds,
+        **status,
+        key_set=status["api_key_set"],
+        counts={
+            "subdeaddits": status["subdeaddit_count"],
+            "users": status["user_count"],
+            "posts": status["post_count"],
+            "agents": status["agent_count"],
+            "enabled_agents": status["enabled_agent_count"],
+        },
+        worker_last_seen=status["worker_last_seen_iso"],
+    )
+
+
+@admin_bp.route("/api/setup/status")
+@production_disabled
+@admin_required
+def setup_status_api():
+    """Return current setup progress without exposing any credentials."""
+    return jsonify(_setup_status())
+
+
+@admin_bp.route("/api/agents/runtime", methods=["POST"])
+@production_disabled
+@admin_required
+def agent_runtime_api():
+    """Enable or disable autonomous agent scheduling."""
+    payload = request.get_json(silent=True)
+    enabled = payload.get("enabled") if isinstance(payload, dict) else None
+    if not isinstance(enabled, bool):
+        return jsonify({"success": False, "message": "enabled must be a boolean"}), 400
+
+    Setting.set_value(
+        "AGENT_RUNTIME_ENABLED",
+        "true" if enabled else "false",
+        description="Whether the autonomous agent runtime is enabled",
+    )
+    return jsonify({"success": True, "runtime_enabled": enabled})
+
+
+@admin_bp.route("/api/setup/test-connection", methods=["POST"])
+@production_disabled
+@admin_required
+def setup_test_connection_api():
+    """Probe the configured endpoint for tool-calling support."""
+    payload = request.get_json(silent=True) or {}
+    api_url = str(payload.get("api_url") or Config.get("OPENAI_API_URL") or "").strip()
+    model = str(payload.get("model") or Config.get("OPENAI_MODEL") or "llama3").strip()
+    key = Config.get_api_key_for_endpoint(api_url)
+    try:
+        capability = probe_endpoint(api_url, model, api_key=key)
+        return jsonify(
+            {
+                "success": True,
+                "supports_tools": bool(capability.supports_tools),
+                "probe_method": str(capability.probe_method or "probe"),
+            }
+        )
+    except Exception as exc:
+        message = str(exc)
+        if key:
+            message = message.replace(key, "[redacted]")
+        return jsonify({"success": False, "message": message})
 
 
 @admin_bp.route("/api/load-default-data", methods=["POST"])
@@ -4806,7 +4935,7 @@ def api_generate_users():
     """Generate human-like personas and optionally enroll them as autonomous agents."""
     from deaddit.services.persona_generator import generate_personas
 
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True) or request.form.to_dict()
     count_raw = payload.get("count", 1)
     try:
         count = int(count_raw)
@@ -4837,7 +4966,7 @@ def api_generate_users():
 
     auto_create_agent = payload.get("auto_create_agent", False)
     if isinstance(auto_create_agent, str):
-        auto_create_agent = auto_create_agent.lower() in ("true", "1", "yes")
+        auto_create_agent = auto_create_agent.lower() in ("true", "1", "yes", "on")
     else:
         auto_create_agent = bool(auto_create_agent)
 

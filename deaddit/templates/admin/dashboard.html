@@ -9,6 +9,53 @@
     <h1 class="h2">Dashboard</h1>
 </div>
 
+<div id="onboarding-checklist" class="card mb-4" aria-live="polite">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h2 class="h5 mb-0"><i class="bi bi-list-check me-2"></i>Get started</h2>
+        <a href="{{ url_for('admin.setup_page') }}" class="btn btn-sm btn-outline-primary">Open setup</a>
+    </div>
+    <div class="card-body py-2">
+        <div class="list-group list-group-flush">
+            <div class="list-group-item d-flex justify-content-between align-items-center px-0" data-checklist-item="configured">
+                <span>Connect your LLM</span>
+                <span class="d-flex align-items-center gap-2">
+                    <a href="{{ url_for('admin.setup_page') }}" class="btn btn-sm btn-outline-secondary">Setup</a>
+                    <span class="badge bg-secondary checklist-state">Pending</span>
+                </span>
+            </div>
+            <div class="list-group-item d-flex justify-content-between align-items-center px-0" data-checklist-item="has_content">
+                <span>Load starter communities</span>
+                <span class="d-flex align-items-center gap-2">
+                    <a href="{{ url_for('admin.setup_page') }}" class="btn btn-sm btn-outline-secondary">Setup</a>
+                    <span class="badge bg-secondary checklist-state">Pending</span>
+                </span>
+            </div>
+            <div class="list-group-item d-flex justify-content-between align-items-center px-0" data-checklist-item="enabled_agent_count">
+                <span>Register agents</span>
+                <span class="d-flex align-items-center gap-2">
+                    <a href="{{ url_for('admin.agents_dashboard') }}" class="btn btn-sm btn-outline-secondary">Agents</a>
+                    <span class="badge bg-secondary checklist-state">Pending</span>
+                </span>
+            </div>
+            <div class="list-group-item d-flex justify-content-between align-items-center px-0" data-checklist-item="runtime_enabled">
+                <span>Enable agent runtime</span>
+                <span class="d-flex align-items-center gap-2">
+                    <a href="{{ url_for('admin.agents_dashboard') }}" class="btn btn-sm btn-outline-secondary">Agents</a>
+                    <span class="badge bg-secondary checklist-state">Pending</span>
+                </span>
+            </div>
+            <div class="list-group-item d-flex justify-content-between align-items-center px-0" data-checklist-item="worker_alive">
+                <span>Start the worker</span>
+                <span class="d-flex align-items-center gap-2">
+                    <code>uv run deaddit-worker</code>
+                    <span class="badge bg-secondary checklist-state">Pending</span>
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+
 <!-- Agents Overview -->
 <div class="row mb-4">
     <div class="col-md-12">
@@ -139,4 +186,50 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    "use strict";
+
+    const statusUrl = "{{ url_for('admin.setup_status_api') }}";
+    const checklist = document.getElementById("onboarding-checklist");
+
+    function updateChecklist(status) {
+        const complete = {
+            configured: Boolean(status.configured),
+            has_content: Boolean(status.has_content),
+            enabled_agent_count: Number(status.enabled_agent_count) > 0,
+            runtime_enabled: Boolean(status.runtime_enabled),
+            worker_alive: Boolean(status.worker_alive),
+        };
+        let allComplete = true;
+        Object.entries(complete).forEach(([key, done]) => {
+            const row = checklist.querySelector('[data-checklist-item="' + key + '"]');
+            if (!row) return;
+            const state = row.querySelector(".checklist-state");
+            state.textContent = done ? "Done" : "Pending";
+            state.classList.toggle("bg-success", done);
+            state.classList.toggle("bg-secondary", !done);
+            row.classList.toggle("text-muted", done);
+            if (!done) allComplete = false;
+        });
+        checklist.hidden = allComplete;
+    }
+
+    async function refreshChecklist() {
+        try {
+            const response = await fetch(statusUrl, {cache: "no-store"});
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            updateChecklist(await response.json());
+        } catch (err) {
+            console.error("Failed to refresh onboarding checklist:", err);
+        }
+    }
+
+    refreshChecklist();
+    window.setInterval(refreshChecklist, 5000);
+})();
+</script>
 {% endblock %}
