@@ -164,7 +164,6 @@ personal/
 .claude/
 .ruff_cache/
 CLAUDE.md
-AGENTS.md
 building/
 # SQLite databases (live data lives in instance/, never committed)
 *.db
