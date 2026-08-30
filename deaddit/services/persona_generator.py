@@ -102,7 +102,7 @@ TROLL_SECTION = (
 MAX_PERSONA_SUBSCRIPTIONS = 3
 
 #: Version of the source-controlled catalogs recorded with each generated user.
-PERSONA_CATALOG_VERSION = "persona_options.v1"
+PERSONA_CATALOG_VERSION = "persona_options.v2"
 
 _INTEREST_ID_BY_TEXT = {option.text: option.id for option in INTERESTS}
 _USERNAME_STYLE_ID_BY_TEXT = {option.text: option.id for option in USERNAME_STYLES}
@@ -200,23 +200,18 @@ def _build_user_prompt(
 
 
 def _existing_snapshots() -> list[ExistingUserSnapshot]:
-    """Snapshot the current population for deficit-aware planning.
+    """Snapshot the current population using persisted persona provenance only.
 
-    ``persona_seed`` provenance (Phase 3 persistence) is read when present;
-    legacy users fall back to normalized label matching inside the planner.
+    Classification is exclusively by the ``persona_seed`` persisted on each
+    user; users without it do not affect deficit balancing.
     """
-    rows = db.session.query(
-        User.agent_state, User.age, User.occupation, User.education
-    ).all()
+    rows = db.session.query(User.agent_state).all()
     snapshots: list[ExistingUserSnapshot] = []
-    for state, age, occupation, education in rows:
+    for (state,) in rows:
         persona_seed = state.get("persona_seed") if isinstance(state, dict) else None
         snapshots.append(
             ExistingUserSnapshot(
                 persona_seed=persona_seed if isinstance(persona_seed, dict) else None,
-                age=age,
-                occupation=occupation,
-                education=education,
             )
         )
 

@@ -59,6 +59,7 @@ class OccupationOption:
     education_options: tuple[EducationOption, ...]
     allowed_contexts: tuple[str, ...]
     min_age: int | None = None
+    max_age: int | None = None
 
 
 @dataclass(frozen=True)
@@ -98,9 +99,6 @@ class UsernameStyleOption:
 @dataclass(frozen=True)
 class ExistingUserSnapshot:
     persona_seed: Mapping[str, object] | None = None
-    age: int | None = None
-    occupation: str | None = None
-    education: str | None = None
 
 
 @dataclass(frozen=True)
@@ -168,7 +166,9 @@ EMPLOYMENT_CONTEXTS = (
     EmploymentContext("context.apprentice", "apprentice", max_age=45),
     EmploymentContext("context.current_student", "current student"),
     EmploymentContext("context.caregiver", "full-time caregiver"),
-    EmploymentContext("context.stay_at_home_parent", "stay-at-home parent"),
+    EmploymentContext(
+        "context.stay_at_home_parent", "stay-at-home parent", min_age=20, max_age=57
+    ),
     EmploymentContext("context.between_jobs", "between jobs"),
     EmploymentContext("context.retired", "retired", min_age=55),
 )
@@ -184,6 +184,81 @@ CONTEXT_BASE_WEIGHTS = {
     "context.caregiver": 5,
     "context.stay_at_home_parent": 5,
     "context.apprentice": 4,
+}
+
+#: Age-band multipliers applied to context base weights: employment-context
+#: prevalence shifts strongly with age (students cluster youngest, retirement
+#: oldest, self-employment rises with age). A missing entry means 1.0; a 0.0
+#: entry removes the context from that band entirely.
+CONTEXT_BAND_WEIGHT_MULTIPLIERS: dict[str, dict[str, float]] = {
+    "age.18_24": {
+        "context.full_time": 0.85,
+        "context.self_employed": 0.35,
+        "context.seasonal": 1.30,
+        "context.multiple_jobs": 1.20,
+        "context.apprentice": 1.60,
+        "context.current_student": 22.0,
+        "context.caregiver": 0.15,
+        "context.stay_at_home_parent": 0.15,
+        "context.between_jobs": 1.20,
+        "context.retired": 0.0,
+    },
+    "age.25_34": {
+        "context.full_time": 1.10,
+        "context.self_employed": 0.80,
+        "context.apprentice": 0.80,
+        "context.current_student": 0.25,
+        "context.caregiver": 1.30,
+        "context.stay_at_home_parent": 1.40,
+        "context.retired": 0.0,
+    },
+    "age.35_44": {
+        "context.full_time": 1.15,
+        "context.self_employed": 1.10,
+        "context.seasonal": 0.80,
+        "context.multiple_jobs": 1.00,
+        "context.apprentice": 0.25,
+        "context.current_student": 0.03,
+        "context.caregiver": 1.50,
+        "context.stay_at_home_parent": 1.50,
+        "context.between_jobs": 0.90,
+        "context.retired": 0.0,
+    },
+    "age.45_54": {
+        "context.full_time": 1.10,
+        "context.self_employed": 1.30,
+        "context.seasonal": 0.70,
+        "context.multiple_jobs": 0.80,
+        "context.apprentice": 0.0,
+        "context.current_student": 0.01,
+        "context.caregiver": 1.20,
+        "context.stay_at_home_parent": 1.10,
+        "context.between_jobs": 0.90,
+        "context.retired": 0.15,
+    },
+    "age.55_64": {
+        "context.full_time": 0.80,
+        "context.self_employed": 1.50,
+        "context.seasonal": 0.60,
+        "context.multiple_jobs": 0.50,
+        "context.current_student": 0.02,
+        "context.caregiver": 0.70,
+        "context.stay_at_home_parent": 0.50,
+        "context.between_jobs": 0.70,
+        "context.retired": 0.55,
+    },
+    "age.65_75": {
+        "context.full_time": 0.40,
+        "context.part_time": 1.30,
+        "context.self_employed": 1.50,
+        "context.seasonal": 0.40,
+        "context.multiple_jobs": 0.30,
+        "context.current_student": 0.0,
+        "context.caregiver": 0.30,
+        "context.stay_at_home_parent": 0.15,
+        "context.between_jobs": 0.50,
+        "context.retired": 2.20,
+    },
 }
 SECTORS = (
     SectorOption("sector.food_and_hospitality", "Food and hospitality"),
@@ -1348,7 +1423,7 @@ OCCUPATIONS = (
         "sector.food_and_hospitality",
         _education_options("line cook", "sector.food_and_hospitality"),
         _occupation_contexts("line cook", "sector.food_and_hospitality"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.prep_cook",
@@ -1356,7 +1431,7 @@ OCCUPATIONS = (
         "sector.food_and_hospitality",
         _education_options("prep cook", "sector.food_and_hospitality"),
         _occupation_contexts("prep cook", "sector.food_and_hospitality"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.restaurant_server",
@@ -1364,7 +1439,7 @@ OCCUPATIONS = (
         "sector.food_and_hospitality",
         _education_options("restaurant server", "sector.food_and_hospitality"),
         _occupation_contexts("restaurant server", "sector.food_and_hospitality"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.bartender",
@@ -1372,7 +1447,7 @@ OCCUPATIONS = (
         "sector.food_and_hospitality",
         _education_options("bartender", "sector.food_and_hospitality"),
         _occupation_contexts("bartender", "sector.food_and_hospitality"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.baker",
@@ -1380,7 +1455,7 @@ OCCUPATIONS = (
         "sector.food_and_hospitality",
         _education_options("baker", "sector.food_and_hospitality"),
         _occupation_contexts("baker", "sector.food_and_hospitality"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.butcher",
@@ -1388,7 +1463,7 @@ OCCUPATIONS = (
         "sector.food_and_hospitality",
         _education_options("butcher", "sector.food_and_hospitality"),
         _occupation_contexts("butcher", "sector.food_and_hospitality"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.cafeteria_worker",
@@ -1396,7 +1471,7 @@ OCCUPATIONS = (
         "sector.food_and_hospitality",
         _education_options("cafeteria worker", "sector.food_and_hospitality"),
         _occupation_contexts("cafeteria worker", "sector.food_and_hospitality"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.hotel_front_desk_clerk",
@@ -1404,7 +1479,7 @@ OCCUPATIONS = (
         "sector.food_and_hospitality",
         _education_options("hotel front-desk clerk", "sector.food_and_hospitality"),
         _occupation_contexts("hotel front-desk clerk", "sector.food_and_hospitality"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.hotel_housekeeper",
@@ -1412,7 +1487,7 @@ OCCUPATIONS = (
         "sector.food_and_hospitality",
         _education_options("hotel housekeeper", "sector.food_and_hospitality"),
         _occupation_contexts("hotel housekeeper", "sector.food_and_hospitality"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.catering_coordinator",
@@ -1420,7 +1495,7 @@ OCCUPATIONS = (
         "sector.food_and_hospitality",
         _education_options("catering coordinator", "sector.food_and_hospitality"),
         _occupation_contexts("catering coordinator", "sector.food_and_hospitality"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.grocery_clerk",
@@ -1428,7 +1503,7 @@ OCCUPATIONS = (
         "sector.retail_and_personal_services",
         _education_options("grocery clerk", "sector.retail_and_personal_services"),
         _occupation_contexts("grocery clerk", "sector.retail_and_personal_services"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.cashier",
@@ -1436,7 +1511,7 @@ OCCUPATIONS = (
         "sector.retail_and_personal_services",
         _education_options("cashier", "sector.retail_and_personal_services"),
         _occupation_contexts("cashier", "sector.retail_and_personal_services"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.retail_supervisor",
@@ -1446,7 +1521,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "retail supervisor", "sector.retail_and_personal_services"
         ),
-        None,
+        23,
     ),
     OccupationOption(
         "occupation.barber",
@@ -1454,7 +1529,7 @@ OCCUPATIONS = (
         "sector.retail_and_personal_services",
         _education_options("barber", "sector.retail_and_personal_services"),
         _occupation_contexts("barber", "sector.retail_and_personal_services"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.hair_stylist",
@@ -1462,7 +1537,7 @@ OCCUPATIONS = (
         "sector.retail_and_personal_services",
         _education_options("hair stylist", "sector.retail_and_personal_services"),
         _occupation_contexts("hair stylist", "sector.retail_and_personal_services"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.nail_technician",
@@ -1470,7 +1545,7 @@ OCCUPATIONS = (
         "sector.retail_and_personal_services",
         _education_options("nail technician", "sector.retail_and_personal_services"),
         _occupation_contexts("nail technician", "sector.retail_and_personal_services"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.massage_therapist",
@@ -1480,7 +1555,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "massage therapist", "sector.retail_and_personal_services"
         ),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.dog_groomer",
@@ -1488,7 +1563,7 @@ OCCUPATIONS = (
         "sector.retail_and_personal_services",
         _education_options("dog groomer", "sector.retail_and_personal_services"),
         _occupation_contexts("dog groomer", "sector.retail_and_personal_services"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.tattoo_artist",
@@ -1496,7 +1571,7 @@ OCCUPATIONS = (
         "sector.retail_and_personal_services",
         _education_options("tattoo artist", "sector.retail_and_personal_services"),
         _occupation_contexts("tattoo artist", "sector.retail_and_personal_services"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.funeral_attendant",
@@ -1506,7 +1581,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "funeral attendant", "sector.retail_and_personal_services"
         ),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.electrician",
@@ -1514,7 +1589,7 @@ OCCUPATIONS = (
         "sector.skilled_trades_and_repair",
         _education_options("electrician", "sector.skilled_trades_and_repair"),
         _occupation_contexts("electrician", "sector.skilled_trades_and_repair"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.plumber",
@@ -1522,7 +1597,7 @@ OCCUPATIONS = (
         "sector.skilled_trades_and_repair",
         _education_options("plumber", "sector.skilled_trades_and_repair"),
         _occupation_contexts("plumber", "sector.skilled_trades_and_repair"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.hvac_technician",
@@ -1530,7 +1605,7 @@ OCCUPATIONS = (
         "sector.skilled_trades_and_repair",
         _education_options("HVAC technician", "sector.skilled_trades_and_repair"),
         _occupation_contexts("HVAC technician", "sector.skilled_trades_and_repair"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.welder",
@@ -1538,7 +1613,7 @@ OCCUPATIONS = (
         "sector.skilled_trades_and_repair",
         _education_options("welder", "sector.skilled_trades_and_repair"),
         _occupation_contexts("welder", "sector.skilled_trades_and_repair"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.carpenter",
@@ -1546,7 +1621,7 @@ OCCUPATIONS = (
         "sector.skilled_trades_and_repair",
         _education_options("carpenter", "sector.skilled_trades_and_repair"),
         _occupation_contexts("carpenter", "sector.skilled_trades_and_repair"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.auto_mechanic",
@@ -1554,7 +1629,7 @@ OCCUPATIONS = (
         "sector.skilled_trades_and_repair",
         _education_options("auto mechanic", "sector.skilled_trades_and_repair"),
         _occupation_contexts("auto mechanic", "sector.skilled_trades_and_repair"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.diesel_mechanic",
@@ -1562,7 +1637,7 @@ OCCUPATIONS = (
         "sector.skilled_trades_and_repair",
         _education_options("diesel mechanic", "sector.skilled_trades_and_repair"),
         _occupation_contexts("diesel mechanic", "sector.skilled_trades_and_repair"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.appliance_repair_technician",
@@ -1574,7 +1649,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "appliance-repair technician", "sector.skilled_trades_and_repair"
         ),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.locksmith",
@@ -1582,7 +1657,7 @@ OCCUPATIONS = (
         "sector.skilled_trades_and_repair",
         _education_options("locksmith", "sector.skilled_trades_and_repair"),
         _occupation_contexts("locksmith", "sector.skilled_trades_and_repair"),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.bicycle_mechanic",
@@ -1590,7 +1665,7 @@ OCCUPATIONS = (
         "sector.skilled_trades_and_repair",
         _education_options("bicycle mechanic", "sector.skilled_trades_and_repair"),
         _occupation_contexts("bicycle mechanic", "sector.skilled_trades_and_repair"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.construction_laborer",
@@ -1600,7 +1675,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "construction laborer", "sector.construction_and_utilities"
         ),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.heavy_equipment_operator",
@@ -1612,7 +1687,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "heavy-equipment operator", "sector.construction_and_utilities"
         ),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.roofer",
@@ -1620,7 +1695,7 @@ OCCUPATIONS = (
         "sector.construction_and_utilities",
         _education_options("roofer", "sector.construction_and_utilities"),
         _occupation_contexts("roofer", "sector.construction_and_utilities"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.survey_technician",
@@ -1628,7 +1703,7 @@ OCCUPATIONS = (
         "sector.construction_and_utilities",
         _education_options("survey technician", "sector.construction_and_utilities"),
         _occupation_contexts("survey technician", "sector.construction_and_utilities"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.electrical_lineworker",
@@ -1640,7 +1715,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "electrical lineworker", "sector.construction_and_utilities"
         ),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.water_treatment_operator",
@@ -1652,7 +1727,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "water-treatment operator", "sector.construction_and_utilities"
         ),
-        None,
+        20,
     ),
     OccupationOption(
         "occupation.solar_installer",
@@ -1660,7 +1735,7 @@ OCCUPATIONS = (
         "sector.construction_and_utilities",
         _education_options("solar installer", "sector.construction_and_utilities"),
         _occupation_contexts("solar installer", "sector.construction_and_utilities"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.building_inspector",
@@ -1668,7 +1743,7 @@ OCCUPATIONS = (
         "sector.construction_and_utilities",
         _education_options("building inspector", "sector.construction_and_utilities"),
         _occupation_contexts("building inspector", "sector.construction_and_utilities"),
-        None,
+        23,
     ),
     OccupationOption(
         "occupation.utility_meter_technician",
@@ -1680,7 +1755,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "utility-meter technician", "sector.construction_and_utilities"
         ),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.arborist",
@@ -1688,7 +1763,7 @@ OCCUPATIONS = (
         "sector.construction_and_utilities",
         _education_options("arborist", "sector.construction_and_utilities"),
         _occupation_contexts("arborist", "sector.construction_and_utilities"),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.city_bus_driver",
@@ -1696,7 +1771,7 @@ OCCUPATIONS = (
         "sector.transport_and_logistics",
         _education_options("city-bus driver", "sector.transport_and_logistics"),
         _occupation_contexts("city-bus driver", "sector.transport_and_logistics"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.long_haul_truck_driver",
@@ -1706,7 +1781,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "long-haul truck driver", "sector.transport_and_logistics"
         ),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.delivery_courier",
@@ -1714,7 +1789,7 @@ OCCUPATIONS = (
         "sector.transport_and_logistics",
         _education_options("delivery courier", "sector.transport_and_logistics"),
         _occupation_contexts("delivery courier", "sector.transport_and_logistics"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.warehouse_picker",
@@ -1722,7 +1797,7 @@ OCCUPATIONS = (
         "sector.transport_and_logistics",
         _education_options("warehouse picker", "sector.transport_and_logistics"),
         _occupation_contexts("warehouse picker", "sector.transport_and_logistics"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.forklift_operator",
@@ -1730,7 +1805,7 @@ OCCUPATIONS = (
         "sector.transport_and_logistics",
         _education_options("forklift operator", "sector.transport_and_logistics"),
         _occupation_contexts("forklift operator", "sector.transport_and_logistics"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.logistics_dispatcher",
@@ -1738,7 +1813,7 @@ OCCUPATIONS = (
         "sector.transport_and_logistics",
         _education_options("logistics dispatcher", "sector.transport_and_logistics"),
         _occupation_contexts("logistics dispatcher", "sector.transport_and_logistics"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.train_conductor",
@@ -1746,7 +1821,7 @@ OCCUPATIONS = (
         "sector.transport_and_logistics",
         _education_options("train conductor", "sector.transport_and_logistics"),
         _occupation_contexts("train conductor", "sector.transport_and_logistics"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.deckhand",
@@ -1754,7 +1829,7 @@ OCCUPATIONS = (
         "sector.transport_and_logistics",
         _education_options("deckhand", "sector.transport_and_logistics"),
         _occupation_contexts("deckhand", "sector.transport_and_logistics"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.baggage_handler",
@@ -1762,7 +1837,7 @@ OCCUPATIONS = (
         "sector.transport_and_logistics",
         _education_options("baggage handler", "sector.transport_and_logistics"),
         _occupation_contexts("baggage handler", "sector.transport_and_logistics"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.postal_carrier",
@@ -1770,7 +1845,7 @@ OCCUPATIONS = (
         "sector.transport_and_logistics",
         _education_options("postal carrier", "sector.transport_and_logistics"),
         _occupation_contexts("postal carrier", "sector.transport_and_logistics"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.assembler",
@@ -1778,7 +1853,7 @@ OCCUPATIONS = (
         "sector.manufacturing",
         _education_options("assembler", "sector.manufacturing"),
         _occupation_contexts("assembler", "sector.manufacturing"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.machinist",
@@ -1786,7 +1861,7 @@ OCCUPATIONS = (
         "sector.manufacturing",
         _education_options("machinist", "sector.manufacturing"),
         _occupation_contexts("machinist", "sector.manufacturing"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.cnc_operator",
@@ -1794,7 +1869,7 @@ OCCUPATIONS = (
         "sector.manufacturing",
         _education_options("CNC operator", "sector.manufacturing"),
         _occupation_contexts("CNC operator", "sector.manufacturing"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.quality_inspector",
@@ -1802,7 +1877,7 @@ OCCUPATIONS = (
         "sector.manufacturing",
         _education_options("quality inspector", "sector.manufacturing"),
         _occupation_contexts("quality inspector", "sector.manufacturing"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.packaging_operator",
@@ -1810,7 +1885,7 @@ OCCUPATIONS = (
         "sector.manufacturing",
         _education_options("packaging operator", "sector.manufacturing"),
         _occupation_contexts("packaging operator", "sector.manufacturing"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.textile_machine_operator",
@@ -1818,7 +1893,7 @@ OCCUPATIONS = (
         "sector.manufacturing",
         _education_options("textile-machine operator", "sector.manufacturing"),
         _occupation_contexts("textile-machine operator", "sector.manufacturing"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.food_plant_worker",
@@ -1826,7 +1901,7 @@ OCCUPATIONS = (
         "sector.manufacturing",
         _education_options("food-plant worker", "sector.manufacturing"),
         _occupation_contexts("food-plant worker", "sector.manufacturing"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.print_shop_operator",
@@ -1834,7 +1909,7 @@ OCCUPATIONS = (
         "sector.manufacturing",
         _education_options("print-shop operator", "sector.manufacturing"),
         _occupation_contexts("print-shop operator", "sector.manufacturing"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.maintenance_mechanic",
@@ -1842,7 +1917,7 @@ OCCUPATIONS = (
         "sector.manufacturing",
         _education_options("maintenance mechanic", "sector.manufacturing"),
         _occupation_contexts("maintenance mechanic", "sector.manufacturing"),
-        None,
+        20,
     ),
     OccupationOption(
         "occupation.production_supervisor",
@@ -1850,7 +1925,7 @@ OCCUPATIONS = (
         "sector.manufacturing",
         _education_options("production supervisor", "sector.manufacturing"),
         _occupation_contexts("production supervisor", "sector.manufacturing"),
-        None,
+        23,
     ),
     OccupationOption(
         "occupation.nursing_assistant",
@@ -1858,7 +1933,7 @@ OCCUPATIONS = (
         "sector.healthcare_support",
         _education_options("nursing assistant", "sector.healthcare_support"),
         _occupation_contexts("nursing assistant", "sector.healthcare_support"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.home_health_aide",
@@ -1866,7 +1941,7 @@ OCCUPATIONS = (
         "sector.healthcare_support",
         _education_options("home-health aide", "sector.healthcare_support"),
         _occupation_contexts("home-health aide", "sector.healthcare_support"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.medical_assistant",
@@ -1874,7 +1949,7 @@ OCCUPATIONS = (
         "sector.healthcare_support",
         _education_options("medical assistant", "sector.healthcare_support"),
         _occupation_contexts("medical assistant", "sector.healthcare_support"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.dental_assistant",
@@ -1882,7 +1957,7 @@ OCCUPATIONS = (
         "sector.healthcare_support",
         _education_options("dental assistant", "sector.healthcare_support"),
         _occupation_contexts("dental assistant", "sector.healthcare_support"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.pharmacy_technician",
@@ -1890,7 +1965,7 @@ OCCUPATIONS = (
         "sector.healthcare_support",
         _education_options("pharmacy technician", "sector.healthcare_support"),
         _occupation_contexts("pharmacy technician", "sector.healthcare_support"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.phlebotomist",
@@ -1898,7 +1973,7 @@ OCCUPATIONS = (
         "sector.healthcare_support",
         _education_options("phlebotomist", "sector.healthcare_support"),
         _occupation_contexts("phlebotomist", "sector.healthcare_support"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.respiratory_therapist",
@@ -1906,7 +1981,7 @@ OCCUPATIONS = (
         "sector.healthcare_support",
         _education_options("respiratory therapist", "sector.healthcare_support"),
         _occupation_contexts("respiratory therapist", "sector.healthcare_support"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.radiologic_technologist",
@@ -1914,7 +1989,7 @@ OCCUPATIONS = (
         "sector.healthcare_support",
         _education_options("radiologic technologist", "sector.healthcare_support"),
         _occupation_contexts("radiologic technologist", "sector.healthcare_support"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.surgical_technician",
@@ -1922,7 +1997,7 @@ OCCUPATIONS = (
         "sector.healthcare_support",
         _education_options("surgical technician", "sector.healthcare_support"),
         _occupation_contexts("surgical technician", "sector.healthcare_support"),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.emt",
@@ -1930,7 +2005,7 @@ OCCUPATIONS = (
         "sector.healthcare_support",
         _education_options("EMT", "sector.healthcare_support"),
         _occupation_contexts("EMT", "sector.healthcare_support"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.registered_nurse",
@@ -1938,7 +2013,7 @@ OCCUPATIONS = (
         "sector.healthcare_professional",
         _education_options("registered nurse", "sector.healthcare_professional"),
         _occupation_contexts("registered nurse", "sector.healthcare_professional"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.dental_hygienist",
@@ -1946,7 +2021,7 @@ OCCUPATIONS = (
         "sector.healthcare_professional",
         _education_options("dental hygienist", "sector.healthcare_professional"),
         _occupation_contexts("dental hygienist", "sector.healthcare_professional"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.physical_therapist",
@@ -1954,7 +2029,7 @@ OCCUPATIONS = (
         "sector.healthcare_professional",
         _education_options("physical therapist", "sector.healthcare_professional"),
         _occupation_contexts("physical therapist", "sector.healthcare_professional"),
-        None,
+        28,
     ),
     OccupationOption(
         "occupation.occupational_therapist",
@@ -1964,7 +2039,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "occupational therapist", "sector.healthcare_professional"
         ),
-        None,
+        27,
     ),
     OccupationOption(
         "occupation.speech_language_pathologist",
@@ -1976,7 +2051,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "speech-language pathologist", "sector.healthcare_professional"
         ),
-        None,
+        26,
     ),
     OccupationOption(
         "occupation.paramedic",
@@ -1994,7 +2069,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "mental-health counselor", "sector.healthcare_professional"
         ),
-        None,
+        26,
     ),
     OccupationOption(
         "occupation.dietitian",
@@ -2002,7 +2077,7 @@ OCCUPATIONS = (
         "sector.healthcare_professional",
         _education_options("dietitian", "sector.healthcare_professional"),
         _occupation_contexts("dietitian", "sector.healthcare_professional"),
-        None,
+        23,
     ),
     OccupationOption(
         "occupation.optician",
@@ -2010,7 +2085,7 @@ OCCUPATIONS = (
         "sector.healthcare_professional",
         _education_options("optician", "sector.healthcare_professional"),
         _occupation_contexts("optician", "sector.healthcare_professional"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.veterinarian",
@@ -2026,7 +2101,7 @@ OCCUPATIONS = (
         "sector.education_and_community",
         _education_options("preschool teacher", "sector.education_and_community"),
         _occupation_contexts("preschool teacher", "sector.education_and_community"),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.elementary_school_teacher",
@@ -2038,7 +2113,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "elementary-school teacher", "sector.education_and_community"
         ),
-        None,
+        22,
     ),
     OccupationOption(
         "occupation.high_school_teacher",
@@ -2046,7 +2121,7 @@ OCCUPATIONS = (
         "sector.education_and_community",
         _education_options("high-school teacher", "sector.education_and_community"),
         _occupation_contexts("high-school teacher", "sector.education_and_community"),
-        None,
+        22,
     ),
     OccupationOption(
         "occupation.special_education_paraprofessional",
@@ -2058,7 +2133,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "special-education paraprofessional", "sector.education_and_community"
         ),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.school_custodian",
@@ -2066,7 +2141,7 @@ OCCUPATIONS = (
         "sector.education_and_community",
         _education_options("school custodian", "sector.education_and_community"),
         _occupation_contexts("school custodian", "sector.education_and_community"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.social_worker",
@@ -2074,7 +2149,7 @@ OCCUPATIONS = (
         "sector.education_and_community",
         _education_options("social worker", "sector.education_and_community"),
         _occupation_contexts("social worker", "sector.education_and_community"),
-        None,
+        23,
     ),
     OccupationOption(
         "occupation.youth_counselor",
@@ -2082,7 +2157,7 @@ OCCUPATIONS = (
         "sector.education_and_community",
         _education_options("youth counselor", "sector.education_and_community"),
         _occupation_contexts("youth counselor", "sector.education_and_community"),
-        None,
+        20,
     ),
     OccupationOption(
         "occupation.academic_adviser",
@@ -2090,7 +2165,7 @@ OCCUPATIONS = (
         "sector.education_and_community",
         _education_options("academic adviser", "sector.education_and_community"),
         _occupation_contexts("academic adviser", "sector.education_and_community"),
-        None,
+        22,
     ),
     OccupationOption(
         "occupation.translator",
@@ -2098,7 +2173,7 @@ OCCUPATIONS = (
         "sector.education_and_community",
         _education_options("translator", "sector.education_and_community"),
         _occupation_contexts("translator", "sector.education_and_community"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.community_organizer",
@@ -2106,7 +2181,7 @@ OCCUPATIONS = (
         "sector.education_and_community",
         _education_options("community organizer", "sector.education_and_community"),
         _occupation_contexts("community organizer", "sector.education_and_community"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.firefighter",
@@ -2114,7 +2189,8 @@ OCCUPATIONS = (
         "sector.public_service_and_safety",
         _education_options("firefighter", "sector.public_service_and_safety"),
         _occupation_contexts("firefighter", "sector.public_service_and_safety"),
-        None,
+        19,
+        57,
     ),
     OccupationOption(
         "occupation.police_dispatcher",
@@ -2122,7 +2198,7 @@ OCCUPATIONS = (
         "sector.public_service_and_safety",
         _education_options("police dispatcher", "sector.public_service_and_safety"),
         _occupation_contexts("police dispatcher", "sector.public_service_and_safety"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.court_clerk",
@@ -2130,7 +2206,7 @@ OCCUPATIONS = (
         "sector.public_service_and_safety",
         _education_options("court clerk", "sector.public_service_and_safety"),
         _occupation_contexts("court clerk", "sector.public_service_and_safety"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.correctional_officer",
@@ -2140,7 +2216,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "correctional officer", "sector.public_service_and_safety"
         ),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.public_health_inspector",
@@ -2152,7 +2228,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "public-health inspector", "sector.public_service_and_safety"
         ),
-        None,
+        20,
     ),
     OccupationOption(
         "occupation.sanitation_inspector",
@@ -2162,7 +2238,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "sanitation inspector", "sector.public_service_and_safety"
         ),
-        None,
+        20,
     ),
     OccupationOption(
         "occupation.emergency_manager",
@@ -2170,7 +2246,7 @@ OCCUPATIONS = (
         "sector.public_service_and_safety",
         _education_options("emergency manager", "sector.public_service_and_safety"),
         _occupation_contexts("emergency manager", "sector.public_service_and_safety"),
-        None,
+        27,
     ),
     OccupationOption(
         "occupation.postal_clerk",
@@ -2178,7 +2254,7 @@ OCCUPATIONS = (
         "sector.public_service_and_safety",
         _education_options("postal clerk", "sector.public_service_and_safety"),
         _occupation_contexts("postal clerk", "sector.public_service_and_safety"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.park_ranger",
@@ -2186,7 +2262,7 @@ OCCUPATIONS = (
         "sector.public_service_and_safety",
         _education_options("park ranger", "sector.public_service_and_safety"),
         _occupation_contexts("park ranger", "sector.public_service_and_safety"),
-        None,
+        22,
     ),
     OccupationOption(
         "occupation.911_operator",
@@ -2194,7 +2270,7 @@ OCCUPATIONS = (
         "sector.public_service_and_safety",
         _education_options("911 operator", "sector.public_service_and_safety"),
         _occupation_contexts("911 operator", "sector.public_service_and_safety"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.receptionist",
@@ -2202,7 +2278,7 @@ OCCUPATIONS = (
         "sector.office_customer_and_finance",
         _education_options("receptionist", "sector.office_customer_and_finance"),
         _occupation_contexts("receptionist", "sector.office_customer_and_finance"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.payroll_clerk",
@@ -2210,7 +2286,7 @@ OCCUPATIONS = (
         "sector.office_customer_and_finance",
         _education_options("payroll clerk", "sector.office_customer_and_finance"),
         _occupation_contexts("payroll clerk", "sector.office_customer_and_finance"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.claims_processor",
@@ -2218,7 +2294,7 @@ OCCUPATIONS = (
         "sector.office_customer_and_finance",
         _education_options("claims processor", "sector.office_customer_and_finance"),
         _occupation_contexts("claims processor", "sector.office_customer_and_finance"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.customer_support_representative",
@@ -2230,7 +2306,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "customer-support representative", "sector.office_customer_and_finance"
         ),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.legal_assistant",
@@ -2238,7 +2314,7 @@ OCCUPATIONS = (
         "sector.office_customer_and_finance",
         _education_options("legal assistant", "sector.office_customer_and_finance"),
         _occupation_contexts("legal assistant", "sector.office_customer_and_finance"),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.bookkeeper",
@@ -2246,7 +2322,7 @@ OCCUPATIONS = (
         "sector.office_customer_and_finance",
         _education_options("bookkeeper", "sector.office_customer_and_finance"),
         _occupation_contexts("bookkeeper", "sector.office_customer_and_finance"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.medical_scheduler",
@@ -2254,7 +2330,7 @@ OCCUPATIONS = (
         "sector.office_customer_and_finance",
         _education_options("medical scheduler", "sector.office_customer_and_finance"),
         _occupation_contexts("medical scheduler", "sector.office_customer_and_finance"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.records_clerk",
@@ -2262,7 +2338,7 @@ OCCUPATIONS = (
         "sector.office_customer_and_finance",
         _education_options("records clerk", "sector.office_customer_and_finance"),
         _occupation_contexts("records clerk", "sector.office_customer_and_finance"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.hr_coordinator",
@@ -2270,7 +2346,7 @@ OCCUPATIONS = (
         "sector.office_customer_and_finance",
         _education_options("HR coordinator", "sector.office_customer_and_finance"),
         _occupation_contexts("HR coordinator", "sector.office_customer_and_finance"),
-        None,
+        20,
     ),
     OccupationOption(
         "occupation.loan_processor",
@@ -2278,7 +2354,7 @@ OCCUPATIONS = (
         "sector.office_customer_and_finance",
         _education_options("loan processor", "sector.office_customer_and_finance"),
         _occupation_contexts("loan processor", "sector.office_customer_and_finance"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.farmhand",
@@ -2286,7 +2362,7 @@ OCCUPATIONS = (
         "sector.agriculture_and_environment",
         _education_options("farmhand", "sector.agriculture_and_environment"),
         _occupation_contexts("farmhand", "sector.agriculture_and_environment"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.dairy_worker",
@@ -2294,7 +2370,7 @@ OCCUPATIONS = (
         "sector.agriculture_and_environment",
         _education_options("dairy worker", "sector.agriculture_and_environment"),
         _occupation_contexts("dairy worker", "sector.agriculture_and_environment"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.greenhouse_grower",
@@ -2302,7 +2378,7 @@ OCCUPATIONS = (
         "sector.agriculture_and_environment",
         _education_options("greenhouse grower", "sector.agriculture_and_environment"),
         _occupation_contexts("greenhouse grower", "sector.agriculture_and_environment"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.landscaper",
@@ -2310,7 +2386,7 @@ OCCUPATIONS = (
         "sector.agriculture_and_environment",
         _education_options("landscaper", "sector.agriculture_and_environment"),
         _occupation_contexts("landscaper", "sector.agriculture_and_environment"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.groundskeeper",
@@ -2318,7 +2394,7 @@ OCCUPATIONS = (
         "sector.agriculture_and_environment",
         _education_options("groundskeeper", "sector.agriculture_and_environment"),
         _occupation_contexts("groundskeeper", "sector.agriculture_and_environment"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.forestry_technician",
@@ -2328,7 +2404,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "forestry technician", "sector.agriculture_and_environment"
         ),
-        None,
+        20,
     ),
     OccupationOption(
         "occupation.fisheries_technician",
@@ -2340,7 +2416,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "fisheries technician", "sector.agriculture_and_environment"
         ),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.recycling_sorter",
@@ -2348,7 +2424,7 @@ OCCUPATIONS = (
         "sector.agriculture_and_environment",
         _education_options("recycling sorter", "sector.agriculture_and_environment"),
         _occupation_contexts("recycling sorter", "sector.agriculture_and_environment"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.waste_collector",
@@ -2356,7 +2432,7 @@ OCCUPATIONS = (
         "sector.agriculture_and_environment",
         _education_options("waste collector", "sector.agriculture_and_environment"),
         _occupation_contexts("waste collector", "sector.agriculture_and_environment"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.pest_control_technician",
@@ -2368,7 +2444,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "pest-control technician", "sector.agriculture_and_environment"
         ),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.laboratory_technician",
@@ -2380,7 +2456,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "laboratory technician", "sector.science_technical_and_professional"
         ),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.gis_technician",
@@ -2392,7 +2468,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "GIS technician", "sector.science_technical_and_professional"
         ),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.civil_engineering_technician",
@@ -2404,7 +2480,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "civil-engineering technician", "sector.science_technical_and_professional"
         ),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.accountant",
@@ -2412,7 +2488,7 @@ OCCUPATIONS = (
         "sector.science_technical_and_professional",
         _education_options("accountant", "sector.science_technical_and_professional"),
         _occupation_contexts("accountant", "sector.science_technical_and_professional"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.paralegal",
@@ -2420,7 +2496,7 @@ OCCUPATIONS = (
         "sector.science_technical_and_professional",
         _education_options("paralegal", "sector.science_technical_and_professional"),
         _occupation_contexts("paralegal", "sector.science_technical_and_professional"),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.insurance_underwriter",
@@ -2432,7 +2508,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "insurance underwriter", "sector.science_technical_and_professional"
         ),
-        None,
+        20,
     ),
     OccupationOption(
         "occupation.urban_planner",
@@ -2444,7 +2520,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "urban planner", "sector.science_technical_and_professional"
         ),
-        None,
+        24,
     ),
     OccupationOption(
         "occupation.chemist",
@@ -2452,7 +2528,7 @@ OCCUPATIONS = (
         "sector.science_technical_and_professional",
         _education_options("chemist", "sector.science_technical_and_professional"),
         _occupation_contexts("chemist", "sector.science_technical_and_professional"),
-        None,
+        22,
     ),
     OccupationOption(
         "occupation.statistician",
@@ -2462,7 +2538,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "statistician", "sector.science_technical_and_professional"
         ),
-        None,
+        22,
     ),
     OccupationOption(
         "occupation.land_surveyor",
@@ -2474,7 +2550,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "land surveyor", "sector.science_technical_and_professional"
         ),
-        None,
+        24,
     ),
     OccupationOption(
         "occupation.graphic_designer",
@@ -2482,7 +2558,7 @@ OCCUPATIONS = (
         "sector.creative_media_and_culture",
         _education_options("graphic designer", "sector.creative_media_and_culture"),
         _occupation_contexts("graphic designer", "sector.creative_media_and_culture"),
-        None,
+        20,
     ),
     OccupationOption(
         "occupation.photographer",
@@ -2490,7 +2566,7 @@ OCCUPATIONS = (
         "sector.creative_media_and_culture",
         _education_options("photographer", "sector.creative_media_and_culture"),
         _occupation_contexts("photographer", "sector.creative_media_and_culture"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.audio_technician",
@@ -2498,7 +2574,7 @@ OCCUPATIONS = (
         "sector.creative_media_and_culture",
         _education_options("audio technician", "sector.creative_media_and_culture"),
         _occupation_contexts("audio technician", "sector.creative_media_and_culture"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.stagehand",
@@ -2506,7 +2582,7 @@ OCCUPATIONS = (
         "sector.creative_media_and_culture",
         _education_options("stagehand", "sector.creative_media_and_culture"),
         _occupation_contexts("stagehand", "sector.creative_media_and_culture"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.copy_editor",
@@ -2514,7 +2590,7 @@ OCCUPATIONS = (
         "sector.creative_media_and_culture",
         _education_options("copy editor", "sector.creative_media_and_culture"),
         _occupation_contexts("copy editor", "sector.creative_media_and_culture"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.sign_painter",
@@ -2522,7 +2598,7 @@ OCCUPATIONS = (
         "sector.creative_media_and_culture",
         _education_options("sign painter", "sector.creative_media_and_culture"),
         _occupation_contexts("sign painter", "sector.creative_media_and_culture"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.florist",
@@ -2530,7 +2606,7 @@ OCCUPATIONS = (
         "sector.creative_media_and_culture",
         _education_options("florist", "sector.creative_media_and_culture"),
         _occupation_contexts("florist", "sector.creative_media_and_culture"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.tailor",
@@ -2538,7 +2614,7 @@ OCCUPATIONS = (
         "sector.creative_media_and_culture",
         _education_options("tailor", "sector.creative_media_and_culture"),
         _occupation_contexts("tailor", "sector.creative_media_and_culture"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.community_radio_producer",
@@ -2550,7 +2626,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "community-radio producer", "sector.creative_media_and_culture"
         ),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.wedding_dj",
@@ -2558,7 +2634,7 @@ OCCUPATIONS = (
         "sector.creative_media_and_culture",
         _education_options("wedding DJ", "sector.creative_media_and_culture"),
         _occupation_contexts("wedding DJ", "sector.creative_media_and_culture"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.help_desk_technician",
@@ -2566,7 +2642,7 @@ OCCUPATIONS = (
         "sector.technology_and_digital",
         _education_options("help-desk technician", "sector.technology_and_digital"),
         _occupation_contexts("help-desk technician", "sector.technology_and_digital"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.network_technician",
@@ -2574,7 +2650,7 @@ OCCUPATIONS = (
         "sector.technology_and_digital",
         _education_options("network technician", "sector.technology_and_digital"),
         _occupation_contexts("network technician", "sector.technology_and_digital"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.systems_administrator",
@@ -2582,7 +2658,7 @@ OCCUPATIONS = (
         "sector.technology_and_digital",
         _education_options("systems administrator", "sector.technology_and_digital"),
         _occupation_contexts("systems administrator", "sector.technology_and_digital"),
-        None,
+        22,
     ),
     OccupationOption(
         "occupation.web_developer",
@@ -2590,7 +2666,7 @@ OCCUPATIONS = (
         "sector.technology_and_digital",
         _education_options("web developer", "sector.technology_and_digital"),
         _occupation_contexts("web developer", "sector.technology_and_digital"),
-        None,
+        20,
     ),
     OccupationOption(
         "occupation.software_engineer",
@@ -2598,7 +2674,7 @@ OCCUPATIONS = (
         "sector.technology_and_digital",
         _education_options("software engineer", "sector.technology_and_digital"),
         _occupation_contexts("software engineer", "sector.technology_and_digital"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.qa_analyst",
@@ -2606,7 +2682,7 @@ OCCUPATIONS = (
         "sector.technology_and_digital",
         _education_options("QA analyst", "sector.technology_and_digital"),
         _occupation_contexts("QA analyst", "sector.technology_and_digital"),
-        None,
+        20,
     ),
     OccupationOption(
         "occupation.data_analyst",
@@ -2614,7 +2690,7 @@ OCCUPATIONS = (
         "sector.technology_and_digital",
         _education_options("data analyst", "sector.technology_and_digital"),
         _occupation_contexts("data analyst", "sector.technology_and_digital"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.cybersecurity_analyst",
@@ -2622,7 +2698,7 @@ OCCUPATIONS = (
         "sector.technology_and_digital",
         _education_options("cybersecurity analyst", "sector.technology_and_digital"),
         _occupation_contexts("cybersecurity analyst", "sector.technology_and_digital"),
-        None,
+        20,
     ),
     OccupationOption(
         "occupation.ux_researcher",
@@ -2630,7 +2706,7 @@ OCCUPATIONS = (
         "sector.technology_and_digital",
         _education_options("UX researcher", "sector.technology_and_digital"),
         _occupation_contexts("UX researcher", "sector.technology_and_digital"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.it_trainer",
@@ -2638,7 +2714,7 @@ OCCUPATIONS = (
         "sector.technology_and_digital",
         _education_options("IT trainer", "sector.technology_and_digital"),
         _occupation_contexts("IT trainer", "sector.technology_and_digital"),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.rideshare_driver",
@@ -2648,7 +2724,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "rideshare driver", "sector.independent_and_irregular_work"
         ),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.market_vendor",
@@ -2656,7 +2732,7 @@ OCCUPATIONS = (
         "sector.independent_and_irregular_work",
         _education_options("market vendor", "sector.independent_and_irregular_work"),
         _occupation_contexts("market vendor", "sector.independent_and_irregular_work"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.house_cleaner",
@@ -2664,7 +2740,7 @@ OCCUPATIONS = (
         "sector.independent_and_irregular_work",
         _education_options("house cleaner", "sector.independent_and_irregular_work"),
         _occupation_contexts("house cleaner", "sector.independent_and_irregular_work"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.handyman",
@@ -2672,7 +2748,7 @@ OCCUPATIONS = (
         "sector.independent_and_irregular_work",
         _education_options("handyman", "sector.independent_and_irregular_work"),
         _occupation_contexts("handyman", "sector.independent_and_irregular_work"),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.pet_sitter",
@@ -2680,7 +2756,7 @@ OCCUPATIONS = (
         "sector.independent_and_irregular_work",
         _education_options("pet sitter", "sector.independent_and_irregular_work"),
         _occupation_contexts("pet sitter", "sector.independent_and_irregular_work"),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.seasonal_resort_worker",
@@ -2692,7 +2768,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "seasonal resort worker", "sector.independent_and_irregular_work"
         ),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.childcare_provider",
@@ -2704,7 +2780,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "childcare provider", "sector.independent_and_irregular_work"
         ),
-        None,
+        19,
     ),
     OccupationOption(
         "occupation.online_reseller",
@@ -2714,7 +2790,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "online reseller", "sector.independent_and_irregular_work"
         ),
-        None,
+        18,
     ),
     OccupationOption(
         "occupation.mobile_notary",
@@ -2722,7 +2798,7 @@ OCCUPATIONS = (
         "sector.independent_and_irregular_work",
         _education_options("mobile notary", "sector.independent_and_irregular_work"),
         _occupation_contexts("mobile notary", "sector.independent_and_irregular_work"),
-        None,
+        21,
     ),
     OccupationOption(
         "occupation.food_delivery_courier",
@@ -2734,7 +2810,7 @@ OCCUPATIONS = (
         _occupation_contexts(
             "food-delivery courier", "sector.independent_and_irregular_work"
         ),
-        None,
+        21,
     ),
 )
 TRAIT_AXES = (
@@ -3003,12 +3079,6 @@ TRAITS = (
         "trait.easily_bored", "easily bored", "axis.motivation_and_values", True
     ),
 )
-
-
-def _trait_id(text: str) -> str:
-    return "trait." + "".join(c.lower() if c.isalnum() else "_" for c in text).strip(
-        "_"
-    ).replace("__", "_")
 
 
 _CONTRADICTIONS = (
@@ -3484,19 +3554,7 @@ USERNAME_STYLES = (
         "a single evocative word + 2-4 digit number, e.g. moonlit_4821, harbor_77, verdigris_302",
     ),
 )
-LEGACY_OCCUPATION_ALIASES = {
-    "software developer": "occupation.software_engineer",
-    "programmer": "occupation.software_engineer",
-    "it support technician": "occupation.help_desk_technician",
-    "it technician": "occupation.help_desk_technician",
-    "it specialist": "occupation.help_desk_technician",
-    "teacher": "occupation.high_school_teacher",
-    "retired teacher": "occupation.high_school_teacher",
-    "substitute teacher": "occupation.high_school_teacher",
-    "elementary teacher": "occupation.elementary_school_teacher",
-    "nurse": "occupation.registered_nurse",
-    "technical writer": "occupation.copy_editor",
-}
+
 
 _OCCUPATION_BY_ID = {o.id: o for o in OCCUPATIONS}
 _OCCUPATIONS_BY_SECTOR = {
@@ -3513,30 +3571,6 @@ _STYLES_BY_FAMILY = {
     for f in dict.fromkeys(s.family for s in WRITING_STYLES)
 }
 _INTEREST_BY_TEXT = {i.text: i for i in INTERESTS}
-_INTEREST_DOMAIN_BY_TEXT = {i.text: i.domain for i in INTERESTS}
-_EDU_TEXT_TO_LEVEL = {}
-for _level in EDUCATION_LEVELS:
-    _EDU_TEXT_TO_LEVEL[_level.label] = _level.id
-for _occupation in OCCUPATIONS:
-    for _option in _occupation.education_options:
-        _old = _EDU_TEXT_TO_LEVEL.get(_option.text)
-        if _old is None or _old == _option.level_id:
-            _EDU_TEXT_TO_LEVEL[_option.text] = _option.level_id
-        else:
-            raise RuntimeError("education text maps to multiple levels")
-
-
-def _normalize_label(value: object) -> str:
-    return " ".join(value.lower().split()) if isinstance(value, str) else ""
-
-
-def _band_for_age(age: object) -> AgeBand | None:
-    if not isinstance(age, int) or isinstance(age, bool):
-        return None
-    for band in AGE_BANDS:
-        if band.low <= age <= band.high:
-            return band
-    return None
 
 
 def _snapshot_counts(existing_users: Sequence[ExistingUserSnapshot]):
@@ -3545,22 +3579,16 @@ def _snapshot_counts(existing_users: Sequence[ExistingUserSnapshot]):
     levels = {e.id: 0 for e in EDUCATION_LEVELS}
     used: set[str] = set()
     seen: set[frozenset[str]] = set()
-    labels = {_normalize_label(o.label): o.id for o in OCCUPATIONS}
     for snapshot in existing_users:
         seed = (
             snapshot.persona_seed if isinstance(snapshot.persona_seed, Mapping) else {}
         )
         occupation_id = seed.get("occupation_id")
-        if not isinstance(occupation_id, str) or occupation_id not in _OCCUPATION_BY_ID:
-            key = _normalize_label(snapshot.occupation)
-            occupation_id = labels.get(key, LEGACY_OCCUPATION_ALIASES.get(key))
-        if occupation_id in _OCCUPATION_BY_ID:
+        if isinstance(occupation_id, str) and occupation_id in _OCCUPATION_BY_ID:
             used.add(occupation_id)
             sectors[_OCCUPATION_BY_ID[occupation_id].sector] += 1
         age_band_id = seed.get("age_band_id")
         band = _AGE_BY_ID.get(age_band_id) if isinstance(age_band_id, str) else None
-        if band is None:
-            band = _band_for_age(seed.get("age")) or _band_for_age(snapshot.age)
         if band is not None:
             bands[band.id] += 1
         raw_level_id = seed.get("education_level_id")
@@ -3569,12 +3597,6 @@ def _snapshot_counts(existing_users: Sequence[ExistingUserSnapshot]):
             if isinstance(raw_level_id, str) and raw_level_id in _EDU_BY_ID
             else None
         )
-        if level_id is None:
-            education_key = _normalize_label(snapshot.education)
-            for text, mapped in _EDU_TEXT_TO_LEVEL.items():
-                if _normalize_label(text) == education_key:
-                    level_id = mapped
-                    break
         if level_id is not None and level_id in levels:
             levels[level_id] += 1
         trait_ids = seed.get("trait_ids")
@@ -3652,6 +3674,38 @@ def _least_used(items: Sequence, uses: Mapping[str, int], rng: random.Random, ke
     return tied[rng.randrange(len(tied))]
 
 
+def _context_weight(context_id: str, band_id: str) -> float:
+    return CONTEXT_BASE_WEIGHTS[context_id] * CONTEXT_BAND_WEIGHT_MULTIPLIERS.get(
+        band_id, {}
+    ).get(context_id, 1.0)
+
+
+def _card_band_compatible(card: OccupationOption, band: AgeBand) -> bool:
+    """Whether any feasible age exists for this card inside the band."""
+    if (card.min_age or 0) > band.high:
+        return False
+    if card.max_age is not None and card.max_age < band.low:
+        return False
+    return any(
+        (_EDU_BY_ID[o.level_id].min_age or 0) <= band.high
+        for o in card.education_options
+    )
+
+
+def _sector_compat_counts(band: AgeBand) -> list[float]:
+    """Age-compatible card counts per sector, as quota weights."""
+    return [
+        float(
+            sum(
+                1
+                for card in _OCCUPATIONS_BY_SECTOR[s.id]
+                if _card_band_compatible(card, band)
+            )
+        )
+        for s in SECTORS
+    ]
+
+
 def _draw_card(
     sector: str,
     band: AgeBand,
@@ -3669,10 +3723,7 @@ def _draw_card(
     bag = bags[sector]
 
     def compatible(card: OccupationOption) -> bool:
-        return (card.min_age or 0) <= band.high and any(
-            (_EDU_BY_ID[o.level_id].min_age or 0) <= band.high
-            for o in card.education_options
-        )
+        return _card_band_compatible(card, band)
 
     def pop_compatible() -> OccupationOption | None:
         # The bag is shuffled, so scan it in its existing draw order while
@@ -3798,22 +3849,91 @@ def build_persona_assignments(
         count,
         total_existing,
     )
-    cap = (
+    # Sector seats are allocated per age band, weighted by how many of each
+    # sector's cards that band can actually use. Young bands therefore skew
+    # toward enterable occupations instead of pairing with professions whose
+    # credentials cannot exist at that age. The global per-sector cap from
+    # the single-pool allocator is preserved by tracking running totals.
+    global_sector_cap = (
         count
         if count < 20
         else max(math.floor(0.2 * count), math.ceil(count / len(SECTORS)))
     )
-    sector_quota = _quota(
-        sector_weights, count, rng, sector_deficits, [cap] * len(SECTORS)
-    )
-    bands = []
-    sectors = []
+    sector_running = {sector.id: 0 for sector in SECTORS}
+    specs = []
     for band, seats in zip(AGE_BANDS, band_quota, strict=True):
-        bands.extend([band] * seats)
-    for sector, seats in zip(SECTORS, sector_quota, strict=True):
-        sectors.extend([sector.id] * seats)
-    rng.shuffle(sectors)
-    specs = list(zip(bands, sectors, strict=True))
+        if not seats:
+            continue
+        compat = _sector_compat_counts(band)
+        weights = [
+            weight * compatible_cards
+            for weight, compatible_cards in zip(sector_weights, compat, strict=True)
+        ]
+        if not any(weights):
+            weights = list(sector_weights)
+        caps = [
+            # Zero-compat sectors are hard-excluded so no remainder seat can
+            # ever pair an impossible (band, sector) combination.
+            0
+            if compatible_cards == 0
+            else max(0, global_sector_cap - sector_running[sector.id])
+            for sector, compatible_cards in zip(SECTORS, compat, strict=True)
+        ]
+        allocation = _quota(weights, seats, rng, sector_deficits, caps)
+        band_sectors = []
+        for sector, sector_seats in zip(SECTORS, allocation, strict=True):
+            sector_running[sector.id] += sector_seats
+            band_sectors.extend([sector.id] * sector_seats)
+        rng.shuffle(band_sectors)
+        specs.extend((band, sector_id) for sector_id in band_sectors)
+    # Repair passes over the (band, sector) pairing. Both preserve band
+    # quotas exactly, keep every pairing age-compatible, and draw no rng.
+    # Coverage: every sector reachable in some band gets at least one seat,
+    # funded from the largest compatible donor row. Balance: no sector keeps
+    # more seats than the single-pool allocator would have allowed.
+    sector_ids = [sector.id for sector in SECTORS]
+    compat_by_band = {band.id: _sector_compat_counts(band) for band in AGE_BANDS}
+    sector_totals: dict[str, int] = {}
+    for _, sector_id in specs:
+        sector_totals[sector_id] = sector_totals.get(sector_id, 0) + 1
+    sector_limit = max(1, math.ceil(count / len(SECTORS)))
+
+    def swap(index: int, target_sector: str) -> None:
+        donor_sector = specs[index][1]
+        specs[index] = (specs[index][0], target_sector)
+        sector_totals[donor_sector] -= 1
+        sector_totals[target_sector] = sector_totals.get(target_sector, 0) + 1
+
+    for position, sector_id in enumerate(sector_ids):
+        if sector_totals.get(sector_id, 0):
+            continue
+        donor = None
+        donor_total = 1
+        for index, (band, row_sector) in enumerate(specs):
+            if sector_totals[row_sector] <= donor_total:
+                continue
+            if compat_by_band[band.id][position] > 0:
+                donor, donor_total = index, sector_totals[row_sector]
+        if donor is not None:
+            swap(donor, sector_id)
+    while sum(max(0, total - sector_limit) for total in sector_totals.values()):
+        swap_index = swap_target = None
+        for index, (band, row_sector) in enumerate(specs):
+            if sector_totals[row_sector] <= sector_limit:
+                continue
+            compat = compat_by_band[band.id]
+            for position, candidate_id in enumerate(sector_ids):
+                if (
+                    compat[position] > 0
+                    and sector_totals.get(candidate_id, 0) < sector_limit
+                ):
+                    swap_index, swap_target = index, candidate_id
+                    break
+            if swap_index is not None:
+                break
+        if swap_index is None or swap_target is None:
+            break
+        swap(swap_index, swap_target)
     troll_indices = set(rng.sample(range(count), troll_count)) if troll_count else set()
     occupation_bags = {}
     for sector in SECTORS:
@@ -3854,19 +3974,23 @@ def build_persona_assignments(
             ):
                 continue
             low = max(band.low, card.min_age or band.low, context.min_age or band.low)
-            high = min(band.high, context.max_age or band.high)
+            high = min(
+                band.high, context.max_age or band.high, card.max_age or band.high
+            )
             if low <= high:
                 contexts.append(context)
         context = _weighted_pick(
             contexts,
             [
-                CONTEXT_BASE_WEIGHTS[item.id] / (1 + context_uses[item.id])
+                # Mild anti-clumping only: strong dampening flattened the
+                # intended per-band proportions toward uniform.
+                _context_weight(item.id, band.id) / (1 + 0.25 * context_uses[item.id])
                 for item in contexts
             ],
             rng,
         )
         low = max(band.low, card.min_age or band.low, context.min_age or band.low)
-        high = min(band.high, context.max_age or band.high)
+        high = min(band.high, context.max_age or band.high, card.max_age or band.high)
         levels = []
         for option in card.education_options:
             level = _EDU_BY_ID[option.level_id]
@@ -3905,7 +4029,12 @@ def build_persona_assignments(
         ]
         level = _weighted_pick(levels, level_weights, rng)
         low = max(low, level.min_age or low)
-        age = rng.randrange(low, high + 1)
+        if context.id == "context.current_student":
+            # Students cluster at the young end of their feasible window:
+            # undergrads at 18-22, returning students just above their floor.
+            age = low + int((high + 1 - low) * rng.random() ** 4.0)
+        else:
+            age = rng.randrange(low, high + 1)
         options = [
             option for option in card.education_options if option.level_id == level.id
         ]
@@ -4020,6 +4149,8 @@ def validate_assignment(assignment: PersonaAssignment) -> tuple[str, ...]:
             errors.append("occupation text exceeds 100 characters")
         if card.min_age is not None and assignment.age < card.min_age:
             errors.append("age is below occupation minimum")
+        if card.max_age is not None and assignment.age > card.max_age:
+            errors.append("age is above occupation maximum")
     context = _CONTEXT_BY_ID.get(assignment.employment_context_id)
     if context is None:
         errors.append("unknown employment context id")

@@ -534,14 +534,24 @@ class TestMatrixPromptAndIdResolution:
     def test_response_without_assignment_ids_is_not_a_success(self, app, fake_llm):
         # Well-formed persona JSON lacking assignment_id can no longer
         # create anyone: every row stays unresolved until the run fails.
-        legacy = json.dumps(
+        unassigned_rows = json.dumps(
             [
-                {"username": "legacy_one", "bio": "A bio", "age": 30, "gender": "Male"},
-                {"username": "legacy_two", "bio": "A bio", "age": 31, "gender": "Male"},
+                {
+                    "username": "no_assignment_one",
+                    "bio": "A bio",
+                    "age": 30,
+                    "gender": "Male",
+                },
+                {
+                    "username": "no_assignment_two",
+                    "bio": "A bio",
+                    "age": 31,
+                    "gender": "Male",
+                },
             ]
         )
         for _ in range(PERSONA_BATCH_ATTEMPTS):
-            fake_llm.enqueue_content(legacy)
+            fake_llm.enqueue_content(unassigned_rows)
 
         with pytest.raises(PersonaGenerationError):
             generate_personas(count=2, auto_create_agent=False, troll_mode="no_troll")
