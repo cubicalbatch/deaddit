@@ -276,7 +276,10 @@ def test_subscriptions_and_prompt_prose_sections_are_stable(app, db_session):
         "but its appearance may include a masthead, menus, section links, "
         "multiple content regions, and a footer. Specify the subject, audience, "
         "page purpose, concrete content, and interactions that make this "
-        "particular site feel distinctive. Never mention prompting or "
+        "particular site feel distinctive. Keep the brief focused rather than "
+        "exhaustive: the generator has a finite output budget, so a few "
+        "well-chosen sections and a small set of concrete content items work "
+        "better than an encyclopedic spec. Never mention prompting or "
         "generation."
     )
     expected_image_diversity_guidance = (

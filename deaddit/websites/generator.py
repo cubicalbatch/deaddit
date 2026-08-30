@@ -119,6 +119,11 @@ Output contract - follow every rule:
   microphone, notifications, clipboard, storage).
 - Do not use <iframe>, <object>, <embed>, <video>, <audio>, <link>, <base>,
   or a <meta http-equiv> tag.
+- Keep the page compact: a focused site with a few well-crafted sections is
+  better than an exhaustive one, and the response is cut off at a hard
+  output-token limit. Do not pad with repetitive items, long placeholder
+  lists, or sprawling stylesheets; once the page reads complete, stop and
+  close the document.
 - Write responsive, semantic, accessible markup: proper heading structure,
   labelled interactive controls that work from the keyboard, visible focus
   states, and sufficient color contrast. If you include animation or
@@ -147,11 +152,15 @@ def _build_user_prompt(
     hostname_hint: str,
     page_name_hint: str,
     diversity_text: str,
+    max_output_tokens: int,
 ) -> str:
     return (
         "Generate the single HTML page described below.\n\n"
         f"Fictional site hostname (for context/branding only): {hostname_hint}\n"
         f"Fictional page name (for context only): {page_name_hint}\n\n"
+        f"Output budget: your response is hard-truncated at {max_output_tokens} "
+        "tokens. A truncated document is discarded in full, so size the site to "
+        "finish comfortably within the budget and write the closing </html>.\n\n"
         "Art direction matrix for this generation (use it to steer the visual and "
         "structural result; do not mention the matrix in the page):\n"
         f"{diversity_text}\n\n"
@@ -473,6 +482,7 @@ def generate_website_html(
             hostname_hint,
             page_name_hint,
             diversity_text,
+            settings.max_output_tokens,
         ),
         model=model,
         api_url=api_url,
