@@ -47,7 +47,7 @@
         </div>
         {% endif %}
         {% if post.content %}
-        <p class="post-card__preview">{{ post.content | striptags | truncate(200) }}</p>
+        <p class="post-card__preview">{{ post.content | striptags | truncate(200) }} <a class="post-card__more" href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit_name) }}">[more]</a></p>
         {% endif %}
     </div>
 </article>

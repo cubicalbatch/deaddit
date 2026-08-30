@@ -1464,6 +1464,16 @@ a:focus {
     margin: 0;
 }
 
+.post-card__more {
+    color: var(--accent);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.post-card__more:hover {
+    text-decoration: underline;
+}
+
 /* Collapsed-card thumbnail: width/height attributes on the <img> reserve
    the correct aspect ratio before the file loads, so this box never
    causes layout shift. The cap keeps a tall image from dominating the
