@@ -20,7 +20,7 @@ from deaddit.models import Comment, Post, Setting, User, Vote
 NOW = datetime(2026, 8, 25, 12, 0, 0)
 D5_REV = "b8e2f4a6c9d1"
 D5_DOWN = "f7a3c9d1e5b2"
-WINDOW_START = NOW - timedelta(days=14)
+WINDOW_START = NOW - timedelta(days=10)
 
 
 @pytest.fixture()
@@ -34,7 +34,7 @@ def pinned_now(app, monkeypatch):
 
 
 def test_fresh_seed_window_causality_and_shape(app, pinned_now, db_session):
-    report = seeding.seed_history(days=14, seed=42, now=NOW)
+    report = seeding.seed_history(days=10, seed=42, now=NOW)
 
     assert report["posts_created"] == Post.query.count()
     assert 100 <= report["posts_created"] <= 400

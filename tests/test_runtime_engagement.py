@@ -114,17 +114,17 @@ def _seed_world(
         )
     db.session.add_all(users)
     db.session.commit()
-    fresh = []
-    for index in range(posts):
-        post = Post(
+    fresh = [
+        Post(
             title=f"target {index}",
             created_at=NOW - timedelta(minutes=created_minutes_ago),
             user="author",
             subdeaddit_name="simsub",
         )
-        db.session.add(post)
-        db.session.commit()
-        fresh.append(post)
+        for index in range(posts)
+    ]
+    db.session.add_all(fresh)
+    db.session.commit()
     if with_policy:
         _add_policy(preset)
     return fresh
