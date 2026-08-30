@@ -4491,7 +4491,8 @@ def _manual_intent_error(agent, intent) -> str | None:
 
     Reuses the registry's static post-tool truth table — the same helpers the
     visit planner and executor use — so admin validation can never drift
-    from runtime policy.
+    from runtime policy. Reasons mirror the agent-detail menu: lurker tier,
+    a conflicting static post-only policy, or the media kind not enabled.
     """
     from deaddit.agents.registry import (
         AutonomyTier,
@@ -4505,9 +4506,21 @@ def _manual_intent_error(agent, intent) -> str | None:
     tier = getattr(agent.autonomy_tier, "value", agent.autonomy_tier)
     if tier == AutonomyTier.LURKER.value:
         return "lurker-tier agents cannot make image or website posts"
-    static_offered = offered_post_tool_names(
-        image_posts_config(agent), website_posts_config(agent)
-    )
+    image_cfg = image_posts_config(agent)
+    website_cfg = website_posts_config(agent)
+    if (
+        image_cfg["enabled"]
+        and image_cfg["policy"] == "image_only"
+        and website_cfg["enabled"]
+        and website_cfg["policy"] == "website_only"
+    ):
+        # The truth table fails closed to no post tools for this combination;
+        # name the conflict rather than the downstream "not enabled" symptom.
+        return (
+            "conflicting static post-only policy (image_only and website_only): "
+            "no media run can be offered"
+        )
+    static_offered = offered_post_tool_names(image_cfg, website_cfg)
     if intent == "image" and "create_image_post" not in static_offered:
         return "image posts are not enabled for this agent"
     if intent == "website" and "create_website" not in static_offered:
@@ -4608,6 +4621,21 @@ def api_force_run(agent_id):
             409,
         )
     return jsonify({"job": job.to_dict(), "agent": _agent_json(agent)}), 202
+
+@admin_bp.route("/api/jobs/<int:job_id>")
+@production_disabled
+@admin_required
+def api_job_status(job_id):
+    """One queue job by ID (generic queue-status lookup).
+
+    Lets the agent-detail live panel distinguish pending, claimed, completed,
+    and failed jobs while no ``AgentRun`` row exists yet. Returns the job's
+    own ``to_dict`` serialization — no second activity representation.
+    """
+    job = db.session.get(Job, job_id)
+    if job is None:
+        return jsonify({"success": False, "error": "job not found"}), 404
+    return jsonify({"job": job.to_dict()})
 
 
 @admin_bp.route("/api/agents/<int:agent_id>/runs")

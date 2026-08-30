@@ -10,10 +10,37 @@
     </h1>
     <div class="btn-toolbar">
         <button id="toggle-btn" class="btn btn-sm btn-outline-success me-2" disabled></button>
-        <button id="force-run-btn" class="btn btn-sm btn-outline-primary" disabled
-                title="Queues one visit on the worker queue; the worker process runs it">
-            <i class="bi bi-lightning"></i> Force Run
-        </button>
+        <div class="btn-group me-2" id="force-run-group">
+            <button id="force-run-btn" class="btn btn-sm btn-outline-primary" disabled
+                    title="Queues a normal (sampled) visit on the worker queue; the worker process runs it">
+                <i class="bi bi-lightning"></i> Force Run
+            </button>
+            <button type="button" id="force-run-toggle" class="btn btn-sm btn-outline-primary dropdown-toggle dropdown-toggle-split"
+                    data-bs-toggle="dropdown" aria-expanded="false" disabled
+                    title="Choose the kind of run to queue">
+                <span class="visually-hidden">Choose the kind of run</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" id="force-run-menu" aria-labelledby="force-run-toggle">
+                <li>
+                    <button type="button" class="dropdown-item" data-run-intent="">
+                        <strong>Normal visit</strong>
+                        <div class="small text-muted run-choice-help">Queues a visit with the planner's sampled intent</div>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" class="dropdown-item" data-run-intent="image">
+                        <strong>Image post run</strong>
+                        <div class="small text-muted run-choice-help">Requests an image-post visit (create_image_post)</div>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" class="dropdown-item" data-run-intent="website">
+                        <strong>Website post run</strong>
+                        <div class="small text-muted run-choice-help">Requests a website-post visit (create_website)</div>
+                    </button>
+                </li>
+            </ul>
+        </div>
         <a href="{{ url_for('admin.agents_dashboard') }}" class="btn btn-sm btn-outline-secondary ms-2">All Agents</a>
     </div>
 </div>
@@ -181,6 +208,21 @@
     </div>
 </div>
 
+<!-- Live manual run follow -->
+<div id="live-panel" class="card mb-4" style="display: none;">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <strong id="live-title">Live manual run</strong>
+        <button id="live-close" class="btn btn-sm btn-outline-secondary" type="button">Close</button>
+    </div>
+    <div class="card-body p-2">
+        <div class="d-flex align-items-center gap-2 flex-wrap p-2 border rounded">
+            <span id="live-phase-badge" class="badge bg-info">Queued</span>
+            <span id="live-summary" class="small text-muted mb-0"></span>
+        </div>
+        <p id="live-error" class="small text-danger mt-1 mb-0" role="alert" style="display: none;"></p>
+    </div>
+</div>
+
 <!-- Run timeline -->
 <div class="card">
     <div class="card-header"><strong>Run Timeline</strong></div>
@@ -273,7 +315,6 @@
         }
         const chip = document.getElementById("agent-status-chip");
         const toggleBtn = document.getElementById("toggle-btn");
-        const runBtn = document.getElementById("force-run-btn");
         const resetBtn = document.getElementById("reset-status-btn");
         const saveBtn = document.getElementById("save-agent-btn");
 
@@ -282,7 +323,7 @@
             chip.className = "badge bg-dark ms-2";
             chip.textContent = "no agent registered";
             toggleBtn.disabled = true;
-            runBtn.disabled = true;
+            syncRunControls();
             if (saveBtn) saveBtn.disabled = true;
             if (resetBtn) resetBtn.style.display = "none";
             document.getElementById("overview-dl").innerHTML = "";
@@ -300,7 +341,7 @@
         chip.textContent = agent.status;
         toggleBtn.disabled = false;
         toggleBtn.className = "btn btn-sm me-2 " + (agent.is_enabled ? "btn-outline-warning" : "btn-outline-success");
-        runBtn.disabled = agent.status === "running" || agent.status === "queued";
+        syncRunControls();
         if (saveBtn) saveBtn.disabled = false;
 
         if (agent.consecutive_failures > 0 || agent.status === "failed" || agent.status === "interrupted") {
@@ -362,6 +403,29 @@
     let nextBeforeId = null;
     let expandedBtn = null;
     let currentRun = null;
+    let openTurnId = null;  // turn whose detail is rendered (guards async renders)
+
+    // Live follow state for the manual run being watched (Phase 2). The
+    // database is the process boundary: this only polls durable agent, job,
+    // run, turn, and tool-call rows through the existing admin APIs.
+    const LIVE_POLL_MS = 1000;
+    const RUN_TERMINAL_STATUSES = {completed: true, failed: true, interrupted: true};
+    const JOB_TERMINAL_STATUSES = {completed: true, failed: true, cancelled: true};
+    const live = {
+        run: null,             // latest run JSON from the runs API
+        latestTurn: null,      // newest observed turn (final tool refresh)
+        jobId: null,
+        requestedIntent: null, // null = normal (sampled) visit
+        runId: null,           // AgentRun id once discovered
+        run: null,             // latest run JSON from the runs API
+        turnIds: new Set(),    // rendered turn ids (no duplicate rows)
+        renderedTurnCount: 0,
+        resolvedToolTurnIds: new Set(), // turns whose expected tools are all persisted
+        ownsPanel: false,      // turns panel currently shows the live run
+        tail: true,            // auto-open newly observed turns
+        timer: null,
+        ticking: false,
+    };
 
     function runsUrl(before) {
         let url = "/admin/api/agents/" + agent.id + "/runs?limit=25";
@@ -559,7 +623,7 @@
         } catch (err) { /* leave summary empty */ }
         item.appendChild(el("div", "small text-truncate text-muted mt-1", responseSummary));
         item.addEventListener("click", () => {
-            openTurn(turn, item);
+            turnClicked(turn, item);
         });
         return item;
     }
@@ -600,21 +664,23 @@
         detail.appendChild(el("h6", "mt-3 mb-2", "Tool calls"));
         const callsWrap = el("div");
         detail.appendChild(callsWrap);
+        openTurnId = turn.id;
+        renderToolCalls(callsWrap, turn, [], []);
         try {
             const data = await api("/admin/api/turns/" + turn.id + "/tool_calls");
-            if (!data.tool_calls.length) {
-                callsWrap.appendChild(el("div", "text-muted small", "No tool calls in this turn."));
-            }
-            data.tool_calls.forEach((call) => {
-                callsWrap.appendChild(toolCallBlock(call));
-            });
+            if (openTurnId !== turn.id) return;
+            renderToolCalls(callsWrap, turn, data.tool_calls || [],
+                pendingToolNames(turn, data.tool_calls || []));
         } catch (err) {
+            if (openTurnId !== turn.id) return;
             callsWrap.appendChild(el("div", "text-danger small", "Failed to load tool calls: " + err.message));
         }
     }
 
     async function openRun(run) {
         currentRun = run || null;
+        // The live poller keeps appending turns only while its own run is shown.
+        live.ownsPanel = live.following && live.runId != null && run && run.id === live.runId;
         const panel = document.getElementById("turns-panel");
         const title = document.getElementById("turns-title");
         title.textContent = "Run #" + run.id + " — loading turns…";
@@ -661,28 +727,461 @@
         }
     });
 
-    document.getElementById("force-run-btn").addEventListener("click", async () => {
-        if (!agent) return;
-        const btn = document.getElementById("force-run-btn");
-        btn.disabled = true;
-        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Queued…';
+    // --- Force-run choices (normal / image / website) ---------------------
+
+    // Mirrors the server's registry truth table (see _manual_intent_error in
+    // admin.py): lurker tier, conflicting post-only policies, or the media
+    // kind not enabled. The server stays authoritative on submit (422).
+    function mediaIntentReason(intent) {
+        if (intent !== "image" && intent !== "website") return null;
+        if (!agent) return "agent not loaded";
+        if (agent.autonomy_tier === "lurker") {
+            return "unavailable to lurker-tier agents";
+        }
+        const cfg = agent.config || {};
+        const img = cfg.image_posts || {};
+        const web = cfg.website_posts || {};
+        const imageOnly = Boolean(img.enabled) && img.policy === "image_only";
+        const websiteOnly = Boolean(web.enabled) && web.policy === "website_only";
+        if (imageOnly && websiteOnly) {
+            return "conflicting static post-only policy";
+        }
+        if (intent === "image" && !img.enabled) {
+            return "image posts not enabled for this agent";
+        }
+        if (intent === "website" && !web.enabled) {
+            return "website posts not enabled for this agent";
+        }
+        return null;
+    }
+
+    const RUN_CHOICE_HELP = {
+        image: "Requests an image-post visit (create_image_post)",
+        website: "Requests a website-post visit (create_website)",
+    };
+
+    function syncRunChoices() {
+        ["image", "website"].forEach((intent) => {
+            const item = document.querySelector(
+                "#force-run-menu [data-run-intent='" + intent + "']");
+            if (!item) return;
+            const help = item.querySelector(".run-choice-help");
+            const reason = mediaIntentReason(intent);
+            item.disabled = Boolean(reason);
+            item.classList.toggle("disabled", Boolean(reason));
+            if (help) help.textContent = reason
+                ? "Unavailable — " + reason
+                : RUN_CHOICE_HELP[intent];
+        });
+    }
+
+    function syncRunControls() {
+        const main = document.getElementById("force-run-btn");
+        const caret = document.getElementById("force-run-toggle");
+        const active = Boolean(agent) && (live.following
+            || agent.status === "queued" || agent.status === "running");
+        main.disabled = !agent || active;
+        caret.disabled = !agent || active;
+        main.innerHTML = active
+            ? '<i class="bi bi-hourglass-split"></i> '
+                + (agent && agent.status === "running" ? "Running…" : "Queued…")
+            : '<i class="bi bi-lightning"></i> Force Run';
+        syncRunChoices();
+    }
+
+    async function queueForcedRun(intent) {
+        if (!agent || live.following) return;
+        const main = document.getElementById("force-run-btn");
+        const caret = document.getElementById("force-run-toggle");
+        main.disabled = true;
+        caret.disabled = true;
+        main.innerHTML = '<i class="bi bi-hourglass-split"></i> Queued…';
         try {
-            await api("/admin/api/agents/" + agent.id + "/force-run", {
+            const data = await api("/admin/api/agents/" + agent.id + "/force-run", {
                 method: "POST",
-                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(intent ? {intent: intent} : {}),
             });
+            const params = (data.job && data.job.parameters) || {};
+            startLiveFollow(data.job.id,
+                params.requested_intent != null ? params.requested_intent : null);
             await loadAgent();
             await loadRuns();
         } catch (err) {
+            // Server-authoritative eligibility (422), overlap (409), or
+            // transport failure — restore the control and surface it.
             alert(err.message);
-        } finally {
-            btn.disabled = agent != null && (agent.status === "queued" || agent.status === "running");
-            btn.innerHTML = '<i class="bi bi-lightning"></i> Force Run';
+            syncRunControls();
         }
+    }
+
+    document.getElementById("force-run-btn").addEventListener("click", () => {
+        queueForcedRun(null);
+    });
+    document.querySelectorAll("#force-run-menu [data-run-intent]").forEach((item) => {
+        item.addEventListener("click", () => {
+            const intent = item.getAttribute("data-run-intent");
+            queueForcedRun(intent === "" ? null : intent);
+        });
     });
 
     document.getElementById("turns-close").addEventListener("click", () => {
         document.getElementById("turns-panel").style.display = "none";
+    });
+
+    // --- Live manual-run follow -------------------------------------------
+
+    function intentLabel(intent) {
+        if (intent === "image") return "image";
+        if (intent === "website") return "website";
+        return "normal (sampled)";
+    }
+
+    function setLiveBadge(text, cls) {
+        const badge = document.getElementById("live-phase-badge");
+        badge.textContent = text;
+        badge.className = "badge " + cls;
+    }
+
+    function setLiveSummary(text) {
+        document.getElementById("live-summary").textContent = text;
+    }
+
+    function showLiveError(message) {
+        const err = document.getElementById("live-error");
+        if (message == null) {
+            err.style.display = "none";
+            return;
+        }
+        err.textContent = message;
+        err.style.display = "";
+    }
+
+    function expectedToolNames(turn) {
+        const calls = (turn.response_message && turn.response_message.tool_calls) || [];
+        return calls.map((call) => (call.function && call.function.name) || call.name || "")
+            .filter(Boolean);
+    }
+
+    // Multiset difference: requested-but-not-yet-persisted tool names. A
+    // ToolCall row only lands once execution finishes, so a non-empty result
+    // means the worker is executing that tool right now.
+    function pendingToolNames(turn, persistedCalls) {
+        const remaining = {};
+        expectedToolNames(turn).forEach((name) => {
+            remaining[name] = (remaining[name] || 0) + 1;
+        });
+        (persistedCalls || []).forEach((call) => {
+            if (remaining[call.name]) remaining[call.name] -= 1;
+        });
+        return Object.keys(remaining).filter((name) => remaining[name] > 0);
+    }
+
+    function pendingToolBlock(name) {
+        const block = el("div", "border rounded p-2 mb-2 d-flex align-items-center gap-2");
+        block.appendChild(el("span", "badge bg-info", "running"));
+        block.appendChild(el("strong", null, name));
+        block.appendChild(el("span", "small text-muted", "requested — executing…"));
+        return block;
+    }
+
+    function renderToolCalls(wrap, turn, calls, pendingNames) {
+        wrap.replaceChildren();
+        wrap.setAttribute("data-tool-calls", String(turn.id));
+        (calls || []).forEach((call) => wrap.appendChild(toolCallBlock(call)));
+        (pendingNames || []).forEach((name) => wrap.appendChild(pendingToolBlock(name)));
+        if (!(calls || []).length && !(pendingNames || []).length) {
+            wrap.appendChild(el("div", "text-muted small", "No tool calls in this turn."));
+        }
+    }
+
+    function turnClicked(turn, itemNode) {
+        if (live.following) {
+            // Follow the tail unless the admin pinned an older turn open.
+            const newest = document.querySelector(
+                "#turns-list .list-group-item:last-of-type");
+            live.tail = !newest || itemNode === newest;
+        }
+        openTurn(turn, itemNode);
+    }
+
+    function startLiveFollow(jobId, requestedIntent) {
+        live.following = true;
+        live.jobId = jobId;
+        live.requestedIntent = requestedIntent || null;
+        live.runId = null;
+        live.run = null;
+        live.latestTurn = null;
+        live.turnIds = new Set();
+        live.renderedTurnCount = 0;
+        live.resolvedToolTurnIds = new Set();
+        live.ownsPanel = true;
+        live.tail = true;
+        document.getElementById("live-panel").style.display = "";
+        setLiveBadge("Queued", "bg-info");
+        setLiveSummary("Job #" + jobId + " · requested intent: "
+            + intentLabel(live.requestedIntent) + " · waiting for the worker to claim it");
+        showLiveError(null);
+        // Open the existing turns panel immediately; turns stream in below.
+        document.getElementById("turns-panel").style.display = "";
+        document.getElementById("turns-title").textContent =
+            "Manual run — job #" + jobId + " (" + intentLabel(live.requestedIntent) + ")";
+        const placeholder = el("div", "text-muted p-2", "Waiting for the run to start…");
+        placeholder.id = "turns-placeholder";
+        document.getElementById("turns-list").replaceChildren(placeholder);
+        document.getElementById("turn-detail").replaceChildren();
+        syncRunControls();
+        scheduleLiveTick(0);
+    }
+
+    function scheduleLiveTick(delayMs) {
+        if (live.timer != null) window.clearTimeout(live.timer);
+        live.timer = window.setTimeout(() => {
+            live.timer = null;
+            liveTick();
+        }, delayMs);
+    }
+
+    function stopLivePolling() {
+        if (live.timer != null) {
+            window.clearTimeout(live.timer);
+            live.timer = null;
+        }
+    }
+
+    // Light status refresh used by the poll loop: never touches the edit
+    // form, which the admin may be typing into while the run executes.
+    function applyAgentStatus(agentData) {
+        if (!agentData) return;
+        agent = agentData;
+        const chip = document.getElementById("agent-status-chip");
+        chip.style.display = "";
+        chip.className = "badge ms-2 " + (STATUS_BADGE[agent.status] || "bg-dark");
+        chip.textContent = agent.status;
+        const toggleBtn = document.getElementById("toggle-btn");
+        toggleBtn.disabled = false;
+        toggleBtn.className = "btn btn-sm me-2 "
+            + (agent.is_enabled ? "btn-outline-warning" : "btn-outline-success");
+        document.getElementById("state-pre").textContent =
+            JSON.stringify(agent.state, null, 2);
+        syncRunControls();
+    }
+
+    function renderTurnsIncremental(turns) {
+        const list = document.getElementById("turns-list");
+        let newest = null;
+        let newestNode = null;
+        turns.forEach((turn) => {
+            if (live.turnIds.has(turn.id)) return;
+            live.turnIds.add(turn.id);
+            live.renderedTurnCount += 1;
+            if (!live.ownsPanel) return;  // another run is open; count only
+            const node = turnItem(turn);
+            list.appendChild(node);
+            newest = turn;
+            newestNode = node;
+        });
+        if (newestNode) {
+            const placeholder = document.getElementById("turns-placeholder");
+            if (placeholder) placeholder.remove();
+            document.getElementById("turns-title").textContent =
+                "Run #" + live.runId + " — live · " + live.renderedTurnCount + " turn(s)";
+            if (live.tail) {
+                openTurn(newest, newestNode);
+            }
+        }
+        currentRun = live.run;
+    }
+
+    function refreshOpenToolCalls(turn, calls, pendingNames) {
+        if (openTurnId !== turn.id) return;
+        const wrap = document.querySelector(
+            '#turn-detail [data-tool-calls="' + turn.id + '"]');
+        if (wrap) renderToolCalls(wrap, turn, calls, pendingNames);
+    }
+
+    async function liveTick() {
+        if (!live.following || live.ticking) return;
+        if (document.hidden) return; // paused; visibilitychange resumes
+        live.ticking = true;
+        try {
+            const [agentData, jobData, runsData] = await Promise.all([
+                api("/admin/api/agents/" + AGENT_ID),
+                live.jobId != null
+                    ? api("/admin/api/jobs/" + live.jobId)
+                    : Promise.resolve(null),
+                api("/admin/api/agents/" + AGENT_ID + "/runs?limit=25"),
+            ]);
+            showLiveError(null);
+            applyAgentStatus(agentData);
+
+            const job = jobData ? jobData.job : null;
+            const result = (job && job.result) || null;
+            const runs = (runsData && runsData.runs) || [];
+
+            // Identify our run: sticky by id, then the job's terminal result,
+            // then the single manual run a claimed job must be executing.
+            let run = null;
+            if (live.runId != null) {
+                run = runs.find((r) => r.id === live.runId) || null;
+            }
+            if (run == null && result && result.run_id != null) {
+                run = runs.find((r) => r.id === result.run_id) || null;
+            }
+            if (run == null && job && job.status === "running") {
+                run = runs.find((r) => r.trigger === "manual" && r.status === "running") || null;
+            }
+            if (run) {
+                live.runId = run.id;
+                live.run = run;
+            }
+
+            let pendingNames = [];
+            if (run) {
+                const turnsData = await api("/admin/api/runs/" + run.id + "/turns");
+                const turns = (turnsData && turnsData.turns) || [];
+                renderTurnsIncremental(turns);
+                const latest = turns.length ? turns[turns.length - 1] : null;
+                live.latestTurn = latest;
+                if (latest && expectedToolNames(latest).length
+                        && !live.resolvedToolTurnIds.has(latest.id)) {
+                    const toolData = await api("/admin/api/turns/" + latest.id + "/tool_calls");
+                    pendingNames = pendingToolNames(latest, toolData.tool_calls || []);
+                    if (live.ownsPanel) {
+                        refreshOpenToolCalls(latest, toolData.tool_calls || [], pendingNames);
+                    }
+                    if (!pendingNames.length) live.resolvedToolTurnIds.add(latest.id);
+                }
+                if (RUN_TERMINAL_STATUSES[run.status] && live.latestTurn
+                        && expectedToolNames(live.latestTurn).length
+                        && !live.resolvedToolTurnIds.has(latest.id)) {
+                    // The run went terminal in this same tick; the last tool
+                    // result may have landed after the fetch above. Poll the
+                    // open turn's tool calls once more before stopping.
+                    try {
+                        const toolData = await api("/admin/api/turns/"
+                            + live.latestTurn.id + "/tool_calls");
+                        pendingNames = pendingToolNames(live.latestTurn,
+                            toolData.tool_calls || []);
+                        if (live.ownsPanel) {
+                            refreshOpenToolCalls(live.latestTurn,
+                                toolData.tool_calls || [], pendingNames);
+                        }
+                        if (!pendingNames.length) {
+                            live.resolvedToolTurnIds.add(live.latestTurn.id);
+                        }
+                    } catch (err) { /* keep whatever was last rendered */ }
+                }
+            }
+
+            // Terminal outcomes.
+            const terminalRun = run && RUN_TERMINAL_STATUSES[run.status] ? run : null;
+            const terminalJob = job && JOB_TERMINAL_STATUSES[job.status] ? job : null;
+            if (terminalRun || terminalJob) {
+                await liveFinish(terminalRun, terminalJob, result);
+                return;
+            }
+
+            if (!run) {
+                if (job && job.status === "running") {
+                    setLiveBadge("Starting", "bg-info");
+                    setLiveSummary("Job #" + live.jobId
+                        + " · worker claimed the job — waiting for the run to be reserved");
+                } else {
+                    setLiveBadge("Queued", "bg-info");
+                    setLiveSummary("Job #" + live.jobId + " · requested intent: "
+                        + intentLabel(live.requestedIntent)
+                        + " · waiting for the worker to claim it");
+                }
+                return;
+            }
+
+            if (pendingNames.length) {
+                setLiveBadge("Running", "bg-primary");
+                setLiveSummary("Run #" + run.id + " · resolved intent: "
+                    + (run.intent || intentLabel(live.requestedIntent)) + " · running "
+                    + pendingNames.join(", ") + "…");
+            } else {
+                setLiveBadge("Running", "bg-primary");
+                setLiveSummary("Run #" + run.id + " · resolved intent: "
+                    + (run.intent || intentLabel(live.requestedIntent))
+                    + " · waiting for the model's next response");
+            }
+        } catch (err) {
+            // Keep polling and never discard already rendered history.
+            showLiveError("Polling error: " + err.message
+                + " — retrying; displayed history is kept up to its last good state.");
+        } finally {
+            live.ticking = false;
+            if (live.following && !document.hidden) {
+                scheduleLiveTick(LIVE_POLL_MS);
+            }
+        }
+    }
+
+    async function liveFinish(run, job, result) {
+        stopLivePolling();
+        live.following = false;
+        // Prefer the freshest truth: the run row when terminal, else the
+        // job's recorded run_status (the row can lag the job by one commit).
+        let status = run && RUN_TERMINAL_STATUSES[run.status]
+            ? run.status
+            : (result && result.run_status) || (job ? job.status : null);
+        if (run == null && result && result.run_id != null) {
+            status = result.run_status || status;
+        }
+        const runId = (run && run.id) || (result && result.run_id) || null;
+        const resolvedIntent = (run && run.intent)
+            || (result && result.resolved_intent) || null;
+        const badgeCls = status === "completed" ? "bg-success"
+            : status === "failed" ? "bg-danger" : "bg-secondary";
+        setLiveBadge(status || "finished", badgeCls);
+        if (runId != null) {
+            setLiveSummary("Run #" + runId + " · resolved intent: "
+                + (resolvedIntent || intentLabel(live.requestedIntent))
+                + " · finished · " + live.renderedTurnCount + " turn(s) observed");
+        } else {
+            setLiveSummary("Job #" + live.jobId + " · finished with no run ("
+                + status + ")");
+        }
+        if (run && run.error_message) {
+            showLiveError("Run failed: " + run.error_message);
+        } else if (job && job.status === "failed" && job.error_message) {
+            showLiveError("Job failed: " + job.error_message);
+        }
+        if (live.ownsPanel && runId != null) {
+            document.getElementById("turns-title").textContent =
+                "Run #" + runId + " — " + (status || "finished");
+        }
+        // Stop polling, then reload the agent overview and run timeline once.
+        await loadAgent();
+        await loadRuns();
+    }
+
+    function maybeReconnectLiveRun() {
+        if (!agent || live.following) return;
+        const manual = agent.state && agent.state.manual_run;
+        if (manual && typeof manual.job_id === "number") {
+            startLiveFollow(manual.job_id,
+                manual.requested_intent != null ? manual.requested_intent : null);
+        }
+    }
+
+    document.getElementById("live-close").addEventListener("click", () => {
+        stopLivePolling();
+        live.following = false;
+        live.ownsPanel = false;
+        document.getElementById("live-panel").style.display = "none";
+        syncRunControls();
+    });
+
+    // Pause polling while the document is hidden; catch up on visibility.
+    document.addEventListener("visibilitychange", () => {
+        if (!live.following) return;
+        if (document.hidden) {
+            stopLivePolling();
+        } else {
+            scheduleLiveTick(0);
+        }
     });
 
     // Cadence preset buttons
@@ -1021,6 +1520,7 @@
     Promise.all([loadProviders(), loadImageProviders()])
         .then(loadAgent)
         .then(loadRuns)
+        .then(maybeReconnectLiveRun)
         .catch((err) => console.error(err));
 })();
 </script>
