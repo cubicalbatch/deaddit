@@ -76,8 +76,7 @@ def _fix_plan(monkeypatch, count: int, troll_count: int = 0) -> tuple:
     normals = count - troll_count
     rows = [_fixed_assignment(i) for i in range(1, normals + 1)]
     rows += [
-        _fixed_assignment(normals + k, troll=True)
-        for k in range(1, troll_count + 1)
+        _fixed_assignment(normals + k, troll=True) for k in range(1, troll_count + 1)
     ]
     frozen = tuple(rows)
     monkeypatch.setattr(generator, "build_persona_assignments", lambda *a, **k: frozen)
@@ -184,11 +183,11 @@ class TestPersonaGeneratorTrollMode:
         assert "- required traits: trait one 1; blunt; methodical; quirk 1" in prompt
         assert result["users"][0]["is_troll"] is True
         stored = User.query.filter_by(username=result["users"][0]["username"]).first()
-        assert stored.agent_state["persona_seed"]["troll_modifier_id"] == "troll.pedantic"
+        assert (
+            stored.agent_state["persona_seed"]["troll_modifier_id"] == "troll.pedantic"
+        )
 
-    def test_normal_matrix_rows_carry_no_troll_flavor(
-        self, app, fake_llm, monkeypatch
-    ):
+    def test_normal_matrix_rows_carry_no_troll_flavor(self, app, fake_llm, monkeypatch):
         _fix_plan(monkeypatch, count=2, troll_count=0)
         fake_llm.enqueue_content(_ids_response(["a1", "a2"]))
         generate_personas(count=2, auto_create_agent=False, troll_mode="no_troll")
@@ -211,9 +210,7 @@ class TestAssignStylesCatalogDelegation:
         from deaddit.services.persona_options import USERNAME_STYLES
 
         first = USERNAME_STYLES[0].text
-        monkeypatch.setattr(
-            generator.random, "choices", lambda seq, k: [seq[0]] * k
-        )
+        monkeypatch.setattr(generator.random, "choices", lambda seq, k: [seq[0]] * k)
         assert _assign_styles(2) == [first, first]
 
 

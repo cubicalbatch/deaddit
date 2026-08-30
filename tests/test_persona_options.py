@@ -69,7 +69,10 @@ def test_catalog_sizes_and_integrity():
     assert len({band.id for band in AGE_BANDS}) == len(AGE_BANDS)
     assert AGE_BANDS[0].low == 18
     assert AGE_BANDS[-1].high == 75
-    assert all(left.high + 1 == right.low for left, right in zip(AGE_BANDS, AGE_BANDS[1:], strict=False))
+    assert all(
+        left.high + 1 == right.low
+        for left, right in zip(AGE_BANDS, AGE_BANDS[1:], strict=False)
+    )
     assert sum(band.target for band in AGE_BANDS) == pytest.approx(1.0)
 
     assert len(EDUCATION_LEVELS) == 9
@@ -77,7 +80,9 @@ def test_catalog_sizes_and_integrity():
     assert sum(EDUCATION_LEVEL_TARGETS.values()) == pytest.approx(1.0)
 
     assert len(EMPLOYMENT_CONTEXTS) == 11
-    assert len({context.id for context in EMPLOYMENT_CONTEXTS}) == len(EMPLOYMENT_CONTEXTS)
+    assert len({context.id for context in EMPLOYMENT_CONTEXTS}) == len(
+        EMPLOYMENT_CONTEXTS
+    )
     assert len(SECTORS) == 16
     assert set(SECTOR_LABELS) == _SECTOR_IDS
     assert len(SECTOR_LABELS) == len(SECTORS)
@@ -145,7 +150,9 @@ def test_catalog_cross_references():
         assert occupation.sector in _SECTOR_IDS
         assert occupation.allowed_contexts
         assert "context.full_time" in occupation.allowed_contexts
-        assert all(context_id in _CONTEXT_BY_ID for context_id in occupation.allowed_contexts)
+        assert all(
+            context_id in _CONTEXT_BY_ID for context_id in occupation.allowed_contexts
+        )
         assert occupation.min_age is None or occupation.min_age >= 18
         assert ("context.current_student" in occupation.allowed_contexts) == (
             "education.current_student" in level_ids
@@ -225,7 +232,9 @@ def test_seed_sweep_gates():
             sector_counts = Counter(row.occupation_sector for row in plan)
             level_counts = Counter(row.education_level_id for row in plan)
             assert all(
-                _BAND_BY_ID[row.age_band_id].low <= row.age <= _BAND_BY_ID[row.age_band_id].high
+                _BAND_BY_ID[row.age_band_id].low
+                <= row.age
+                <= _BAND_BY_ID[row.age_band_id].high
                 for row in plan
             )
             assert all(
@@ -247,7 +256,10 @@ def test_seed_sweep_gates():
                 assert len(sector_counts) >= 7
                 assert len(band_counts) >= 5
                 assert len(level_counts) >= 4
-                assert len({_STYLE_BY_ID[row.writing_style_id].family for row in plan}) >= 4
+                assert (
+                    len({_STYLE_BY_ID[row.writing_style_id].family for row in plan})
+                    >= 4
+                )
             elif count == 20:
                 assert len(band_counts) == 6
                 assert max(sector_counts.values()) <= floor(0.2 * count)
@@ -267,18 +279,24 @@ def test_seed_sweep_gates():
                 assert max(level_counts.values()) <= ceil(0.3 * count)
                 occupations_by_sector = defaultdict(list)
                 for row in plan:
-                    occupations_by_sector[row.occupation_sector].append(row.occupation_id)
+                    occupations_by_sector[row.occupation_sector].append(
+                        row.occupation_id
+                    )
                 for sector_occupations in occupations_by_sector.values():
                     # Rows are shuffled after drawing, so output order is not
                     # bag order; the order-independent observable of the
                     # no-repeat-before-exhaustion rule is that a sector's rows
                     # cover every card before any card can appear twice.
-                    assert len(set(sector_occupations)) == min(len(sector_occupations), 10)
+                    assert len(set(sector_occupations)) == min(
+                        len(sector_occupations), 10
+                    )
 
 
 def test_existing_users_deficit_and_legacy_mapping():
     technology_users = [
-        ExistingUserSnapshot(persona_seed={"occupation_id": "occupation.software_engineer"})
+        ExistingUserSnapshot(
+            persona_seed={"occupation_id": "occupation.software_engineer"}
+        )
         for _ in range(40)
     ]
     with_technology_snapshot = _build(10, 0, 7, technology_users)
@@ -302,16 +320,13 @@ def test_existing_users_deficit_and_legacy_mapping():
     )
     _assert_valid(with_age_snapshot)
     bachelor_users = [
-        ExistingUserSnapshot(
-            persona_seed={"education_level_id": "education.bachelor"}
-        )
+        ExistingUserSnapshot(persona_seed={"education_level_id": "education.bachelor"})
         for _ in range(100)
     ]
     with_bachelor_snapshot = _build(20, 0, 17, bachelor_users)
     without_bachelor_snapshot = _build(20, 0, 17)
     assert sum(
-        row.education_level_id == "education.bachelor"
-        for row in with_bachelor_snapshot
+        row.education_level_id == "education.bachelor" for row in with_bachelor_snapshot
     ) < sum(
         row.education_level_id == "education.bachelor"
         for row in without_bachelor_snapshot
@@ -330,7 +345,9 @@ def test_existing_users_deficit_and_legacy_mapping():
         10, 0, 7, provenance_occupation
     )
 
-    _assert_valid(_build(10, 0, 7, [ExistingUserSnapshot(occupation="Software Developer")]))
+    _assert_valid(
+        _build(10, 0, 7, [ExistingUserSnapshot(occupation="Software Developer")])
+    )
     _assert_valid(
         _build(
             10,
@@ -356,6 +373,28 @@ def test_existing_users_deficit_and_legacy_mapping():
             ],
         )
     )
+
+
+def test_sequential_batches_preserve_occupation_novelty():
+    existing_users = []
+    assignments = []
+    for batch_index in range(5):
+        batch = build_persona_assignments(
+            count=10,
+            troll_count=0,
+            existing_users=existing_users,
+            rng=random.Random(1300 + batch_index),
+        )
+        assignments.extend(batch)
+        existing_users.extend(
+            ExistingUserSnapshot(
+                persona_seed={"occupation_id": assignment.occupation_id},
+                occupation=assignment.occupation,
+            )
+            for assignment in batch
+        )
+
+    assert len({assignment.occupation_id for assignment in assignments}) >= 45
 
 
 def test_validate_assignment_rejections():
@@ -387,8 +426,18 @@ def test_validate_assignment_rejections():
     student = _CONTEXT_BY_ID["context.current_student"]
     invalid.extend(
         [
-            replace(row, employment_context_id=retired.id, employment_context=retired.label, age=40),
-            replace(row, employment_context_id=apprentice.id, employment_context=apprentice.label, age=60),
+            replace(
+                row,
+                employment_context_id=retired.id,
+                employment_context=retired.label,
+                age=40,
+            ),
+            replace(
+                row,
+                employment_context_id=apprentice.id,
+                employment_context=apprentice.label,
+                age=60,
+            ),
             replace(
                 row,
                 employment_context_id=student.id,
@@ -402,10 +451,14 @@ def test_validate_assignment_rejections():
 
     contradiction_candidates = [
         pair
-        for pair in sorted(CONTRADICTING_TRAIT_PAIRS, key=lambda value: tuple(sorted(value)))
+        for pair in sorted(
+            CONTRADICTING_TRAIT_PAIRS, key=lambda value: tuple(sorted(value))
+        )
         if len({_TRAIT_BY_ID[trait_id].axis for trait_id in pair}) == 2
     ]
-    all_pairs = sorted(CONTRADICTING_TRAIT_PAIRS, key=lambda value: tuple(sorted(value)))
+    all_pairs = sorted(
+        CONTRADICTING_TRAIT_PAIRS, key=lambda value: tuple(sorted(value))
+    )
     contradiction = (contradiction_candidates or all_pairs)[0]
     contradiction_ids = tuple(sorted(contradiction))
     contradiction_axes = {_TRAIT_BY_ID[trait_id].axis for trait_id in contradiction_ids}
@@ -425,7 +478,9 @@ def test_validate_assignment_rejections():
             [trait.id for trait in TRAITS if trait.axis == axis][:2]
         )
     invalid.append(replace(row, trait_ids=tuple(repeated_axis_traits)))
-    invalid.append(replace(row, trait_ids=_trait_ids_with_axes(include_limitation=False)))
+    invalid.append(
+        replace(row, trait_ids=_trait_ids_with_axes(include_limitation=False))
+    )
 
     same_domain = next(
         domain
@@ -441,17 +496,17 @@ def test_validate_assignment_rejections():
     related_domains = SECTOR_RELATED_DOMAINS.get(related_sector, frozenset())
     if not related_domains:
         related_sector = next(
-            (sector_id for sector_id, domains in SECTOR_RELATED_DOMAINS.items() if domains),
+            (
+                sector_id
+                for sector_id, domains in SECTOR_RELATED_DOMAINS.items()
+                if domains
+            ),
             None,
         )
         assert related_sector is not None
         related_domains = SECTOR_RELATED_DOMAINS[related_sector]
     related_seeds = [
-        next(
-            interest.text
-            for interest in INTERESTS
-            if interest.domain == domain
-        )
+        next(interest.text for interest in INTERESTS if interest.domain == domain)
         for domain in INTEREST_DOMAINS
         if domain in related_domains
     ][:2]
@@ -501,8 +556,6 @@ def test_validate_assignment_rejections():
 
     assert len(invalid) == 17
     assert all(validate_assignment(candidate) for candidate in invalid)
-
-
 
 
 def test_username_style_and_interest_seeds():

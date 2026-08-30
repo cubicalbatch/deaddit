@@ -112,8 +112,7 @@ def _fixture_assignments(count: int, troll_count: int = 0) -> tuple:
     normals = count - troll_count
     rows = [_fixed_assignment(i) for i in range(1, normals + 1)]
     rows += [
-        _fixed_assignment(normals + k, troll=True)
-        for k in range(1, troll_count + 1)
+        _fixed_assignment(normals + k, troll=True) for k in range(1, troll_count + 1)
     ]
     return tuple(rows)
 
@@ -306,9 +305,7 @@ class TestPersonaGeneratorService:
         assert "chill_dude" in prompt
         assert pg.USERNAME_STYLE_RULES in prompt
 
-    def test_style_wrapper_runs_once_per_full_request(
-        self, app, fake_llm, monkeypatch
-    ):
+    def test_style_wrapper_runs_once_per_full_request(self, app, fake_llm, monkeypatch):
         # The style draw is a single full-request call, not a per-batch or
         # per-retry draw: row 11 keeps style 11 in its own remainder batch.
         _install_fixed_plan(monkeypatch, count=12)
@@ -397,9 +394,7 @@ class TestMatrixPromptAndIdResolution:
         assert "Rows are not interchangeable" in prompt
         assert "exactly the occupation" in prompt
 
-    def test_each_batch_prompt_renders_only_its_rows(
-        self, app, fake_llm, monkeypatch
-    ):
+    def test_each_batch_prompt_renders_only_its_rows(self, app, fake_llm, monkeypatch):
         _install_fixed_plan(monkeypatch, count=12)
         fake_llm.enqueue_content(_personas_json(10))
         fake_llm.enqueue_content(_personas_json(2, start=11))
@@ -416,9 +411,7 @@ class TestMatrixPromptAndIdResolution:
         assert "- occupation: matrix job 1 (" not in prompts[1]
         assert "- occupation: matrix job 10 (" not in prompts[1]
 
-    def test_rows_pair_by_assignment_id_not_position(
-        self, app, fake_llm, monkeypatch
-    ):
+    def test_rows_pair_by_assignment_id_not_position(self, app, fake_llm, monkeypatch):
         # Returned rows arrive reversed: demographics follow the ID, while
         # source-owned fields come from the matching assignment.
         assignments = _install_fixed_plan(monkeypatch, count=2)
@@ -512,6 +505,7 @@ class TestMatrixPromptAndIdResolution:
         # The first row for an ID wins; the duplicate never creates a user
         assert len(fake_llm.requests) == 1
         assert User.query.count() == 2
+
     def test_unknown_ids_are_ignored_not_positionally_mapped(
         self, app, fake_llm, monkeypatch
     ):
@@ -682,9 +676,7 @@ class TestAuthoritativePersonaMerge:
         assignments = _install_fixed_plan(monkeypatch, count=1)
         monkeypatch.setattr(pg, "_apply_casing", lambda name: name)
         fake_llm.enqueue_content(
-            json.dumps(
-                [_persona_row("a1", "committed_user", subscriptions=[])]
-            )
+            json.dumps([_persona_row("a1", "committed_user", subscriptions=[])])
         )
 
         result = generate_personas(

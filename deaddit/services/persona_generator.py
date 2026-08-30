@@ -213,9 +213,7 @@ def _existing_snapshots() -> list[ExistingUserSnapshot]:
         persona_seed = state.get("persona_seed") if isinstance(state, dict) else None
         snapshots.append(
             ExistingUserSnapshot(
-                persona_seed=persona_seed
-                if isinstance(persona_seed, dict)
-                else None,
+                persona_seed=persona_seed if isinstance(persona_seed, dict) else None,
                 age=age,
                 occupation=occupation,
                 education=education,
@@ -223,6 +221,7 @@ def _existing_snapshots() -> list[ExistingUserSnapshot]:
         )
 
     return snapshots
+
 
 def _normalize_subscriptions(raw: object, valid_sub_names: set[str]) -> list[str]:
     """Validate LLM-picked subscriptions against real communities.
@@ -387,10 +386,14 @@ def _sanitize_persona(
     else:
         interests = []
     if not interests:
-        interests = list(assignment.interest_seeds) if assignment else [
-            "general discussion",
-            "technology",
-        ]
+        interests = (
+            list(assignment.interest_seeds)
+            if assignment
+            else [
+                "general discussion",
+                "technology",
+            ]
+        )
 
     raw_traits = item.get("personality_traits")
     if isinstance(raw_traits, list):
@@ -582,7 +585,7 @@ def generate_personas(
             api_key = None
 
     topic_section = (
-        f'\nInterest lens: some of these personas may have interests '
+        f"\nInterest lens: some of these personas may have interests "
         f'connected to "{topic_hint.strip()}". The lens applies to '
         "interests only - never change any assigned age, occupation, "
         "education, traits, or writing style to match it, and keep most "
