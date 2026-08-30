@@ -267,6 +267,21 @@ def test_subscriptions_and_prompt_prose_sections_are_stable(app, db_session):
     # Capability guidance: these are sections, not unconditional base prose.
     assert variables["image_guidance_section"]
     assert variables["website_guidance_section"]
+    expected_website_diversity_guidance = (
+        "\n\nWhen you brief a website, deliberately vary its information "
+        "architecture, visible navigation, section structure, visual mood, "
+        "and typographic voice from sites you have described before. Think in "
+        "terms of a complete site presence rather than a single centered "
+        "artifact: the technical deliverable is one self-contained HTML file, "
+        "but its appearance may include a masthead, menus, section links, "
+        "multiple content regions, and a footer. Specify the subject, audience, "
+        "page purpose, concrete content, and interactions that make this "
+        "particular site feel distinctive. Never mention prompting or "
+        "generation."
+    )
+    assert variables["website_guidance_section"].endswith(
+        expected_website_diversity_guidance
+    )
     # Subscription state keeps order, and non-lurkers receive the universal
     # backstage room independently of their interest subscriptions.
     access = variables["subscriptions_section"]
@@ -293,6 +308,28 @@ def test_subscriptions_and_prompt_prose_sections_are_stable(app, db_session):
     assert "Length target for this text post body:" in kickoff
     assert "You're waking up with something to share." in kickoff
     assert "using the create_post tool" in kickoff
+
+
+def test_website_guidance_contains_no_concrete_genre_example():
+    """Static guidance must not anchor website briefs to one genre."""
+    concrete_genres = (
+        "news",
+        "store",
+        "blog",
+        "wiki",
+        "marketplace",
+        "portfolio",
+        "community",
+        "restaurant",
+        "travel",
+        "tutorial",
+        "forum",
+    )
+    guidance = (
+        agent_prompts._WEBSITE_GUIDANCE_OPTIONAL
+        + agent_prompts._WEBSITE_GUIDANCE_WEBSITE_ONLY
+    ).lower()
+    assert not any(genre in guidance for genre in concrete_genres)
 
 
 def test_kickoff_requested_intent_and_unread_matrix(app, db_session):

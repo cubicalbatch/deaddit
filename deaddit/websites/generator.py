@@ -25,12 +25,18 @@ unsafe to echo back).
 
 from __future__ import annotations
 
+import random
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
 from deaddit.llm.client import ChatRequest, LLMClient, Sampling
 from deaddit.llm.errors import LLMError
+from deaddit.websites.diversity import (
+    diversity_ids,
+    render_website_diversity,
+    sample_website_diversity,
+)
 from deaddit.websites.storage import WebsiteGenerationSettings
 
 __all__ = [
@@ -60,6 +66,7 @@ class WebsiteGenerationResult:
     finish_reason: str | None
     api_url: str
     model: str
+    diversity_ids: dict[str, tuple[str, ...]]
 
 
 class WebsiteGenerationError(Exception):
@@ -118,8 +125,13 @@ Output contract - follow every rule:
   motion, also add a `prefers-reduced-motion` CSS rule that disables or
   reduces it.
 - Any interactive behavior (tabs, toggles, filters, small games, etc.) must
-  work entirely within this one page using inline JavaScript. Do not link
-  to, or imply the existence of, any other page.
+  work entirely within this one self-contained HTML file using inline
+  JavaScript. One file is a technical implementation constraint, not a visual
+  layout constraint: the site may look like a complete multi-section or
+  multi-page web presence, including navigation bars, menus, section link
+  lists, breadcrumbs, multiple columns, and footers. Those controls may use
+  inert in-page anchors such as `href="#section"`; do not require another
+  document or network request.
 - Write the page as if it is a real, independent website with its own
   voice, content, and design - not as a description of an AI prompt. Do not
   mention that the page was generated, prompted, or written by an AI, an
@@ -131,12 +143,18 @@ Produce only the HTML document. Nothing else.
 
 
 def _build_user_prompt(
-    website_description: str, hostname_hint: str, page_name_hint: str
+    website_description: str,
+    hostname_hint: str,
+    page_name_hint: str,
+    diversity_text: str,
 ) -> str:
     return (
         "Generate the single HTML page described below.\n\n"
         f"Fictional site hostname (for context/branding only): {hostname_hint}\n"
         f"Fictional page name (for context only): {page_name_hint}\n\n"
+        "Art direction matrix for this generation (use it to steer the visual and "
+        "structural result; do not mention the matrix in the page):\n"
+        f"{diversity_text}\n\n"
         "Site and page brief, written by the persona who found this site:\n"
         f"{website_description}\n\n"
         "Write the complete HTML document for this exact page now."
@@ -408,6 +426,7 @@ def generate_website_html(
     agent: str | None,
     settings: WebsiteGenerationSettings,
     run_deadline_remaining: float | None = None,
+    rng: random.Random | None = None,
 ) -> WebsiteGenerationResult:
     """Generate and validate one HTML document for ``create_website``.
 
@@ -441,11 +460,19 @@ def generate_website_html(
         raise WebsiteGenerationError(
             "not enough run time remaining to generate a website"
         )
+    diversity_matrix = sample_website_diversity(
+        rng if rng is not None else random.Random()
+    )
+    diversity_text = render_website_diversity(diversity_matrix)
+    selected_diversity_ids = diversity_ids(diversity_matrix)
 
     request = ChatRequest(
         system_prompt=_SYSTEM_PROMPT,
         user_prompt=_build_user_prompt(
-            website_description, hostname_hint, page_name_hint
+            website_description,
+            hostname_hint,
+            page_name_hint,
+            diversity_text,
         ),
         model=model,
         api_url=api_url,
@@ -482,4 +509,5 @@ def generate_website_html(
         finish_reason=result.finish_reason,
         api_url=api_url,
         model=model,
+        diversity_ids=selected_diversity_ids,
     )

@@ -9,12 +9,14 @@ LLM transport per tests/conftest.py's autouse _network_guard.
 from __future__ import annotations
 
 import logging
+import random
 
 import pytest
 
 from deaddit.llm.errors import PermanentLLMError, TransientLLMError
 from deaddit.models import LLMUsage
 from deaddit.websites.generator import (
+    _SYSTEM_PROMPT,
     WebsiteGenerationError,
     WebsiteGenerationInvalidHTMLError,
     WebsiteGenerationResult,
@@ -165,6 +167,69 @@ class TestRequestShape:
             _generate(fake_llm, run_deadline_remaining=0.0)
 
         assert fake_llm.requests == []
+
+
+class TestWebsiteDiversityPrompt:
+    def test_user_prompt_contains_rendered_diversity_matrix(self, app, fake_llm):
+        seed = 17
+        with app.app_context():
+            fake_llm.enqueue_content(VALID_HTML, finish_reason="stop")
+            result = _generate(fake_llm, rng=random.Random(seed))
+        from deaddit.websites.diversity import (
+            diversity_ids,
+            render_website_diversity,
+            sample_website_diversity,
+        )
+
+        matrix = sample_website_diversity(random.Random(seed))
+        expected = render_website_diversity(matrix)
+        user_prompt = fake_llm.requests[0]["payload"]["messages"][1]["content"]
+        assert result.diversity_ids
+        assert result.diversity_ids == diversity_ids(matrix)
+        assert expected in user_prompt
+        assert (
+            "Art direction matrix for this generation (use it to steer the visual "
+            "and structural result; do not mention the matrix in the page):\n"
+            in user_prompt
+        )
+        assert "Genre / site archetype (sample 2):" not in user_prompt
+        assert (
+            "A publication-like site organized around timely stories, headlines, "
+            "categories, and editorial prominence." not in user_prompt
+        )
+
+    def test_system_prompt_allows_multi_section_inert_navigation(self):
+        assert (
+            "One file is a technical implementation constraint, not a visual"
+            in _SYSTEM_PROMPT
+        )
+        assert "multi-page web presence, including navigation bars, menus, section" in (
+            _SYSTEM_PROMPT
+        )
+        assert 'inert in-page anchors such as `href="#section"`' in _SYSTEM_PROMPT
+        assert "Do not link to" not in _SYSTEM_PROMPT
+        assert "imply the existence of, any other page" not in _SYSTEM_PROMPT
+
+    def test_seeded_rng_makes_matrix_and_prompt_deterministic(self, app, fake_llm):
+        with app.app_context():
+            fake_llm.enqueue_content(VALID_HTML, finish_reason="stop")
+            first = _generate(fake_llm, rng=random.Random(23))
+            fake_llm.enqueue_content(VALID_HTML, finish_reason="stop")
+            second = _generate(fake_llm, rng=random.Random(23))
+
+        first_prompt = fake_llm.requests[0]["payload"]["messages"][1]["content"]
+        second_prompt = fake_llm.requests[1]["payload"]["messages"][1]["content"]
+        assert first_prompt == second_prompt
+        assert first.diversity_ids == second.diversity_ids
+
+    def test_different_seed_changes_at_least_one_axis(self, app, fake_llm):
+        with app.app_context():
+            fake_llm.enqueue_content(VALID_HTML, finish_reason="stop")
+            first = _generate(fake_llm, rng=random.Random(1))
+            fake_llm.enqueue_content(VALID_HTML, finish_reason="stop")
+            second = _generate(fake_llm, rng=random.Random(2))
+
+        assert first.diversity_ids != second.diversity_ids
 
 
 class TestSuccessPath:

@@ -7,6 +7,9 @@ Resolution 9). Write tools are rate class WRITE; ``finish`` is META.
 
 from __future__ import annotations
 
+import json
+import random
+
 from flask import current_app
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
@@ -406,6 +409,7 @@ def _create_website(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
             model=ctx.llm_model,
             agent=ctx.user_username,
             settings=settings,
+            rng=random.Random(ctx.run.id) if ctx.run is not None else random.Random(),
             run_deadline_remaining=run_deadline_remaining,
         )
     except WebsiteGenerationTruncatedError:
@@ -460,6 +464,12 @@ def _create_website(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
             "kind": _WEBSITE_GENERATION_ATTEMPTED_KIND,
         }
 
+    provenance = json.dumps(
+        {"website_diversity_ids": generation.diversity_ids},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    source_description = f"{params.website_description}\n\n{provenance}"
     pending = PendingGeneratedWebsite(
         storage_path=stored.storage_path,
         byte_size=stored.byte_size,
@@ -467,7 +477,7 @@ def _create_website(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
         public_path=allocated.public_path,
         hostname=allocated.hostname,
         page_name=allocated.page_name,
-        source_description=params.website_description,
+        source_description=source_description,
         creator_username_snapshot=ctx.user_username,
         api_url_snapshot=generation.api_url,
         model_snapshot=generation.model,
@@ -512,6 +522,7 @@ def _create_website(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
         "website_url": f"/out/{post.website.public_path}",
         "hostname": post.website.hostname,
         "hint": "Website post created successfully. Call finish to conclude your visit.",
+        "website_diversity_ids": generation.diversity_ids,
     }
 
 
@@ -686,10 +697,14 @@ register(
             "one-page generated website. It shares the one-post-per-session limit "
             "with create_post. website_description is the generator brief, not "
             "post content, and must specify the site's purpose, audience, "
-            "information architecture, visual language, thorough concrete actual content, "
-            "interactions, and the specific rendered page. hostname_hint and "
-            "page_name_hint are fitting fictional URL hints and may be adjusted "
-            "to meet storage rules."
+            "information architecture, visual language, thorough concrete actual "
+            "content, interactions, and the specific rendered page. Deliberately "
+            "choose a distinctive site structure, navigation pattern, visual mood, "
+            "and typographic character rather than defaulting to a document-like "
+            "artifact. The technical deliverable is one self-contained HTML file, but "
+            "the visible design may include multiple sections, navigation, menus, and "
+            "a footer. hostname_hint and page_name_hint are fitting fictional URL "
+            "hints and may be adjusted to meet storage rules."
         ),
         parameters=CreateWebsiteArgs,
         handler=_create_website,

@@ -159,6 +159,16 @@ _WEBSITE_GUIDANCE_OPTIONAL = (
     "their eye, what they think of it), not a restatement of the site "
     "brief. Give the post a specific, engaging title; body text is "
     "optional - your own short reaction to the link is plenty."
+    "\n\nWhen you brief a website, deliberately vary its information "
+    "architecture, visible navigation, section structure, visual mood, "
+    "and typographic voice from sites you have described before. Think in "
+    "terms of a complete site presence rather than a single centered "
+    "artifact: the technical deliverable is one self-contained HTML file, "
+    "but its appearance may include a masthead, menus, section links, "
+    "multiple content regions, and a footer. Specify the subject, audience, "
+    "page purpose, concrete content, and interactions that make this "
+    "particular site feel distinctive. Never mention prompting or "
+    "generation."
 )
 
 _WEBSITE_GUIDANCE_WEBSITE_ONLY = (
@@ -174,6 +184,16 @@ _WEBSITE_GUIDANCE_WEBSITE_ONLY = (
     "or how the page was made. Keep the post body separate from that "
     "brief - the body is your persona's own reaction to finding the "
     "link, not a restatement of the site brief. Body text is optional."
+    "\n\nWhen you brief a website, deliberately vary its information "
+    "architecture, visible navigation, section structure, visual mood, "
+    "and typographic voice from sites you have described before. Think in "
+    "terms of a complete site presence rather than a single centered "
+    "artifact: the technical deliverable is one self-contained HTML file, "
+    "but its appearance may include a masthead, menus, section links, "
+    "multiple content regions, and a footer. Specify the subject, audience, "
+    "page purpose, concrete content, and interactions that make this "
+    "particular site feel distinctive. Never mention prompting or "
+    "generation."
 )
 
 

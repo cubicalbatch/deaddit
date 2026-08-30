@@ -11,6 +11,8 @@ tests/test_img_agent_tool.py's conventions.
 
 from __future__ import annotations
 
+import json
+import random
 import time
 from pathlib import Path
 
@@ -34,7 +36,10 @@ from deaddit.models import (
     ToolCall,
     User,
 )
-from deaddit.websites.generator import _inject_navigation_bar
+from deaddit.websites.generator import (
+    WebsiteGenerationResult,
+    _inject_navigation_bar,
+)
 from tests.fakes import FakeImageAdapter
 
 API_URL = "http://caller-endpoint.test/v1"
@@ -258,6 +263,7 @@ def test_website_post_succeeds_and_gating_is_enforced_independently_of_tool_offe
         "website_url",
         "hostname",
         "hint",
+        "website_diversity_ids",
     }
     assert result["post_id"]
     assert result["title"] == WEBSITE_ARGS["title"]
@@ -270,7 +276,13 @@ def test_website_post_succeeds_and_gating_is_enforced_independently_of_tool_offe
     website = GeneratedWebsite.query.one()
     assert website.hostname == "www.fake-observatory.com"
     assert website.public_path == "www.fake-observatory.com/aurora-map.html"
-    assert website.source_description == _DESCRIPTION
+    provenance_prefix = f"{_DESCRIPTION}\n\n"
+    assert website.source_description.startswith(provenance_prefix)
+    assert json.loads(website.source_description[len(provenance_prefix) :]) == {
+        "website_diversity_ids": {
+            axis: list(ids) for axis, ids in result["website_diversity_ids"].items()
+        }
+    }
     assert website.creator_username_snapshot == "alice"
     assert website.agent_id == agent.id
     assert website.agent_run_id == run.id
@@ -303,6 +315,50 @@ def test_website_post_succeeds_and_gating_is_enforced_independently_of_tool_offe
         _ctx(only_agent, later),
     )
     assert text["ok"] is False and "website posts" in text["error"]
+
+
+def test_create_website_provenance_records_diversity_ids(app, db_session, monkeypatch):
+    agent = _website_agent(db_session)
+    run = _new_run(db_session, agent)
+    diversity_ids = {
+        "genres": ("genre.newsroom", "genre.portfolio"),
+        "layouts": ("layout.editorial_grid", "layout.split_hero"),
+        "moods": ("mood.neon_night", "mood.deep_ocean"),
+        "typography": ("type.modern_grotesk", "type.display_serif"),
+        "rhythms": ("rhythm.discovery",),
+    }
+
+    def fake_generate(**kwargs):
+        assert kwargs["rng"].getstate() == random.Random(run.id).getstate()
+        return WebsiteGenerationResult(
+            html=VALID_HTML,
+            request_id="website-request-1",
+            prompt_tokens=3,
+            completion_tokens=4,
+            total_tokens=7,
+            finish_reason="stop",
+            api_url=API_URL,
+            model=MODEL,
+            diversity_ids=diversity_ids,
+        )
+
+    monkeypatch.setattr(tools_write, "generate_website_html", fake_generate)
+    result = execute(
+        "create_website",
+        WEBSITE_ARGS,
+        _ctx(agent, run, deadline=Deadline.after(120)),
+    )
+
+    assert result["ok"] is True
+    assert result["website_diversity_ids"] == diversity_ids
+    website = GeneratedWebsite.query.one()
+    provenance = json.dumps(
+        {"website_diversity_ids": diversity_ids},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    assert website.source_description == f"{_DESCRIPTION}\n\n{provenance}"
+    assert website.source_description.endswith(f"\n\n{provenance}")
 
 
 def test_website_post_failures_leave_no_post_no_files_and_share_the_post_budget(

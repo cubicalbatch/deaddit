@@ -178,6 +178,7 @@ rejection strings are byte-frozen (Python/SQL/agent parity).
 | File | Purpose |
 |---|---|
 | `storage.py` | Resolves the app-configured root, normalizes hostname/page hints, allocates opaque `pages/<uuid>.html` paths, atomically writes via `tmp/`, rejects traversal/symlink escapes, deletes files, and reconciles rows against on-disk files with hash/size checks. |
+| `diversity.py` | Local art-direction matrix sampler for generated sites: five weighted pools (site archetype, layout structure, visual mood, typographic character, content rhythm) sampled without replacement per generation (2/2/2/2/1) and rendered into the generator prompt, breaking genre/palette/layout collapse; sampled ids persist as provenance. |
 | `generator.py` | Dedicated no-tools HTML generation using the agent's effective LLM endpoint/model; validates complete, bounded HTML before publication and never stores partial output. |
 | `service.py` | Hard-delete seam: snapshots `GeneratedWebsite.storage_path` values before post rows are deleted and removes files only after the DB commit succeeds. |
 | `cli.py` | `deaddit websites reconcile-websites`: dry-run by default; `--apply` removes only unreferenced `pages/` files, while reporting missing rows and sha256/size mismatches. Includes the production guard and `--root` override. |
