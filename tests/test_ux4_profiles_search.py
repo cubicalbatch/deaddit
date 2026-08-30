@@ -155,6 +155,7 @@ class TestProfileTraits:
 
         body = resp.get_data(as_text=True)
         assert "dry wit" in body
+        assert "just quirky" in body
 
     def test_subscriptions_exposed_in_context_and_body(
         self, app, client, db_session, ctx

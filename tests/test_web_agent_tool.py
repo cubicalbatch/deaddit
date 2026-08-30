@@ -603,8 +603,8 @@ def test_create_website_wire_schema_and_registration_match_contract():
     }
     function = wire["function"]
     assert function["name"] == "create_website"
-    assert "concrete" in function["description"].lower()
-    assert "thorough" in function["description"].lower()
+    assert "website_description" in function["description"].lower()
+    assert "generator brief" in function["description"].lower()
     properties = function["parameters"]["properties"]
     assert set(properties) == {
         "community",

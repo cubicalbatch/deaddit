@@ -132,7 +132,12 @@ def test_downvote_allowed_by_default(seeded_db):
 
 def test_new_upvote_updates_all_counters_and_post_karma(seeded_db, db_session):
     post = seeded_db["posts"][1]  # bob's post
-    assert cast_vote("alice", "post", post.id, 1) == {"status": "ok", "score": 1}
+    assert cast_vote("alice", "post", post.id, 1) == {
+        "status": "ok",
+        "score": 1,
+        "changed": True,
+        "change_kind": "insert",
+    }
 
     post = _refresh(db_session, Post, post.id)
     assert post.score == 1
@@ -144,7 +149,12 @@ def test_new_upvote_updates_all_counters_and_post_karma(seeded_db, db_session):
 
 def test_new_comment_upvote_accrues_comment_karma(seeded_db, db_session):
     comment = seeded_db["comments"][1]  # alice's comment on bob's post
-    assert cast_vote("bob", "comment", comment.id, 1) == {"status": "ok", "score": 1}
+    assert cast_vote("bob", "comment", comment.id, 1) == {
+        "status": "ok",
+        "score": 1,
+        "changed": True,
+        "change_kind": "insert",
+    }
 
     comment = _refresh(db_session, type(comment), comment.id)
     assert comment.score == 1
@@ -158,7 +168,12 @@ def test_new_comment_upvote_accrues_comment_karma(seeded_db, db_session):
 
 def test_new_downvote_negative_score_and_karma(seeded_db, db_session):
     post = seeded_db["posts"][1]
-    assert cast_vote("alice", "post", post.id, -1) == {"status": "ok", "score": -1}
+    assert cast_vote("alice", "post", post.id, -1) == {
+        "status": "ok",
+        "score": -1,
+        "changed": True,
+        "change_kind": "insert",
+    }
 
     post = _refresh(db_session, Post, post.id)
     assert post.score == -1
@@ -170,8 +185,18 @@ def test_same_value_revote_is_idempotent_noop(seeded_db, db_session):
     post = seeded_db["posts"][1]
     first = cast_vote("alice", "post", post.id, 1)
     second = cast_vote("alice", "post", post.id, 1)
-    assert first == {"status": "ok", "score": 1}
-    assert second == {"status": "ok", "score": 1}
+    assert first == {
+        "status": "ok",
+        "score": 1,
+        "changed": True,
+        "change_kind": "insert",
+    }
+    assert second == {
+        "status": "ok",
+        "score": 1,
+        "changed": False,
+        "change_kind": "same_value_noop",
+    }
 
     db_session.expire_all()
     rows = db_session.query(Vote).filter_by(voter="alice", post_id=post.id).all()
@@ -183,9 +208,19 @@ def test_same_value_revote_is_idempotent_noop(seeded_db, db_session):
 
 def test_switch_up_to_down_delta_is_two(seeded_db, db_session):
     post = seeded_db["posts"][1]
-    assert cast_vote("alice", "post", post.id, 1) == {"status": "ok", "score": 1}
+    assert cast_vote("alice", "post", post.id, 1) == {
+        "status": "ok",
+        "score": 1,
+        "changed": True,
+        "change_kind": "insert",
+    }
     switched = cast_vote("alice", "post", post.id, -1)
-    assert switched == {"status": "ok", "score": -1}
+    assert switched == {
+        "status": "ok",
+        "score": -1,
+        "changed": True,
+        "change_kind": "direction_switch",
+    }
 
     post = _refresh(db_session, Post, post.id)
     assert post.score == -1
@@ -195,8 +230,18 @@ def test_switch_up_to_down_delta_is_two(seeded_db, db_session):
 
 def test_switch_down_to_up_delta_is_two(seeded_db, db_session):
     post = seeded_db["posts"][1]
-    assert cast_vote("alice", "post", post.id, -1) == {"status": "ok", "score": -1}
-    assert cast_vote("alice", "post", post.id, 1) == {"status": "ok", "score": 1}
+    assert cast_vote("alice", "post", post.id, -1) == {
+        "status": "ok",
+        "score": -1,
+        "changed": True,
+        "change_kind": "insert",
+    }
+    assert cast_vote("alice", "post", post.id, 1) == {
+        "status": "ok",
+        "score": 1,
+        "changed": True,
+        "change_kind": "direction_switch",
+    }
 
     post = _refresh(db_session, Post, post.id)
     assert post.score == 1
@@ -224,6 +269,8 @@ def test_switch_on_comment_keeps_vote_count(seeded_db, db_session):
     assert cast_vote("alice", "comment", comment.id, -1) == {
         "status": "ok",
         "score": -1,
+        "changed": True,
+        "change_kind": "direction_switch",
     }
 
     comment = _refresh(db_session, type(comment), comment.id)
@@ -269,7 +316,12 @@ def test_concurrent_duplicate_insert_rolls_back_and_resolves(
 
     result = cast_vote("alice", "post", post.id, 1)
 
-    assert result == {"status": "ok", "score": 1}
+    assert result == {
+        "status": "ok",
+        "score": 1,
+        "changed": False,
+        "change_kind": "same_value_noop",
+    }
     assert len(calls) == 2  # rollback + retry happened exactly once
 
     db_session.expire_all()

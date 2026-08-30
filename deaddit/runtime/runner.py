@@ -36,6 +36,7 @@ class JobRunner:
         self._lanes: dict[str, ThreadPoolExecutor] = {}
         self._stop_event = threading.Event()
         self._poller_thread: threading.Thread | None = None
+        self._heartbeat_lock = threading.Lock()
         self._heartbeat_threads: list[threading.Thread] = []
         self._last_liveness = 0.0
 
@@ -57,7 +58,10 @@ class JobRunner:
         for name, executor in self._lanes.items():
             executor.shutdown(wait=wait)
             logger.debug("Shut down %s lane", name)
-        for thread in list(self._heartbeat_threads):
+        with self._heartbeat_lock:
+            threads = list(self._heartbeat_threads)
+            self._heartbeat_threads.clear()
+        for thread in threads:
             thread.join(timeout=10)
 
     # ------------------------------------------------------------------
@@ -80,7 +84,14 @@ class JobRunner:
             elapsed = time.monotonic() - started
             self._stop_event.wait(max(self._poll_seconds - elapsed, 0.0))
 
+    def _prune_heartbeat_threads(self) -> None:
+        with self._heartbeat_lock:
+            self._heartbeat_threads = [
+                t for t in self._heartbeat_threads if t.is_alive()
+            ]
+
     def _poll_once(self) -> None:
+        self._prune_heartbeat_threads()
         with self.app.app_context():
             now = time.monotonic()
             if now - self._last_liveness >= LIVENESS_WRITE_INTERVAL_SECONDS:
@@ -136,11 +147,16 @@ class JobRunner:
             daemon=True,
         )
         thread.start()
-        self._heartbeat_threads.append(thread)
+        with self._heartbeat_lock:
+            self._heartbeat_threads.append(thread)
         try:
             jobs.execute_job(job_id, app=self.app)
         finally:
             stop_heartbeat.set()
+            thread.join(timeout=5)
+            with self._heartbeat_lock:
+                if thread in self._heartbeat_threads:
+                    self._heartbeat_threads.remove(thread)
 
     def _heartbeat_loop(self, job_id: int, stop_event: threading.Event) -> None:
         while not stop_event.wait(self._heartbeat_seconds):

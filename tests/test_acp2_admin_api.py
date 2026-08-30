@@ -894,19 +894,17 @@ def test_prepared_visit_injects_backfills_and_recent_episodes(seeded_db, db_sess
     visit = prepare_agent_visit(agent, db.session.get(User, "alice"))
     messages = visit.messages
     assert messages[0]["role"] == "system"
-    kickoff = messages[-1]["content"]
-    assert "Your memory:" in kickoff
-    assert f"- {BACKFILL_PREFIX} she posted often" in kickoff
-    assert "Recent visits:" in kickoff
-    assert "- busy visit" in kickoff  # newest episode listed first
-    assert "- quiet visit" in kickoff
+    system = messages[0]["content"]
+    assert "Your memory:" in system
+    assert f"- {BACKFILL_PREFIX} she posted often" in system
+    assert "Recent visits:" in system
+    assert "- busy visit" in system  # newest episode listed first
+    assert "- quiet visit" in system
 
 
 def test_prepared_visit_has_no_memory_section_when_empty(seeded_db, db_session):
     agent = _make_agent(db_session, "alice")
 
-    messages = prepare_agent_visit(
-        agent, db.session.get(User, "alice")
-    ).messages
+    messages = prepare_agent_visit(agent, db.session.get(User, "alice")).messages
 
-    assert "Your memory:" not in messages[-1]["content"]
+    assert "Your memory:" not in messages[0]["content"]

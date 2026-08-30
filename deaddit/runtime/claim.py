@@ -15,9 +15,6 @@ logger = logging.getLogger(__name__)
 #: Sweep threshold: running jobs whose heartbeat is older than this are stale.
 HEARTBEAT_STALE_MINUTES = 5
 
-#: Freshness window for the worker-liveness timestamp.
-LIVENESS_MAX_AGE_SECONDS = 90
-
 #: Setting key holding an ISO ``utcnow`` timestamp of the last worker ping.
 WORKER_LIVENESS_SETTING_KEY = "WORKER_HEARTBEAT_AT"
 
@@ -94,17 +91,3 @@ def write_worker_liveness(worker_id: str) -> None:
         (instance_path / WORKER_HEARTBEAT_FILE).touch()
     except OSError as exc:
         logger.warning("Could not touch %s: %s", WORKER_HEARTBEAT_FILE, exc)
-
-
-def liveness_is_fresh(max_age_seconds: int = LIVENESS_MAX_AGE_SECONDS) -> bool:
-    """True iff a worker wrote its liveness timestamp within the window."""
-    raw = Setting.get_value(WORKER_LIVENESS_SETTING_KEY)
-    if not raw:
-        return False
-    try:
-        seen = datetime.fromisoformat(raw)
-    except ValueError:
-        logger.warning("Unparseable %s value: %r", WORKER_LIVENESS_SETTING_KEY, raw)
-        return False
-    age = datetime.utcnow() - seen.replace(tzinfo=None)
-    return timedelta(0) <= age <= timedelta(seconds=max_age_seconds)

@@ -11,7 +11,6 @@ from unittest.mock import patch
 
 from deaddit.agents.prompts import prepare_agent_visit
 from deaddit.models import Agent, User
-
 from tests.visit_profiles import pin_intent_mix
 
 
@@ -89,31 +88,31 @@ def test_categorical_interval_boundaries(seeded_db, db_session):
 
     # Image slice: r < 0.20
     with patch(
-        "random.random", side_effect=[0.5, 0.10]
-    ):  # 1st roll post-chance (0.5 < 1.0), 2nd roll 0.10
+        "random.random", side_effect=[0.5, 0.99, 0.10]
+    ):  # 1st roll post-chance (0.5 < 1.0), 2nd roll backstage (0.99), 3rd roll 0.10
         _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "image"
 
     # Image boundary exact
-    with patch("random.random", side_effect=[0.5, 0.19999]):
+    with patch("random.random", side_effect=[0.5, 0.99, 0.19999]):
         _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "image"
 
     # Website slice: 0.20 <= r < 0.50
-    with patch("random.random", side_effect=[0.5, 0.20]):
+    with patch("random.random", side_effect=[0.5, 0.99, 0.20]):
         _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "website"
 
-    with patch("random.random", side_effect=[0.5, 0.49999]):
+    with patch("random.random", side_effect=[0.5, 0.99, 0.49999]):
         _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "website"
 
     # Post remainder slice: r >= 0.50
-    with patch("random.random", side_effect=[0.5, 0.50]):
+    with patch("random.random", side_effect=[0.5, 0.99, 0.50]):
         _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "post"
 
-    with patch("random.random", side_effect=[0.5, 0.99]):
+    with patch("random.random", side_effect=[0.5, 0.99, 0.99]):
         _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "post"
 
@@ -142,7 +141,7 @@ def test_ineligible_selected_slices_degrade_to_post_without_transfer(
     pin_intent_mix(agent, post=1.0, image=0.30, website=0.40)
 
     # Draw website slice: r = 0.35 (in [0.30, 0.70)) -> should degrade to "post", not "image"
-    with patch("random.random", side_effect=[0.5, 0.35]):
+    with patch("random.random", side_effect=[0.5, 0.99, 0.35]):
         _, intent = _kickoff(db_session, agent, unread=0)
         assert intent == "post"
 

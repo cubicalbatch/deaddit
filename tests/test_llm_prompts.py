@@ -24,7 +24,6 @@ from deaddit.agents.prompts import (
 from deaddit.llm.prompts import (
     PromptVersionImmutable,
     UnknownPromptVariable,
-    clear_pin,
     create_template,
     create_version,
     get_version,
@@ -33,13 +32,13 @@ from deaddit.llm.prompts import (
     resolve_pin,
     set_pin,
 )
-from tests.visit_profiles import pin_profile
 from deaddit.models import (
     Agent,
     AgentMemory,
     PromptRenderAudit,
     User,
 )
+from tests.visit_profiles import pin_profile
 
 DEFAULT_BODY = (
     "{persona_block}\n\n{tier_line}\n\n{rules_block}{image_guidance_section}"
@@ -53,7 +52,6 @@ def _binding(body: str, variables: dict) -> dict:
     """The strict variable subset one template body actually names."""
     names = set(re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", body))
     return {name: variables[name] for name in names}
-
 
 
 def _sha(text: str) -> str:
@@ -193,9 +191,9 @@ class TestPinResolution:
         create_version("pt", DEFAULT_BODY + "\nversion2")
         set_pin("cohort", "parity", "pt", 1)
         agent = self._agent(db_session, "special", cohort="parity")
-        user = User.query.filter_by(username="special").one()
         key = str(agent.id)
         set_pin("agent", key, "pt", 2)
+
         pin = resolve_pin("agent", key)
         assert pin.target_kind == "agent"
         assert pin.version_number == 2
@@ -244,9 +242,7 @@ class TestRenderAudit:
         key = str(agent.id)
         set_pin("agent", key, "aud", version.version)
 
-        variables = _binding(
-            DEFAULT_BODY, system_prompt_variables(agent, user)
-        )
+        variables = _binding(DEFAULT_BODY, system_prompt_variables(agent, user))
         text, version_row = render_pinned(
             "agent", key, variables=variables, subject_key=key
         )
@@ -292,10 +288,13 @@ class TestDefaultAssemblyByteStability:
         pinned_text = visit.messages[0]["content"]
         assert pinned_text == open(GOLDEN_PATH).read()
         # profile layout and direct renderer agree byte-for-byte
-        assert render(
-            DEFAULT_BODY,
-            _binding(DEFAULT_BODY, system_prompt_variables(agent, user)),
-        ) == pinned_text
+        assert (
+            render(
+                DEFAULT_BODY,
+                _binding(DEFAULT_BODY, system_prompt_variables(agent, user)),
+            )
+            == pinned_text
+        )
 
 
 # --- 4C: image-post guidance -----------------------------------------------
@@ -518,9 +517,7 @@ class TestWebsitePostGuidance:
         assert "website_description" in prompt
         assert "separate from that brief" in prompt.lower()
 
-    def test_website_only_guidance_flows_through_pinned_profile(
-        self, app, db_session
-    ):
+    def test_website_only_guidance_flows_through_pinned_profile(self, app, db_session):
         """Same named-variable contract as the image feature: the pinned
         profile render and the direct renderer agree byte-for-byte."""
         agent, user = _agent_with_post_config(

@@ -15,7 +15,6 @@ from deaddit.llm.capabilities import (
     set_vision_manual_override,
 )
 from deaddit.llm.client import (
-    STOP_VALUES,
     ChatRequest,
     ChatResult,
     Done,
@@ -46,7 +45,6 @@ __all__ = [
     "LAST_PROBE_EVIDENCE",
     "LAST_STREAM_PROBE_EVIDENCE",
     "LAST_VISION_PROBE_EVIDENCE",
-    "STOP_VALUES",
     "CapabilityError",
     "ChatRequest",
     "ChatResult",

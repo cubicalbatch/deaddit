@@ -1,7 +1,7 @@
 """Shared Phase 4 test helper: pin visit profiles with a chosen intent mix.
 
-The three legacy ``AGENT_*`` Config settings no longer exist; tests that
-need a specific automatic-intent distribution pin an immutable
+The legacy ``AGENT_*`` Config settings no longer exist; tests that need a
+specific automatic-intent distribution pin an immutable
 ``agent.visit_profile`` version on the agent under test.
 """
 
@@ -21,9 +21,14 @@ from deaddit.llm.prompts import (
 PROFILE_TEMPLATE = "agent.visit_profile"
 
 
-def _document(post: float, image: float, website: float) -> str:
+def _document(post: float, image: float, website: float, backstage: float = 0.0) -> str:
     document = json.loads(serialize_visit_profile(DEFAULT_VISIT_PROFILE))
-    document["intent_mix"] = {"post": post, "image": image, "website": website}
+    document["intent_mix"] = {
+        "post": post,
+        "image": image,
+        "website": website,
+        "backstage": backstage,
+    }
     return json.dumps(document, sort_keys=True, separators=(",", ":"))
 
 
@@ -33,9 +38,16 @@ def _write_version(body: str) -> int:
     return create_version(PROFILE_TEMPLATE, body).version
 
 
-def pin_intent_mix(agent, *, post: float, image: float = 0.0, website: float = 0.0):
+def pin_intent_mix(
+    agent,
+    *,
+    post: float,
+    image: float = 0.0,
+    website: float = 0.0,
+    backstage: float = 0.0,
+):
     """Pin one immutable profile version with the given mix onto ``agent``."""
-    version = _write_version(_document(post, image, website))
+    version = _write_version(_document(post, image, website, backstage))
     return set_pin("agent", str(agent.id), PROFILE_TEMPLATE, version)
 
 

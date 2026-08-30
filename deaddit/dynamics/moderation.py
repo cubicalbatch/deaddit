@@ -24,7 +24,7 @@ from datetime import datetime
 from sqlalchemy import or_
 
 from deaddit.dynamics import activity, notifications
-from deaddit.dynamics.karma import _strip_karma_on_remove, recompute_scores_and_karma
+from deaddit.dynamics.karma import recompute_scores_and_karma, strip_karma_on_remove
 from deaddit.extensions import db
 from deaddit.models import Ban, Comment, Post, Report, User
 
@@ -127,7 +127,7 @@ def remove_report(report_id: int, moderator: str, removal_reason: str) -> Report
     report.resolution_note = removal_reason
     db.session.commit()
 
-    if _strip_karma_on_remove():
+    if strip_karma_on_remove():
         recompute_scores_and_karma()
 
     _notify_mod_action_safely(

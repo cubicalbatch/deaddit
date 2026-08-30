@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, request, url_for
 from sqlalchemy import func
 
-from deaddit.services.content import get_available_models
 from deaddit.utils import get_websites_bulk
 
 from .models import Comment, GeneratedWebsite, Post, PostImage, Subdeaddit, User
@@ -231,9 +230,3 @@ def get_users():
         for user in users
     ]
     return jsonify({"users": user_list})
-
-
-@bp.route("/api/available_models")
-def available_models():
-    models = get_available_models()
-    return jsonify({"models": models})

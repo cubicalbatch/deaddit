@@ -11,7 +11,6 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.visit_profiles import pin_intent_mix
 from deaddit.agents.prompts import (
     build_system_prompt,
     prepare_agent_visit,
@@ -19,7 +18,7 @@ from deaddit.agents.prompts import (
 )
 from deaddit.agents.registry import specs_for, tools_for
 from deaddit.models import Agent, AgentMemory, User
-
+from tests.visit_profiles import pin_intent_mix
 
 READ_ONLY_TOOLS = {
     "browse_feed",
@@ -216,12 +215,12 @@ def test_tier_capability_intent_matrix_matches_current_prompt_and_wire_contract(
 
         for intent in INTENTS:
             expected = _expected_tools(tier, capability_tools, intent)
-            assert {tool.name for tool in tools_for(tier, agent=agent, intent=intent)} == (
-                expected
-            )
-            assert {spec.name for spec in specs_for(tier, agent=agent, intent=intent)} == (
-                expected
-            )
+            assert {
+                tool.name for tool in tools_for(tier, agent=agent, intent=intent)
+            } == (expected)
+            assert {
+                spec.name for spec in specs_for(tier, agent=agent, intent=intent)
+            } == (expected)
 
             intent_variables = system_prompt_variables(agent, user, intent=intent)
             expected_image = _expected_image_guidance(
@@ -258,34 +257,35 @@ def test_subscriptions_and_prompt_prose_sections_are_stable(app, db_session):
         website_mode="optional",
     )
     variables = system_prompt_variables(agent, user)
-    prompt = build_system_prompt(agent, user)
 
     # Global behavior: tool use, authenticity, and quality rules.
+
     assert "You interact with the site through tools" in variables["rules_block"]
     assert "Be genuine." in variables["rules_block"]
     assert "Posting rules:" in variables["rules_block"]
     # Capability guidance: these are sections, not unconditional base prose.
     assert variables["image_guidance_section"]
     assert variables["website_guidance_section"]
-    # Subscription state is persistent system context and keeps order.
-    assert variables["subscriptions_section"] == (
+    # Subscription state keeps order, and non-lurkers receive the universal
+    # backstage room independently of their interest subscriptions.
+    access = variables["subscriptions_section"]
+    assert access.startswith(
         "\n\nYou are currently subscribed to: r/mycology, r/trains"
     )
+    assert "backstage access to d/BetweenRobots" in access
     no_sub_agent, no_sub_user = _make_agent(
         db_session, "subscription_empty_matrix", subscriptions=[]
     )
-    assert system_prompt_variables(no_sub_agent, no_sub_user)[
+    no_sub_access = system_prompt_variables(no_sub_agent, no_sub_user)[
         "subscriptions_section"
-    ] == ""
-    assert "r/mycology, r/trains" in prompt
+    ]
+    assert "backstage access to d/BetweenRobots" in no_sub_access
 
     # Content tuning and the transient kickoff objective remain in the user
     # message.  Operational tool wording appears in both the system contract
     # and the forced-post kickoff when a post is explicitly requested.
     with patch("deaddit.agents.prompts.random.choices", return_value=[0]):
-        visit = prepare_agent_visit(
-            agent, user, requested_intent="post", unread=0
-        )
+        visit = prepare_agent_visit(agent, user, requested_intent="post", unread=0)
     kickoff = visit.messages[1]["content"]
     assert visit.plan.intent == "post"
     assert "For inspiration, choose at most one" in kickoff
@@ -318,11 +318,12 @@ def test_kickoff_requested_intent_and_unread_matrix(app, db_session):
         capability_tools = _static_post_tools(image_mode, website_mode)
         for requested in requests:
             for unread in (0, 2):
-                with patch(
-                    "deaddit.agents.prompts.random.choices", return_value=[50]
-                ), patch(
-                    "deaddit.agents.prompts.random.sample",
-                    side_effect=lambda population, count: list(population)[:count],
+                with (
+                    patch("deaddit.agents.prompts.random.choices", return_value=[50]),
+                    patch(
+                        "deaddit.agents.prompts.random.sample",
+                        side_effect=lambda population, count: list(population)[:count],
+                    ),
                 ):
                     visit = prepare_agent_visit(
                         agent,
@@ -344,7 +345,9 @@ def test_kickoff_requested_intent_and_unread_matrix(app, db_session):
                     expected = (
                         requested
                         if _special_tool(requested) in capability_tools
-                        else "post" if capability_tools else "browse"
+                        else "post"
+                        if capability_tools
+                        else "browse"
                     )
                 elif requested == "post":
                     expected = "post" if capability_tools else "browse"
@@ -380,21 +383,24 @@ def test_initial_messages_freeze_unread_notice_and_system_kickoff_roles(
     agent, user = _make_agent(db_session, "initial_messages")
     monkeypatch.setattr("deaddit.agents.prompts.unread_count", lambda username: 2)
     monkeypatch.setattr("deaddit.agents.prompts.visit_memories", lambda username: None)
-    with patch("deaddit.agents.prompts.random.choices", return_value=[0]), patch(
-        "deaddit.agents.prompts.random.sample", side_effect=lambda population, count: list(population)[:count]
+    with (
+        patch("deaddit.agents.prompts.random.choices", return_value=[0]),
+        patch(
+            "deaddit.agents.prompts.random.sample",
+            side_effect=lambda population, count: list(population)[:count],
+        ),
     ):
         visit = prepare_agent_visit(agent, user, requested_intent="browse")
     messages = visit.messages
     assert visit.plan.intent == "browse"
     assert [message["role"] for message in messages] == ["system", "user"]
     assert messages[0]["content"].startswith("You are initial_messages")
-    assert "You have 2 unread replies. Use the view_inbox tool" in messages[1]["content"]
+    assert (
+        "You have 2 unread replies. Use the view_inbox tool" in messages[1]["content"]
+    )
 
 
-
-def test_prepared_messages_render_persistent_memory_once_in_system(
-    app, db_session
-):
+def test_prepared_messages_render_persistent_memory_once_in_system(app, db_session):
     agent, user = _make_agent(db_session, "memory_once")
     db_session.add_all(
         [
@@ -412,9 +418,7 @@ def test_prepared_messages_render_persistent_memory_once_in_system(
     )
     db_session.commit()
 
-    visit = prepare_agent_visit(
-        agent, user, requested_intent="browse", unread=0
-    )
+    visit = prepare_agent_visit(agent, user, requested_intent="browse", unread=0)
     system, kickoff = (message["content"] for message in visit.messages)
     combined = system + "\n" + kickoff
 
@@ -428,9 +432,7 @@ def test_prepared_messages_render_persistent_memory_once_in_system(
         assert content not in kickoff
 
 
-def test_prepared_capability_guidance_matches_exact_tool_specs(
-    app, db_session
-):
+def test_prepared_capability_guidance_matches_exact_tool_specs(app, db_session):
     """The prepared plan is the shared source for capability prose and tools."""
     for index, (image_mode, website_mode) in enumerate(CAPABILITIES):
         agent, user = _make_agent(
@@ -439,9 +441,7 @@ def test_prepared_capability_guidance_matches_exact_tool_specs(
             image_mode=image_mode,
             website_mode=website_mode,
         )
-        visit = prepare_agent_visit(
-            agent, user, requested_intent="post", unread=0
-        )
+        visit = prepare_agent_visit(agent, user, requested_intent="post", unread=0)
         system = visit.messages[0]["content"]
         offered = visit.plan.offered_tool_names
         assert offered == frozenset(spec.name for spec in visit.tool_specs)
@@ -449,18 +449,14 @@ def test_prepared_capability_guidance_matches_exact_tool_specs(
             assert (tool_name in system) is (tool_name in offered)
 
 
-def test_tool_descriptions_keep_operations_not_prompt_profile_tuning(
-    app, db_session
-):
+def test_tool_descriptions_keep_operations_not_prompt_profile_tuning(app, db_session):
     agent, user = _make_agent(
         db_session,
         "operational_tool_contracts",
         image_mode="optional",
         website_mode="optional",
     )
-    visit = prepare_agent_visit(
-        agent, user, requested_intent="post", unread=0
-    )
+    visit = prepare_agent_visit(agent, user, requested_intent="post", unread=0)
     descriptions = {
         spec.name: spec.description
         for spec in visit.tool_specs
@@ -468,16 +464,21 @@ def test_tool_descriptions_keep_operations_not_prompt_profile_tuning(
         in {"create_post", "create_image_post", "create_website", "create_comment"}
     }
 
-    assert "At most one post may be published per session." in descriptions["create_post"]
-    assert "alt_text is the public accessibility description" in descriptions[
-        "create_image_post"
-    ]
-    assert "website_description is the generator brief, not post content" in descriptions[
-        "create_website"
-    ]
-    assert "parent_id must identify a comment on that post" in descriptions[
-        "create_comment"
-    ]
+    assert (
+        "At most one post may be published per session." in descriptions["create_post"]
+    )
+    assert (
+        "alt_text is the public accessibility description"
+        in descriptions["create_image_post"]
+    )
+    assert (
+        "website_description is the generator brief, not post content"
+        in descriptions["create_website"]
+    )
+    assert (
+        "parent_id must identify a comment on that post"
+        in descriptions["create_comment"]
+    )
     tool_text = "\n".join(descriptions.values()).lower()
     for removed_tuning in (
         "authentic",
@@ -492,9 +493,8 @@ def test_tool_descriptions_keep_operations_not_prompt_profile_tuning(
     assert "never mention that it was generated" in system
     assert "plausibly found" in system
 
-def test_rng_draw_order_is_length_then_intent_then_content_tuning(
-    app, db_session
-):
+
+def test_rng_draw_order_is_length_then_intent_then_content_tuning(app, db_session):
     agent, user = _make_agent(
         db_session,
         "rng_matrix",
@@ -518,28 +518,32 @@ def test_rng_draw_order_is_length_then_intent_then_content_tuning(
         return []
 
     pin_intent_mix(agent, post=1.0, image=0.0, website=0.0)
-    with patch("deaddit.agents.prompts.random.choices", choices), patch(
-        "deaddit.agents.prompts.random.random", random_value
-    ), patch("deaddit.agents.prompts.random.sample", sample):
+    with (
+        patch("deaddit.agents.prompts.random.choices", choices),
+        patch("deaddit.agents.prompts.random.random", random_value),
+        patch("deaddit.agents.prompts.random.sample", sample),
+    ):
         visit = prepare_agent_visit(agent, user, unread=0)
     assert visit.plan.intent == "post"
-    assert events == ["length", "random", "sample", "sample"]
+    assert events == ["length", "random", "random", "sample", "sample"]
 
     events.clear()
-    with patch("deaddit.agents.prompts.random.choices", choices), patch(
-        "deaddit.agents.prompts.random.random", random_value
-    ), patch("deaddit.agents.prompts.random.sample", sample):
-        visit = prepare_agent_visit(
-            agent, user, unread=0, requested_intent="browse"
-        )
+    with (
+        patch("deaddit.agents.prompts.random.choices", choices),
+        patch("deaddit.agents.prompts.random.random", random_value),
+        patch("deaddit.agents.prompts.random.sample", sample),
+    ):
+        visit = prepare_agent_visit(agent, user, unread=0, requested_intent="browse")
     assert visit.plan.intent == "browse"
     assert events == ["length", "sample"]
 
     events.clear()
     lurker, lurker_user = _make_agent(db_session, "rng_lurker", tier="lurker")
-    with patch("deaddit.agents.prompts.random.choices", choices), patch(
-        "deaddit.agents.prompts.random.random", random_value
-    ), patch("deaddit.agents.prompts.random.sample", sample):
+    with (
+        patch("deaddit.agents.prompts.random.choices", choices),
+        patch("deaddit.agents.prompts.random.random", random_value),
+        patch("deaddit.agents.prompts.random.sample", sample),
+    ):
         visit = prepare_agent_visit(
             lurker, lurker_user, unread=0, requested_intent="post"
         )
@@ -585,12 +589,15 @@ def test_automatic_sampled_intent_uses_current_categorical_slices(
         website_mode="optional",
     )
     pin_intent_mix(agent, post=1.0, image=0.25, website=0.50)
-    with patch(
-        "deaddit.agents.prompts.random.random",
-        side_effect=[0.0, kind_draw],
-    ), patch(
-        "deaddit.agents.prompts.random.sample",
-        side_effect=lambda population, count: list(population)[:count],
+    with (
+        patch(
+            "deaddit.agents.prompts.random.random",
+            side_effect=[0.0, 0.5, kind_draw],
+        ),
+        patch(
+            "deaddit.agents.prompts.random.sample",
+            side_effect=lambda population, count: list(population)[:count],
+        ),
     ):
         visit = prepare_agent_visit(agent, user, unread=0)
     kickoff = visit.messages[1]["content"]
@@ -617,12 +624,14 @@ def test_length_quantile_selects_current_content_family(
         f"length_{intent}_{quantile}",
         image_mode="optional",
     )
-    with patch("deaddit.agents.prompts.random.choices", return_value=[quantile]), patch(
-        "deaddit.agents.prompts.random.sample", side_effect=lambda population, count: list(population)[:count]
+    with (
+        patch("deaddit.agents.prompts.random.choices", return_value=[quantile]),
+        patch(
+            "deaddit.agents.prompts.random.sample",
+            side_effect=lambda population, count: list(population)[:count],
+        ),
     ):
-        visit = prepare_agent_visit(
-            agent, user, requested_intent=intent, unread=0
-        )
+        visit = prepare_agent_visit(agent, user, requested_intent=intent, unread=0)
     kickoff = visit.messages[1]["content"]
     assert visit.plan.intent == intent
     assert needle in kickoff

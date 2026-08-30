@@ -10,6 +10,9 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
+    "BACKSTAGE_SUBDEADDIT_NAME",
+    "DISABLED_IMAGE_POSTS_CONFIG",
+    "DISABLED_WEBSITE_POSTS_CONFIG",
     "POST_TOOL_NAMES",
     "TOOL_REGISTRY",
     "AutonomyTier",
@@ -17,11 +20,15 @@ __all__ = [
     "Tool",
     "ToolContext",
     "all_tools",
+    "effective_post_configs",
     "get",
     "image_posts_config",
+    "offered_post_tool_names",
     "register",
     "specs_for",
+    "subscribe_nudge",
     "tools_for",
+    "website_posts_config",
 ]
 
 
@@ -30,4 +37,10 @@ def __getattr__(name: str) -> Any:
         from deaddit.agents import registry
 
         return getattr(registry, name)
+    try:
+        import importlib
+
+        return importlib.import_module(f"deaddit.agents.{name}")
+    except ImportError:
+        pass
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

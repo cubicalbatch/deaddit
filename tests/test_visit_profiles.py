@@ -18,7 +18,6 @@ import re
 import pytest
 
 from deaddit import Config
-from deaddit.extensions import db
 from deaddit.agents.loop import run_once
 from deaddit.agents.prompts import (
     DEFAULT_PROFILE_NAME,
@@ -27,6 +26,7 @@ from deaddit.agents.prompts import (
     INTENT_SOURCE_SAMPLED,
     prepare_agent_visit,
 )
+from deaddit.extensions import db
 from deaddit.llm.prompts import (
     PromptError,
     create_template,
@@ -38,7 +38,6 @@ from deaddit.llm.prompts import (
     set_pin,
 )
 from deaddit.models import Agent, AgentTurn, Setting, User
-
 from tests.visit_profiles import (
     PROFILE_TEMPLATE,
     pin_cohort_intent_mix,
@@ -118,14 +117,18 @@ class TestInvalidProfilesRejected:
         assert get_template(PROFILE_TEMPLATE) is None
 
     def test_profile_version_creation_validates(self, app, db_session):
-        create_template(PROFILE_TEMPLATE, serialize_visit_profile(DEFAULT_VISIT_PROFILE))
+        create_template(
+            PROFILE_TEMPLATE, serialize_visit_profile(DEFAULT_VISIT_PROFILE)
+        )
         with pytest.raises(PromptError):
             create_version(PROFILE_TEMPLATE, json.dumps(_invalid_document()))
         assert get_template(PROFILE_TEMPLATE).versions.count() == 1
 
     def test_pin_rejects_unknown_profile_version(self, app, db_session):
         agent, _ = _make_agent(db_session, "bad_pin")
-        create_template(PROFILE_TEMPLATE, serialize_visit_profile(DEFAULT_VISIT_PROFILE))
+        create_template(
+            PROFILE_TEMPLATE, serialize_visit_profile(DEFAULT_VISIT_PROFILE)
+        )
         with pytest.raises(PromptError):
             set_pin("agent", str(agent.id), PROFILE_TEMPLATE, 99)
 
@@ -195,7 +198,9 @@ class TestProfilePrecedence:
 
 
 class TestRunPromptMetadata:
-    def test_metadata_reproduces_initial_messages(self, seeded_db, db_session, fake_llm):
+    def test_metadata_reproduces_initial_messages(
+        self, seeded_db, db_session, fake_llm
+    ):
         agent, _ = _make_agent(db_session, "audited_runner")
         fake_llm.enqueue(
             {
@@ -215,15 +220,18 @@ class TestRunPromptMetadata:
         assert meta["profile"]["resolution_source"] == "default"
         assert meta["intent"] == run.intent
         assert meta["offered_tool_names"] == sorted(meta["offered_tool_names"])
-        assert isinstance(meta["length_target_id"], str) or meta[
-            "length_target_id"
-        ] is None
+        assert (
+            isinstance(meta["length_target_id"], str)
+            or meta["length_target_id"] is None
+        )
         assert isinstance(meta["direction_ids"], list)
 
         # The immutable profile body and the stored variables reproduce the
         # exact initial system-message bytes.
         profile = parse_visit_profile(meta["profile"]["body"])
-        replayed = _replay(profile.layouts["system"], meta["render_variables"]["system"])
+        replayed = _replay(
+            profile.layouts["system"], meta["render_variables"]["system"]
+        )
         assert replayed == meta["initial_messages"][0]["content"]
 
         # The first AgentTurn kept the exact request bytes.

@@ -98,8 +98,8 @@ def test_update_agent_via_nested_config_and_post_update_url(
     monkeypatch.setattr(capabilities, "ensure_tools_allowed", _noop_tools_allowed)
     agent = _make_agent(db_session, "alice")
 
-    resp = admin_client.post(
-        f"/admin/api/agents/{agent.id}/update",
+    resp = admin_client.put(
+        f"/admin/api/agents/{agent.id}",
         json={
             "autonomy_tier": "lurker",
             "config": {

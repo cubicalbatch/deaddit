@@ -109,13 +109,6 @@ class User(db.Model):
     created_at = db.Column(db.DateTime)  # Phase D5: history seeding
     agent_state = db.Column(db.JSON, nullable=False, default=dict, server_default="{}")
 
-    posts = db.relationship(
-        "Post", backref="author", lazy="dynamic", foreign_keys="Post.user"
-    )
-    comments = db.relationship(
-        "Comment", backref="author", lazy="dynamic", foreign_keys="Comment.user"
-    )
-
     def get_interests(self):
         return json.loads(self.interests)
 
@@ -148,40 +141,11 @@ class Job(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     started_at = db.Column(db.DateTime)
     completed_at = db.Column(db.DateTime)
-    estimated_completion = db.Column(db.DateTime)
-    rq_job_id = db.Column(db.String(36), unique=True, index=True)
     claimed_at = db.Column(db.DateTime)
     worker_id = db.Column(db.String(64))
     heartbeat_at = db.Column(db.DateTime)
 
     __table_args__ = (db.Index("ix_job_status_priority", "status", "priority"),)
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "type": self.type.value if self.type else None,
-            "status": self.status.value if self.status else None,
-            "priority": self.priority,
-            "progress": self.progress,
-            "total_items": self.total_items,
-            "parameters": self.parameters,
-            "result": self.result,
-            "error_message": self.error_message,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat()
-            if self.completed_at
-            else None,
-            "estimated_completion": self.estimated_completion.isoformat()
-            if self.estimated_completion
-            else None,
-            "rq_job_id": self.rq_job_id,
-            "claimed_at": self.claimed_at.isoformat() if self.claimed_at else None,
-            "worker_id": self.worker_id,
-            "heartbeat_at": self.heartbeat_at.isoformat()
-            if self.heartbeat_at
-            else None,
-        }
 
 
 class ApiModel(db.Model):
@@ -222,17 +186,6 @@ class ApiModel(db.Model):
                 db.session.add(new_model)
 
         db.session.commit()
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "api_url": self.api_url,
-            "model_name": self.model_name,
-            "last_fetched": self.last_fetched.isoformat()
-            if self.last_fetched
-            else None,
-            "is_active": self.is_active,
-        }
 
 
 class LLMProvider(db.Model):
@@ -295,48 +248,6 @@ class LLMProvider(db.Model):
         return target
 
 
-class ApiEndpointConfig(db.Model):
-    """Store configuration settings per API endpoint."""
-
-    id = db.Column(db.Integer, primary_key=True)
-    api_url = db.Column(db.String(255), nullable=False, unique=True, index=True)
-    default_model = db.Column(db.String(100))
-    last_updated = db.Column(db.DateTime, default=datetime.utcnow)
-
-    @staticmethod
-    def get_default_model_for_endpoint(api_url):
-        """Get the default model for a specific API endpoint."""
-        config = ApiEndpointConfig.query.filter_by(api_url=api_url).first()
-        return config.default_model if config else None
-
-    @staticmethod
-    def set_default_model_for_endpoint(api_url, model_name):
-        """Set the default model for a specific API endpoint."""
-        config = ApiEndpointConfig.query.filter_by(api_url=api_url).first()
-        if config:
-            config.default_model = model_name
-            config.last_updated = datetime.utcnow()
-        else:
-            config = ApiEndpointConfig(
-                api_url=api_url,
-                default_model=model_name,
-                last_updated=datetime.utcnow(),
-            )
-            db.session.add(config)
-        db.session.commit()
-        return config
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "api_url": self.api_url,
-            "default_model": self.default_model,
-            "last_updated": self.last_updated.isoformat()
-            if self.last_updated
-            else None,
-        }
-
-
 class EndpointCapability(db.Model):
     """Cached per-endpoint/per-model capability verdicts (Phase LLM-2).
 
@@ -395,17 +306,10 @@ class Setting(db.Model):
         db.session.commit()
         return setting
 
-    def to_dict(self):
-        return {
-            "key": self.key,
-            "value": self.value,
-            "description": self.description,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-
 
 # --- LLM accounting & routing ---
+
+
 class LLMUsage(db.Model):
     """One row per LLM provider attempt, including failed attempts."""
 
@@ -641,8 +545,12 @@ class Vote(db.Model):
     )
     value = db.Column(db.SmallInteger, nullable=False)
     source = db.Column(
-        db.String(16), nullable=False, server_default="agent", index=True
-    )  # 'agent'|'human'|'backfill'|'simulated'
+        db.String(16),
+        nullable=False,
+        server_default="simulated",
+        default="simulated",
+        index=True,
+    )  # 'simulated'|'agent'|'human'|'backfill'
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     __table_args__ = (
@@ -991,7 +899,7 @@ class ActivityEvent(db.Model):
     occurred_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     event_type = db.Column(
         db.String(20), nullable=False, index=True
-    )  # 'post' | 'comment' | 'vote' | 'report' | 'login_session'
+    )  # 'post' | 'comment' | 'vote' | 'report'
     username = db.Column(db.String(50), index=True)
     post_id = db.Column(db.Integer)
     comment_id = db.Column(db.Integer)
@@ -1146,22 +1054,6 @@ class ImageModel(db.Model):
             name="uq_image_model_provider_identifier",
         ),
     )
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "provider_id": self.provider_id,
-            "model_identifier": self.model_identifier,
-            "display_name": self.display_name,
-            "category": self.category,
-            "provider_metadata": self.provider_metadata,
-            "compatibility_verdict": self.compatibility_verdict,
-            "compatibility_reason": self.compatibility_reason,
-            "last_fetched": self.last_fetched.isoformat()
-            if self.last_fetched
-            else None,
-            "is_active": self.is_active,
-        }
 
 
 class PostImage(db.Model):

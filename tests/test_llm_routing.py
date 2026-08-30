@@ -12,7 +12,7 @@ import pytest
 
 from deaddit.config import Config
 from deaddit.llm import routing
-from deaddit.models import ApiEndpointConfig, ModelRoute
+from deaddit.models import LLMProvider, ModelRoute
 
 DEFAULT_URL = "http://localhost/v1"
 
@@ -152,14 +152,20 @@ def test_endpoint_config_falls_back_to_openai_model(app, db_session):
     # Suppress seeding so steps 4/5 of the chain are reachable.
     routing._routes_checked = True
     db_session.query(ModelRoute).delete()
+    db_session.query(LLMProvider).delete()
 
     db_session.add(
-        ApiEndpointConfig(api_url=DEFAULT_URL, default_model="endpoint-model")
+        LLMProvider(
+            name="test-provider",
+            api_url=DEFAULT_URL,
+            default_model="endpoint-model",
+            is_default=True,
+        )
     )
     db_session.commit()
     assert routing.resolve()[1] == "endpoint-model"
 
-    db_session.query(ApiEndpointConfig).delete()
+    db_session.query(LLMProvider).delete()
     db_session.commit()
     assert routing.resolve() == (DEFAULT_URL, "llama3")
 

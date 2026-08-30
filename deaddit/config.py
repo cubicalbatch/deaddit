@@ -38,12 +38,7 @@ class Config:
         "OPENAI_API_URL": "http://localhost/v1",
         "OPENAI_KEY": None,
         "OPENAI_MODEL": "llama3",
-        "MODELS": "llama3,gpt-3.5-turbo,gpt-4,claude-3-haiku,mistral-7b",
-        "API_BASE_URL": "http://localhost:5000",
         "SECRET_KEY": "dev-secret-key-change-in-production",
-        "FLASK_ENV": "development",
-        "FLASK_DEBUG": "True",
-        "DEFAULT_DATA_LOADED": "false",
         "API_TOKEN": None,
         "PRODUCTION": "false",
         "SEED_VOTE_MAX": "150",
@@ -62,12 +57,7 @@ class Config:
         "OPENAI_API_URL": "Base URL for AI API service",
         "OPENAI_KEY": "API authentication key for AI service (environment-only)",
         "OPENAI_MODEL": "Default AI model to use for content generation",
-        "MODELS": "Comma-separated list of available AI models",
-        "API_BASE_URL": "Base URL for the application API",
         "SECRET_KEY": "Flask secret key for session management",
-        "FLASK_ENV": "Flask environment (development/production)",
-        "FLASK_DEBUG": "Enable Flask debug mode (True/False)",
-        "DEFAULT_DATA_LOADED": "Whether default subdeaddits and users have been loaded",
         "PRODUCTION": "Production mode - disables admin interface and ingestion endpoints (true/false)",
         "API_TOKEN": "Security token for admin access (minimum 3 characters; environment-only)",
         "SEED_VOTE_MAX": "Max synthetic votes (total attention) per item during history seeding",
@@ -249,17 +239,6 @@ class Config:
             pass
 
     @classmethod
-    def is_configured(cls) -> bool:
-        """Check if the application has been configured (has settings in database)."""
-        try:
-            # Check if we have any settings in the database
-            setting_count = Setting.query.count()
-            return setting_count > 0
-        except Exception:
-            # Database might not be ready yet
-            return False
-
-    @classmethod
     def get_api_key_for_endpoint(cls, endpoint_url: str) -> str | None:
         """Get API key for a specific endpoint URL, checking LLMProvider first."""
         try:
@@ -345,26 +324,3 @@ class Config:
                 endpoint_url.replace("https://", "").replace("http://", ""),
             )
             return safe_key.upper()[:50]  # Limit length
-
-    @classmethod
-    def get_all_endpoint_keys(cls) -> dict:
-        """Get all endpoint-specific API keys, masked (never plaintext)."""
-        endpoint_keys = {}
-
-        # Common endpoints
-        endpoints = {
-            "https://api.openai.com/v1": "OpenAI",
-            "https://api.groq.com/openai/v1": "Groq",
-            "https://openrouter.ai/api/v1": "OpenRouter",
-        }
-
-        for endpoint_url, name in endpoints.items():
-            api_key = cls.get_api_key_for_endpoint(endpoint_url)
-            has_key = bool(api_key)
-            endpoint_keys[endpoint_url] = {
-                "name": name,
-                "masked": "••••••••••••••••" if has_key else None,
-                "has_key": has_key,
-            }
-
-        return endpoint_keys

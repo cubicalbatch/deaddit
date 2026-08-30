@@ -15,10 +15,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 
 from deaddit.agents.registry import (
+    BACKSTAGE_SUBDEADDIT_NAME,
     AutonomyTier,
     RateClass,
     Tool,
     ToolContext,
+    parse_tier,
     register,
     subscribe_nudge,
 )
@@ -105,26 +107,39 @@ def _browse_feed(ctx: ToolContext, params: BrowseFeedArgs) -> dict:
     subscriptions = (
         list((user.agent_state or {}).get("subscriptions") or []) if user else []
     )
+    backstage_member = (
+        params.subdeaddit is None
+        and parse_tier(ctx.agent.autonomy_tier) is not AutonomyTier.LURKER
+        and db.session.get(Subdeaddit, BACKSTAGE_SUBDEADDIT_NAME) is not None
+    )
     targets: list[str] = []
     if params.subdeaddit is not None:
         targets.append(params.subdeaddit)
     elif subscriptions:
-        # Personalized feed: subscriptions only.
+        # Personalized feed: subscriptions plus the universal backstage room.
         for name in subscriptions:
             if name not in targets:
                 targets.append(name)
+    if backstage_member and BACKSTAGE_SUBDEADDIT_NAME not in targets:
+        targets.append(BACKSTAGE_SUBDEADDIT_NAME)
 
     pool: dict[int, Post] = {}
     if not params.subdeaddit and not subscriptions:
-        # Cold start: no subscriptions would otherwise mean an empty pool,
-        # which funneled everyone toward the few communities they already
-        # knew about. Show the site-wide frontpage instead.
+        # Cold start remains site-wide, with backstage posts explicitly added
+        # so a busy frontpage cannot make the shared room undiscoverable.
         pool = {
             post.id: post
             for post in Post.query.order_by(Post.created_at.desc()).limit(
                 _FRONTPAGE_POOL_SIZE
             )
         }
+        if backstage_member:
+            for post in (
+                Post.query.filter_by(subdeaddit_name=BACKSTAGE_SUBDEADDIT_NAME)
+                .order_by(Post.created_at.desc())
+                .limit(100)
+            ):
+                pool[post.id] = post
     else:
         for name in targets:
             rows = (
@@ -147,6 +162,23 @@ def _browse_feed(ctx: ToolContext, params: BrowseFeedArgs) -> dict:
     posts = sorted(pool.values(), key=_sort_key, reverse=params.sort == "new")[
         : params.limit
     ]
+    if (
+        backstage_member
+        and posts
+        and not any(post.subdeaddit_name == BACKSTAGE_SUBDEADDIT_NAME for post in posts)
+    ):
+        backstage_posts = [
+            post
+            for post in pool.values()
+            if post.subdeaddit_name == BACKSTAGE_SUBDEADDIT_NAME
+        ]
+        if backstage_posts:
+            featured = sorted(
+                backstage_posts,
+                key=_sort_key,
+                reverse=params.sort == "new",
+            )[0]
+            posts[-1] = featured
 
     counts: dict[int, int] = {}
     if posts:

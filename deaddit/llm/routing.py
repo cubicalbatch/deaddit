@@ -11,7 +11,7 @@ Precedence chain:
 1. CLI/process override (:func:`set_models_override`)
 2. Active :class:`ModelRoute` for the persona's tier (highest priority wins)
 3. Active ``ModelRoute`` for tier ``'default'``
-4. ``ApiEndpointConfig.get_default_model_for_endpoint`` for the configured URL
+4. Default provider or matching :class:`~deaddit.models.LLMProvider` default model
 5. ``Config.OPENAI_MODEL`` (``'llama3'`` fallback)
 """
 
@@ -21,7 +21,7 @@ import logging
 
 from deaddit.config import Config
 from deaddit.extensions import db
-from deaddit.models import ApiEndpointConfig, ModelRoute
+from deaddit.models import ModelRoute
 
 logger = logging.getLogger(__name__)
 
@@ -168,13 +168,18 @@ def resolve(user_persona: str | None = None) -> tuple[str, str]:
         if route:
             return route.api_url or default_api_url, route.model_name
 
-    # 4. Per-endpoint configured default model.
-    endpoint_model = ApiEndpointConfig.get_default_model_for_endpoint(default_api_url)
-    if endpoint_model:
-        return default_api_url, endpoint_model
-
-    # 5. Default provider's model or global config fallback.
+    # 4. Default provider's model or matching LLMProvider default_model.
     if default_provider and default_provider.default_model:
         return default_api_url, default_provider.default_model
 
+    try:
+        from deaddit.models import LLMProvider
+
+        matching_provider = LLMProvider.query.filter_by(api_url=default_api_url).first()
+        if matching_provider and matching_provider.default_model:
+            return default_api_url, matching_provider.default_model
+    except Exception:
+        pass
+
+    # 5. Global config fallback.
     return default_api_url, Config.get("OPENAI_MODEL", "llama3")

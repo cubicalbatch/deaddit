@@ -633,7 +633,11 @@ def _unsubscribe(ctx: ToolContext, params: UnsubscribeArgs) -> dict:
 
 class FinishArgs(BaseModel):
     summary: str = Field(min_length=1, max_length=2000)
-    mood: str | None = None
+    mood: str | None = Field(
+        default=None,
+        deprecated=True,
+        description="Deprecated legacy field from prototype agent runtime.",
+    )
 
 
 def _finish(ctx: ToolContext, params: FinishArgs) -> dict:

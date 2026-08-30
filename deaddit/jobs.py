@@ -7,7 +7,6 @@ deaddit.runtime.
 
 import logging
 import threading
-import uuid
 from datetime import datetime
 from typing import Any
 
@@ -43,7 +42,6 @@ def create_job(
         priority=priority,
         total_items=total_items,
         parameters=parameters,
-        rq_job_id=str(uuid.uuid4()),  # Keep field name for compatibility
     )
 
     db.session.add(job)

@@ -168,28 +168,6 @@ main {
     margin-top: 0;
 }
 
-.feather {
-    width: 16px;
-    height: 16px;
-    vertical-align: text-bottom;
-}
-
-/* Job status colors */
-.job-status-pending { color: var(--text-2); }
-.job-status-running { color: var(--status-info); }
-.job-status-completed { color: var(--status-success); }
-.job-status-failed { color: var(--status-danger); }
-.job-status-cancelled { color: var(--text-2); }
-
-/* Striped progress animation */
-.progress-bar-striped.active {
-    animation: progress-bar-stripes 2s linear infinite;
-}
-
-@keyframes progress-bar-stripes {
-    from { background-position: 40px 0; }
-    to { background-position: 0 0; }
-}
 
 /* Bootstrap alerts re-tuned onto status tokens for both themes */
 .alert-warning {

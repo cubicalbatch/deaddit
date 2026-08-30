@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel, ValidationError
 
 from deaddit.agents.registry import (
+    BACKSTAGE_SUBDEADDIT_NAME,
     POST_TOOL_NAMES,
     AutonomyTier,
     ToolContext,
@@ -198,6 +199,46 @@ def _check_post_policy(name: str, ctx: ToolContext) -> str | None:
     if website_cfg["enabled"] and website_cfg["policy"] == "website_only":
         return "this agent may only publish website posts, not text posts"
     return "no post tool is available for this agent's configuration"
+
+
+def _post_destination(name: str, validated: dict) -> str | None:
+    if name == "create_post":
+        return validated.get("subdeaddit")
+    if name in ("create_image_post", "create_website"):
+        return validated.get("community")
+    return None
+
+
+def _check_target_subdeaddit(
+    name: str, ctx: ToolContext, validated: dict
+) -> str | None:
+    target = ctx.target_subdeaddit
+    destination = _post_destination(name, validated)
+    if target is None or destination is None or destination == target:
+        return None
+    return (
+        f"this visit is reserved for d/{target}; "
+        f"you cannot publish the post in d/{destination}"
+    )
+
+
+def _check_backstage_rotation(
+    name: str, ctx: ToolContext, validated: dict
+) -> str | None:
+    """Keep one persona from opening consecutive backstage threads."""
+    if _post_destination(name, validated) != BACKSTAGE_SUBDEADDIT_NAME:
+        return None
+    latest = (
+        Post.query.filter(
+            Post.subdeaddit_name == BACKSTAGE_SUBDEADDIT_NAME,
+            Post.removed.is_(False),
+        )
+        .order_by(Post.created_at.desc(), Post.id.desc())
+        .first()
+    )
+    if latest is not None and latest.user == ctx.user_username:
+        return "another persona must open the next d/BetweenRobots thread"
+    return None
 
 
 def _parse_raw_arguments(raw_arguments: dict | str) -> dict:
@@ -465,9 +506,10 @@ def execute(name: str, raw_arguments: dict | str, ctx: ToolContext) -> dict:
             started,
         )
 
-    # Visit reservation gate: comments are not available during image/website reserved visits.
+    # Reserved post visits do not expose comments, and direct executor calls
+    # cannot bypass that focus.
     intent = getattr(ctx, "post_intent", "browse")
-    if intent in ("image", "website") and name == "create_comment":
+    if intent in ("image", "website", "backstage") and name == "create_comment":
         return _persist_and_return(
             ctx,
             name,
@@ -497,17 +539,27 @@ def execute(name: str, raw_arguments: dict | str, ctx: ToolContext) -> dict:
             _reject(f"invalid arguments for '{name}'", hint=hint),
             started,
         )
-    except ValidationError as exc:
-        first = exc.errors()[0] if exc.errors() else {"loc": (), "msg": str(exc)}
-        loc = ".".join(str(part) for part in first.get("loc", ()))
+
+    target_problem = _check_target_subdeaddit(name, ctx, validated)
+    if target_problem is not None:
         return _persist_and_return(
             ctx,
             name,
-            raw_arguments_dict,
+            validated,
             _reject(
-                f"invalid arguments for '{name}'",
-                hint=f"{loc}: {first.get('msg', str(exc))}",
+                target_problem,
+                hint=f"publish this post in d/{ctx.target_subdeaddit}",
             ),
+            started,
+        )
+
+    rotation_problem = _check_backstage_rotation(name, ctx, validated)
+    if rotation_problem is not None:
+        return _persist_and_return(
+            ctx,
+            name,
+            validated,
+            _reject(rotation_problem, hint="finish this visit without posting"),
             started,
         )
 

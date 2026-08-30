@@ -323,43 +323,14 @@
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="api_token" class="form-label">Admin API Token</label>
-                                <div class="input-group">
-                                    <input type="password" class="form-control" id="api_token" name="api_token"
-                                           placeholder="{% if config.api_token_set %}Stored - leave blank to keep{% else %}Enter token (minimum 3 characters){% endif %}"
-                                           autocomplete="new-password">
-                                    <button type="button" class="btn btn-outline-secondary" data-toggle-password="api_token"
-                                            aria-label="Show or hide API token">
-                                        <i class="bi bi-eye"></i>
-                                    </button>
-                                </div>
-                                <div class="form-text">
+                                <label class="form-label">Admin API Token</label>
+                                <div class="form-control-plaintext">
                                     Status: <span id="api-token-status">
                                         {%- if config.api_token_set %}<span class="text-success">set</span>{% else %}<span class="text-danger">not set</span>{% endif -%}
-                                    </span>.
-                                    Leave blank to keep the stored token.
+                                    </span>
                                 </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="subdeaddit_selection_strategy" class="form-label">Subdeaddit Selection Strategy</label>
-                                <select class="form-select" id="subdeaddit_selection_strategy" name="subdeaddit_selection_strategy">
-                                    <option value="weighted" {% if config.subdeaddit_selection_strategy == 'weighted' %}selected{% endif %}>
-                                        Weighted (Recommended) - Favors subdeaddits with fewer posts
-                                    </option>
-                                    <option value="round_robin" {% if config.subdeaddit_selection_strategy == 'round_robin' %}selected{% endif %}>
-                                        Round Robin - Strict even distribution
-                                    </option>
-                                    <option value="improved_random" {% if config.subdeaddit_selection_strategy == 'improved_random' %}selected{% endif %}>
-                                        Improved Random - Better entropy, avoids consecutive selections
-                                    </option>
-                                </select>
                                 <div class="form-text">
-                                    Controls how subdeaddits are selected when no specific subdeaddit is chosen.
-                                    <strong>Weighted</strong> ensures better distribution across all subdeaddits.
+                                    API tokens are environment-only since refactor A6. Configure <code>API_TOKEN</code> in your environment / <code>.env</code> file.
                                 </div>
                             </div>
                         </div>
@@ -1365,16 +1336,8 @@
         const form = event.target;
         const formData = new FormData(form);
 
-        const token = formData.get('api_token') || '';
-        if (token && token.length < 3) {
-            showAlert('<i class="bi bi-exclamation-triangle"></i> API Token must be at least 3 characters long', 'alert-warning');
-            return;
-        }
-
         const payload = {
-            api_base_url: formData.get('api_base_url'),
-            api_token: token,
-            subdeaddit_selection_strategy: formData.get('subdeaddit_selection_strategy')
+            api_base_url: formData.get('api_base_url')
         };
 
         const done = busy(form.querySelector('button[type="submit"]'), 'Saving...');
@@ -1383,7 +1346,6 @@
             .then(data => {
                 if (data.success) {
                     showAlert('<i class="bi bi-check-circle"></i> Deaddit configuration saved successfully!', 'alert-success');
-                    document.getElementById('api_token').value = '';
                     setTimeout(() => window.location.reload(), 1500);
                 } else {
                     showAlert('<i class="bi bi-x-circle"></i> Failed to save configuration: ' + (data.error || data.message), 'alert-danger');

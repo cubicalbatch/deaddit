@@ -132,7 +132,6 @@ def inject_config():
     return {
         "config": {
             "api_token_set": Config.is_api_token_set(),
-            "api_base_url": Config.get("API_BASE_URL"),
             "openai_api_url": Config.get("OPENAI_API_URL"),
             "openai_model": Config.get("OPENAI_MODEL"),
             "openai_key_set": bool(Config.get("OPENAI_KEY")),

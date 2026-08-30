@@ -453,10 +453,6 @@ def preset_config(name: str) -> dict[str, dict[str, Any]]:
     return validate_policy(config)
 
 
-def get_preset_config(name: str) -> dict[str, dict[str, Any]]:
-    return preset_config(name)
-
-
 class _StableStream:
     """Small project-owned deterministic byte stream.
 
@@ -797,28 +793,12 @@ class TickResult:
     revival_threads_examined: int = 0
 
     @property
-    def target_budgets(self) -> dict[tuple[str, int], int]:
-        return self.budgets
-
-    @property
-    def selected_voters(self) -> list[str]:
-        return self.voters_selected
-
-    @property
-    def skip_reasons(self) -> dict[str, int]:
-        return self.skips
-
-    @property
     def voters_selected(self) -> list[str]:
         return [decision.voter for decision in self.decisions]
 
     @property
     def directions(self) -> list[int]:
         return [decision.direction for decision in self.decisions]
-
-    @property
-    def cast_count(self) -> int:
-        return len(self.casts)
 
     def skip(self, reason: str) -> None:
         self.skips[reason] = self.skips.get(reason, 0) + 1
@@ -1546,8 +1526,6 @@ class ActiveWindowEngine:
                     casts_used=casts_used,
                 )
 
-    run = tick
-
 
 def run_active_tick(
     policy: VoteCadencePolicy | PolicyConfig | Mapping[str, Any] | None = None,
@@ -1574,10 +1552,6 @@ def run_active_tick(
     return ActiveWindowEngine(policy, **options).tick(now, **kwargs)
 
 
-run_tail_tick = run_active_tick
-tick_active_window = run_active_tick
-
-
 def simulate_active_tick(
     policy: VoteCadencePolicy | PolicyConfig | Mapping[str, Any] | None = None,
     now: datetime | None = None,
@@ -1590,6 +1564,3 @@ def simulate_active_tick(
     """
     kwargs.setdefault("dry_run", True)
     return run_active_tick(policy, now, **kwargs)
-
-
-simulate_tail_tick = simulate_active_tick

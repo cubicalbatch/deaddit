@@ -234,11 +234,10 @@ def run_once(
     agent_id: int,
     *,
     trigger: str = "manual",
-    force_intent: str | None = None,
     requested_intent: str | None = None,
 ) -> AgentRun:
     """Run one full agent visit synchronously. Caller provides the app context."""
-    req = requested_intent if requested_intent is not None else force_intent
+    req = requested_intent
     agent = db.session.get(Agent, agent_id)
     if agent is None:
         raise ValueError(f"No agent with id {agent_id}")
@@ -323,6 +322,7 @@ def run_once(
             "intent": visit.plan.intent,
             "intent_source": visit.plan.intent_source,
             "content_kind": visit.plan.content_kind,
+            "target_subdeaddit": visit.plan.target_subdeaddit,
             "length_target_id": visit.plan.length_target_id,
             "direction_ids": list(visit.plan.direction_ids),
             "offered_tool_names": sorted(visit.plan.offered_tool_names),
@@ -357,6 +357,7 @@ def run_once(
         run=run,
         user_username=run.persona_username,
         post_intent=visit.plan.intent,
+        target_subdeaddit=visit.plan.target_subdeaddit,
         llm_api_url=api_url,
         llm_api_key=api_key,
         llm_model=model,

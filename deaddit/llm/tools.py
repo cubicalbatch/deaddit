@@ -36,36 +36,13 @@ class ToolSpec:
         }
 
 
-_registry: dict[str, ToolSpec] = {}
-
-
-def register(spec: ToolSpec) -> None:
-    """Add a tool spec to the module-level registry (replaces same-name)."""
-    _registry[spec.name] = spec
-
-
-def get(name: str) -> ToolSpec:
-    """Look up a registered spec by name; KeyError if missing."""
-    return _registry[name]
-
-
-def all_specs() -> list[ToolSpec]:
-    return list(_registry.values())
-
-
-def clear_registry() -> None:
-    """Empty the registry (for tests)."""
-    _registry.clear()
-
-
-def validate_tool_args(spec_or_name: ToolSpec | str, arguments: dict | str) -> dict:
+def validate_tool_args(spec: ToolSpec, arguments: dict | str) -> dict:
     """Validate raw tool arguments against a spec's pydantic model.
 
     Accepts a parsed dict or a JSON string; returns the validated, coerced
     dict. Raises SchemaValidationError (chained from the pydantic error) on
     missing, extra, or mistyped fields.
     """
-    spec = spec_or_name if isinstance(spec_or_name, ToolSpec) else get(spec_or_name)
     if isinstance(arguments, str):
         try:
             arguments = json.loads(arguments)
@@ -88,30 +65,3 @@ def validate_tool_args(spec_or_name: ToolSpec | str, arguments: dict | str) -> d
             f"Tool {spec.name!r} received invalid arguments: {exc}"
         ) from exc
     return validated.model_dump()
-
-
-def build_tool_results(tool_calls: list[dict]) -> list[dict]:
-    """Build OpenAI-shaped tool-role messages for assistant tool_calls.
-
-    Valid calls produce the validated arguments as JSON content; invalid
-    arguments or unknown tool names produce a JSON ``{"error": "<why>"}``
-    content instead, so the model can see and correct the failure.
-    """
-    results: list[dict] = []
-    for call in tool_calls:
-        call_id = call.get("id")
-        function = call.get("function") or {}
-        name = function.get("name")
-        try:
-            spec = get(name)
-        except KeyError:
-            content = json.dumps({"error": f"Unknown tool: {name!r}"})
-        else:
-            try:
-                args = validate_tool_args(spec, function.get("arguments"))
-            except SchemaValidationError as exc:
-                content = json.dumps({"error": str(exc)})
-            else:
-                content = json.dumps(args)
-        results.append({"role": "tool", "tool_call_id": call_id, "content": content})
-    return results

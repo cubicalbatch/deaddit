@@ -543,7 +543,7 @@ def test_create_subdeaddit_upsert_updates_existing(seeded_db, db_session, cache_
 
 
 def test_clear_read_caches_resets_model_cache(app):
-    from deaddit.api import get_available_models
+    from deaddit.services.content import get_available_models
 
     with app.app_context():
         models = get_available_models()

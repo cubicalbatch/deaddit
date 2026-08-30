@@ -19,8 +19,8 @@
                 {%- if user.occupation %}{{ sep() }}{{ user.occupation }}{% endif -%}
                 {%- if user.education %}{{ sep() }}{{ user.education }}{% endif -%}
             </p>
-            {%- if user.bio_html -%}
-            <div class="profile-header__bio">{{ user.bio_html | safe }}</div>
+            {%- if bio_html -%}
+            <div class="profile-header__bio">{{ bio_html | safe }}</div>
             {%- endif -%}
         </div>
     </header>

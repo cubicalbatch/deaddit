@@ -329,7 +329,7 @@ def test_public_json_and_html_show_images_without_leaking_private_metadata(
     # cards never accumulate duplicate listeners, and hidden purely via CSS.
     js = (STATIC_ROOT / "js/image-feed.js").read_text()
     assert "document.addEventListener('click'" in js
-    assert "data-image-toggle" in js and "data-feed-image-action" in js
+    assert "data-image-toggle" in js
     for hook in ("htmx:afterSwap", "htmx:load"):
         assert hook in js
     css = (STATIC_ROOT / "style.css").read_text()

@@ -98,7 +98,11 @@ def test_effective_post_configs_truth_table(db_session):
         {"create_post", "create_image_post", "create_website"}
     )
 
-    # 4. Inconsistent special intent fails closed to no post tools
+    # 4. Backstage intent reserves a plain-text post.
+    eff_img, eff_web = effective_post_configs(agent_both_opt, intent="backstage")
+    assert offered_post_tool_names(eff_img, eff_web) == frozenset({"create_post"})
+
+    # 5. Inconsistent special intent fails closed to no post tools
     agent_no_img = _make_agent_row(
         db_session,
         "agent_no_img",
@@ -135,6 +139,14 @@ def test_tools_for_and_specs_for_intent_filtering(db_session):
     assert "create_post" not in tool_names_web
     assert "create_image_post" not in tool_names_web
     assert "create_comment" not in tool_names_web
+
+    # Backstage intent: only the reserved text post is writable.
+    tools_backstage = tools_for("regular", agent=agent, intent="backstage")
+    tool_names_backstage = {tool.name for tool in tools_backstage}
+    assert "create_post" in tool_names_backstage
+    assert "create_image_post" not in tool_names_backstage
+    assert "create_website" not in tool_names_backstage
+    assert "create_comment" not in tool_names_backstage
 
     # Browse intent: create_comment is present, standard tools available
     tools_browse = tools_for("regular", agent=agent, intent="browse")

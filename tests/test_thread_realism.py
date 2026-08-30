@@ -371,9 +371,7 @@ def test_reply_notification_suppressed_once_exchange_completes(seeded_db, db_ses
 def test_unread_kickoff_encourages_moving_on(seeded_db, db_session):
     agent = _make_agent(db_session, "alice")
 
-    visit = prepare_agent_visit(
-        agent, db_session.get(User, "alice"), unread=3
-    )
+    visit = prepare_agent_visit(agent, db_session.get(User, "alice"), unread=3)
     prompt = visit.messages[1]["content"]
     intent = visit.plan.intent
 

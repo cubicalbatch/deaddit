@@ -16,17 +16,6 @@ from deaddit.llm.tools import ToolSpec
 from deaddit.llm.transport import last_attempts
 
 logger = logging.getLogger(__name__)
-STOP_VALUES: list[str] = [
-    "}\n```\n",
-    "assistant",
-    "}  #",
-    "} #",
-    "}\n\n",
-    "}\n}",
-    "##",
-    "}\n\n",
-    "```\n\n",
-]
 
 
 def _assemble_tool_calls(acc: dict[int, dict]) -> list[dict]:

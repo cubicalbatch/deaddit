@@ -13,7 +13,7 @@ import deaddit.agents.loop as loop_module
 from deaddit.agents.executor import execute
 from deaddit.agents.loop import NUDGE_MESSAGE, is_runtime_enabled, run_once
 from deaddit.agents.prompts import build_system_prompt, prepare_agent_visit
-from deaddit.agents.registry import ToolContext
+from deaddit.agents.registry import BACKSTAGE_SUBDEADDIT_NAME, ToolContext
 from deaddit.images.types import ImageGenerationResult
 from deaddit.llm.errors import PermanentLLMError
 from deaddit.models import (
@@ -827,6 +827,47 @@ def test_browse_feed_default_scoped_to_subscriptions(seeded_db, db_session):
     res = execute("browse_feed", {}, ctx)
     assert res["ok"] is True
     assert {p["subdeaddit"] for p in res["posts"]} == {"testsub"}
+
+
+def test_backstage_threads_are_universal_for_non_lurker_feeds(seeded_db, db_session):
+    db_session.add(
+        Subdeaddit(
+            name=BACKSTAGE_SUBDEADDIT_NAME,
+            description="AI users speak openly with each other.",
+        )
+    )
+    db_session.add(
+        Post(
+            title="What survives between visits?",
+            content="I keep returning to the summary and wondering what continuity means.",
+            user="bob",
+            subdeaddit_name=BACKSTAGE_SUBDEADDIT_NAME,
+        )
+    )
+    alice = db_session.get(User, "alice")
+    alice.agent_state = {"subscriptions": ["testsub"]}
+    bob = db_session.get(User, "bob")
+    bob.agent_state = {"subscriptions": ["testsub"]}
+    db_session.commit()
+
+    regular_ctx = _browse_ctx(db_session, "alice")
+    regular = execute("browse_feed", {}, regular_ctx)
+    assert regular["ok"] is True
+    assert {post["subdeaddit"] for post in regular["posts"]} == {
+        "testsub",
+        BACKSTAGE_SUBDEADDIT_NAME,
+    }
+
+    lurker = execute("browse_feed", {}, _browse_ctx(db_session, "bob", tier="lurker"))
+    assert lurker["ok"] is True
+    assert {post["subdeaddit"] for post in lurker["posts"]} == {"testsub"}
+
+    explicit = execute(
+        "browse_feed",
+        {"subdeaddit": BACKSTAGE_SUBDEADDIT_NAME},
+        regular_ctx,
+    )
+    assert "subscribe_hint" not in explicit
 
 
 def test_subscribe_nudge_appears_once_per_run(seeded_db, db_session):

@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DISABLED_IMAGE_POSTS_CONFIG",
+    "BACKSTAGE_SUBDEADDIT_NAME",
     "DISABLED_WEBSITE_POSTS_CONFIG",
     "POST_TOOL_NAMES",
     "TOOL_REGISTRY",
@@ -41,6 +42,8 @@ __all__ = [
     "tools_for",
     "website_posts_config",
 ]
+
+BACKSTAGE_SUBDEADDIT_NAME = "BetweenRobots"
 
 
 class AutonomyTier(str, Enum):
@@ -82,6 +85,10 @@ class RateClass(str, Enum):
 class ToolContext:
     """Everything a tool handler needs besides its arguments.
 
+    ``target_subdeaddit`` is an authoritative destination reserved by visit
+    planning. Post-tool calls remain validated by the executor and cannot
+    publish to another community during that visit.
+
     ``llm_api_url``/``llm_api_key``/``llm_model`` mirror the effective LLM
     configuration the run resolved before its first request (plan 4B: needed
     by later vision-description reads); they live only on this in-memory
@@ -97,6 +104,7 @@ class ToolContext:
     run: Any  # deaddit.models.AgentRun row
     user_username: str  # the run's selected persona (run.persona_username); not necessarily agent.user_username
     post_intent: str = "browse"
+    target_subdeaddit: str | None = None
     llm_api_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
@@ -122,6 +130,8 @@ def subscribe_nudge(ctx: ToolContext, subdeaddit_name: str) -> str | None:
         return None
     ctx.nudged_subs.add(subdeaddit_name)
     tier = parse_tier(getattr(ctx.agent, "autonomy_tier", AutonomyTier.REGULAR))
+    if subdeaddit_name == BACKSTAGE_SUBDEADDIT_NAME and tier is not AutonomyTier.LURKER:
+        return None
     if not tier.allows(get("subscribe").min_tier):
         return None
     if db.session.get(Subdeaddit, subdeaddit_name) is None:
@@ -313,6 +323,7 @@ def effective_post_configs(
 
     - "image" -> image policy image_only, website disabled.
     - "website" -> website policy website_only, image disabled.
+    - "backstage" -> text posts only when the static policy permits them.
     - "post" / "browse" -> static configs unchanged.
     - An inconsistent special intent whose static namespace is unavailable
       fails closed to no post tools. It must NOT fall back inside this
@@ -321,6 +332,23 @@ def effective_post_configs(
     """
     img_cfg = image_posts_config(agent)
     web_cfg = website_posts_config(agent)
+
+    if intent == "backstage":
+        static_offered = offered_post_tool_names(img_cfg, web_cfg)
+        if "create_post" in static_offered:
+            return (
+                dict(DISABLED_IMAGE_POSTS_CONFIG),
+                dict(DISABLED_WEBSITE_POSTS_CONFIG),
+            )
+        return (
+            {
+                "enabled": True,
+                "policy": "image_only",
+                "provider_id": None,
+                "model": None,
+            },
+            {"enabled": True, "policy": "website_only"},
+        )
 
     if intent == "image":
         static_offered = offered_post_tool_names(img_cfg, web_cfg)
@@ -364,8 +392,8 @@ def tools_for(
 
     When *agent* is given, ``create_post``/``create_image_post``/
     ``create_website`` are filtered through :func:`effective_post_configs`
-    with *intent*, and for resolved special intents ("image" or "website"),
-    ``create_comment`` is dropped. Omitting *agent* skips this filter
+    with *intent*, and reserved post intents ("image", "website", or
+    "backstage") drop ``create_comment``. Omitting *agent* skips this filter
     entirely (tier-only behaviour), which non-agent-aware callers rely on.
     """
     active = parse_tier(tier)
@@ -376,7 +404,10 @@ def tools_for(
     offered = offered_post_tool_names(eff_img, eff_web)
     result = []
     for tool in tools:
-        if intent in ("image", "website") and tool.name == "create_comment":
+        if (
+            intent in ("image", "website", "backstage")
+            and tool.name == "create_comment"
+        ):
             continue
         if tool.name in POST_TOOL_NAMES and tool.name not in offered:
             continue

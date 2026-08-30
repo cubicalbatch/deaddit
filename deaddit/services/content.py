@@ -34,6 +34,7 @@ from deaddit.models import (
     Subdeaddit,
     User,
 )
+from deaddit.utils import process_post_title
 
 __all__ = [
     "ContentValidationError",
@@ -123,14 +124,7 @@ def _check_rate_limit(user: str, kind: str) -> None:
 
 
 def _clear_read_caches() -> None:
-    """Invalidate read-side caches after a successful mutation.
-
-    Lazy imports keep module load free of circular dependencies:
-    ``deaddit.api`` re-exports :func:`get_available_models` from this module,
-    and importing it at module scope would be circular.
-    """
-    from deaddit.api import get_available_models
-
+    """Invalidate read-side caches after a successful mutation."""
     get_available_models.cache_clear()
     flask_cache.clear()  # Clear comment count caches
 
@@ -226,7 +220,7 @@ def create_post(
     )
 
     post = Post(
-        title=title,
+        title=process_post_title(title),
         content=content,
         score=score,
         user=user,
@@ -350,7 +344,7 @@ def create_image_post(
     )
 
     post = Post(
-        title=title,
+        title=process_post_title(title),
         content=content or None,
         score=score,
         user=user,
@@ -532,7 +526,7 @@ def create_website_post(
         )
 
         post = Post(
-            title=title,
+            title=process_post_title(title),
             content=content or None,
             score=score,
             user=user,
@@ -695,9 +689,8 @@ def create_user(
         personality_traits=traits_json,
         model=model,
         is_troll=is_troll,
+        created_at=created_at,
     )
-    if created_at is not None and "created_at" in User.__table__.columns:
-        user_obj.created_at = created_at
     db.session.add(user_obj)
     _commit()
     _clear_read_caches()
@@ -713,10 +706,6 @@ def create_subdeaddit(
     created_at: datetime | None = None,
 ) -> Subdeaddit:
     """Create a :class:`~deaddit.models.Subdeaddit`, or upsert it.
-
-    Note:
-        ``created_at`` is accepted for signature uniformity but only applied
-        if the model has a ``created_at`` column (Phase D5: it does).
 
     Raises:
         ContentValidationError: missing name/description, or existing name
@@ -744,10 +733,8 @@ def create_subdeaddit(
         _clear_read_caches()
         return existing
 
-    subdeaddit = Subdeaddit(name=name, description=description)
+    subdeaddit = Subdeaddit(name=name, description=description, created_at=created_at)
     subdeaddit.set_post_types(types_list)
-    if created_at is not None and "created_at" in Subdeaddit.__table__.columns:
-        subdeaddit.created_at = created_at
     db.session.add(subdeaddit)
     _commit()
     _clear_read_caches()

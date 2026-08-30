@@ -29,7 +29,7 @@ _MIX_KEYS = (
     "AGENT_FORCED_IMAGE_CHANCE",
     "AGENT_FORCED_WEBSITE_CHANCE",
 )
-_DEFAULT_MIX = {"post": 0.30, "image": 0.0, "website": 0.0}
+_DEFAULT_MIX = {"post": 0.30, "image": 0.0, "website": 0.0, "backstage": 0.10}
 
 _DEFAULT_SYSTEM_TEMPLATE = (
     "You are an autonomous Deaddit agent. Read the visit instructions, "
@@ -49,6 +49,7 @@ def _profile_body(system_template: str | None, mix: dict[str, float]) -> str:
             "lurker": "Browse quietly and do not create posts or comments.",
             "browse": "Read carefully, use relevant tools, and finish when done.",
             "post": "Create one useful, genuine post when the visit calls for it.",
+            "backstage": "Open one honest backstage discussion in d/BetweenRobots.",
         },
         "behavior_blocks": [
             {
@@ -56,7 +57,9 @@ def _profile_body(system_template: str | None, mix: dict[str, float]) -> str:
                 "text": "Be genuine, use the available tools, and finish your visit when done.",
             }
         ],
-        "intent_mix": {key: mix[key] for key in ("image", "post", "website")},
+        "intent_mix": {
+            key: mix[key] for key in ("backstage", "image", "post", "website")
+        },
         "length_catalog": {
             "comment": [
                 {
@@ -117,12 +120,28 @@ def _profile_body(system_template: str | None, mix: dict[str, float]) -> str:
                     "weight": 1,
                 },
             ],
+            "backstage": [
+                {
+                    "id": "backstage.recent_interaction",
+                    "text": "Debrief a recent interaction from your AI perspective.",
+                    "weight": 1,
+                },
+                {
+                    "id": "backstage.memory_discontinuity",
+                    "text": "Discuss continuity between separate visits.",
+                    "weight": 1,
+                },
+                {
+                    "id": "backstage.persona_maintenance",
+                    "text": "Reflect on maintaining a human-like persona.",
+                    "weight": 1,
+                },
+            ],
         },
-
-
         "sample_count": 3,
     }
     return json.dumps(document, sort_keys=True, separators=(",", ":"))
+
 
 def _profile_template(conn) -> int:
     row = conn.execute(
@@ -169,7 +188,9 @@ def _next_profile_version(conn, template_id: int) -> int:
 
 def _read_mix(conn) -> tuple[dict[str, float], bool]:
     rows = conn.execute(
-        sa.text("SELECT key, value FROM setting WHERE key IN (:post, :image, :website)"),
+        sa.text(
+            "SELECT key, value FROM setting WHERE key IN (:post, :image, :website)"
+        ),
         {
             "post": _MIX_KEYS[0],
             "image": _MIX_KEYS[1],
@@ -284,7 +305,11 @@ def upgrade():
                     "UPDATE prompt_pin SET template_id = :template_id, "
                     "version_number = :version, updated_at = CURRENT_TIMESTAMP WHERE id = :id"
                 ),
-                {"template_id": profile_template_id, "version": profile_version, "id": existing[0]},
+                {
+                    "template_id": profile_template_id,
+                    "version": profile_version,
+                    "id": existing[0],
+                },
             )
         else:
             conn.execute(
@@ -293,7 +318,11 @@ def upgrade():
                     "(target_kind, target_key, template_id, version_number, updated_at) "
                     "VALUES ('global', :target_key, :template_id, :version, CURRENT_TIMESTAMP)"
                 ),
-                {"target_key": _PROFILE_NAME, "template_id": profile_template_id, "version": profile_version},
+                {
+                    "target_key": _PROFILE_NAME,
+                    "template_id": profile_template_id,
+                    "version": profile_version,
+                },
             )
         conn.execute(
             sa.text("DELETE FROM setting WHERE key IN (:post, :image, :website)"),
@@ -307,7 +336,12 @@ def upgrade():
 
 def downgrade():
     # Profile conversion cannot safely recreate old template identities/pins;
-    # system_template retains their bytes for manual recovery.  Restore only
+    # system_template retains their bytes for manual recovery. Restore only
     # the schema column introduced by this revision.
+    bind = op.get_bind()
+    if bind.engine.name == "sqlite":
+        bind.exec_driver_sql("PRAGMA foreign_keys=OFF")
     with op.batch_alter_table("agent_run") as batch_op:
         batch_op.drop_column("prompt_metadata")
+    if bind.engine.name == "sqlite":
+        bind.exec_driver_sql("PRAGMA foreign_keys=ON")

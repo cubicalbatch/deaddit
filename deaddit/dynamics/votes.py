@@ -32,13 +32,13 @@ def _reject(reason: str, score: int) -> dict[str, Any]:
     return {"status": "rejected", "reason": reason, "score": score}
 
 
-def _success(
-    score: int, changed: bool, change_kind: str, structured: bool
-) -> dict[str, Any]:
-    result = {"status": "ok", "score": score}
-    if structured:
-        result.update(changed=changed, change_kind=change_kind)
-    return result
+def _success(score: int, changed: bool, change_kind: str) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "score": score,
+        "changed": changed,
+        "change_kind": change_kind,
+    }
 
 
 def _find_vote(voter: str, target: str, target_id: int) -> Vote | None:
@@ -57,18 +57,17 @@ def cast_vote(
     value: int,
     _retried: bool = False,
     *,
-    source: str | None = None,
-    allow_recast: bool | None = None,
+    source: str = "simulated",
+    allow_recast: bool = True,
 ) -> dict[str, Any]:
     """Cast a vote while keeping score, vote count, and karma canonical.
 
-    ``source`` and ``allow_recast`` are keyword-only.  Omitting both retains
-    the historical result shape and recast behavior for existing callers.
-    Explicit arguments return ``changed`` and ``change_kind`` metadata.
+    ``source`` defaults to ``"simulated"`` and ``allow_recast`` defaults to ``True``.
+    Returns a standardized dictionary containing ``status``, ``score``, ``changed``,
+    and ``change_kind`` metadata.
     """
-    requested_source = "agent" if source is None else source
-    recast = True if allow_recast is None else allow_recast
-    structured = source is not None or allow_recast is not None
+    requested_source = source
+    recast = allow_recast
 
     model = _MODELS.get(target)
     item = db.session.get(model, target_id) if model else None
@@ -157,4 +156,4 @@ def cast_vote(
             post_id=target_id if is_post else None,
             comment_id=None if is_post else target_id,
         )
-    return _success(int(item.score), changed, change_kind, structured)
+    return _success(int(item.score), changed, change_kind)

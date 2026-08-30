@@ -199,8 +199,8 @@ def test_run_once_uses_numeric_agent_id_and_reports_selected_persona(
     db_session.commit()
     calls = []
 
-    def fake_run_once(agent_id, *, trigger, force_intent):
-        calls.append((agent_id, trigger, force_intent))
+    def fake_run_once(agent_id, *, trigger, requested_intent):
+        calls.append((agent_id, trigger, requested_intent))
         run = AgentRun(
             agent_id=agent_id,
             persona_username=user.username,

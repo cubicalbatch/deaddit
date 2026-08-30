@@ -35,8 +35,6 @@ def strip_karma_on_remove() -> bool:
     ).strip().lower() in _TRUTHY
 
 
-_strip_karma_on_remove = strip_karma_on_remove  # internal alias
-
 _PLANS: tuple[tuple[str, type, Any], ...] = (
     ("post", Post, Vote.post_id),
     ("comment", Comment, Vote.comment_id),

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 from pydantic import BaseModel, ValidationError
 
@@ -15,11 +13,6 @@ from deaddit.llm.errors import (
 )
 from deaddit.llm.tools import (
     ToolSpec,
-    all_specs,
-    build_tool_results,
-    clear_registry,
-    get,
-    register,
     validate_tool_args,
 )
 
@@ -32,13 +25,6 @@ class EchoArgs(BaseModel):
 
 
 ECHO = ToolSpec(name="echo", description="Echo a message", parameters_model=EchoArgs)
-
-
-@pytest.fixture(autouse=True)
-def _clean_registry():
-    clear_registry()
-    yield
-    clear_registry()
 
 
 def _request(**overrides) -> ChatRequest:
@@ -81,8 +67,6 @@ def test_validate_accepts_dict_and_json_str():
         "message": "yo",
         "count": 1,
     }
-    register(ECHO)
-    assert validate_tool_args("echo", '{"message": "reg"}')["message"] == "reg"
 
 
 @pytest.mark.parametrize(
@@ -107,34 +91,6 @@ def test_validate_rejects_bad_arguments(bad_args, why):
 def test_validate_rejects_non_json_string():
     with pytest.raises(SchemaValidationError):
         validate_tool_args(ECHO, "{not json")
-
-
-def test_registry_lookup():
-    register(ECHO)
-    assert get("echo") is ECHO
-    with pytest.raises(KeyError):
-        get("nope")
-    assert all_specs() == [ECHO]
-
-
-# --- 3. build_tool_results -----------------------------------------------------
-
-
-def test_build_tool_results_valid_invalid_unknown():
-    register(ECHO)
-    calls = [
-        {"id": "c1", "function": {"name": "echo", "arguments": '{"message": "hi"}'}},
-        {"id": "c2", "function": {"name": "echo", "arguments": '{"count": 5}'}},
-        {"id": "c3", "function": {"name": "mystery", "arguments": "{}"}},
-    ]
-    results = build_tool_results(calls)
-    assert [r["tool_call_id"] for r in results] == ["c1", "c2", "c3"]
-    assert all(r["role"] == "tool" for r in results)
-    assert json.loads(results[0]["content"]) == {"message": "hi", "count": 1}
-    invalid = json.loads(results[1]["content"])
-    assert "error" in invalid
-    unknown = json.loads(results[2]["content"])
-    assert "error" in unknown
 
 
 # --- 4. payload serialization --------------------------------------------------

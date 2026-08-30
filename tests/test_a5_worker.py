@@ -199,6 +199,40 @@ def test_boot_sweep_then_execute_once(app, db_session, monkeypatch):
     )
     assert executions == [job_id], "executor ran the job more than once"
     assert row.result == {"batch_results": [], "count": 0}
+    assert runner._heartbeat_threads == []
+
+
+def test_job_runner_prunes_heartbeat_threads_after_job_finishes(
+    app, db_session, monkeypatch
+):
+    """JobRunner must not retain terminated heartbeat threads in _heartbeat_threads."""
+    from deaddit import jobs
+    from deaddit.runtime.runner import JobRunner
+
+    def quick_job(job):
+        return {"done": True}
+
+    monkeypatch.setattr(jobs, "_execute_batch_operation", quick_job)
+    monkeypatch.setenv("DEADDIT_WORKER_POLL_SECONDS", "0.05")
+
+    job = _make_job()
+    db_session.add(job)
+    db_session.commit()
+
+    runner = JobRunner(app)
+    try:
+        runner.start()
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            _db.session.expire_all()
+            row = _db.session.get(Job, job.id)
+            if row.status == JobStatus.COMPLETED:
+                break
+            time.sleep(0.05)
+    finally:
+        runner.stop(wait=True)
+
+    assert runner._heartbeat_threads == []
 
 
 # ---------------------------------------------------------------------------

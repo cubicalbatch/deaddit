@@ -21,12 +21,11 @@ from deaddit.dynamics.ranking import (
 from deaddit.extensions import db
 
 from .config import Config
-from .models import Comment, Post, Subdeaddit, User
+from .models import Comment, LLMProvider, Post, Subdeaddit, User
 from .utils import (
     format_content_html,
     get_comment_counts_bulk,
     get_websites_bulk,
-    process_post_title,
 )
 
 bp = Blueprint("web", __name__)
@@ -43,11 +42,10 @@ def index():
     total_subdeaddits = Subdeaddit.query.count()
 
     # Check if core configuration is set
-    openai_key = Config.get("OPENAI_KEY")
     openai_url = Config.get("OPENAI_API_URL")
 
-    is_configured = bool(
-        openai_key and openai_url and openai_url != "http://localhost/v1"
+    is_configured = LLMProvider.query.count() > 0 or bool(
+        openai_url and openai_url != "http://localhost/v1"
     )
 
     # Show setup message only if database is empty AND configuration is not set
@@ -123,10 +121,6 @@ def index():
         {"username": row.username, "post_count": row.post_count} for row in user_rows
     ]
 
-    # Process post titles
-    for post in posts:
-        post.title = process_post_title(post.title)
-
     # Get comment counts and generated websites efficiently
     post_ids = [post.id for post in posts]
     comment_counts = get_comment_counts_bulk(post_ids)
@@ -182,10 +176,6 @@ def subdeaddit(subdeaddit_name):
     )
     has_more = total_posts > page * posts_per_page
     total_pages = (total_posts + posts_per_page - 1) // posts_per_page
-
-    # Process post titles
-    for post in paginated_posts:
-        post.title = process_post_title(post.title)
 
     # Get comment counts and generated websites efficiently
     post_ids = [post.id for post in paginated_posts]
@@ -478,8 +468,6 @@ def user_profile(username):
             .limit(per_page)
             .all()
         )
-        for post in posts:
-            post.title = process_post_title(post.title)
         post_ids = [post.id for post in posts]
         context["posts"] = posts
         context["comment_counts"] = get_comment_counts_bulk(post_ids)
@@ -597,8 +585,6 @@ def search():
         )
         total_posts = posts_query.count()
         posts = posts_query.offset(offset).limit(posts_per_page).all()
-        for post in posts:
-            post.title = process_post_title(post.title)
         post_ids = [post.id for post in posts]
         comment_counts = get_comment_counts_bulk(post_ids)
         websites = get_websites_bulk(post_ids)

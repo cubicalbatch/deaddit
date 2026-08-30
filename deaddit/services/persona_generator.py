@@ -167,13 +167,6 @@ def _normalize_subscriptions(raw: object, valid_sub_names: set[str]) -> list[str
     return picked[:MAX_PERSONA_SUBSCRIPTIONS]
 
 
-USERNAME_STYLE_RULES = (
-    "lowercase; only letters, digits, underscores; 4-20 characters; "
-    "must NOT describe the user's personality (never two trait-words like "
-    "chill_dude, cozy_ghost, quiet_thinker); no real people's names."
-)
-
-
 class PersonaGenerationError(Exception):
     """Raised when persona generation or parsing fails."""
 

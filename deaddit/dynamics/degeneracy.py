@@ -318,7 +318,10 @@ def with_repetition_demotion(order_clauses: list) -> list:
 def hot_rank_key_demoted(
     *, score: int, created_at: datetime, now: datetime, demoted: bool
 ) -> float:
-    """Python mirror of the demoted hot key: ``0.5 ×`` the frozen mirror."""
+    """Test-only mirror of the demoted hot rank key: ``0.5 ×`` the frozen mirror.
+
+    Used by tests to assert numerical parity against SQL with_repetition_demotion.
+    """
     from deaddit.dynamics.ranking import post_rank_key
 
     key = post_rank_key("hot", score=score, created_at=created_at, now=now)

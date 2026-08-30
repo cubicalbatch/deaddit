@@ -461,11 +461,6 @@ def daily_metric_row(row: PlatformDaily) -> dict[str, Any]:
     }
 
 
-def daily_metrics(days: int = 30) -> list[dict[str, Any]]:
-    """Return additive vote, simulator, and token metrics for daily rows."""
-    return [daily_metric_row(row) for row in daily_series(days)]
-
-
 def sub_gini_series(window_days: int = 7) -> dict[str, float]:
     """Per-subdeaddit participation Gini over the trailing window.
 

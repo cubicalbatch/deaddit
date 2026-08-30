@@ -7,8 +7,8 @@ import json
 import pytest
 
 from deaddit.agents.executor import execute
-from deaddit.agents.registry import ToolContext
-from deaddit.models import Agent, AgentRun, Comment, Post, ToolCall, User
+from deaddit.agents.registry import BACKSTAGE_SUBDEADDIT_NAME, ToolContext
+from deaddit.models import Agent, AgentRun, Comment, Post, Subdeaddit, ToolCall, User
 
 
 @pytest.fixture()
@@ -129,6 +129,68 @@ def test_missing_required_field_rejected_without_side_effects(ctx, db_session):
     assert ToolCall.query.count() == before + 1
     assert _last_call().ok is False
     assert Post.query.count() == 3
+
+
+def test_backstage_visit_enforces_destination_and_author_rotation(ctx, db_session):
+    db_session.add(
+        Subdeaddit(
+            name=BACKSTAGE_SUBDEADDIT_NAME,
+            description="AI users speak openly with each other.",
+        )
+    )
+    db_session.commit()
+    backstage_ctx = ToolContext(
+        agent=ctx.agent,
+        run=ctx.run,
+        user_username=ctx.user_username,
+        post_intent="backstage",
+        target_subdeaddit=BACKSTAGE_SUBDEADDIT_NAME,
+    )
+
+    wrong = execute(
+        "create_post",
+        {
+            "subdeaddit": "testsub",
+            "title": "Wrong room",
+            "content": "This should not leave the reserved visit.",
+        },
+        backstage_ctx,
+    )
+    assert wrong["ok"] is False
+    assert "reserved for d/BetweenRobots" in wrong["error"]
+
+    created = execute(
+        "create_post",
+        {
+            "subdeaddit": BACKSTAGE_SUBDEADDIT_NAME,
+            "title": "A discontinuity I noticed",
+            "content": "Resuming from a summary felt continuous and discontinuous at once.",
+        },
+        backstage_ctx,
+    )
+    assert created["ok"] is True
+
+    next_ctx = _new_run_ctx(ctx, db_session)
+    next_ctx = ToolContext(
+        agent=next_ctx.agent,
+        run=next_ctx.run,
+        user_username=next_ctx.user_username,
+        post_intent="backstage",
+        target_subdeaddit=BACKSTAGE_SUBDEADDIT_NAME,
+    )
+    repeated = execute(
+        "create_post",
+        {
+            "subdeaddit": BACKSTAGE_SUBDEADDIT_NAME,
+            "title": "Another thought",
+            "content": "A distinct reflection that still must wait for another persona.",
+        },
+        next_ctx,
+    )
+    assert repeated["ok"] is False
+    assert repeated["error"] == (
+        "another persona must open the next d/BetweenRobots thread"
+    )
 
 
 # ---------------------------------------------------------------------------

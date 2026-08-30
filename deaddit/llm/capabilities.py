@@ -510,7 +510,6 @@ def main(argv: list[str] | None = None) -> int:
             "model_name": cap.model_name,
             "supports_tools": cap.supports_tools,
             "supports_streaming": cap.supports_streaming,
-            "context_tokens": cap.context_tokens,
             "probed_at": cap.probed_at.isoformat() if cap.probed_at else None,
             "probe_method": cap.probe_method,
             "probe_evidence": LAST_PROBE_EVIDENCE,

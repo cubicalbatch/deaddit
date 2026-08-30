@@ -1,4 +1,4 @@
-// Per-image and feed-wide expand/minimize for image post cards (plan 6C).
+// Per-image expand/minimize for image post cards (plan 6C).
 // Vanilla ES module, no dependencies. Loaded globally from base.html since
 // image cards can appear on the front page, subdeaddits, user profiles, and
 // search results.
@@ -18,13 +18,6 @@ const EXPAND_ICON = 'bi-arrows-angle-expand';
 const MINIMIZE_ICON = 'bi-arrows-angle-contract';
 
 let nextImageId = 0;
-
-// Feed-wide choice set by the toolbar's "Expand all" / "Minimize all"
-// buttons. `null` means no global choice has been made yet, so newly
-// enhanced or HTMX-appended cards keep the server-rendered thumbnail. Once
-// set, it lives for the rest of the page's life (including across "Load
-// More" fetches) so later cards match whatever the feed was last set to.
-let feedChoice = null;
 
 function cardImageAndButton(media) {
     return [media.querySelector('.post-card__thumb'), media.querySelector('.post-card__expand')];
@@ -75,17 +68,10 @@ function enhanceCard(media) {
     btn.setAttribute('aria-label', 'Expand image');
     btn.innerHTML = `<i class="bi ${EXPAND_ICON}" aria-hidden="true"></i>`;
     media.appendChild(btn);
-
-    if (feedChoice !== null) setCardState(media, feedChoice);
 }
 
 function enhanceAll(root = document) {
     root.querySelectorAll('.post-card__media').forEach(enhanceCard);
-}
-
-function applyFeedChoice(expanded) {
-    feedChoice = expanded;
-    document.querySelectorAll('.post-card__media').forEach((media) => setCardState(media, expanded));
 }
 
 document.addEventListener('click', (event) => {
@@ -93,19 +79,12 @@ document.addEventListener('click', (event) => {
     if (toggleBtn) {
         const media = toggleBtn.closest('.post-card__media');
         if (media) setCardState(media, !isExpanded(media));
-        return;
-    }
-
-    const feedBtn = event.target.closest('[data-feed-image-action]');
-    if (feedBtn) {
-        applyFeedChoice(feedBtn.dataset.feedImageAction === 'expand-all');
     }
 });
 
 enhanceAll();
 document.addEventListener('DOMContentLoaded', () => enhanceAll());
-// New cards appended by htmx (Load More) get the same treatment, following
-// whatever feed-wide choice is currently in effect.
+// New cards appended by htmx (Load More) get the same treatment.
 for (const event of ['htmx:afterSwap', 'htmx:load']) {
     document.addEventListener(event, () => enhanceAll());
 }

@@ -605,28 +605,6 @@ html[data-theme="dark"] .brand__logo--dark {
     color: var(--text-2);
 }
 
-/* Meta row kept for user_profile.html comment listings
-   (post.html comments use .comment-meta instead). */
-.comment-info {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    font-size: var(--font-size-sm);
-    color: var(--text-2);
-    flex-wrap: wrap;
-}
-/* user_profile.html comment listings still use .comment-info; anchors need
-   the same link treatment as .comment-meta a or they render UA-default blue
-   underlined and fail AA on dark. --text-2: 5.70:1 light / 7.22:1 dark on surface */
-.comment-info a {
-    color: var(--text-2);
-    text-decoration: none;
-    font-weight: 500;
-}
-
-.comment-info a:hover {
-    color: var(--accent);
-}
 
 
 .ai-generated {
@@ -832,27 +810,6 @@ html[data-theme="dark"] .brand__logo--dark {
 .comments-section .comment-body {
     font-size: var(--font-size-base);
 }
-.subdeaddit-header {
-    text-align: center;
-    margin-bottom: var(--space-xxl);
-    padding: var(--space-xl) 0;
-    background-color: var(--bg-surface);
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border);
-}
-
-.subdeaddit-title {
-    font-size: var(--font-size-xxl);
-    margin: 0 0 var(--space-sm) 0;
-    color: var(--accent);
-    font-weight: 700;
-}
-
-.subdeaddit-subtitle {
-    color: var(--text-2);
-    font-size: var(--font-size-lg);
-    margin: 0;
-}
 
 /* Collapsed state (server-flagged for deep threads, or user-toggled):
    the comment shrinks to its one-line header. Hide body, actions, children,
@@ -901,67 +858,7 @@ html[data-theme="dark"] .brand__logo--dark {
         box-shadow var(--motion-slow) var(--ease-out-quart);
 }
 
-/* Mobile filter styles */
-.mobile-filter-wrapper {
-    display: none;
-    position: relative;
-}
-
-.mobile-filter-toggle {
-    display: none;
-}
-
-.mobile-filter-dropdown {
-    display: none !important;
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--space-sm);
-    background-color: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: var(--space-sm);
-    position: absolute;
-    top: 100%;
-    right: 0;
-    min-width: 250px;
-    z-index: 1000;
-    box-shadow: var(--shadow-2);
-}
-
-.mobile-filter-dropdown.show {
-    display: flex !important;
-}
-
-.filter-content {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-}
-
-/* Media query for mobile devices */
 @media (max-width: 768px) {
-
-    .mobile-filter-wrapper {
-        display: block;
-    }
-
-    .mobile-filter-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--space-xs);
-        flex-shrink: 0;
-        font-size: var(--font-size-sm);
-        padding: var(--space-xs) var(--space-sm);
-    }
-
-    .mobile-filter-toggle.active {
-        background-color: var(--accent);
-        color: white;
-    }
-
-    #resetFilter {
-        width: 100%;
-    }
 
     .post {
         flex-direction: column;
@@ -992,79 +889,8 @@ html[data-theme="dark"] .brand__logo--dark {
     .post-card__title {
         font-size: var(--font-size-base);
     }
-
-    .subdeaddit-title {
-        font-size: var(--font-size-xl);
-    }
 }
 
-.user-profile {
-    background-color: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-xl);
-    margin-bottom: var(--space-xl);
-    box-shadow: var(--shadow-1);
-}
-
-.user-profile h1 {
-    color: var(--text-1);
-    margin-bottom: var(--space-lg);
-    font-size: var(--font-size-xxl);
-    font-weight: 700;
-}
-
-.user-info {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: var(--space-md);
-}
-
-.info-item {
-    background-color: var(--bg-canvas);
-    padding: var(--space-md);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border);
-}
-
-.info-item.full-width {
-    grid-column: 1 / -1;
-}
-
-.info-label {
-    font-weight: 600;
-    color: var(--text-2);
-    margin-right: var(--space-sm);
-    font-size: var(--font-size-sm);
-}
-
-.info-value {
-    color: var(--text-1);
-    font-weight: 500;
-}
-
-.interests-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-sm);
-    margin-top: var(--space-sm);
-}
-
-.interest-tag {
-    background-color: var(--bg-surface);
-    color: var(--text-1);
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: var(--radius-lg);
-    font-size: var(--font-size-sm);
-    border: 1px solid var(--border);
-    transition: all 0.2s ease;
-}
-
-.interest-tag:hover {
-    background-color: var(--accent);
-    color: white;
-    border-color: var(--accent);
-}
 
 /* Enhanced form styling */
 .btn {
@@ -2173,10 +1999,6 @@ a.chip:hover {
     border-color: var(--up-hover);
 }
 
-/* Setup page: keep the hero column centered without bootstrap utilities */
-.setup-center {
-    justify-content: center;
-}
 
 /* ============================================================
    UX-4: User profiles, people list, setup wizard, site search

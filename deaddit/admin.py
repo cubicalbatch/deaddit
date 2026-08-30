@@ -3,7 +3,6 @@ Admin interface for Deaddit content management.
 Provides web-based UI for job management and content generation.
 """
 
-import base64
 import json
 import logging
 import os
@@ -51,7 +50,6 @@ from deaddit.models import (
     AgentMemory,
     AgentRun,
     AgentTurn,
-    ApiEndpointConfig,
     ApiModel,
     Ban,
     Comment,
@@ -1798,12 +1796,11 @@ def settings():
     default_provider = LLMProvider.get_default()
 
     config = {
-        "openai_api_url": all_settings["OPENAI_API_URL"]["value"],
-        "openai_model": all_settings["OPENAI_MODEL"]["value"],
-        "api_base_url": all_settings["API_BASE_URL"]["value"],
-        "models": all_settings["MODELS"]["value"],
-        "api_token_set": all_settings["API_TOKEN"]["value"] == "***set***",
-        "openai_key_set": all_settings["OPENAI_KEY"]["value"] != "***not set***",
+        "openai_api_url": all_settings.get("OPENAI_API_URL", {}).get("value"),
+        "openai_model": all_settings.get("OPENAI_MODEL", {}).get("value"),
+        "api_token_set": all_settings.get("API_TOKEN", {}).get("value") == "***set***",
+        "openai_key_set": all_settings.get("OPENAI_KEY", {}).get("value")
+        != "***not set***",
         "all_settings": all_settings,
         "default_provider": default_provider.to_dict() if default_provider else None,
     }
@@ -1819,7 +1816,7 @@ def capabilities():
     caps = EndpointCapability.query.order_by(
         EndpointCapability.api_url, EndpointCapability.model_name
     ).all()
-    endpoints = ApiEndpointConfig.query.order_by(ApiEndpointConfig.api_url).all()
+    endpoints = LLMProvider.query.order_by(LLMProvider.api_url).all()
     return render_template(
         "admin/capabilities.html",
         capabilities=caps,
@@ -1974,11 +1971,8 @@ def save_config_api():
 
         if data.get("openai_model"):
             Config.set("OPENAI_MODEL", data["openai_model"])
-        if data.get("api_base_url"):
-            Config.set("API_BASE_URL", data["api_base_url"].rstrip("/"))
-        if data.get("models"):
-            Config.set("MODELS", data["models"])
         troll_chance_raw = str(data.get("troll_user_chance") or "").strip()
+
         if troll_chance_raw:
             try:
                 troll_chance = float(troll_chance_raw)
@@ -2040,13 +2034,10 @@ def save_config_api():
 def save_deaddit_config_api():
     """API endpoint to save Deaddit configuration to database."""
     try:
-        data = request.get_json()
-
-        # Save configuration values to database
-        if data.get("api_base_url"):
-            Config.set("API_BASE_URL", data["api_base_url"].rstrip("/"))
+        data = request.get_json() or {}
 
         # Empty-means-unchanged: an absent or blank token never overwrites the
+
         # stored value. Only a non-empty token is validated and written. Since
         # A6 the token is environment-only: a non-empty token is refused.
         token = (data.get("api_token") or "").strip()
@@ -2275,130 +2266,6 @@ def load_models_api():
         return jsonify({"success": False, "message": f"Error loading models: {str(e)}"})
 
 
-@admin_bp.route("/api/models/<api_url_hash>", methods=["GET"])
-@production_disabled
-@admin_required
-def get_cached_models_api(api_url_hash):
-    """API endpoint to get cached models for a specific API endpoint."""
-    try:
-        # Decode the base64 encoded API URL
-        api_url = base64.b64decode(api_url_hash.encode()).decode("utf-8")
-
-        # Get cached models
-        cached_models = ApiModel.get_models_for_api(api_url)
-        model_names = [model.model_name for model in cached_models]
-
-        if cached_models:
-            last_fetched = (
-                max(model.last_fetched for model in cached_models)
-                if cached_models
-                else None
-            )
-            return jsonify(
-                {
-                    "success": True,
-                    "models": model_names,
-                    "cached": True,
-                    "last_fetched": last_fetched.isoformat() if last_fetched else None,
-                    "count": len(model_names),
-                }
-            )
-        else:
-            return jsonify(
-                {
-                    "success": True,
-                    "models": [],
-                    "cached": True,
-                    "message": "No cached models found for this API endpoint",
-                }
-            )
-
-    except Exception as e:
-        logger.error(f"Error getting cached models: {str(e)}")
-        return jsonify(
-            {"success": False, "message": f"Error retrieving cached models: {str(e)}"}
-        )
-
-
-@admin_bp.route("/api/endpoint-config/<api_url_hash>", methods=["GET"])
-@production_disabled
-@admin_required
-def get_endpoint_config_api(api_url_hash):
-    """Get configuration for a specific API endpoint including default model and cached models."""
-    try:
-        # Decode the base64 encoded API URL
-        api_url = base64.b64decode(api_url_hash.encode()).decode("utf-8")
-
-        # Get default model for this endpoint
-        default_model = ApiEndpointConfig.get_default_model_for_endpoint(api_url)
-
-        # Get cached models for this endpoint
-        cached_models = ApiModel.get_models_for_api(api_url)
-        model_names = [model.model_name for model in cached_models]
-
-        last_fetched = None
-        if cached_models:
-            last_fetched = max(model.last_fetched for model in cached_models)
-
-        return jsonify(
-            {
-                "success": True,
-                "api_url": api_url,
-                "default_model": default_model,
-                "models": model_names,
-                "last_fetched": last_fetched.isoformat() if last_fetched else None,
-                "model_count": len(model_names),
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"Error getting endpoint config: {str(e)}")
-        return jsonify(
-            {
-                "success": False,
-                "message": f"Error retrieving endpoint configuration: {str(e)}",
-            }
-        )
-
-
-@admin_bp.route("/api/endpoint-config", methods=["POST"])
-@production_disabled
-@admin_required
-def save_endpoint_default_model_api():
-    """Save the default model for a specific API endpoint."""
-    try:
-        data = request.get_json()
-        api_url = data.get("api_url")
-        default_model = data.get("default_model")
-
-        if not api_url:
-            return jsonify({"success": False, "message": "API URL is required"})
-
-        if not default_model:
-            return jsonify({"success": False, "message": "Default model is required"})
-
-        # Save the default model for this endpoint
-        config = ApiEndpointConfig.set_default_model_for_endpoint(
-            api_url, default_model
-        )
-
-        logger.info(f"Set default model '{default_model}' for API endpoint: {api_url}")
-
-        return jsonify(
-            {
-                "success": True,
-                "message": f"Default model '{default_model}' saved for this endpoint",
-                "config": config.to_dict(),
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"Error saving endpoint default model: {str(e)}")
-        return jsonify(
-            {"success": False, "message": f"Error saving default model: {str(e)}"}
-        )
-
-
 @admin_bp.route("/api/get-endpoint-key", methods=["POST"])
 @production_disabled
 @admin_required
@@ -2528,7 +2395,6 @@ def api_get_provider(provider_id):
 
 
 @admin_bp.route("/api/providers/<int:provider_id>", methods=["PUT", "POST"])
-@admin_bp.route("/api/providers/<int:provider_id>/update", methods=["POST", "PUT"])
 @production_disabled
 @admin_required
 def api_update_provider(provider_id):
@@ -2597,7 +2463,6 @@ def api_update_provider(provider_id):
 
 
 @admin_bp.route("/api/providers/<int:provider_id>", methods=["DELETE"])
-@admin_bp.route("/api/providers/<int:provider_id>/delete", methods=["POST", "DELETE"])
 @production_disabled
 @admin_required
 def api_delete_provider(provider_id):
@@ -4140,7 +4005,6 @@ def api_get_agent(agent_id):
 
 
 @admin_bp.route("/api/agents/<int:agent_id>", methods=["PUT", "POST"])
-@admin_bp.route("/api/agents/<int:agent_id>/update", methods=["POST", "PUT"])
 @production_disabled
 @admin_required
 def api_update_agent(agent_id):
@@ -5234,6 +5098,7 @@ def prompts_create_version_api(name):
         return jsonify({"error": str(exc)}), 400
     return jsonify(_version_dict(row)), 201
 
+
 @admin_bp.route("/api/pins")
 @production_disabled
 @admin_required
@@ -5339,14 +5204,19 @@ def prompt_renders_api():
 # RNG and no persistence, so a reviewer can inspect behavior before pinning.
 
 _PROFILE_TEMPLATE = "agent.visit_profile"
-_PREVIEW_INTENTS = frozenset({"browse", "post", "image", "website"})
+_PREVIEW_INTENTS = frozenset({"browse", "post", "image", "website", "backstage"})
 
 
 def _profile_leaf_diff(path, effective, preview):
     """One leaf-level change entry, or None when the values are equal."""
     if effective == preview:
         return None
-    return {"path": path, "change": "modified", "effective": effective, "preview": preview}
+    return {
+        "path": path,
+        "change": "modified",
+        "effective": effective,
+        "preview": preview,
+    }
 
 
 def _profile_diff(effective, preview, path=""):
@@ -5369,9 +5239,7 @@ def _profile_diff(effective, preview, path=""):
                     {"path": child, "change": "removed", "effective": effective[key]}
                 )
             else:
-                entries.extend(
-                    _profile_diff(effective[key], preview[key], child)
-                )
+                entries.extend(_profile_diff(effective[key], preview[key], child))
         return entries
     if (
         isinstance(effective, list)
@@ -5385,7 +5253,11 @@ def _profile_diff(effective, preview, path=""):
             child = f"{path}[{item_id}]"
             if item_id not in effective_by_id:
                 entries.append(
-                    {"path": child, "change": "added", "preview": preview_by_id[item_id]}
+                    {
+                        "path": child,
+                        "change": "added",
+                        "preview": preview_by_id[item_id],
+                    }
                 )
             elif item_id not in preview_by_id:
                 entries.append(
@@ -5409,7 +5281,10 @@ def _profile_diff(effective, preview, path=""):
 def _preview_warnings(plan, requested_intent):
     """Derive the same conditions runtime logs as reviewer-facing warnings."""
     warnings = []
-    if requested_intent in ("image", "website") and plan.intent != requested_intent:
+    if (
+        requested_intent in ("image", "website", "backstage")
+        and plan.intent != requested_intent
+    ):
         warnings.append(
             f"Requested intent '{requested_intent}' is ineligible for this "
             f"agent; at runtime it degrades to '{plan.intent}'."
@@ -5438,9 +5313,12 @@ def prompts_page():
 @production_disabled
 @admin_required
 def prompts_validate_api(name):
-    """Dry-run visit-profile validation without storing anything."""
-    from deaddit.llm.prompts import PromptError, get_template, parse_visit_profile
-    from deaddit.llm.prompts import serialize_visit_profile
+    from deaddit.llm.prompts import (
+        PromptError,
+        get_template,
+        parse_visit_profile,
+        serialize_visit_profile,
+    )
 
     if name != _PROFILE_TEMPLATE:
         # Unknown names 404; other real templates explain the restriction.
@@ -5501,14 +5379,20 @@ def prompts_preview_api(name):
         return jsonify(
             {
                 "error": "Field 'requested_intent' must be one of "
-                "browse, post, image, website, or null"
+                "browse, post, image, website, backstage, or null"
             }
         ), 400
     unread_count = data.get("unread_count", 0)
-    if isinstance(unread_count, bool) or not isinstance(unread_count, int) or unread_count < 0:
+    if (
+        isinstance(unread_count, bool)
+        or not isinstance(unread_count, int)
+        or unread_count < 0
+    ):
         return jsonify({"error": "Field 'unread_count' must be an integer >= 0"}), 400
     version = data.get("version")
-    if version is not None and (isinstance(version, bool) or not isinstance(version, int)):
+    if version is not None and (
+        isinstance(version, bool) or not isinstance(version, int)
+    ):
         return jsonify({"error": "Field 'version' must be an integer or null"}), 400
 
     agent = db.session.get(Agent, agent_id)
@@ -5573,6 +5457,7 @@ def prompts_preview_api(name):
                 "intent": plan.intent,
                 "intent_source": plan.intent_source,
                 "content_kind": plan.content_kind,
+                "target_subdeaddit": plan.target_subdeaddit,
                 "offered_tool_names": sorted(plan.offered_tool_names),
                 "length_target_id": plan.length_target_id,
                 "direction_ids": list(plan.direction_ids),

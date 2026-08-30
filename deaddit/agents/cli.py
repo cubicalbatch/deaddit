@@ -16,7 +16,7 @@ from deaddit.agents.cohort import (
 from deaddit.agents.loop import DEFAULT_CONFIG, run_once
 from deaddit.agents.memory import backfill_persona_history
 from deaddit.agents.parity import build_sample_packet, compute_report, connect_ro
-from deaddit.agents.registry import AutonomyTier
+from deaddit.agents.registry import POST_TOOL_NAMES, AutonomyTier
 from deaddit.extensions import db
 from deaddit.llm import CapabilityError, ensure_tools_allowed
 from deaddit.llm import capabilities as _capabilities
@@ -346,7 +346,7 @@ def run_once_command(ctx, agent_id, intent) -> None:
             raise click.ClickException(f"No agent registered for id '{agent_id}'")
 
         try:
-            run = run_once(agent_row.id, trigger="manual", force_intent=intent)
+            run = run_once(agent_row.id, trigger="manual", requested_intent=intent)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
 
@@ -404,7 +404,7 @@ def _creation_counts(calls) -> tuple[int, int]:
     for call in calls:
         if not call.ok:
             continue
-        if call.name == "create_post":
+        if call.name in POST_TOOL_NAMES:
             posts += 1
         elif call.name == "create_comment":
             comments += 1

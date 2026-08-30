@@ -31,23 +31,23 @@ def _fresh_settings_cache(monkeypatch):
 
 
 def test_nonsecret_db_beats_env(app, db_session, monkeypatch):
-    monkeypatch.setenv("MODELS", "from-env")
-    Setting.set_value("MODELS", "from-db", None)
-    assert Config.get("MODELS") == "from-db"
+    monkeypatch.setenv("SEED_VOTE_MAX", "100")
+    Setting.set_value("SEED_VOTE_MAX", "200", None)
+    assert Config.get("SEED_VOTE_MAX") == "200"
 
 
 def test_nonsecret_env_beats_default_when_no_row(app, db_session, monkeypatch):
-    db_session.query(Setting).filter(Setting.key == "MODELS").delete()
+    db_session.query(Setting).filter(Setting.key == "SEED_VOTE_MAX").delete()
     db_session.commit()
-    monkeypatch.setenv("MODELS", "from-env")
-    assert Config.get("MODELS") == "from-env"
+    monkeypatch.setenv("SEED_VOTE_MAX", "100")
+    assert Config.get("SEED_VOTE_MAX") == "100"
 
 
 def test_nonsecret_default_used_when_db_and_env_unset(app, db_session, monkeypatch):
-    db_session.query(Setting).filter(Setting.key == "MODELS").delete()
+    db_session.query(Setting).filter(Setting.key == "SEED_VOTE_MAX").delete()
     db_session.commit()
-    monkeypatch.delenv("MODELS", raising=False)
-    assert Config.get("MODELS") == Config.DEFAULTS["MODELS"]
+    monkeypatch.delenv("SEED_VOTE_MAX", raising=False)
+    assert Config.get("SEED_VOTE_MAX") == Config.DEFAULTS["SEED_VOTE_MAX"]
 
 
 def test_nonsecret_param_default_wins_over_nothing(app, db_session, monkeypatch):
@@ -64,7 +64,7 @@ def test_nonsecret_param_default_wins_over_nothing(app, db_session, monkeypatch)
 
 
 def test_cached_get_hits_database_once(app, db_session, monkeypatch):
-    Setting.set_value("API_BASE_URL", "http://db-base", None)
+    Setting.set_value("SEED_VOTE_MAX", "50", None)
     calls = []
     original = Setting.get_value
 
@@ -73,10 +73,10 @@ def test_cached_get_hits_database_once(app, db_session, monkeypatch):
         return original(key, default)
 
     monkeypatch.setattr(Setting, "get_value", counting_get_value)
-    assert Config.get("API_BASE_URL") == "http://db-base"
-    assert Config.get("API_BASE_URL") == "http://db-base"
-    assert Config.get("API_BASE_URL") == "http://db-base"
-    assert calls == ["API_BASE_URL"]
+    assert Config.get("SEED_VOTE_MAX") == "50"
+    assert Config.get("SEED_VOTE_MAX") == "50"
+    assert Config.get("SEED_VOTE_MAX") == "50"
+    assert calls == ["SEED_VOTE_MAX"]
 
 
 def test_config_set_visible_immediately(app, db_session):
@@ -88,13 +88,13 @@ def test_config_set_visible_immediately(app, db_session):
 
 
 def test_direct_orm_write_visible_immediately_via_event_hook(app, db_session):
-    Setting.set_value("MODELS", "before", None)
-    assert Config.get("MODELS") == "before"
-    row = db_session.get(Setting, "MODELS")
+    Setting.set_value("SEED_VOTE_MAX", "before", None)
+    assert Config.get("SEED_VOTE_MAX") == "before"
+    row = db_session.get(Setting, "SEED_VOTE_MAX")
     row.value = "after"
     db_session.commit()
     # after_flush event hook invalidated the cache without any manual step.
-    assert Config.get("MODELS") == "after"
+    assert Config.get("SEED_VOTE_MAX") == "after"
 
 
 def test_cache_expires_after_ttl(app, db_session, monkeypatch):
@@ -103,24 +103,24 @@ def test_cache_expires_after_ttl(app, db_session, monkeypatch):
     monkeypatch.setattr(
         settings_service.time, "monotonic", lambda: real_monotonic() + offset[0]
     )
-    Setting.set_value("API_BASE_URL", "http://first", None)
-    assert Config.get("API_BASE_URL") == "http://first"
+    Setting.set_value("SEED_VOTE_MAX", "50", None)
+    assert Config.get("SEED_VOTE_MAX") == "50"
 
     # Mutate the DB behind the cache's back: Core SQL update produces no ORM
     # flush of Setting instances, so the invalidation hook must not fire.
     table = Setting.__tablename__
     db_session.execute(
-        text(f"UPDATE {table} SET value = 'http://second' WHERE key = 'API_BASE_URL'")
+        text(f"UPDATE {table} SET value = '100' WHERE key = 'SEED_VOTE_MAX'")
     )
     db_session.commit()
 
     # Within the TTL the cached value persists.
     assert offset[0] < settings_service.ttl_seconds()
-    assert Config.get("API_BASE_URL") == "http://first"
+    assert Config.get("SEED_VOTE_MAX") == "50"
 
     # Advance past the TTL -> next get re-reads the database.
     offset[0] = settings_service.ttl_seconds() + 1.0
-    assert Config.get("API_BASE_URL") == "http://second"
+    assert Config.get("SEED_VOTE_MAX") == "100"
 
 
 def test_cached_unit_semantics_negative_lookup_and_expiry(monkeypatch):
@@ -206,7 +206,7 @@ def test_is_secret_key_covers_prefix_and_frozenset():
     assert is_secret_key("API_KEY_WHATEVER")
     assert is_secret_key("API_TOKEN")
     assert not is_secret_key("PRODUCTION")
-    assert not is_secret_key("API_BASE_URL")
+    assert not is_secret_key("SEED_VOTE_MAX")
 
 
 # ---------------------------------------------------------------------------
@@ -233,18 +233,6 @@ def test_defect2_get_all_settings_masks_every_secret(app, db_session, monkeypatc
     all_blob = json.dumps(Config.get_all_settings())
     for plaintext in ("sk-openai-plain", "tok-plain", "gsk-plain"):
         assert plaintext not in all_blob
-
-    endpoint_blob = json.dumps(Config.get_all_endpoint_keys())
-    for plaintext in ("sk-openai-plain", "tok-plain", "gsk-plain"):
-        assert plaintext not in endpoint_blob
-    assert '"key"' not in endpoint_blob
-
-    keys = Config.get_all_endpoint_keys()
-    groq = keys["https://api.groq.com/openai/v1"]
-    assert groq["has_key"] is True
-    assert groq["masked"]
-    openai_entry = keys["https://api.openai.com/v1"]
-    assert set(openai_entry) == {"name", "masked", "has_key"}
 
     settings_view = Config.get_all_settings()
     for key in ("OPENAI_KEY", "API_TOKEN", "SECRET_KEY"):

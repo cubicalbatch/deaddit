@@ -103,20 +103,6 @@ def get_websites_bulk(post_ids: list[int]) -> dict[int, GeneratedWebsite]:
     return {website.post_id: website for website in websites}
 
 
-@cache.memoize(timeout=300)
-def get_single_comment_count(post_id: int) -> int:
-    """
-    Get comment count for a single post with caching.
-
-    Args:
-        post_id: Post ID to get comment count for
-
-    Returns:
-        Comment count for the post
-    """
-    return Comment.query.filter_by(post_id=post_id).count()
-
-
 def process_post_title(title: str) -> str:
     """
     Process post titles by removing HTML tags and replacing Reddit references.

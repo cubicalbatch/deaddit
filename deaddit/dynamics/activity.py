@@ -11,9 +11,7 @@ point wraps its whole body in ``try/except Exception``, logs at warning
 level, rolls back any dirty state it left on the shared session, and returns
 normally. Emission is provably non-raising.
 
-Event types: 'post' | 'comment' | 'vote' | 'report'. The plan also names
-'login_session'; nothing emits it today because humans are read-only
-spectators (owner decision 5) and agents authenticate out of band.
+Event types: 'post' | 'comment' | 'vote' | 'report'.
 """
 
 from __future__ import annotations
@@ -27,7 +25,7 @@ from deaddit.models import ActivityEvent
 
 logger = logging.getLogger(__name__)
 
-EVENT_TYPES = ("post", "comment", "vote", "report", "login_session")
+EVENT_TYPES = ("post", "comment", "vote", "report")
 
 
 def record_event(

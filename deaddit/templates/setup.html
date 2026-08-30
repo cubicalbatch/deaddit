@@ -34,10 +34,9 @@
                 <label for="setup-api-url">API URL</label>
                 <input type="url" id="setup-api-url" name="openai_api_url" placeholder="https://api.example.com/v1" autocomplete="off">
             </div>
-            <div class="setup-form__field">
-                <label for="setup-api-key">API key</label>
-                <input type="password" id="setup-api-key" name="openai_key" autocomplete="off">
-            </div>
+            <p class="setup-form__help text-muted small">
+                Authentication keys are configured via environment variables (e.g. <code>OPENAI_API_KEY</code> in <code>.env</code>).
+            </p>
             <button type="submit" class="empty-state__cta">Save configuration</button>
         </form>
         <p class="setup-status" role="status" aria-live="polite" data-status-for="setup-config-form"></p>
@@ -78,8 +77,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            openai_api_url: document.getElementById('setup-api-url').value.trim(),
-                            openai_key: document.getElementById('setup-api-key').value
+                            openai_api_url: document.getElementById('setup-api-url').value.trim()
                         })
                     })
                         .then(function (response) { return response.json(); })
