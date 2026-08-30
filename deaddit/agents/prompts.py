@@ -677,8 +677,8 @@ _DEFAULT_PROFILE_DOCUMENT = {
     ],
     "intent_mix": {
         "post": 0.30,
-        "image": 0.0,
-        "website": 0.0,
+        "image": 0.15,
+        "website": 0.15,
         "backstage": 0.10,
     },
     "length_catalog": {
