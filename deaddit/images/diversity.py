@@ -26,6 +26,7 @@ class ImageDiversity:
     """One selected direction and its compatible rendering choices."""
 
     direction: DiversityOption
+    subject: DiversityOption
     framing: DiversityOption
     lighting: DiversityOption
     capture: DiversityOption
@@ -82,6 +83,94 @@ def _drawn(
         capture=_option("capture", capture[0], capture[1], medium="drawn"),
         color=_option("color", color[0], color[1], medium="drawn"),
     )
+
+
+# Subject-matter axis: a nudge toward one subject neighbourhood.  The agent's
+# own image_prompt stays authoritative — the fragment only tilts the scene
+# choice away from the safe everyday defaults (food, pets, household objects).
+SUBJECT_OPTIONS: tuple[DiversityOption, ...] = (
+    DiversityOption(
+        "subject.urban_night",
+        "Lean the scene toward an urban night setting: neon-lit streets, shop "
+        "windows or a dimly lit transit platform after dark.",
+    ),
+    DiversityOption(
+        "subject.wilderness",
+        "Lean the scene toward wilderness: a forest trail, open ridge line or "
+        "riverbank far from any building.",
+        weight=1.0,
+    ),
+    DiversityOption(
+        "subject.mechanical_industrial",
+        "Lean the scene toward mechanical or industrial matter: gears, engines, "
+        "workshop tools or factory floor details.",
+    ),
+    DiversityOption(
+        "subject.historical_archival",
+        "Lean the scene toward historical or archival material: old documents, "
+        "museum pieces or weathered monuments that carry visible age.",
+    ),
+    DiversityOption(
+        "subject.abstract_texture",
+        "Lean the scene toward abstract texture: close-up patterns of rust, "
+        "fabric, peeling paint or rippled sand that read as pure surface.",
+    ),
+    DiversityOption(
+        "subject.candid_portrait",
+        "Lean the scene toward a candid human portrait: one person absorbed in "
+        "an everyday task, unaware of the camera.",
+    ),
+    DiversityOption(
+        "subject.architectural_detail",
+        "Lean the scene toward architectural detail: stairwells, facades, "
+        "doorways or the geometry of a building interior.",
+    ),
+    DiversityOption(
+        "subject.weather",
+        "Lean the scene toward weather as the main event: fog, storm clouds, "
+        "rain on glass or after-storm light.",
+    ),
+    DiversityOption(
+        "subject.water_scene",
+        "Lean the scene toward water: a harbour, lakeshore, swimming pool or "
+        "rain-swollen gutter as the centrepiece.",
+    ),
+    DiversityOption(
+        "subject.crowd_street",
+        "Lean the scene toward a crowd or street scene: market bustle, a queue "
+        "or passers-by crossing in different directions.",
+    ),
+    DiversityOption(
+        "subject.macro_nature",
+        "Lean the scene toward macro nature: insects, moss, seed heads or bark "
+        "photographed at close range.",
+    ),
+    DiversityOption(
+        "subject.vintage_retro",
+        "Lean the scene toward vintage or retro character: analogue gadgets, "
+        "period clothing or a room that stopped in an earlier decade.",
+    ),
+)
+
+_SUBJECT_BY_ID = {option.id: option for option in SUBJECT_OPTIONS}
+
+
+def sample_subject(
+    rng: random.Random,
+    *,
+    subject_id: str | None = None,
+) -> DiversityOption:
+    """Pick one subject-matter nudge using only the caller's random stream."""
+
+    if subject_id is not None:
+        try:
+            return _SUBJECT_BY_ID[subject_id]
+        except KeyError as exc:
+            valid = ", ".join(option.id for option in SUBJECT_OPTIONS)
+            raise ValueError(
+                f"unknown image diversity subject ID {subject_id!r}; expected one of: {valid}"
+            ) from exc
+    return SUBJECT_OPTIONS[rng.randrange(len(SUBJECT_OPTIONS))]
 
 
 # Direction descriptions deliberately describe *how* to approach the request;
@@ -608,13 +697,15 @@ def sample_image_diversity(
     rng: random.Random,
     *,
     direction_id: str | None = None,
+    subject_id: str | None = None,
     source_prompt: str = "",
 ) -> ImageDiversity:
     """Choose one coherent direction using only the caller's random stream.
 
     ``direction_id`` is used by the prompt planner to carry one locally chosen
     direction through the image prompt and downstream samplers.  When absent,
-    one of the twelve stable directions is selected.  An explicit photographic
+    one of the twelve stable directions is selected.  ``subject_id`` carries a
+    locally chosen subject-matter nudge the same way.  An explicit photographic
     or drawn medium in ``source_prompt`` overrides the direction's default
     medium without changing its intent.
     """
@@ -629,6 +720,8 @@ def sample_image_diversity(
                 f"unknown image diversity direction ID {direction_id!r}; expected one of: {valid}"
             ) from exc
 
+    subject = sample_subject(rng, subject_id=subject_id)
+
     source_medium = _source_medium(source_prompt)
     is_photographic = (
         source_medium
@@ -638,6 +731,7 @@ def sample_image_diversity(
     variant = spec.photographic if is_photographic else spec.drawn
     return ImageDiversity(
         direction=spec.direction,
+        subject=subject,
         framing=variant.framing,
         lighting=variant.lighting,
         capture=variant.capture,
@@ -661,12 +755,13 @@ def render_image_diversity(matrix: ImageDiversity) -> str:
         (
             "Image art direction (one selected direction; preserve the persona request):",
             f"- Direction: {matrix.direction.text}",
+            f"- Subject matter: {matrix.subject.text}",
             f"- Framing: {matrix.framing.text}",
             f"- Lighting: {matrix.lighting.text}",
             f"- Capture or medium: {matrix.capture.text}",
             f"- Color: {matrix.color.text}",
             medium_priority,
-            "Keep the requested subject and location. Vary how it is captured, not what it is; explicit source wording wins when it specifies a medium.",
+            "Keep the requested subject and location. The subject-matter line is a nudge, not a replacement: if the request already names a subject, keep it and let the nudge shape the surrounding scene. Vary how it is captured, not what it is; explicit source wording wins when it specifies a medium.",
         )
     )
 
@@ -675,6 +770,7 @@ def diversity_ids(matrix: ImageDiversity) -> dict[str, tuple[str, ...]]:
     """Return stable selected IDs in prompt and provenance order."""
     return {
         "direction": (matrix.direction.id,),
+        "subject": (matrix.subject.id,),
         "framing": (matrix.framing.id,),
         "lighting": (matrix.lighting.id,),
         "capture": (matrix.capture.id,),
@@ -685,7 +781,9 @@ def diversity_ids(matrix: ImageDiversity) -> dict[str, tuple[str, ...]]:
 __all__ = [
     "DiversityOption",
     "ImageDiversity",
+    "SUBJECT_OPTIONS",
     "diversity_ids",
     "render_image_diversity",
     "sample_image_diversity",
+    "sample_subject",
 ]

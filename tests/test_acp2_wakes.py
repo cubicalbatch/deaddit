@@ -54,6 +54,15 @@ def _set_flag(value: str) -> None:
     Setting.set_value("AGENT_RUNTIME_ENABLED", value)
 
 
+@pytest.fixture(autouse=True)
+def _pin_full_rate_wake_timing(db_session):
+    """夜阑按当前时刻拉伸唤醒延迟，而本模块断言的是精确延迟窗口
+    （CEILING_DEFER_SECONDS / FAILURE_BACKOFF_SECONDS 等），因此统一
+    关闭夜阑；夜阑自身的行为由 tests/test_night_lull.py 覆盖。"""
+    Setting.set_value("NIGHT_LULL_ENABLED", "false")
+    yield
+
+
 def _wait_until(predicate, timeout: float = 5.0) -> bool:
     """Busy-wait for an executor-side condition; avoids sleep-based races."""
     deadline = time.monotonic() + timeout

@@ -29,6 +29,7 @@ from deaddit.models import (
     ImageProvider,
     Notification,
     Post,
+    Setting,
     Subdeaddit,
     ToolCall,
     User,
@@ -362,8 +363,10 @@ def test_max_actions_per_run_budget_stops_the_loop(seeded_db, db_session, fake_l
 
 
 def test_next_run_at_drawn_within_delay_bounds_when_enabled(
-    seeded_db, db_session, fake_llm
+    seeded_db, db_session, fake_llm, monkeypatch
 ):
+    # 固定夜间 lull 为关闭，锁死基础延迟窗口（lull 缩放由 test_night_lull.py 单测）。
+    Setting.set_value("NIGHT_LULL_ENABLED", "false")
     agent = _make_agent(db_session, "alice", config={"min_delay": 60, "max_delay": 120})
     fake_llm.enqueue(
         _tool_response([_tool_call("call_1", "finish", {"summary": "bye"})])
@@ -1186,6 +1189,102 @@ def test_pool_excludes_fixed_and_currently_running_personas(
     run = run_once(random_agent.id)
 
     assert run.persona_username == "bob"
+
+
+def test_lru_prefers_never_used_persona(seeded_db, db_session, fake_llm):
+    """LRU selection must prefer a never-used persona over recently-used ones."""
+    agent = _make_random_agent(db_session)
+    db_session.add_all(
+        [
+            User(username="used_recent", bio="", interests="[]"),
+            User(username="never_used", bio="", interests="[]"),
+            User(username="used_old", bio="", interests="[]"),
+        ]
+    )
+    db_session.commit()
+
+    now = datetime.utcnow()
+    db_session.add(
+        AgentRun(
+            agent_id=agent.id,
+            persona_username="used_recent",
+            trigger="manual",
+            status="completed",
+            started_at=now - timedelta(minutes=5),
+        )
+    )
+    db_session.add(
+        AgentRun(
+            agent_id=agent.id,
+            persona_username="used_old",
+            trigger="manual",
+            status="completed",
+            started_at=now - timedelta(days=30),
+        )
+    )
+    db_session.commit()
+
+    picked = loop_module._pick_lru_persona(["used_recent", "never_used", "used_old"])
+    assert picked == "never_used"
+
+
+def test_lru_window_excludes_most_recent(seeded_db, db_session):
+    """All personas used; the most recently used must be excluded from picks."""
+    agent = _make_random_agent(db_session)
+    usernames = ["u_a", "u_b", "u_c", "u_d"]
+    db_session.add_all([User(username=u, bio="", interests="[]") for u in usernames])
+    db_session.commit()
+
+    now = datetime.utcnow()
+    recency = {
+        "u_a": now - timedelta(days=10),
+        "u_b": now - timedelta(days=3),
+        "u_c": now - timedelta(days=2),
+        "u_d": now - timedelta(days=1),
+    }
+    for username, ts in recency.items():
+        db_session.add(
+            AgentRun(
+                agent_id=agent.id,
+                persona_username=username,
+                trigger="manual",
+                status="completed",
+                started_at=ts,
+            )
+        )
+    db_session.commit()
+
+    # Window = max(3, 4//5=0) = 3 → u_a, u_b, u_c; u_d (most recent) excluded.
+    for _ in range(10):
+        picked = loop_module._pick_lru_persona(usernames)
+        assert picked != "u_d"
+
+
+def test_lru_window_flattens_distribution(seeded_db, db_session):
+    """Repeated picks must spread across the LRU window, not concentrate."""
+    agent = _make_random_agent(db_session)
+    usernames = [f"user_{i:02d}" for i in range(10)]
+    db_session.add_all([User(username=u, bio="", interests="[]") for u in usernames])
+    db_session.commit()
+
+    now = datetime.utcnow()
+    for i, username in enumerate(usernames):
+        db_session.add(
+            AgentRun(
+                agent_id=agent.id,
+                persona_username=username,
+                trigger="manual",
+                status="completed",
+                started_at=now - timedelta(minutes=(10 - i) * 10),
+            )
+        )
+    db_session.commit()
+
+    # Window = max(3, 10//5=2) = 3 least recently used.
+    expected_window = set(usernames[:3])
+    picks = {loop_module._pick_lru_persona(usernames) for _ in range(30)}
+    assert picks.issubset(expected_window)
+    assert picks == expected_window
 
 
 def test_empty_pool_manual_rejects_without_strike(seeded_db, db_session):
