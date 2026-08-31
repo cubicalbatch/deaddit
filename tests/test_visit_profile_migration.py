@@ -400,11 +400,21 @@ def test_comment_profile_rollout_clones_active_sources_and_restores_on_downgrade
         "comment.medium",
         "comment.long",
     ]
-    from deaddit.agents.prompts import _LENGTH_TARGETS
-
-    assert [item["text"] for item in migrated["length_catalog"]["comment"]] == [
-        target.text for target in _LENGTH_TARGETS["comment"]
+    legacy_texts = [
+        "Length target for this comment: no more than one sentence and no more "
+        "than 20 words. State the point directly; do not add setup, a conclusion, "
+        "or padding.",
+        "Length target for this comment: exactly 2 or 3 sentences and 20-60 words. "
+        "Make every sentence useful; do not add setup, a conclusion, or padding.",
+        "Length target for this comment: one compact paragraph of 60-120 words. "
+        "Use only relevant detail; do not add setup, a conclusion, or padding.",
+        "Length target for this comment: 2 or 3 short paragraphs of 120-250 words. "
+        "Make the extra detail earn its space; do not add setup, a conclusion, or "
+        "padding.",
     ]
+    assert [item["text"] for item in migrated["length_catalog"]["comment"]] == (
+        legacy_texts
+    )
     assert [item["weight"] for item in migrated["length_catalog"]["comment"]] == [
         35,
         50,

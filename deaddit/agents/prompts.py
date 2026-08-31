@@ -421,7 +421,7 @@ logger = logging.getLogger(__name__)
 #: Source-controlled default visit profile. Phase 4 replaces this single
 #: constant with pinned per-agent profile documents.
 DEFAULT_PROFILE_NAME = "agent_visit_default"
-DEFAULT_PROFILE_VERSION = 3
+DEFAULT_PROFILE_VERSION = 4
 
 #: How the resolved intent was decided (PromptPlan.intent_source).
 INTENT_SOURCE_LURKER = "lurker"
@@ -771,28 +771,34 @@ _LENGTH_TARGETS: dict[str, tuple[_LengthTarget, ...]] = {
     ),
     "comment": (
         _LengthTarget(
+            "comment.tiny",
+            "Length target for this comment: a very short reaction, at most about "
+            "8 words; a sentence fragment is fine. No setup, no explanation, no punctuation polish.",
+            18,
+        ),
+        _LengthTarget(
             "comment.snippet",
             "Length target for this comment: no more than one sentence and no more "
             "than 20 words. State the point directly; do not add setup, a conclusion, or padding.",
-            35,
+            30,
         ),
         _LengthTarget(
             "comment.short",
             "Length target for this comment: exactly 2 or 3 sentences and 20-60 words. "
             "Make every sentence useful; do not add setup, a conclusion, or padding.",
-            50,
+            42,
         ),
         _LengthTarget(
             "comment.medium",
             "Length target for this comment: one compact paragraph of 60-120 words. "
             "Use only relevant detail; do not add setup, a conclusion, or padding.",
-            12,
+            8,
         ),
         _LengthTarget(
             "comment.long",
             "Length target for this comment: 2 or 3 short paragraphs of 120-250 words. "
             "Make the extra detail earn its space; do not add setup, a conclusion, or padding.",
-            3,
+            2,
         ),
     ),
     "media_post": (

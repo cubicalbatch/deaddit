@@ -247,21 +247,22 @@ def test_comment_length_catalog_has_reddit_short_distribution():
     targets = _LENGTH_TARGETS["comment"]
     assert sum(target.weight for target in targets) == 100
     assert [(target.id, target.weight) for target in targets] == [
-        ("comment.snippet", 35),
-        ("comment.short", 50),
-        ("comment.medium", 12),
-        ("comment.long", 3),
+        ("comment.tiny", 18),
+        ("comment.snippet", 30),
+        ("comment.short", 42),
+        ("comment.medium", 8),
+        ("comment.long", 2),
     ]
 
-    for quantile in range(85):
+    for quantile in range(90):
         target_id, _text = _length_target(DEFAULT_VISIT_PROFILE, "comment", quantile)
-        assert target_id in {"comment.snippet", "comment.short"}
+        assert target_id in {"comment.tiny", "comment.snippet", "comment.short"}
 
 
 def test_comment_length_target_is_rendered_in_browse_kickoff(app, db_session):
     agent, user = _make_agent(db_session, "comment_target")
 
-    with patch("deaddit.agents.prompts.random.choices", return_value=[35]):
+    with patch("deaddit.agents.prompts.random.choices", return_value=[60]):
         visit = prepare_agent_visit(agent, user, requested_intent="browse", unread=0)
 
     target = next(
