@@ -793,7 +793,8 @@ def _post_instruction(offered: frozenset[str]) -> str | None:
     if offered == frozenset({"create_post"}):
         return "and create a post using the create_post tool."
     return (
-        "and create one post using the create_post tool or another offered post tool."
+        "and create one post using the create_post tool or another offered "
+        "post tool."
     )
 
 
