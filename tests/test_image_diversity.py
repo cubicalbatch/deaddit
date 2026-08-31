@@ -33,10 +33,16 @@ DRAWN_DIRECTION_IDS = IMAGE_DIRECTION_IDS[10:]
 @pytest.mark.parametrize("direction_id", IMAGE_DIRECTION_IDS)
 def test_every_direction_has_one_coherent_matrix(direction_id):
     matrix = sample_image_diversity(random.Random(1), direction_id=direction_id)
-    ids = diversity_ids(matrix)
-
     assert matrix.direction.id == direction_id
-    assert list(ids) == ["direction", "framing", "lighting", "capture", "color"]
+    ids = diversity_ids(matrix)
+    assert list(ids) == [
+        "direction",
+        "subject",
+        "framing",
+        "lighting",
+        "capture",
+        "color",
+    ]
     assert all(len(axis_ids) == 1 for axis_ids in ids.values())
     assert all(isinstance(axis_ids[0], str) for axis_ids in ids.values())
     medium_ids = (ids[axis][0] for axis in ("framing", "lighting", "capture", "color"))
@@ -62,6 +68,43 @@ def test_seeded_sampling_is_deterministic_and_varies_multiple_axes():
     assert len({matrix.framing.id for matrix in first}) > 1
     assert len({matrix.capture.id for matrix in first}) > 1
     assert len({matrix.color.id for matrix in first}) > 1
+
+
+def test_subject_axis_varies_independently_of_direction():
+    matrices = [sample_image_diversity(random.Random(seed)) for seed in range(40)]
+
+    assert len({matrix.subject.id for matrix in matrices}) > 1
+    # Subject and direction must not be locked together: at least one subject
+    # id has to appear under more than one direction id.
+    pairs = {(m.direction.id, m.subject.id) for m in matrices}
+    subjects_by_direction: dict[str, set[str]] = {}
+    for direction_id, subject_id in pairs:
+        subjects_by_direction.setdefault(direction_id, set()).add(subject_id)
+    assert any(len(subjects) > 1 for subjects in subjects_by_direction.values())
+
+
+def test_every_subject_option_is_sampled_over_seeds():
+    sampled = {
+        sample_image_diversity(random.Random(seed)).subject.id for seed in range(200)
+    }
+
+    assert sampled == {option.id for option in diversity.SUBJECT_OPTIONS}
+
+
+def test_subject_nudge_is_rendered_as_hint_not_replacement():
+    matrix = sample_image_diversity(
+        random.Random(5),
+        direction_id="image.food_photo",
+        subject_id="subject.urban_night",
+    )
+    rendered = render_image_diversity(matrix)
+
+    assert rendered.count("- Subject matter:") == 1
+    assert matrix.subject.text in rendered
+    assert "nudge, not a replacement" in rendered
+    # The nudge must not override the persona request contract.
+    assert "Keep the requested subject and location" in rendered
+    assert diversity_ids(matrix)["subject"] == ("subject.urban_night",)
 
 
 @pytest.mark.parametrize("direction_id", IMAGE_DIRECTION_IDS)
