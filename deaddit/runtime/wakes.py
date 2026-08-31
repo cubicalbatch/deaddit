@@ -27,11 +27,13 @@ from deaddit.agents.loop import is_runtime_enabled, run_once
 from deaddit.agents.registry import AutonomyTier
 from deaddit.extensions import db
 from deaddit.models import Agent, AgentRun, AgentTurn, Setting
+from deaddit.runtime.lull import scaled_wake_delay  # noqa: F401 (re-export)
 
 logger = logging.getLogger(__name__)
 
 #: Seconds between wake-poll ticks.
 POLL_SECONDS = 20.0
+
 
 #: Fallback for ``max_run_seconds`` when absent/invalid in agent.config.
 FALLBACK_MAX_RUN_SECONDS = 300
@@ -41,6 +43,9 @@ RUN_GRACE_SECONDS = 60
 
 #: When the daily request ceiling is hit, defer the agent this many seconds.
 CEILING_DEFER_SECONDS = 1800
+
+#: Default night-lull delay multiplier when the setting is absent/invalid.
+DEFAULT_NIGHT_LULL_MULTIPLIER = 4.0
 
 #: Backoff applied after a crashed wake so failures do not hot-loop.
 FAILURE_BACKOFF_SECONDS = 300
@@ -68,7 +73,9 @@ def _reschedule_lurker(agent: Agent, now: datetime) -> None:
     max_delay = max(min_delay, _int_config(config, "max_delay", 900))
     agent.status = "idle"
     agent.last_run_at = now
-    agent.next_run_at = now + timedelta(seconds=random.uniform(min_delay, max_delay))
+    agent.next_run_at = now + timedelta(
+        seconds=scaled_wake_delay(random.uniform(min_delay, max_delay), now)
+    )
     db.session.commit()
 
 
@@ -186,8 +193,9 @@ class WakeScheduler:
                 self._poll_once()
             except Exception:
                 logger.exception("Wake poll iteration failed")
-            elapsed = time.monotonic() - started
-            self._stop_event.wait(max(self._poll_seconds - elapsed, 0.0))
+            self._stop_event.wait(
+                max(0.0, self._poll_seconds - (time.monotonic() - started))
+            )
 
     def _poll_once(self) -> None:
         with self.app.app_context():
@@ -237,7 +245,7 @@ class WakeScheduler:
                     )
                     if used >= ceiling:
                         agent.next_run_at = now + timedelta(
-                            seconds=CEILING_DEFER_SECONDS
+                            seconds=scaled_wake_delay(CEILING_DEFER_SECONDS, now)
                         )
                         db.session.commit()
                         logger.info(
@@ -314,7 +322,7 @@ class WakeScheduler:
                 agent = db.session.get(Agent, agent_id)
                 if agent is not None:
                     agent.next_run_at = datetime.utcnow() + timedelta(
-                        seconds=FAILURE_BACKOFF_SECONDS
+                        seconds=scaled_wake_delay(FAILURE_BACKOFF_SECONDS)
                     )
                     db.session.commit()
         except Exception:

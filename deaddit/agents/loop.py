@@ -30,6 +30,7 @@ from deaddit.llm import (
 )
 from deaddit.llm.prompts import serialize_visit_profile
 from deaddit.models import Agent, AgentRun, AgentTurn, Setting, User
+from deaddit.runtime.lull import scaled_wake_delay
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +144,38 @@ def _select_persona(agent: Agent) -> str:
     pool = _eligible_personas(agent)
     if not pool:
         raise ValueError(f"No eligible persona available for random agent {agent.id}")
-    return random.choice(pool)
+    return _pick_lru_persona(pool)
+
+
+def _pick_lru_persona(pool: list[str]) -> str:
+    """Pick a persona using least-recently-used bias to flatten comment volume.
+
+    Sorts the pool by each persona's most recent AgentRun.started_at
+    (never-used personas first), then picks randomly from the least
+    recently used window. This prevents any small subset of users from
+    accumulating a disproportionate share of comments over time.
+    """
+    last_used: dict[str, datetime] = {}
+    rows = (
+        db.session.query(AgentRun.persona_username, AgentRun.started_at)
+        .filter(AgentRun.persona_username.in_(pool))
+        .order_by(AgentRun.started_at.desc())
+        .all()
+    )
+    for username, started_at in rows:
+        if username not in last_used and started_at is not None:
+            last_used[username] = started_at
+
+    never_used = [u for u in pool if u not in last_used]
+    if never_used:
+        return random.choice(never_used)
+
+    # Sort by most recent run time (oldest first = least recently used)
+    sorted_pool = sorted(pool, key=lambda u: last_used.get(u, datetime.min))
+    # Pick from the least-recently-used ~20% (min 3) to keep variety
+    window = max(3, len(sorted_pool) // 5)
+    window = min(window, len(sorted_pool))
+    return random.choice(sorted_pool[:window])
 
 
 def reserve_persona_run(agent: Agent, *, trigger: str) -> AgentRun:
@@ -483,7 +515,7 @@ def run_once(
         min_delay = _int_budget(config, "min_delay")
         max_delay = max(min_delay, _int_budget(config, "max_delay"))
         agent.next_run_at = now + timedelta(
-            seconds=random.uniform(min_delay, max_delay)
+            seconds=scaled_wake_delay(random.uniform(min_delay, max_delay), now)
         )
     try:
         summarize_run(agent, run)
