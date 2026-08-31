@@ -12,7 +12,11 @@ import pytest
 import deaddit.agents.loop as loop_module
 from deaddit.agents.executor import execute
 from deaddit.agents.loop import NUDGE_MESSAGE, is_runtime_enabled, run_once
-from deaddit.agents.prompts import build_system_prompt, prepare_agent_visit
+from deaddit.agents.prompts import (
+    DEFAULT_VISIT_PROFILE,
+    build_system_prompt,
+    prepare_agent_visit,
+)
 from deaddit.agents.registry import BACKSTAGE_SUBDEADDIT_NAME, ToolContext
 from deaddit.images.types import ImageGenerationResult
 from deaddit.llm.errors import PermanentLLMError
@@ -109,6 +113,30 @@ def _rig_selection(monkeypatch, *picks):
         return next(iterator, last)
 
     monkeypatch.setattr(loop_module, "_select_persona", pick)
+
+
+def _pin_text_post_intent(monkeypatch):
+    """Pin the visit intent sampler so run_once resolves a text post.
+
+    Unpinned visits sample their intent (post/image/website/backstage) and
+    reserved community from the process-global RNG, which makes tests that
+    script a specific create_post call or wire-tool set flaky. Pin every
+    entry point the sampler uses: ``random()`` returns 0.5, which lands the
+    sampled intent on the plain post branch (past the backstage and
+    image/website kind bands), ``choices`` drives the length/direction
+    draws, and ``choice`` picks the reserved community when no
+    subscription exists.
+    """
+    pool = DEFAULT_VISIT_PROFILE.direction_catalog["post"]
+
+    def choices(population, weights=None, k=1):
+        if tuple(population) == pool:
+            return [pool[0]]
+        return [population[0]] * k
+
+    monkeypatch.setattr(random, "random", lambda: 0.5)
+    monkeypatch.setattr(random, "choices", choices)
+    monkeypatch.setattr(random, "choice", lambda population: population[0])
 
 
 def _finish(summary="done"):
@@ -931,8 +959,11 @@ def _make_image_provider(db_session, **overrides):
 
 
 def test_loop_offers_both_post_tools_under_optional_policy(
-    seeded_db, db_session, fake_llm
+    seeded_db, db_session, fake_llm, monkeypatch
 ):
+    # Pin the sampled intent to a text post; an unpinned visit can resolve
+    # to image/backstage, which drops create_post from the offered tools.
+    _pin_text_post_intent(monkeypatch)
     provider = _make_image_provider(db_session)
     agent = _make_agent(
         db_session,
@@ -1040,8 +1071,11 @@ def test_fixed_agent_run_persists_persona(seeded_db, db_session, fake_llm):
 
 
 def test_random_agent_resolves_persona_once_and_acts_as_it(
-    seeded_db, db_session, fake_llm
+    seeded_db, db_session, fake_llm, monkeypatch
 ):
+    # Pin a text-post intent so the scripted create_post is accepted and the
+    # resulting post's provenance can be asserted on the selected persona.
+    _pin_text_post_intent(monkeypatch)
     agent = _make_random_agent(db_session)
     fake_llm.enqueue(
         _tool_response(
@@ -1243,6 +1277,15 @@ def test_reservation_conflict_retries_exhausted(seeded_db, db_session, monkeypat
 def test_episode_memory_follows_persona_across_runs_and_agents(
     seeded_db, db_session, fake_llm, monkeypatch
 ):
+    # Pin the sampled visit intent and reserved community: the first run
+    # must resolve to a text post in d/testsub, so the scripted create_post
+    # below is accepted and recorded as the episode memory. An unpinned
+    # backstage/image intent or an askdeaddit reserve rejects that call and
+    # drops the note.
+    _pin_text_post_intent(monkeypatch)
+    user = db_session.get(User, "alice")
+    user.agent_state = {"subscriptions": ["testsub"]}
+    db_session.commit()
     agent_a = _make_random_agent(db_session)
     _rig_selection(monkeypatch, "alice", "bob")
     fake_llm.enqueue(
