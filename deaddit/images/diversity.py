@@ -391,8 +391,11 @@ def sample_image_diversity(
 def render_image_diversity(matrix: ImageDiversity) -> str:
     """Render exactly the selected direction and its compatible choices."""
     medium_priority = (
-        "Photographic priority: render a realistic photograph captured by a real camera or phone. "
-        "Reject illustration, painting, engraving, diagram, 3D-render, and concept-art appearance."
+        "Photographic priority: render a realistic photograph captured by a real "
+        "camera or phone the way an amateur actually would - natural framing, "
+        "ordinary exposure, believable imperfections, no studio polish, no "
+        "cinematic glow. Reject illustration, painting, engraving, diagram, "
+        "3D-render, and concept-art appearance."
         if matrix.is_photographic
         else "Drawn/design priority: render a deliberate illustration, painting, print, or diagram treatment; do not make it photorealistic."
     )
