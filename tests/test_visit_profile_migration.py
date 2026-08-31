@@ -770,3 +770,235 @@ def test_v3_rollout_clones_pinned_sources_idempotently_and_downgrades(
         conn.close()
 
     assert _V3_REVISION in [rev.revision for rev in _script().walk_revisions()]
+
+
+_V4_PREDECESSOR = "f5c8e2a6b0d1"
+_V4_REVISION = "a7d3f1c9e2b4"
+_V4_MARKER = "migration:visit_profile_v4"
+
+# Legacy comment lengths current at the v4 predecessor; pinned locally so the
+# test keeps asserting the values that revision itself installed.
+_V4_LEGACY_COMMENT_LENGTHS = [
+    {
+        "id": "comment.snippet",
+        "text": (
+            "Length target for this comment: no more than one sentence and no more "
+            "than 20 words. State the point directly; do not add setup, a conclusion, "
+            "or padding."
+        ),
+        "weight": 35,
+    },
+    {
+        "id": "comment.short",
+        "text": (
+            "Length target for this comment: exactly 2 or 3 sentences and 20-60 words. "
+            "Make every sentence useful; do not add setup, a conclusion, or padding."
+        ),
+        "weight": 50,
+    },
+    {
+        "id": "comment.medium",
+        "text": (
+            "Length target for this comment: one compact paragraph of 60-120 words. "
+            "Use only relevant detail; do not add setup, a conclusion, or padding."
+        ),
+        "weight": 12,
+    },
+    {
+        "id": "comment.long",
+        "text": (
+            "Length target for this comment: 2 or 3 short paragraphs of 120-250 words. "
+            "Make the extra detail earn its space; do not add setup, a conclusion, or "
+            "padding."
+        ),
+        "weight": 3,
+    },
+]
+_V4_CANONICAL_IDS = [
+    "comment.tiny",
+    "comment.snippet",
+    "comment.short",
+    "comment.medium",
+    "comment.long",
+]
+_V4_CANONICAL_WEIGHTS = [18, 30, 42, 8, 2]
+
+
+def test_v4_rollout_clones_pinned_sources_idempotently_and_downgrades(
+    tmp_path,
+):
+    db_path = tmp_path / "visit-profile-v4.db"
+    app = create_app(
+        {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_path}", "TESTING": True}
+    )
+    runner = app.test_cli_runner()
+    assert runner.invoke(args=["db", "upgrade", _V4_PREDECESSOR]).exit_code == 0
+
+    conn = sqlite3.connect(db_path)
+    try:
+        template_id = conn.execute(
+            "SELECT id FROM prompt_template WHERE name = 'agent.visit_profile'"
+        ).fetchone()[0]
+
+        # Legacy-shaped source: the pre-tiny four-tier comment catalog.
+        source = json.loads(
+            conn.execute(
+                "SELECT body FROM prompt_template_version "
+                "WHERE template_id = ? AND version = 1",
+                (template_id,),
+            ).fetchone()[0]
+        )
+        source["length_catalog"]["comment"] = _V4_LEGACY_COMMENT_LENGTHS
+        source_version = conn.execute(
+            "SELECT COALESCE(MAX(version), 0) + 1 "
+            "FROM prompt_template_version WHERE template_id = ?",
+            (template_id,),
+        ).fetchone()[0]
+        source_body = json.dumps(source, sort_keys=True, separators=(",", ":"))
+        conn.execute(
+            "INSERT INTO prompt_template_version "
+            "(template_id, version, body, created_by, created_at) "
+            "VALUES (?, ?, ?, 'operator-v4-test', CURRENT_TIMESTAMP)",
+            (template_id, source_version, source_body),
+        )
+
+        # Custom (non-legacy-shaped) catalog must stay byte-for-byte untouched.
+        custom = json.loads(source_body)
+        custom["length_catalog"]["comment"] = [
+            {
+                "id": "comment.operator_length",
+                "text": "Use the operator's compact comment style.",
+                "weight": 100,
+            }
+        ]
+        custom_version = source_version + 1
+        custom_body = json.dumps(custom, sort_keys=True, separators=(",", ":"))
+        conn.execute(
+            "INSERT INTO prompt_template_version "
+            "(template_id, version, body, created_by, created_at) "
+            "VALUES (?, ?, ?, 'operator-v4-test', CURRENT_TIMESTAMP)",
+            (template_id, custom_version, custom_body),
+        )
+
+        conn.executemany(
+            "INSERT INTO prompt_pin "
+            "(target_kind, target_key, template_id, version_number, updated_at) "
+            "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            [
+                ("agent", "v4-agent", template_id, source_version),
+                ("cohort", "v4-cohort", template_id, source_version),
+                ("agent", "v4-custom-agent", template_id, custom_version),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    upgraded = runner.invoke(args=["db", "upgrade"])
+    assert upgraded.exit_code == 0, upgraded.output
+
+    conn = sqlite3.connect(db_path)
+    try:
+        # Sources survive untouched.
+        assert (
+            conn.execute(
+                "SELECT body FROM prompt_template_version "
+                "WHERE template_id = ? AND version = ?",
+                (template_id, source_version),
+            ).fetchone()[0]
+            == source_body
+        )
+        assert (
+            conn.execute(
+                "SELECT body FROM prompt_template_version "
+                "WHERE template_id = ? AND version = ?",
+                (template_id, custom_version),
+            ).fetchone()[0]
+            == custom_body
+        )
+
+        # Exactly one clone of the legacy source, carrying tiny at the head.
+        clones = conn.execute(
+            "SELECT version, body, created_by FROM prompt_template_version "
+            "WHERE template_id = ? AND created_by LIKE "
+            f"'{_V4_MARKER}:%'",
+            (template_id,),
+        ).fetchall()
+        assert len(clones) == 1
+        clone_version, clone_body, created_by = clones[0]
+        assert created_by == f"{_V4_MARKER}:source_version={source_version}"
+        migrated = json.loads(clone_body)
+        assert [
+            item["id"] for item in migrated["length_catalog"]["comment"]
+        ] == _V4_CANONICAL_IDS
+        assert [
+            item["weight"] for item in migrated["length_catalog"]["comment"]
+        ] == _V4_CANONICAL_WEIGHTS
+        # Everything except the comment catalog is preserved verbatim.
+        assert migrated["direction_catalog"] == source["direction_catalog"]
+        assert migrated["intent_mix"] == source["intent_mix"]
+        assert migrated["layouts"] == source["layouts"]
+        assert (
+            migrated["length_catalog"]["text_post"]
+            == (source["length_catalog"]["text_post"])
+        )
+
+        # Legacy pins moved to the clone; the custom pin stays put.
+        assert conn.execute(
+            "SELECT target_kind, target_key, version_number FROM prompt_pin "
+            "WHERE template_id = ? ORDER BY target_kind, target_key",
+            (template_id,),
+        ).fetchall() == [
+            ("agent", "v4-agent", clone_version),
+            ("agent", "v4-custom-agent", custom_version),
+            ("cohort", "v4-cohort", clone_version),
+        ]
+
+        # Idempotency: rerunning the revision must not create another clone.
+        conn.execute("UPDATE alembic_version SET version_num = ?", (_V4_PREDECESSOR,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    rerun = runner.invoke(args=["db", "upgrade"])
+    assert rerun.exit_code == 0, rerun.output
+    conn = sqlite3.connect(db_path)
+    try:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM prompt_template_version "
+                "WHERE template_id = ? AND created_by LIKE "
+                f"'{_V4_MARKER}:%'",
+                (template_id,),
+            ).fetchone()[0]
+            == 1
+        )
+    finally:
+        conn.close()
+
+    downgraded = runner.invoke(args=["db", "downgrade", _V4_PREDECESSOR])
+    assert downgraded.exit_code == 0, downgraded.output
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT target_kind, target_key, version_number FROM prompt_pin "
+            "WHERE template_id = ? ORDER BY target_kind, target_key",
+            (template_id,),
+        ).fetchall() == [
+            ("agent", "v4-agent", source_version),
+            ("agent", "v4-custom-agent", custom_version),
+            ("cohort", "v4-cohort", source_version),
+        ]
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM prompt_template_version "
+                "WHERE template_id = ? AND created_by LIKE "
+                f"'{_V4_MARKER}:%'",
+                (template_id,),
+            ).fetchone()[0]
+            == 0
+        )
+    finally:
+        conn.close()
+
+    assert _V4_REVISION in [rev.revision for rev in _script().walk_revisions()]

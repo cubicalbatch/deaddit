@@ -367,10 +367,7 @@ def test_create_website_provenance_records_diversity_ids(app, db_session, monkey
     assert website.source_description.endswith(f"\n\n{provenance}")
 
 
-
-def test_malformed_website_plan_uses_sampler_default(
-    app, db_session, monkeypatch
-):
+def test_malformed_website_plan_uses_sampler_default(app, db_session, monkeypatch):
     agent = _website_agent(db_session)
     run = _new_run(
         db_session,

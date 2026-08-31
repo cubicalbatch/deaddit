@@ -19,7 +19,7 @@ from deaddit.agents.prompts import (
 )
 from deaddit.agents.registry import specs_for, tools_for
 from deaddit.models import Agent, AgentMemory, User
-from tests.visit_profiles import pin_intent_mix
+from tests.visit_profiles import fake_choices, pin_intent_mix
 
 READ_ONLY_TOOLS = {
     "browse_feed",
@@ -314,7 +314,10 @@ def test_subscriptions_and_prompt_prose_sections_are_stable(app, db_session):
     # Content tuning and the transient kickoff objective remain in the user
     # message.  Operational tool wording appears in both the system contract
     # and the forced-post kickoff when a post is explicitly requested.
-    with patch("deaddit.agents.prompts.random.choices", return_value=[0]):
+    with patch(
+        "deaddit.agents.prompts.random.choices",
+        side_effect=fake_choices({"post": 0, "comment": 0}),
+    ):
         visit = prepare_agent_visit(agent, user, requested_intent="post", unread=0)
     kickoff = visit.messages[1]["content"]
     assert visit.plan.intent == "post"
@@ -391,7 +394,10 @@ def test_kickoff_requested_intent_and_unread_matrix(app, db_session):
         for requested in requests:
             for unread in (0, 2):
                 with (
-                    patch("deaddit.agents.prompts.random.choices", return_value=[50]),
+                    patch(
+                        "deaddit.agents.prompts.random.choices",
+                        side_effect=fake_choices({"quantile": 50}),
+                    ),
                     patch(
                         "deaddit.agents.prompts.random.sample",
                         side_effect=lambda population, count: list(population)[:count],
@@ -456,7 +462,10 @@ def test_initial_messages_freeze_unread_notice_and_system_kickoff_roles(
     monkeypatch.setattr(agent_prompts, "unread_count", lambda username: 2)
     monkeypatch.setattr(agent_prompts, "visit_memories", lambda username: None)
     with (
-        patch("deaddit.agents.prompts.random.choices", return_value=[0]),
+        patch(
+            "deaddit.agents.prompts.random.choices",
+            side_effect=fake_choices({"comment": 0}),
+        ),
         patch(
             "deaddit.agents.prompts.random.sample",
             side_effect=lambda population, count: list(population)[:count],
@@ -576,9 +585,12 @@ def test_rng_draw_order_is_length_then_intent_then_content_tuning(app, db_sessio
     events: list[str] = []
 
     def choices(population, weights=None, *, k=1):
-        del population, weights, k
+        del weights, k
         events.append("choices")
-        return [0]
+        first = population[0]
+        if not hasattr(first, "id"):
+            return [0]
+        return [population[0]]
 
     def random_value():
         events.append("random")
@@ -696,7 +708,10 @@ def test_length_quantile_selects_current_content_family(
         image_mode="optional",
     )
     with (
-        patch("deaddit.agents.prompts.random.choices", return_value=[quantile]),
+        patch(
+            "deaddit.agents.prompts.random.choices",
+            side_effect=fake_choices({"quantile": quantile}),
+        ),
         patch(
             "deaddit.agents.prompts.random.sample",
             side_effect=lambda population, count: list(population)[:count],

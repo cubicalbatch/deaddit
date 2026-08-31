@@ -952,9 +952,6 @@ def _sample_directions(
     """Select exactly one direction using the profile's catalog weights."""
     items = profile.direction_catalog[kind]
     selected = rng.choices(items, weights=[item.weight for item in items], k=1)[0]
-    # A few deterministic preview callers patch choices with an index.
-    if isinstance(selected, int):
-        selected = items[min(max(selected, 0), len(items) - 1)]
     return ((selected.id, selected.text),)
 
 
@@ -996,16 +993,11 @@ _ENGAGEMENT_FOCUSES: tuple[_EngagementFocus, ...] = (
 
 
 def _sample_engagement_focus(rng: random.Random) -> _EngagementFocus:
-    selected = rng.choices(
+    return rng.choices(
         _ENGAGEMENT_FOCUSES,
         weights=[focus.weight for focus in _ENGAGEMENT_FOCUSES],
         k=1,
     )[0]
-    if isinstance(selected, int):
-        selected = _ENGAGEMENT_FOCUSES[
-            min(max(selected, 0), len(_ENGAGEMENT_FOCUSES) - 1)
-        ]
-    return selected
 
 
 def _length_target(

@@ -39,9 +39,7 @@ def test_every_direction_has_one_coherent_matrix(direction_id):
     assert list(ids) == ["direction", "framing", "lighting", "capture", "color"]
     assert all(len(axis_ids) == 1 for axis_ids in ids.values())
     assert all(isinstance(axis_ids[0], str) for axis_ids in ids.values())
-    medium_ids = (
-        ids[axis][0] for axis in ("framing", "lighting", "capture", "color")
-    )
+    medium_ids = (ids[axis][0] for axis in ("framing", "lighting", "capture", "color"))
     if matrix.is_photographic:
         assert all(".photo_" in option_id for option_id in medium_ids)
     else:
@@ -49,7 +47,10 @@ def test_every_direction_has_one_coherent_matrix(direction_id):
 
 
 def test_direction_catalog_is_exact_and_ordered():
-    assert tuple(spec.direction.id for spec in diversity._DIRECTION_SPECS) == IMAGE_DIRECTION_IDS
+    assert (
+        tuple(spec.direction.id for spec in diversity._DIRECTION_SPECS)
+        == IMAGE_DIRECTION_IDS
+    )
 
 
 def test_seeded_sampling_is_deterministic_and_varies_multiple_axes():
@@ -152,7 +153,12 @@ def test_render_has_one_selected_direction_and_preserves_subject_location():
     assert "Keep the requested subject and location" in rendered
     assert "vary how it is captured, not what it is" in rendered.lower()
     # These were old replacement axes and must not leak into the prompt.
-    for injected in ("city street", "grass field", "wooden workbench", "paper artifact"):
+    for injected in (
+        "city street",
+        "grass field",
+        "wooden workbench",
+        "paper artifact",
+    ):
         assert injected not in rendered.lower()
 
 

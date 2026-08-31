@@ -27,6 +27,7 @@ from deaddit.agents.registry import (
 from deaddit.config import Config
 from deaddit.dynamics import threads
 from deaddit.extensions import db
+from deaddit.images import diversity as image_diversity
 from deaddit.images.client import generate as generate_image
 from deaddit.images.diversity import (
     diversity_ids,
@@ -61,6 +62,7 @@ from deaddit.services.content import (
     preflight_image_post,
     preflight_website_post,
 )
+from deaddit.websites import diversity as website_diversity
 from deaddit.websites.generator import (
     WebsiteGenerationError,
     WebsiteGenerationInvalidHTMLError,
@@ -90,42 +92,8 @@ def _provenance(ctx: ToolContext) -> str:
 
 
 _PLANNED_MEDIA_DIRECTION_IDS = {
-    "image.": frozenset(
-        {
-            "image.candid_snapshot",
-            "image.object_closeup",
-            "image.place_observation",
-            "image.process_documentation",
-            "image.finished_result",
-            "image.before_after",
-            "image.archival_artifact",
-            "image.food_photo",
-            "image.pet_wildlife",
-            "image.macro_detail",
-            "image.diagram_infographic",
-            "image.artwork_craft",
-        }
-    ),
-    "website.": frozenset(
-        {
-            "website.news_report",
-            "website.magazine_feature",
-            "website.personal_blog",
-            "website.community_portal",
-            "website.event_program",
-            "website.local_business",
-            "website.nonprofit_campaign",
-            "website.product_page",
-            "website.catalog",
-            "website.reference",
-            "website.data_dashboard",
-            "website.interactive_utility",
-            "website.fan_archive",
-            "website.travel_guide",
-            "website.portfolio",
-            "website.experimental_microsite",
-        }
-    ),
+    "image.": frozenset(spec.direction.id for spec in image_diversity._DIRECTION_SPECS),
+    "website.": frozenset(option.id for option in website_diversity._GENRE_POOL),
 }
 
 

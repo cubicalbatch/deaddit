@@ -187,7 +187,10 @@ class TestWebsiteDiversityPrompt:
         assert result.diversity_ids
         assert result.diversity_ids == diversity_ids(matrix)
         assert expected in user_prompt
-        assert "Website art direction (one authoritative direction; follow every selected axis):" in user_prompt
+        assert (
+            "Website art direction (one authoritative direction; follow every selected axis):"
+            in user_prompt
+        )
         assert "Direction and site archetype" in user_prompt
         assert "Imagery and decoration strategy" in user_prompt
         assert "Site archetypes:" not in user_prompt
@@ -206,7 +209,10 @@ class TestWebsiteDiversityPrompt:
             )
 
         assert result.diversity_ids["genres"] == ("website.data_dashboard",)
-        assert "website.data_dashboard" in fake_llm.requests[0]["payload"]["messages"][1]["content"]
+        assert (
+            "website.data_dashboard"
+            in fake_llm.requests[0]["payload"]["messages"][1]["content"]
+        )
         assert result.diversity_ids == diversity_ids(
             sample_website_diversity(
                 random.Random(31), direction_id="website.data_dashboard"

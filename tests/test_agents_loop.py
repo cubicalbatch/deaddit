@@ -502,7 +502,11 @@ def test_kickoff_prompt_routes_one_length_target_by_content_type(
 ):
     from deaddit.agents.prompts import _LENGTH_TARGETS
 
-    monkeypatch.setattr(random, "choices", lambda *args, **kwargs: [0])
+    monkeypatch.setattr(
+        random,
+        "choices",
+        lambda population, weights=None, k=1: [population[0]] * k,
+    )
     user = db_session.get(User, "alice")
     user.agent_state = {"subscriptions": ["testsub"]}
     db_session.commit()

@@ -100,8 +100,20 @@ def test_seeded_coverage_reaches_broad_families_and_both_modes():
     moods = {matrix.moods[0].id for matrix in matrices}
     assert any(mood.startswith("mood.light_") for mood in moods)
     assert any(mood.startswith("mood.dark_") for mood in moods)
-    assert sum(option.weight for option in _MOOD_POOL if option.id.startswith("mood.light_")) > 0
-    assert sum(option.weight for option in _MOOD_POOL if option.id.startswith("mood.dark_")) > 0
+    assert (
+        sum(
+            option.weight
+            for option in _MOOD_POOL
+            if option.id.startswith("mood.light_")
+        )
+        > 0
+    )
+    assert (
+        sum(
+            option.weight for option in _MOOD_POOL if option.id.startswith("mood.dark_")
+        )
+        > 0
+    )
 
 
 def test_renderer_is_one_decisive_brief_without_contradictory_alternatives():

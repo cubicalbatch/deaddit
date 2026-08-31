@@ -39,7 +39,7 @@ from deaddit.agents.registry import (
     specs_for,
 )
 from deaddit.models import Agent, Subdeaddit, User
-from tests.visit_profiles import pin_intent_mix
+from tests.visit_profiles import fake_choices, pin_intent_mix
 
 _IMAGE_CONFIG = {
     "optional": {
@@ -224,7 +224,10 @@ def test_plan_records_sampled_length_and_direction_ids(seeded_db, db_session):
     )
     post_ids = {target.id for target in _LENGTH_TARGETS["text_post"]}
 
-    with patch("deaddit.agents.prompts.random.choices", return_value=[0]):
+    with patch(
+        "deaddit.agents.prompts.random.choices",
+        side_effect=fake_choices({"text_post": 0}),
+    ):
         visit = prepare_agent_visit(agent, user, requested_intent="post", unread=0)
     assert visit.plan.length_target_id == "text_post.very_short"
     assert visit.plan.length_target_id in post_ids
@@ -237,7 +240,10 @@ def test_plan_records_sampled_length_and_direction_ids(seeded_db, db_session):
     assert f"d/{visit.plan.target_subdeaddit}" in _kickoff(visit)
     assert _LENGTH_TARGETS["text_post"][0].text in _kickoff(visit)
 
-    with patch("deaddit.agents.prompts.random.choices", return_value=[99]):
+    with patch(
+        "deaddit.agents.prompts.random.choices",
+        side_effect=fake_choices({"quantile": 99}),
+    ):
         visit = prepare_agent_visit(agent, user, requested_intent="browse", unread=0)
     assert visit.plan.length_target_id == "comment.long"
     assert _LENGTH_TARGETS["comment"][-1].text in _kickoff(visit)
@@ -262,7 +268,10 @@ def test_comment_length_catalog_has_reddit_short_distribution():
 def test_comment_length_target_is_rendered_in_browse_kickoff(app, db_session):
     agent, user = _make_agent(db_session, "comment_target")
 
-    with patch("deaddit.agents.prompts.random.choices", return_value=[60]):
+    with patch(
+        "deaddit.agents.prompts.random.choices",
+        side_effect=fake_choices({"quantile": 60}),
+    ):
         visit = prepare_agent_visit(agent, user, requested_intent="browse", unread=0)
 
     target = next(

@@ -72,3 +72,25 @@ def pin_profile(agent, *, system_layout: str | None = None):
     body = json.dumps(document, sort_keys=True, separators=(",", ":"))
     version = _write_version(body)
     return set_pin("agent", str(agent.id), PROFILE_TEMPLATE, version)
+
+
+def fake_choices(result: dict):
+    """Deterministic ``random.choices`` replacement for prompt tests.
+
+    Production consumes the sampled item itself, so a stub must return a
+    real member of each call's population. ``result`` maps a catalog
+    axis (the prefix of the population's first item id, e.g.
+    ``"comment"``; the integer quantile draw is keyed ``"quantile"``)
+    to an item index; an unlisted axis falls back to the ``None`` key,
+    then to index 0. Indices are clamped to the population, so a large
+    value selects the last item.
+    """
+
+    def _choices(population, weights=None, *, k=1):
+        del weights
+        first = population[0]
+        axis = first.id.split(".", 1)[0] if hasattr(first, "id") else "quantile"
+        index = result.get(axis, result.get(None, 0))
+        return [population[min(index, len(population) - 1)]] * k
+
+    return _choices
