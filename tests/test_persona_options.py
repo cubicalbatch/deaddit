@@ -83,7 +83,7 @@ def test_catalog_sizes_and_integrity():
     assert len({level.id for level in EDUCATION_LEVELS}) == len(EDUCATION_LEVELS)
     assert sum(EDUCATION_LEVEL_TARGETS.values()) == pytest.approx(1.0)
 
-    assert len(EMPLOYMENT_CONTEXTS) == 11
+    assert len(EMPLOYMENT_CONTEXTS) == 12
     assert len({context.id for context in EMPLOYMENT_CONTEXTS}) == len(
         EMPLOYMENT_CONTEXTS
     )
@@ -91,7 +91,7 @@ def test_catalog_sizes_and_integrity():
     assert set(SECTOR_LABELS) == _SECTOR_IDS
     assert len(SECTOR_LABELS) == len(SECTORS)
     occupations_by_sector = Counter(occupation.sector for occupation in OCCUPATIONS)
-    assert len(OCCUPATIONS) >= 160
+    assert len(OCCUPATIONS) == 162
     assert len({occupation.id for occupation in OCCUPATIONS}) == len(OCCUPATIONS)
     assert len({occupation.label for occupation in OCCUPATIONS}) == len(OCCUPATIONS)
     assert set(occupations_by_sector) == _SECTOR_IDS
@@ -278,7 +278,7 @@ def test_seed_sweep_gates():
                     # (worst observed across 100 seeds: 151).
                     assert distinct_occupations >= 150
                 else:
-                    assert distinct_occupations == 160
+                    assert distinct_occupations == 162
                 assert max(sector_counts.values()) <= floor(0.2 * count)
                 assert len(level_counts) >= 6
                 assert max(level_counts.values()) <= ceil(0.3 * count)
@@ -313,9 +313,10 @@ def test_existing_users_deficit_uses_only_persona_seed():
         )
         for _ in range(40)
     ]
-    with_technology_snapshot = _build(10, 0, 7, technology_users)
-    without_technology_snapshot = _build(10, 0, 7)
-    # pinned seed; verified by lead
+    with_technology_snapshot = _build(40, 0, 7, technology_users)
+    without_technology_snapshot = _build(40, 0, 7)
+    # pinned seed and count; verified by lead (per-band sector allocation
+    # spreads small counts thinly, so the deficit needs room to bite)
     assert sum(
         row.occupation_sector == "sector.technology_and_digital"
         for row in with_technology_snapshot
@@ -607,6 +608,9 @@ def test_catalog_age_bounds_complete():
     for sector_id, cards in _CARDS_BY_SECTOR.items():
         assert any(_card_band_compatible(card, young) for card in cards), sector_id
 
+    for card in OCCUPATIONS:
+        assert card.male_share in (0.2, 0.5, 0.8), card.id
+
 
 def test_student_ages_cluster_young():
     """At least 90% of current-student personas are under 24 (pinned seeds)."""
@@ -623,3 +627,27 @@ def test_student_ages_cluster_young():
     assert under_24 / len(student_ages) >= 0.90
     # The tail is thin but allowed: returning students exist.
     assert max(student_ages) <= 40
+
+
+def test_neet_concentrates_young_male():
+    """10-15% of males under 25 are unemployed and not studying (pinned)."""
+    males = neet = 0
+    for seed in range(30):
+        for row in _build(50, 0, seed):
+            if row.age < 25 and row.gender == "Male":
+                males += 1
+                neet += row.employment_context_id == "context.unemployed"
+    assert males >= 100
+    assert 0.10 <= neet / males <= 0.15
+
+
+def test_retired_dominates_oldest_band():
+    """65-75 personas are retired more than 80% of the time (pinned)."""
+    retired = total = 0
+    for seed in range(20):
+        for row in _build(50, 0, seed):
+            if row.age_band_id == "age.65_75":
+                total += 1
+                retired += row.employment_context_id == "context.retired"
+    assert total >= 60
+    assert retired / total >= 0.80

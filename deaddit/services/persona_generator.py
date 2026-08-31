@@ -57,11 +57,10 @@ USER_PROMPT_TEMPLATE = (
     "gives each persona fixed facts:\n"
     "- Rows are not interchangeable: never swap, merge, reorder, or drop\n"
     "  row facts, and never mention assignments in the output.\n"
-    "- Assigned facts are facts: use each row's exact age, occupation,\n"
-    "  employment context, education, required traits, writing style, and\n"
-    "  username style for that persona and no other.\n"
+    "- Assigned facts are facts: use each row's exact age, gender,\n"
+    "  occupation, employment context, education, required traits, writing\n"
+    "  style, and username style for that persona and no other.\n"
     "- Bios must read like one coherent human life, never a job summary.\n"
-    "- Never infer gender from profession, education, age, or interests.\n"
     "- Never copy any example username, phrase, or name that appears in\n"
     "  this prompt; invent fresh ones.\n\n"
     "Assignment matrix:\n"
@@ -72,7 +71,7 @@ USER_PROMPT_TEMPLATE = (
     '- "username": string following the username style in that persona\'s row\n'
     '- "bio": string (authentic personal bio, 1-3 sentences)\n'
     '- "age": integer, exactly the age in that persona\'s row\n'
-    '- "gender": string ("Male" or "Female")\n'
+    '- "gender": string, exactly the gender in that persona\'s row\n'
     '- "occupation": string, exactly the occupation in that persona\'s row\n'
     '- "education": string, exactly the education text in that persona\'s row\n'
     '- "interests": list of strings (3 to 6 specific interests or hobbies;\n'
@@ -114,6 +113,7 @@ def _persona_seed(assignment: PersonaAssignment) -> dict[str, Any]:
         "catalog_version": PERSONA_CATALOG_VERSION,
         "assignment_id": assignment.id,
         "age_band_id": assignment.age_band_id,
+        "gender": assignment.gender,
         "occupation_id": assignment.occupation_id,
         "occupation_sector": assignment.occupation_sector,
         "employment_context_id": assignment.employment_context_id,
@@ -161,6 +161,7 @@ def _matrix_row(index: int, assignment: PersonaAssignment, is_troll: bool) -> st
     lines = [
         f"Persona {index} [assignment_id {assignment.id}]:",
         f"- age: {assignment.age}",
+        f"- gender: {assignment.gender}",
         f"- occupation: {assignment.occupation} ({assignment.employment_context})",
         f'- education: "{assignment.education}"',
         f"- required traits: {'; '.join(assignment.traits)}",
@@ -364,6 +365,8 @@ def _sanitize_persona(
 
     raw_gender = str(item.get("gender") or "").strip().lower()
     gender = "Female" if "female" in raw_gender or raw_gender == "f" else "Male"
+    if assignment is not None:
+        gender = assignment.gender
 
     bio = str(item.get("bio") or "").strip() or "Deaddit community member."
     if assignment is None:

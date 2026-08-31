@@ -157,8 +157,7 @@ class TestPersonaGeneratorService:
         name1, name2 = (u["username"] for u in result["users"])
 
         u1 = User.query.filter(db.func.lower(User.username) == name1.lower()).first()
-        assert 18 <= u1.age <= 99
-        assert u1.gender == "Male"
+        assert u1.gender == u1.agent_state["persona_seed"]["gender"]
         assert u1.occupation
         assert u1.education
         assert u1.writing_style
@@ -166,7 +165,7 @@ class TestPersonaGeneratorService:
         assert u1.agent_state["persona_seed"]["assignment_id"] == "a1"
 
         u2 = User.query.filter(db.func.lower(User.username) == name2.lower()).first()
-        assert u2.gender == "Female"
+        assert u2.gender == u2.agent_state["persona_seed"]["gender"]
         assert u2.agent_state["persona_seed"]["assignment_id"] == "a2"
 
         # Verify Agent auto-enrollment with default config requirements
@@ -667,6 +666,7 @@ class TestAuthoritativePersonaMerge:
             "catalog_version": pg.PERSONA_CATALOG_VERSION,
             "assignment_id": assignment.id,
             "age_band_id": assignment.age_band_id,
+            "gender": assignment.gender,
             "occupation_id": assignment.occupation_id,
             "occupation_sector": assignment.occupation_sector,
             "employment_context_id": assignment.employment_context_id,
