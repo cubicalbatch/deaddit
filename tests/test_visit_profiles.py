@@ -100,14 +100,14 @@ class TestInvalidProfilesRejected:
             parse_visit_profile("{not json")
         with pytest.raises(PromptError):
             parse_visit_profile({"schema_version": 1})
+        invalid = json.loads(serialize_visit_profile(DEFAULT_VISIT_PROFILE))
+        invalid["sample_count"] = 2
         with pytest.raises(PromptError):
-            parse_visit_profile(_invalid_document())
+            parse_visit_profile(invalid)
 
-    def test_parse_rejects_short_direction_catalog(self):
+    def test_parse_rejects_empty_direction_catalog(self):
         document = json.loads(serialize_visit_profile(DEFAULT_VISIT_PROFILE))
-        document["direction_catalog"]["post"] = document["direction_catalog"]["post"][
-            :1
-        ]
+        document["direction_catalog"]["post"] = []
         with pytest.raises(PromptError):
             parse_visit_profile(document)
 
@@ -225,6 +225,7 @@ class TestRunPromptMetadata:
             or meta["length_target_id"] is None
         )
         assert isinstance(meta["direction_ids"], list)
+        assert isinstance(meta["engagement_focus_id"], str)
 
         # The immutable profile body and the stored variables reproduce the
         # exact initial system-message bytes.

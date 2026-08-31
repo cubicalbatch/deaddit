@@ -1,103 +1,136 @@
-"""Tests for local website art-direction sampling and rendering."""
+"""Tests for coherent local website art-direction sampling and rendering."""
 
 from __future__ import annotations
 
 import json
 import random
 
+import pytest
+
 from deaddit.websites.diversity import (
     _GENRE_POOL,
-    _LAYOUT_POOL,
+    _LAYOUT_ALLOWLIST,
     _MOOD_POOL,
-    _RHYTHM_POOL,
-    _TYPOGRAPHY_POOL,
     diversity_ids,
     render_website_diversity,
     sample_website_diversity,
 )
 
-_POOLS = {
-    "genres": _GENRE_POOL,
-    "layouts": _LAYOUT_POOL,
-    "moods": _MOOD_POOL,
-    "typography": _TYPOGRAPHY_POOL,
-    "rhythms": _RHYTHM_POOL,
-}
+
+def test_direction_vocabulary_is_exact_and_unique():
+    direction_ids = [option.id for option in _GENRE_POOL]
+    assert direction_ids == [
+        "website.news_report",
+        "website.magazine_feature",
+        "website.personal_blog",
+        "website.community_portal",
+        "website.event_program",
+        "website.local_business",
+        "website.nonprofit_campaign",
+        "website.product_page",
+        "website.catalog",
+        "website.reference",
+        "website.data_dashboard",
+        "website.interactive_utility",
+        "website.fan_archive",
+        "website.travel_guide",
+        "website.portfolio",
+        "website.experimental_microsite",
+    ]
+    assert len(direction_ids) == len(set(direction_ids))
+    assert set(direction_ids) == set(_LAYOUT_ALLOWLIST)
 
 
-def test_each_axis_pool_has_expected_minimum_and_stable_unique_ids():
-    for pool in _POOLS.values():
-        assert len(pool) >= 10
-        ids = [option.id for option in pool]
-        assert len(ids) == len(set(ids))
-        assert all(option.id for option in pool)
-
-
-def test_sample_sizes_are_two_two_two_two_one():
+def test_sample_selects_one_value_per_axis_and_compatible_layout():
     matrix = sample_website_diversity(random.Random(42))
 
-    assert len(matrix.genres) == 2
-    assert len(matrix.layouts) == 2
-    assert len(matrix.moods) == 2
-    assert len(matrix.typography) == 2
-    assert len(matrix.rhythms) == 1
-
-
-def test_sampling_is_without_replacement_per_axis():
-    matrix = sample_website_diversity(random.Random(7))
-
-    for options in (
+    assert matrix.direction_id in {option.id for option in _GENRE_POOL}
+    axes = (
         matrix.genres,
         matrix.layouts,
         matrix.moods,
         matrix.typography,
         matrix.rhythms,
-    ):
-        assert len(options) == len({option.id for option in options})
+        matrix.imagery,
+    )
+    assert all(len(axis) == 1 for axis in axes)
+    assert matrix.layouts[0].id in _LAYOUT_ALLOWLIST[matrix.direction_id]
+    assert matrix.genres[0].id == matrix.direction_id
 
 
-def test_weighted_seeded_sampling_is_deterministic():
+def test_pinned_direction_does_not_change_archetype_and_unknown_fails():
+    matrix = sample_website_diversity(
+        random.Random(7), direction_id="website.interactive_utility"
+    )
+    assert matrix.direction_id == "website.interactive_utility"
+    assert matrix.genres[0].id == "website.interactive_utility"
+    assert matrix.layouts[0].id in _LAYOUT_ALLOWLIST[matrix.direction_id]
+
+    with pytest.raises(ValueError, match="unknown website direction ID"):
+        sample_website_diversity(random.Random(7), direction_id="website.missing")
+
+
+def test_seeded_sampling_is_deterministic_and_ids_are_json_safe():
     first = sample_website_diversity(random.Random(2026))
     second = sample_website_diversity(random.Random(2026))
-
     assert first == second
     assert diversity_ids(first) == diversity_ids(second)
+    assert list(diversity_ids(first)) == [
+        "genres",
+        "layouts",
+        "moods",
+        "typography",
+        "rhythms",
+        "imagery",
+    ]
+    json.dumps(diversity_ids(first), sort_keys=True)
 
 
-def test_rendered_matrix_contains_only_selected_text_and_exact_template():
-    matrix = sample_website_diversity(random.Random(99))
-    rendered = render_website_diversity(matrix)
-    expected = "\n".join(
-        (
-            "Website art direction matrix (sampled for this generation; treat it as a coherent constraint, not a list to copy verbatim):",
-            f"- Site archetypes: {'; '.join(option.text for option in matrix.genres)}",
-            f"- Layout structures: {'; '.join(option.text for option in matrix.layouts)}",
-            f"- Visual moods and palettes: {'; '.join(option.text for option in matrix.moods)}",
-            f"- Typographic character: {'; '.join(option.text for option in matrix.typography)}",
-            f"- Content rhythm and interaction: {'; '.join(option.text for option in matrix.rhythms)}",
-            "Interpret the matrix through the persona brief, invent concrete content, and make the result feel like a complete independent website. Prefer visible navigation, section links, and a footer when the selected structure calls for them; in-page links may be inert anchors.",
+def test_seeded_coverage_reaches_broad_families_and_both_modes():
+    matrices = [sample_website_diversity(random.Random(seed)) for seed in range(256)]
+    directions = {matrix.direction_id for matrix in matrices}
+    assert {
+        "website.news_report",
+        "website.community_portal",
+        "website.product_page",
+        "website.reference",
+        "website.interactive_utility",
+        "website.portfolio",
+    } <= directions
+    moods = {matrix.moods[0].id for matrix in matrices}
+    assert any(mood.startswith("mood.light_") for mood in moods)
+    assert any(mood.startswith("mood.dark_") for mood in moods)
+    assert (
+        sum(
+            option.weight
+            for option in _MOOD_POOL
+            if option.id.startswith("mood.light_")
         )
+        > 0
+    )
+    assert (
+        sum(
+            option.weight for option in _MOOD_POOL if option.id.startswith("mood.dark_")
+        )
+        > 0
     )
 
-    assert rendered == expected
-    for axis, options in vars(matrix).items():
-        for option in options:
-            assert option.text in rendered
-        for option in _POOLS[axis]:
-            if option not in options:
-                assert option.text not in rendered
 
-
-def test_ids_are_ordered_and_json_safe():
-    matrix = sample_website_diversity(random.Random(13))
-    ids = diversity_ids(matrix)
-
-    assert list(ids) == ["genres", "layouts", "moods", "typography", "rhythms"]
-    assert ids == {
-        "genres": tuple(option.id for option in matrix.genres),
-        "layouts": tuple(option.id for option in matrix.layouts),
-        "moods": tuple(option.id for option in matrix.moods),
-        "typography": tuple(option.id for option in matrix.typography),
-        "rhythms": tuple(option.id for option in matrix.rhythms),
-    }
-    json.dumps(ids, sort_keys=True)
+def test_renderer_is_one_decisive_brief_without_contradictory_alternatives():
+    matrix = sample_website_diversity(
+        random.Random(11), direction_id="website.news_report"
+    )
+    rendered = render_website_diversity(matrix)
+    assert "one authoritative direction" in rendered
+    assert "alternatives" not in rendered
+    assert "choose between" not in rendered
+    for axis in (
+        matrix.genres,
+        matrix.layouts,
+        matrix.moods,
+        matrix.typography,
+        matrix.rhythms,
+        matrix.imagery,
+    ):
+        assert axis[0].text in rendered
+    assert "Preserve the persona's site subject and content." in rendered

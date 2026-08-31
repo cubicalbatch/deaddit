@@ -373,10 +373,8 @@ def test_unread_kickoff_encourages_moving_on(seeded_db, db_session):
 
     visit = prepare_agent_visit(agent, db_session.get(User, "alice"), unread=3)
     prompt = visit.messages[1]["content"]
-    intent = visit.plan.intent
 
-    assert intent == "browse"
-    assert "Most replies" in prompt
+    assert "answer only where you have something genuinely new to add" in prompt
     assert "join ongoing conversations" not in prompt
 
 

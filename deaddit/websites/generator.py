@@ -161,8 +161,8 @@ def _build_user_prompt(
         f"Output budget: your response is hard-truncated at {max_output_tokens} "
         "tokens. A truncated document is discarded in full, so size the site to "
         "finish comfortably within the budget and write the closing </html>.\n\n"
-        "Art direction matrix for this generation (use it to steer the visual and "
-        "structural result; do not mention the matrix in the page):\n"
+        "Authoritative art direction for this generation (follow every selected "
+        "axis; do not mention the direction in the page):\n"
         f"{diversity_text}\n\n"
         "Site and page brief, written by the persona who found this site:\n"
         f"{website_description}\n\n"
@@ -436,15 +436,17 @@ def generate_website_html(
     settings: WebsiteGenerationSettings,
     run_deadline_remaining: float | None = None,
     rng: random.Random | None = None,
+    direction_id: str | None = None,
 ) -> WebsiteGenerationResult:
     """Generate and validate one HTML document for ``create_website``.
-
     Builds a plain (no-tools) completion request against exactly *api_url*/
     *api_key*/*model* - the caller's already-resolved effective LLM
     configuration, never a website-specific override - labeled
     ``action="create_website"`` and ``agent=agent`` so the request is billed
     and audited through the normal :mod:`deaddit.llm.accounting` ledger like
-    any other LLM call. ``max_tokens`` comes from *settings*
+    any other LLM call. When *direction_id* is supplied, it pins the website
+    archetype while local sampling chooses only compatible visual axes.
+    ``max_tokens`` comes from *settings*
     (``resolve_website_settings()``'s 32,768-token floor already applied).
 
     ``read_timeout`` is the smaller of ``settings.generation_timeout_seconds``
@@ -470,7 +472,8 @@ def generate_website_html(
             "not enough run time remaining to generate a website"
         )
     diversity_matrix = sample_website_diversity(
-        rng if rng is not None else random.Random()
+        rng if rng is not None else random.Random(),
+        direction_id=direction_id,
     )
     diversity_text = render_website_diversity(diversity_matrix)
     selected_diversity_ids = diversity_ids(diversity_matrix)

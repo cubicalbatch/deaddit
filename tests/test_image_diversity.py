@@ -1,4 +1,4 @@
-"""Tests for image art-direction diversity sampling."""
+"""Focused tests for coherent image art-direction sampling."""
 
 import json
 import random
@@ -7,115 +7,171 @@ import pytest
 
 from deaddit.images import diversity
 from deaddit.images.diversity import (
-    DiversityOption,
-    ImageDiversity,
     diversity_ids,
     render_image_diversity,
     sample_image_diversity,
 )
 
-POOLS = (
-    ("framings", "framing.", diversity._FRAMING_POOL),
-    ("subjects", "subject.", diversity._SUBJECT_POOL),
-    ("lighting", "lighting.", diversity._LIGHTING_POOL),
-    ("palettes", "palette.", diversity._PALETTE_POOL),
-    ("styles", "style.", diversity._STYLE_POOL),
-    ("settings", "setting.", diversity._SETTING_POOL),
+IMAGE_DIRECTION_IDS = (
+    "image.candid_snapshot",
+    "image.object_closeup",
+    "image.place_observation",
+    "image.process_documentation",
+    "image.finished_result",
+    "image.before_after",
+    "image.archival_artifact",
+    "image.food_photo",
+    "image.pet_wildlife",
+    "image.macro_detail",
+    "image.diagram_infographic",
+    "image.artwork_craft",
 )
-COLLAPSE_IDS = {
-    "framings": "framing.overhead_flat_lay",
-    "subjects": "subject.paper_artifact",
-    "lighting": "lighting.warm_local",
-    "palettes": "palette.warm_neutral",
-    "styles": "style.documentary_photo",
-    "settings": "setting.wooden_workbench",
-}
+PHOTO_DIRECTION_IDS = IMAGE_DIRECTION_IDS[:10]
+DRAWN_DIRECTION_IDS = IMAGE_DIRECTION_IDS[10:]
 
 
-@pytest.mark.parametrize("axis, prefix, pool", POOLS)
-def test_pools_have_minimum_size_unique_ids_and_collapse_weight(axis, prefix, pool):
-    assert len(pool) >= 12
-    assert len({option.id for option in pool}) == len(pool)
-    assert sum(option.weight == 0.45 for option in pool) == 1
+@pytest.mark.parametrize("direction_id", IMAGE_DIRECTION_IDS)
+def test_every_direction_has_one_coherent_matrix(direction_id):
+    matrix = sample_image_diversity(random.Random(1), direction_id=direction_id)
+    ids = diversity_ids(matrix)
+
+    assert matrix.direction.id == direction_id
+    assert list(ids) == ["direction", "framing", "lighting", "capture", "color"]
+    assert all(len(axis_ids) == 1 for axis_ids in ids.values())
+    assert all(isinstance(axis_ids[0], str) for axis_ids in ids.values())
+    medium_ids = (ids[axis][0] for axis in ("framing", "lighting", "capture", "color"))
+    if matrix.is_photographic:
+        assert all(".photo_" in option_id for option_id in medium_ids)
+    else:
+        assert all(".drawn_" in option_id for option_id in medium_ids)
+
+
+def test_direction_catalog_is_exact_and_ordered():
     assert (
-        next(option for option in pool if option.weight == 0.45).id
-        == COLLAPSE_IDS[axis]
-    )
-    assert all(option.weight in (0.45, 1.0) for option in pool)
-    assert all(option.id.startswith(prefix) for option in pool)
-
-
-def test_sample_has_one_option_per_axis_in_fixed_order():
-    matrix = sample_image_diversity(random.Random(4))
-    assert isinstance(matrix, ImageDiversity)
-    assert list(matrix.__dataclass_fields__) == [
-        "framings",
-        "subjects",
-        "lighting",
-        "palettes",
-        "styles",
-        "settings",
-    ]
-    assert all(len(options) == 1 for options in vars(matrix).values())
-    assert list(diversity_ids(matrix)) == [
-        "framings",
-        "subjects",
-        "lighting",
-        "palettes",
-        "styles",
-        "settings",
-    ]
-
-
-def test_weighted_helper_samples_without_replacement():
-    pool = tuple(DiversityOption(str(index), str(index), 1.0) for index in range(8))
-    selected = diversity._sample_weighted_without_replacement(
-        pool, 8, random.Random(12)
-    )
-    assert len(selected) == 8
-    assert len({option.id for option in selected}) == 8
-    assert {option.id for option in selected} == {option.id for option in pool}
-
-
-def test_seeded_sampling_is_deterministic():
-    assert sample_image_diversity(random.Random(12345)) == sample_image_diversity(
-        random.Random(12345)
+        tuple(spec.direction.id for spec in diversity._DIRECTION_SPECS)
+        == IMAGE_DIRECTION_IDS
     )
 
 
-def test_different_seeds_produce_different_sampling():
-    assert sample_image_diversity(random.Random(1)) != sample_image_diversity(
-        random.Random(2)
+def test_seeded_sampling_is_deterministic_and_varies_multiple_axes():
+    first = [sample_image_diversity(random.Random(seed)) for seed in range(10)]
+    second = [sample_image_diversity(random.Random(seed)) for seed in range(10)]
+
+    assert first == second
+    assert len({matrix.direction.id for matrix in first}) > 1
+    assert len({matrix.framing.id for matrix in first}) > 1
+    assert len({matrix.capture.id for matrix in first}) > 1
+    assert len({matrix.color.id for matrix in first}) > 1
+
+
+@pytest.mark.parametrize("direction_id", IMAGE_DIRECTION_IDS)
+def test_explicit_photo_source_wins_over_drawn_default(direction_id):
+    matrix = sample_image_diversity(
+        random.Random(7),
+        direction_id=direction_id,
+        source_prompt="A documentary photograph taken with a phone camera.",
     )
 
-
-def test_render_is_exact_template_and_contains_only_selected_text():
-    selected = tuple(pool[1] for _, _, pool in POOLS)
-    matrix = ImageDiversity(*((option,) for option in selected))
-    expected = "\n".join(
-        (
-            "Image art direction (sampled for this generation; blend it with the persona request rather than treating it as a replacement):",
-            f"- Framing and camera: {selected[0].text}",
-            f"- Subject focus: {selected[1].text}",
-            f"- Lighting situation: {selected[2].text}",
-            f"- Palette and mood: {selected[3].text}",
-            f"- Visual medium and style: {selected[4].text}",
-            f"- Setting and surface: {selected[5].text}",
-            "Keep the requested subject and scene. Apply each sampled direction where the prompt leaves that axis unspecified. If the prompt explicitly contradicts a sampled direction, the prompt wins for that axis.",
-        )
+    assert matrix.is_photographic is True
+    assert all(
+        getattr(matrix, axis).id.startswith(f"{axis}.photo_")
+        for axis in ("framing", "lighting", "capture", "color")
     )
     rendered = render_image_diversity(matrix)
-    assert rendered == expected
-    assert len(rendered.splitlines()) == 8
-    for _, _, pool in POOLS:
-        for option in pool:
-            if option not in selected:
-                assert option.text not in rendered
+    assert "Photographic priority: render a realistic photograph" in rendered
+    assert "Drawn/design priority:" not in rendered
 
 
-def test_diversity_ids_are_ordered_json_safe_tuples():
-    matrix = sample_image_diversity(random.Random(99))
-    ids = diversity_ids(matrix)
+@pytest.mark.parametrize("direction_id", IMAGE_DIRECTION_IDS)
+def test_explicit_drawn_source_wins_over_photo_default(direction_id):
+    matrix = sample_image_diversity(
+        random.Random(7),
+        direction_id=direction_id,
+        source_prompt="An engraved illustration in watercolor and ink.",
+    )
+
+    assert matrix.is_photographic is False
+    assert all(
+        getattr(matrix, axis).id.startswith(f"{axis}.drawn_")
+        for axis in ("framing", "lighting", "capture", "color")
+    )
+    rendered = render_image_diversity(matrix)
+    assert "Drawn/design priority:" in rendered
+    assert "Photographic priority:" not in rendered
+
+
+def test_medium_phrase_order_handles_photo_of_drawn_artifact():
+    matrix = sample_image_diversity(
+        random.Random(2),
+        direction_id="image.artwork_craft",
+        source_prompt="A photograph of an old engraving.",
+    )
+    assert matrix.is_photographic is True
+
+
+@pytest.mark.parametrize("direction_id", PHOTO_DIRECTION_IDS)
+def test_photo_directions_never_compile_drawn_axis_choices(direction_id):
+    matrix = sample_image_diversity(random.Random(11), direction_id=direction_id)
+    rendered = render_image_diversity(matrix)
+
+    assert matrix.is_photographic is True
+    assert all(
+        getattr(matrix, axis).id.startswith(f"{axis}.photo_")
+        for axis in ("framing", "lighting", "capture", "color")
+    )
+    assert "realistic photograph" in rendered
+    # The rejection sentence is allowed to name forbidden media, but no
+    # positive drawn directive may be selected for a photographic direction.
+    assert "Drawn/design priority:" not in rendered
+    assert "Use a deliberate illustration" not in rendered
+    assert "Use a painting" not in rendered
+    assert "Use a 3D" not in rendered
+
+
+@pytest.mark.parametrize("direction_id", DRAWN_DIRECTION_IDS)
+def test_drawn_directions_compile_only_drawn_choices(direction_id):
+    matrix = sample_image_diversity(random.Random(11), direction_id=direction_id)
+    rendered = render_image_diversity(matrix)
+
+    assert matrix.is_photographic is False
+    assert all(
+        getattr(matrix, axis).id.startswith(f"{axis}.drawn_")
+        for axis in ("framing", "lighting", "capture", "color")
+    )
+    assert "Drawn/design priority:" in rendered
+    assert "realistic photograph captured" not in rendered
+
+
+def test_render_has_one_selected_direction_and_preserves_subject_location():
+    matrix = sample_image_diversity(
+        random.Random(3), direction_id="image.place_observation"
+    )
+    rendered = render_image_diversity(matrix)
+
+    assert rendered.count("- Direction:") == 1
+    assert "one selected direction" in rendered
+    assert "Keep the requested subject and location" in rendered
+    assert "vary how it is captured, not what it is" in rendered.lower()
+    # These were old replacement axes and must not leak into the prompt.
+    for injected in (
+        "city street",
+        "grass field",
+        "wooden workbench",
+        "paper artifact",
+    ):
+        assert injected not in rendered.lower()
+
+
+def test_unknown_direction_id_fails_clearly():
+    with pytest.raises(ValueError, match="unknown image diversity direction ID"):
+        sample_image_diversity(random.Random(1), direction_id="image.unknown")
+
+
+def test_diversity_ids_are_stable_json_safe_tuples():
+    ids = diversity_ids(
+        sample_image_diversity(random.Random(99), direction_id="image.food_photo")
+    )
+
     assert all(isinstance(axis_ids, tuple) for axis_ids in ids.values())
     assert json.loads(json.dumps(ids)) == {
         key: list(value) for key, value in ids.items()

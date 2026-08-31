@@ -27,6 +27,7 @@ from deaddit.agents.registry import (
 from deaddit.config import Config
 from deaddit.dynamics import threads
 from deaddit.extensions import db
+from deaddit.images import diversity as image_diversity
 from deaddit.images.client import generate as generate_image
 from deaddit.images.diversity import (
     diversity_ids,
@@ -61,6 +62,7 @@ from deaddit.services.content import (
     preflight_image_post,
     preflight_website_post,
 )
+from deaddit.websites import diversity as website_diversity
 from deaddit.websites.generator import (
     WebsiteGenerationError,
     WebsiteGenerationInvalidHTMLError,
@@ -87,6 +89,29 @@ _IMAGE_GENERATION_SECONDS = 90.0
 
 def _provenance(ctx: ToolContext) -> str:
     return f"agent:{ctx.user_username}"
+
+
+_PLANNED_MEDIA_DIRECTION_IDS = {
+    "image.": frozenset(spec.direction.id for spec in image_diversity._DIRECTION_SPECS),
+    "website.": frozenset(option.id for option in website_diversity._GENRE_POOL),
+}
+
+
+def _planned_media_direction(ctx: ToolContext, prefix: str) -> str | None:
+    """Return the sole known planned direction for a media tool."""
+    run = ctx.run
+    metadata = getattr(run, "prompt_metadata", None) if run is not None else None
+    if not isinstance(metadata, dict):
+        return None
+    direction_ids = metadata.get("direction_ids")
+    if not isinstance(direction_ids, list) or len(direction_ids) != 1:
+        return None
+    direction_id = direction_ids[0]
+    if not isinstance(direction_id, str):
+        return None
+    if direction_id not in _PLANNED_MEDIA_DIRECTION_IDS.get(prefix, ()):
+        return None
+    return direction_id
 
 
 class CreatePostArgs(BaseModel):
@@ -226,7 +251,11 @@ def _create_image_post(ctx: ToolContext, params: CreateImagePostArgs) -> dict:
     diversity_rng = (
         random.Random(ctx.run.id) if ctx.run is not None else random.Random()
     )
-    diversity = sample_image_diversity(diversity_rng)
+    diversity = sample_image_diversity(
+        diversity_rng,
+        direction_id=_planned_media_direction(ctx, "image."),
+        source_prompt=params.image_prompt,
+    )
     diversity_text = render_image_diversity(diversity)
     composed_prompt = f"{params.image_prompt}\n\n{diversity_text}"
     try:
@@ -423,6 +452,7 @@ def _create_website(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
             settings=settings,
             rng=random.Random(ctx.run.id) if ctx.run is not None else random.Random(),
             run_deadline_remaining=run_deadline_remaining,
+            direction_id=_planned_media_direction(ctx, "website."),
         )
     except WebsiteGenerationTruncatedError:
         return {

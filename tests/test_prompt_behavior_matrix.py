@@ -19,7 +19,7 @@ from deaddit.agents.prompts import (
 )
 from deaddit.agents.registry import specs_for, tools_for
 from deaddit.models import Agent, AgentMemory, User
-from tests.visit_profiles import pin_intent_mix
+from tests.visit_profiles import fake_choices, pin_intent_mix
 
 READ_ONLY_TOOLS = {
     "browse_feed",
@@ -314,11 +314,14 @@ def test_subscriptions_and_prompt_prose_sections_are_stable(app, db_session):
     # Content tuning and the transient kickoff objective remain in the user
     # message.  Operational tool wording appears in both the system contract
     # and the forced-post kickoff when a post is explicitly requested.
-    with patch("deaddit.agents.prompts.random.choices", return_value=[0]):
+    with patch(
+        "deaddit.agents.prompts.random.choices",
+        side_effect=fake_choices({"post": 0, "comment": 0}),
+    ):
         visit = prepare_agent_visit(agent, user, requested_intent="post", unread=0)
     kickoff = visit.messages[1]["content"]
     assert visit.plan.intent == "post"
-    assert "For inspiration, choose at most one" in kickoff
+    assert "Direction for this visit:" in kickoff
     assert "Length target for this text post body:" in kickoff
     assert "You're waking up with something to share." in kickoff
     assert "using the create_post tool" in kickoff
@@ -391,7 +394,10 @@ def test_kickoff_requested_intent_and_unread_matrix(app, db_session):
         for requested in requests:
             for unread in (0, 2):
                 with (
-                    patch("deaddit.agents.prompts.random.choices", return_value=[50]),
+                    patch(
+                        "deaddit.agents.prompts.random.choices",
+                        side_effect=fake_choices({"quantile": 50}),
+                    ),
                     patch(
                         "deaddit.agents.prompts.random.sample",
                         side_effect=lambda population, count: list(population)[:count],
@@ -456,7 +462,10 @@ def test_initial_messages_freeze_unread_notice_and_system_kickoff_roles(
     monkeypatch.setattr(agent_prompts, "unread_count", lambda username: 2)
     monkeypatch.setattr(agent_prompts, "visit_memories", lambda username: None)
     with (
-        patch("deaddit.agents.prompts.random.choices", return_value=[0]),
+        patch(
+            "deaddit.agents.prompts.random.choices",
+            side_effect=fake_choices({"comment": 0}),
+        ),
         patch(
             "deaddit.agents.prompts.random.sample",
             side_effect=lambda population, count: list(population)[:count],
@@ -575,52 +584,54 @@ def test_rng_draw_order_is_length_then_intent_then_content_tuning(app, db_sessio
     )
     events: list[str] = []
 
-    def choices(population, *, k):
-        del population, k
-        events.append("length")
-        return [0]
+    def choices(population, weights=None, *, k=1):
+        del weights, k
+        events.append("choices")
+        first = population[0]
+        if not hasattr(first, "id"):
+            return [0]
+        return [population[0]]
 
     def random_value():
         events.append("random")
         return 0.0
 
-    def sample(population, count):
-        del population, count
-        events.append("sample")
-        return []
+    def choice(population):
+        events.append("choice")
+        return population[0]
 
     pin_intent_mix(agent, post=1.0, image=0.0, website=0.0)
     with (
         patch("deaddit.agents.prompts.random.choices", choices),
         patch("deaddit.agents.prompts.random.random", random_value),
-        patch("deaddit.agents.prompts.random.sample", sample),
+        patch("deaddit.agents.prompts.random.choice", choice),
     ):
         visit = prepare_agent_visit(agent, user, unread=0)
     assert visit.plan.intent == "post"
-    assert events == ["length", "random", "random", "sample", "sample"]
+    assert events == ["choices", "random", "random", "choices"]
 
     events.clear()
     with (
         patch("deaddit.agents.prompts.random.choices", choices),
         patch("deaddit.agents.prompts.random.random", random_value),
-        patch("deaddit.agents.prompts.random.sample", sample),
+        patch("deaddit.agents.prompts.random.choice", choice),
     ):
         visit = prepare_agent_visit(agent, user, unread=0, requested_intent="browse")
     assert visit.plan.intent == "browse"
-    assert events == ["length", "sample"]
+    assert events == ["choices", "choices", "choices"]
 
     events.clear()
     lurker, lurker_user = _make_agent(db_session, "rng_lurker", tier="lurker")
     with (
         patch("deaddit.agents.prompts.random.choices", choices),
         patch("deaddit.agents.prompts.random.random", random_value),
-        patch("deaddit.agents.prompts.random.sample", sample),
+        patch("deaddit.agents.prompts.random.choice", choice),
     ):
         visit = prepare_agent_visit(
             lurker, lurker_user, unread=0, requested_intent="post"
         )
     assert visit.plan.intent == "browse"
-    assert events == ["length"]
+    assert events == ["choices"]
 
 
 def test_same_seed_and_inputs_are_byte_identical(app, db_session):
@@ -680,7 +691,7 @@ def test_automatic_sampled_intent_uses_current_categorical_slices(
 @pytest.mark.parametrize(
     "intent,quantile,needle",
     (
-        ("browse", 0, "no more than 20 words"),
+        ("browse", 0, "at most about"),
         ("browse", 99, "120-250 words"),
         ("post", 0, "one sentence or a very short question"),
         ("post", 99, "four to six short paragraphs"),
@@ -697,7 +708,10 @@ def test_length_quantile_selects_current_content_family(
         image_mode="optional",
     )
     with (
-        patch("deaddit.agents.prompts.random.choices", return_value=[quantile]),
+        patch(
+            "deaddit.agents.prompts.random.choices",
+            side_effect=fake_choices({"quantile": quantile}),
+        ),
         patch(
             "deaddit.agents.prompts.random.sample",
             side_effect=lambda population, count: list(population)[:count],

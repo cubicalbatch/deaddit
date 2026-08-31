@@ -1,472 +1,684 @@
-"""Sample and render varied art direction for generated images.
+"""Sample and render coherent art direction for generated images.
 
-The module is pure data and consumes only a caller-provided random stream.
+The sampler chooses one stable creative direction and then derives compatible
+capture choices from that direction.  It consumes only a caller-provided random
+stream; source prompts are inspected only for their explicit medium intent.
 """
 
 from __future__ import annotations
 
 import random
-import textwrap
+import re
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class DiversityOption:
-    """One stable, weighted art-direction option."""
+    """One stable art-direction choice."""
 
     id: str
     text: str
-    weight: float
+    weight: float = 1.0
 
 
 @dataclass(frozen=True)
 class ImageDiversity:
-    """The selected art-direction options for one image generation."""
+    """One selected direction and its compatible rendering choices."""
 
-    framings: tuple[DiversityOption, ...]
-    subjects: tuple[DiversityOption, ...]
-    lighting: tuple[DiversityOption, ...]
-    palettes: tuple[DiversityOption, ...]
-    styles: tuple[DiversityOption, ...]
-    settings: tuple[DiversityOption, ...]
+    direction: DiversityOption
+    framing: DiversityOption
+    lighting: DiversityOption
+    capture: DiversityOption
+    color: DiversityOption
+    is_photographic: bool
 
 
-_FRAMING_POOL: tuple[DiversityOption, ...] = (
-    DiversityOption(
-        "framing.overhead_flat_lay",
-        "Use a straight-down overhead view with the subject arranged as a flat-lay composition.",
-        0.45,
+@dataclass(frozen=True)
+class _DirectionVariant:
+    """Axis choices for one direction in one medium."""
+
+    framing: DiversityOption
+    lighting: DiversityOption
+    capture: DiversityOption
+    color: DiversityOption
+
+
+@dataclass(frozen=True)
+class _DirectionSpec:
+    """A direction with coherent photographic and drawn variants."""
+
+    direction: DiversityOption
+    photographic: _DirectionVariant
+    drawn: _DirectionVariant
+
+
+def _option(axis: str, name: str, text: str, *, medium: str) -> DiversityOption:
+    return DiversityOption(f"{axis}.{medium}_{name}", text)
+
+
+def _photo(
+    framing: tuple[str, str],
+    lighting: tuple[str, str],
+    capture: tuple[str, str],
+    color: tuple[str, str],
+) -> _DirectionVariant:
+    return _DirectionVariant(
+        framing=_option("framing", framing[0], framing[1], medium="photo"),
+        lighting=_option("lighting", lighting[0], lighting[1], medium="photo"),
+        capture=_option("capture", capture[0], capture[1], medium="photo"),
+        color=_option("color", color[0], color[1], medium="photo"),
+    )
+
+
+def _drawn(
+    framing: tuple[str, str],
+    lighting: tuple[str, str],
+    capture: tuple[str, str],
+    color: tuple[str, str],
+) -> _DirectionVariant:
+    return _DirectionVariant(
+        framing=_option("framing", framing[0], framing[1], medium="drawn"),
+        lighting=_option("lighting", lighting[0], lighting[1], medium="drawn"),
+        capture=_option("capture", capture[0], capture[1], medium="drawn"),
+        color=_option("color", color[0], color[1], medium="drawn"),
+    )
+
+
+# Direction descriptions deliberately describe *how* to approach the request;
+# none names a replacement subject, place, or setting.
+_DIRECTION_SPECS: tuple[_DirectionSpec, ...] = (
+    _DirectionSpec(
+        DiversityOption(
+            "image.candid_snapshot",
+            "Candid snapshot: observe the requested subject in an unposed, immediate moment.",
+        ),
+        _photo(
+            ("eye_level", "Use an eye-level view with a natural, unforced crop."),
+            (
+                "available_light",
+                "Use the available light with soft, believable falloff.",
+            ),
+            (
+                "handheld_phone",
+                "Make it a handheld phone photograph with slight natural imperfection.",
+            ),
+            ("true_to_life", "Keep color true to life with restrained contrast."),
+        ),
+        _drawn(
+            (
+                "observational_crop",
+                "Use an unposed observational crop with a clear gesture.",
+            ),
+            (
+                "soft_tonal",
+                "Use soft drawn tonal modeling rather than cast-light simulation.",
+            ),
+            (
+                "line_and_wash",
+                "Use an observational line-and-wash drawing with varied line weight.",
+            ),
+            (
+                "muted_paper",
+                "Use a muted paper-ground palette with a few intentional accents.",
+            ),
+        ),
     ),
-    DiversityOption(
-        "framing.eye_level_close",
-        "Use an eye-level close view with shallow depth and attention on one meaningful detail.",
-        1.0,
+    _DirectionSpec(
+        DiversityOption(
+            "image.object_closeup",
+            "Object close-up: prioritize the requested subject's tactile detail at close range.",
+        ),
+        _photo(
+            (
+                "tight_detail",
+                "Use a tight close view that makes surface detail legible.",
+            ),
+            (
+                "raking_side",
+                "Use raking side light to reveal texture without theatrical effects.",
+            ),
+            (
+                "camera_closeup",
+                "Make it a real camera close-up with believable lens falloff.",
+            ),
+            (
+                "material_neutral",
+                "Use a neutral material palette with accurate surface color.",
+            ),
+        ),
+        _drawn(
+            (
+                "detail_panel",
+                "Use a tightly framed detail panel with deliberate contour emphasis.",
+            ),
+            ("modeled_tone", "Use layered drawn tones to describe volume and texture."),
+            (
+                "technical_study",
+                "Use a detailed ink or graphite study with controlled hatching.",
+            ),
+            (
+                "earth_and_ink",
+                "Use earth pigments and dark ink with the support surface visible.",
+            ),
+        ),
     ),
-    DiversityOption(
-        "framing.low_angle",
-        "Use a low camera angle that gives the subject weight against its surroundings.",
-        1.0,
+    _DirectionSpec(
+        DiversityOption(
+            "image.place_observation",
+            "Place observation: let the requested place or context remain legible in an observational view.",
+        ),
+        _photo(
+            (
+                "wide_context",
+                "Use a wide environmental view that preserves spatial context.",
+            ),
+            ("overcast_day", "Use broad overcast daylight for honest, even detail."),
+            (
+                "documentary_camera",
+                "Make it a documentary camera photograph from a plausible vantage point.",
+            ),
+            (
+                "atmospheric_neutral",
+                "Keep atmospheric color subtle and faithful to the observed conditions.",
+            ),
+        ),
+        _drawn(
+            (
+                "panoramic_field",
+                "Use a broad composed field with clear spatial relationships.",
+            ),
+            (
+                "flat_even_tone",
+                "Use even graphic tones and a restrained sense of depth.",
+            ),
+            (
+                "location_sketch",
+                "Use a location sketch with selective detail and visible construction marks.",
+            ),
+            ("quiet_earth", "Use quiet earth and sky colors with measured separation."),
+        ),
     ),
-    DiversityOption(
-        "framing.wide_environmental",
-        "Use a wide environmental view where the subject shares visual importance with its surroundings.",
-        1.0,
+    _DirectionSpec(
+        DiversityOption(
+            "image.process_documentation",
+            "Process documentation: show the requested activity through an attentive record of its stages.",
+        ),
+        _photo(
+            (
+                "sequence_ready",
+                "Use a purposeful frame that makes the action and its stage easy to read.",
+            ),
+            (
+                "work_light",
+                "Use practical work light with shadows that remain informative.",
+            ),
+            (
+                "documentary_handheld",
+                "Make it a handheld documentary photograph, not a staged advertisement.",
+            ),
+            (
+                "functional_color",
+                "Use functional, honest color with modest saturation.",
+            ),
+        ),
+        _drawn(
+            (
+                "stepwise_layout",
+                "Use a stepwise layout with clear progression across the frame.",
+            ),
+            (
+                "graphic_shadow",
+                "Use graphic shadow shapes to separate the stages cleanly.",
+            ),
+            (
+                "instructional_ink",
+                "Use an instructional ink drawing with economical annotation-like marks.",
+            ),
+            (
+                "workshop_ochre",
+                "Use ochre, graphite, and one restrained accent for visual continuity.",
+            ),
+        ),
     ),
-    DiversityOption(
-        "framing.profile",
-        "Use a side profile view with layered depth and a clear silhouette.",
-        1.0,
+    _DirectionSpec(
+        DiversityOption(
+            "image.finished_result",
+            "Finished result: present the requested completed work with calm, legible emphasis.",
+        ),
+        _photo(
+            (
+                "three_quarter_result",
+                "Use a three-quarter view that makes the completed form immediately legible.",
+            ),
+            (
+                "controlled_softbox",
+                "Use controlled soft light with gentle edge definition.",
+            ),
+            (
+                "product_camera",
+                "Make it a realistic product photograph with useful, non-glossy detail.",
+            ),
+            (
+                "clean_balanced",
+                "Use clean balanced color without a synthetic showroom cast.",
+            ),
+        ),
+        _drawn(
+            (
+                "hero_composition",
+                "Use a composed hero view with a strong silhouette and clean margins.",
+            ),
+            (
+                "design_highlight",
+                "Use deliberate highlight and shadow shapes to clarify the result.",
+            ),
+            (
+                "poster_design",
+                "Use a polished poster or print design with disciplined shape language.",
+            ),
+            (
+                "limited_accent",
+                "Use a limited palette with one confident accent color.",
+            ),
+        ),
     ),
-    DiversityOption(
-        "framing.rear_follow",
-        "Use a from-behind viewpoint that suggests movement toward a visible destination.",
-        1.0,
+    _DirectionSpec(
+        DiversityOption(
+            "image.before_after",
+            "Before and after: make the requested change readable through a direct visual comparison.",
+        ),
+        _photo(
+            (
+                "matched_pair",
+                "Use matched framing and scale so the comparison reads immediately.",
+            ),
+            ("consistent_daylight", "Use consistent daylight across the paired views."),
+            (
+                "documentary_pair",
+                "Make it a realistic documentary photo pair with ordinary imperfections.",
+            ),
+            (
+                "truthful_comparison",
+                "Keep color and contrast consistent so the change is not exaggerated.",
+            ),
+        ),
+        _drawn(
+            (
+                "split_comparison",
+                "Use a clear split comparison with aligned visual anchors.",
+            ),
+            (
+                "graphic_difference",
+                "Use graphic tonal contrast only where it clarifies the change.",
+            ),
+            (
+                "annotated_plate",
+                "Use a designed comparison plate with restrained labels or marks.",
+            ),
+            (
+                "paired_neutrals",
+                "Use paired neutral tones with one controlled difference accent.",
+            ),
+        ),
     ),
-    DiversityOption(
-        "framing.three_quarter",
-        "Use a three-quarter view with dimensional form and an off-center subject.",
-        1.0,
+    _DirectionSpec(
+        DiversityOption(
+            "image.archival_artifact",
+            "Archival artifact: preserve the requested item's evidence of age, use, and provenance.",
+        ),
+        _photo(
+            (
+                "flat_record",
+                "Use a careful record view that keeps edges and identifying details visible.",
+            ),
+            (
+                "museum_soft",
+                "Use soft diffuse illumination that avoids distracting glare.",
+            ),
+            (
+                "archive_documentary",
+                "Make it a faithful archival photograph with natural surface wear.",
+            ),
+            (
+                "faded_material",
+                "Use gently faded, material-accurate color with restrained contrast.",
+            ),
+        ),
+        _drawn(
+            (
+                "catalog_plate",
+                "Use a catalog-like plate with measured margins and visible evidence.",
+            ),
+            ("paper_tone", "Use flat paper tones and controlled value changes."),
+            (
+                "engraved_record",
+                "Use an engraved or lithographic record with careful fine marks.",
+            ),
+            (
+                "sepia_ink",
+                "Use sepia, charcoal, and paper white without glossy color effects.",
+            ),
+        ),
     ),
-    DiversityOption(
-        "framing.ground_level",
-        "Use a ground-level perspective that exaggerates foreground texture and receding space.",
-        1.0,
+    _DirectionSpec(
+        DiversityOption(
+            "image.food_photo",
+            "Food photo: make the requested food immediately appetizing through texture and arrangement.",
+        ),
+        _photo(
+            (
+                "tabletop_three_quarter",
+                "Use a tabletop three-quarter view with enough context to read the serving.",
+            ),
+            (
+                "window_soft",
+                "Use soft window light that preserves texture and natural highlights.",
+            ),
+            (
+                "phone_food",
+                "Make it a believable phone food photograph, not a sterile advertisement.",
+            ),
+            (
+                "appetizing_natural",
+                "Use appetizing but natural color; avoid exaggerated saturation.",
+            ),
+        ),
+        _drawn(
+            (
+                "menu_composition",
+                "Use a clear menu-like composition that makes the arrangement readable.",
+            ),
+            ("warm_flat_tone", "Use warm flat tones with selective value for texture."),
+            (
+                "culinary_illustration",
+                "Use a culinary illustration with confident contour and material marks.",
+            ),
+            (
+                "spice_palette",
+                "Use a warm spice palette balanced by paper and ink neutrals.",
+            ),
+        ),
     ),
-    DiversityOption(
-        "framing.reflection",
-        "Use a reflection-based composition with the primary subject seen indirectly.",
-        1.0,
+    _DirectionSpec(
+        DiversityOption(
+            "image.pet_wildlife",
+            "Pet and wildlife: attend to the requested animal's behavior without forcing a pose.",
+        ),
+        _photo(
+            (
+                "behavioral_eye_level",
+                "Use an eye-level behavioral frame without forcing a pose.",
+            ),
+            (
+                "natural_outdoor",
+                "Use natural outdoor light with readable detail in the shadows.",
+            ),
+            (
+                "telephoto_observation",
+                "Make it a realistic observational photograph with plausible lens distance.",
+            ),
+            (
+                "habitat_true",
+                "Keep habitat color true and avoid fantasy color grading.",
+            ),
+        ),
+        _drawn(
+            (
+                "gesture_study",
+                "Use a gesture-focused study that keeps the animal's movement readable.",
+            ),
+            (
+                "natural_marking",
+                "Use drawn marks to imply light while preserving clear anatomy.",
+            ),
+            (
+                "field_plate",
+                "Use a natural-history field plate with precise contour and selective detail.",
+            ),
+            (
+                "habitat_earth",
+                "Use habitat greens, browns, and paper neutrals with small accents.",
+            ),
+        ),
     ),
-    DiversityOption(
-        "framing.macro",
-        "Use an intimate macro perspective that magnifies texture, material, and small transitions.",
-        1.0,
+    _DirectionSpec(
+        DiversityOption(
+            "image.macro_detail",
+            "Macro detail: magnify the requested subject's small structure, texture, or transition.",
+        ),
+        _photo(
+            (
+                "macro_focus",
+                "Use a true macro frame with a narrow but intentional focus plane.",
+            ),
+            (
+                "diffused_close",
+                "Use diffused close light that reveals tiny relief without harsh glare.",
+            ),
+            (
+                "macro_lens",
+                "Make it a realistic macro photograph with optical depth-of-field behavior.",
+            ),
+            (
+                "microscopic_true",
+                "Keep magnified color truthful to the material rather than surreal.",
+            ),
+        ),
+        _drawn(
+            (
+                "magnified_detail",
+                "Use an enlarged detail view with clear structural hierarchy.",
+            ),
+            (
+                "crosshatch_relief",
+                "Use crosshatching and layered marks to describe small relief.",
+            ),
+            (
+                "scientific_study",
+                "Use a precise scientific drawing with disciplined line variation.",
+            ),
+            (
+                "mineral_paper",
+                "Use mineral, moss, or paper hues only as the requested material supports.",
+            ),
+        ),
     ),
-    DiversityOption(
-        "framing.balanced_pair",
-        "Use a balanced two-subject composition with visual tension across the frame.",
-        1.0,
+    _DirectionSpec(
+        DiversityOption(
+            "image.diagram_infographic",
+            "Diagram and infographic: organize the requested information so relationships are immediately legible.",
+        ),
+        _photo(
+            (
+                "flat_document",
+                "Use a flat, square-on record view that keeps all requested information legible.",
+            ),
+            (
+                "even_document_light",
+                "Use even document light without glare or dramatic falloff.",
+            ),
+            (
+                "scanner_or_camera",
+                "Make it a realistic photograph or scan of the requested diagram.",
+            ),
+            ("paper_true", "Keep ink and paper color accurate and restrained."),
+        ),
+        _drawn(
+            (
+                "structured_grid",
+                "Use a structured grid with clear hierarchy and unambiguous relationships.",
+            ),
+            ("flat_design_tone", "Use flat design tones and consistent visual weight."),
+            (
+                "vector_infographic",
+                "Use a clean vector infographic or technical diagram with deliberate symbols.",
+            ),
+            (
+                "signal_palette",
+                "Use a limited signal palette with strong contrast for labels and paths.",
+            ),
+        ),
     ),
-    DiversityOption(
-        "framing.motion",
-        "Use a dynamic perspective with directional movement and intentional motion blur.",
-        1.0,
+    _DirectionSpec(
+        DiversityOption(
+            "image.artwork_craft",
+            "Artwork and craft: foreground the requested work's material decisions and hand-made evidence.",
+        ),
+        _photo(
+            (
+                "artwork_record",
+                "Use a faithful record view that shows the requested work without altering it.",
+            ),
+            (
+                "gallery_diffuse",
+                "Use diffuse illumination that preserves surface texture and edges.",
+            ),
+            (
+                "artwork_documentary",
+                "Make it a realistic photograph documenting the requested work.",
+            ),
+            (
+                "material_faithful",
+                "Keep pigment, fiber, wood, or metal color faithful to the requested material.",
+            ),
+        ),
+        _drawn(
+            (
+                "crafted_composition",
+                "Use a composed view that makes the hand-made construction easy to inspect.",
+            ),
+            (
+                "tactile_marks",
+                "Use tactile marks and layered value to show material decisions.",
+            ),
+            (
+                "mixed_media",
+                "Use a compatible craft medium such as ink, collage, print, or paint as requested.",
+            ),
+            (
+                "workshop_palette",
+                "Use a material-led palette with paper, pigment, and one deliberate accent.",
+            ),
+        ),
     ),
 )
 
-_SUBJECT_POOL: tuple[DiversityOption, ...] = (
-    DiversityOption(
-        "subject.paper_artifact",
-        "Make a paper artifact the central subject, with its marks and edges carrying the detail.",
-        0.45,
-    ),
-    DiversityOption(
-        "subject.person_gesture",
-        "Center a person's gesture or partial figure; communicate action without requiring a posed portrait.",
-        1.0,
-    ),
-    DiversityOption(
-        "subject.botanical",
-        "Center organic plant forms with varied scale, texture, and asymmetrical growth.",
-        1.0,
-    ),
-    DiversityOption(
-        "subject.architecture",
-        "Center architectural form, geometry, and the way built structure meets open space.",
-        1.0,
-    ),
-    DiversityOption(
-        "subject.mechanical",
-        "Center a mechanical object or system with visible joints, wear, and functional detail.",
-        1.0,
-    ),
-    DiversityOption(
-        "subject.food_texture",
-        "Center a prepared dish or ingredient where color, texture, and arrangement tell the story.",
-        1.0,
-    ),
-    DiversityOption(
-        "subject.animal_encounter",
-        "Center an animal in a natural moment, prioritizing behavior and attentive observation.",
-        1.0,
-    ),
-    DiversityOption(
-        "subject.landscape",
-        "Center a broad landscape with a strong horizon, atmospheric depth, and changing terrain.",
-        1.0,
-    ),
-    DiversityOption(
-        "subject.craft",
-        "Center a handmade object or craft process with material evidence and imperfect detail.",
-        1.0,
-    ),
-    DiversityOption(
-        "subject.transit",
-        "Center a vehicle or transit moment with directional lines and lived-in context.",
-        1.0,
-    ),
-    DiversityOption(
-        "subject.found_object",
-        "Center a found object whose age and use are legible through wear.",
-        1.0,
-    ),
-    DiversityOption(
-        "subject.abstract",
-        "Center an abstract arrangement of shape, color, and texture without a literal narrative.",
-        1.0,
-    ),
+_DIRECTION_BY_ID = {spec.direction.id: spec for spec in _DIRECTION_SPECS}
+
+# The first ten are photographic by default.  A source prompt can still make
+# any direction drawn, or make either of the final two photographic, because
+# an explicit source medium is authoritative.
+_PHOTOGRAPHIC_DIRECTION_IDS = frozenset(
+    spec.direction.id for spec in _DIRECTION_SPECS[:-2]
 )
 
-_LIGHTING_POOL: tuple[DiversityOption, ...] = (
-    DiversityOption(
-        "lighting.warm_local",
-        "Use warm local lamp light with soft falloff and intimate shadows.",
-        0.45,
-    ),
-    DiversityOption(
-        "lighting.hard_noon",
-        "Use hard overhead daylight with crisp shadows and decisive highlights.",
-        1.0,
-    ),
-    DiversityOption(
-        "lighting.overcast",
-        "Use broad overcast illumination with soft edges and even, truthful color.",
-        1.0,
-    ),
-    DiversityOption(
-        "lighting.cool_twilight",
-        "Use cool twilight light with restrained contrast and a fading ambient sky.",
-        1.0,
-    ),
-    DiversityOption(
-        "lighting.backlit_silhouette",
-        "Use strong backlight with a readable rim and selectively obscured detail.",
-        1.0,
-    ),
-    DiversityOption(
-        "lighting.colored_gels",
-        "Use controlled colored light with distinct hues separated across the scene.",
-        1.0,
-    ),
-    DiversityOption(
-        "lighting.flash_freeze",
-        "Use direct flash that freezes detail and creates sharp, immediate shadows.",
-        1.0,
-    ),
-    DiversityOption(
-        "lighting.flickering_source",
-        "Use a small flickering light source with deep falloff and sculpted darkness.",
-        1.0,
-    ),
-    DiversityOption(
-        "lighting.clear_side_light",
-        "Use clear side light entering from one direction with long gentle shadows.",
-        1.0,
-    ),
-    DiversityOption(
-        "lighting.mist_diffusion",
-        "Use diffuse light through atmospheric haze, preserving shape while reducing contrast.",
-        1.0,
-    ),
-    DiversityOption(
-        "lighting.mixed_sources",
-        "Use visibly mixed color temperatures so different light sources create spatial layers.",
-        1.0,
-    ),
-    DiversityOption(
-        "lighting.reflective_bounce",
-        "Use reflected fill light that reveals surfaces without flattening their form.",
-        1.0,
-    ),
+_PHOTOGRAPHIC_TERMS = re.compile(
+    r"\b(?:photo(?:graph(?:y|ic)?|realistic)?|snapshot|selfie|camera|dslr|"
+    r"phone\s+(?:photo|shot)|film\s+photo|documentary\s+(?:photo|image|shot)|"
+    r"product\s+(?:photo|shot)|macro\s+(?:photo|shot))\b",
+    re.IGNORECASE,
 )
-
-_PALETTE_POOL: tuple[DiversityOption, ...] = (
-    DiversityOption(
-        "palette.warm_neutral",
-        "Use a restrained warm-neutral palette with modest tonal variation and low saturation.",
-        0.45,
-    ),
-    DiversityOption(
-        "palette.cobalt_coral",
-        "Use deep cobalt and coral accents against a balanced neutral ground.",
-        1.0,
-    ),
-    DiversityOption(
-        "palette.moss_rust",
-        "Use moss green, rust red, and charcoal with earthy separation.",
-        1.0,
-    ),
-    DiversityOption(
-        "palette.ice_lilac",
-        "Use icy blue, pale lilac, and silver with cool atmospheric restraint.",
-        1.0,
-    ),
-    DiversityOption(
-        "palette.black_white_accent",
-        "Use near-black and off-white with one sharply controlled accent color.",
-        1.0,
-    ),
-    DiversityOption(
-        "palette.citrus_teal",
-        "Use citrus yellow and teal with lively, clean contrast.",
-        1.0,
-    ),
-    DiversityOption(
-        "palette.ochre_violet",
-        "Use ochre and violet balanced by dark plum and muted stone.",
-        1.0,
-    ),
-    DiversityOption(
-        "palette.pastel_multicolor",
-        "Use softened rose, mint, sky, and apricot in gentle layered transitions.",
-        1.0,
-    ),
-    DiversityOption(
-        "palette.verdant",
-        "Use dense greens with small flashes of bright color and deep natural shadow.",
-        1.0,
-    ),
-    DiversityOption(
-        "palette.metallic_signal",
-        "Use graphite, silver, and one vivid signal hue with precise technical contrast.",
-        1.0,
-    ),
-    DiversityOption(
-        "palette.sunset",
-        "Use coral, amber, plum, and violet with dramatic late-day tonal range.",
-        1.0,
-    ),
-    DiversityOption(
-        "palette.desaturated_blue",
-        "Use desaturated blue, fog gray, and faded tan for spacious quiet separation.",
-        1.0,
-    ),
-)
-
-_STYLE_POOL: tuple[DiversityOption, ...] = (
-    DiversityOption(
-        "style.documentary_photo",
-        "Use a photorealistic documentary photograph with candid detail and natural imperfections.",
-        0.45,
-    ),
-    DiversityOption(
-        "style.editorial_illustration",
-        "Use a crisp editorial illustration with deliberate shape language and selective detail.",
-        1.0,
-    ),
-    DiversityOption(
-        "style.screenprint",
-        "Use a layered screen-print aesthetic with visible ink texture and simplified forms.",
-        1.0,
-    ),
-    DiversityOption(
-        "style.watercolor",
-        "Use translucent watercolor washes, soft edges, and paper grain as visual structure.",
-        1.0,
-    ),
-    DiversityOption(
-        "style.oil_paint",
-        "Use tactile oil-paint brushwork with layered pigment and expressive surface variation.",
-        1.0,
-    ),
-    DiversityOption(
-        "style.graphic_poster",
-        "Use bold graphic-poster forms, strong silhouettes, and economical visual detail.",
-        1.0,
-    ),
-    DiversityOption(
-        "style.collage",
-        "Use a mixed collage of cut shapes, found textures, and carefully aligned fragments.",
-        1.0,
-    ),
-    DiversityOption(
-        "style.ink_drawing",
-        "Use an ink drawing with varied line weight, hatching, and intentional negative space.",
-        1.0,
-    ),
-    DiversityOption(
-        "style.three_d_render",
-        "Use a polished 3D render with physically coherent materials and designed lighting.",
-        1.0,
-    ),
-    DiversityOption(
-        "style.pixel_art",
-        "Use a pixel-art treatment with deliberate block scale, limited shading, and clear silhouettes.",
-        1.0,
-    ),
-    DiversityOption(
-        "style.film_still",
-        "Use a cinematic film-still look with grain, composed color, and observational framing.",
-        1.0,
-    ),
-    DiversityOption(
-        "style.natural_history_plate",
-        "Use a precise natural-history plate style with labeled visual structure and restrained ornament.",
-        1.0,
-    ),
-)
-
-_SETTING_POOL: tuple[DiversityOption, ...] = (
-    DiversityOption(
-        "setting.wooden_workbench",
-        "Place the scene on a wooden workbench or desk with visible grain and practical wear.",
-        0.45,
-    ),
-    DiversityOption(
-        "setting.concrete_floor",
-        "Place the scene on a cool concrete floor with broad negative space and industrial texture.",
-        1.0,
-    ),
-    DiversityOption(
-        "setting.grass_field",
-        "Place the scene in an open grass field with layered distance and changing ground cover.",
-        1.0,
-    ),
-    DiversityOption(
-        "setting.patterned_tile",
-        "Place the scene against patterned tile with repeating geometry and clean divisions.",
-        1.0,
-    ),
-    DiversityOption(
-        "setting.dark_studio",
-        "Place the scene in a controlled dark studio with a seamless ground and isolated focus.",
-        1.0,
-    ),
-    DiversityOption(
-        "setting.coastal_edge",
-        "Place the scene near an exposed shoreline with wind, horizon, and tactile natural surfaces.",
-        1.0,
-    ),
-    DiversityOption(
-        "setting.greenhouse",
-        "Place the scene in a dense greenhouse with translucent structure and layered leaves.",
-        1.0,
-    ),
-    DiversityOption(
-        "setting.city_street",
-        "Place the scene in an active city street with architectural context and incidental movement.",
-        1.0,
-    ),
-    DiversityOption(
-        "setting.rock_shelf",
-        "Place the scene on a natural rock shelf with weathered texture and uneven footing.",
-        1.0,
-    ),
-    DiversityOption(
-        "setting.metal_workshop",
-        "Place the scene in a metalworking space with durable surfaces and functional clutter.",
-        1.0,
-    ),
-    DiversityOption(
-        "setting.domestic_textile",
-        "Place the scene against a soft textile surface with folds, seams, and gentle irregularity.",
-        1.0,
-    ),
-    DiversityOption(
-        "setting.gallery_wall",
-        "Place the scene against a spare gallery wall with deliberate negative space and controlled context.",
-        1.0,
-    ),
+_DRAWN_TERMS = re.compile(
+    r"\b(?:illustrat(?:ion|ed|e)|painting?|painted|oil\s*paint(?:ing)?|"
+    r"watercolou?r|engraving?|etching?|woodcut|lithograph(?:y)?|sketch(?:ed)?|"
+    r"drawing?|diagram(?:s)?|infographic(?:s)?|render(?:ed|ing)?|3d|three[- ]d|"
+    r"concept\s*art|pixel\s*art|comic|collage|screenprint|poster|artwork|craft)\b",
+    re.IGNORECASE,
 )
 
 
-def _sample_weighted_without_replacement(
-    pool: tuple[DiversityOption, ...], count: int, rng: random.Random
-) -> tuple[DiversityOption, ...]:
-    """Draw ``count`` options proportionally to weight, without replacement."""
-    remaining = list(pool)
-    selected: list[DiversityOption] = []
-    for _ in range(count):
-        total_weight = sum(option.weight for option in remaining)
-        threshold = rng.random() * total_weight
-        cumulative_weight = 0.0
-        for index, option in enumerate(remaining):
-            cumulative_weight += option.weight
-            if threshold < cumulative_weight:
-                selected.append(remaining.pop(index))
-                break
-        else:  # pragma: no cover - random.Random.random() is always below 1.0
-            selected.append(remaining.pop())
-    return tuple(selected)
+def _source_medium(source_prompt: str) -> bool | None:
+    """Return source medium (``True`` photo, ``False`` drawn), if explicit."""
+    if not source_prompt:
+        return None
+    photo = _PHOTOGRAPHIC_TERMS.search(source_prompt)
+    drawn = _DRAWN_TERMS.search(source_prompt)
+    if photo is None and drawn is None:
+        return None
+    if drawn is None:
+        return True
+    if photo is None:
+        return False
+    # The first explicit medium phrase is the closest representation of the
+    # persona's request (e.g. “a photo of an engraving” is photographic).
+    return photo.start() < drawn.start()
 
 
-def sample_image_diversity(rng: random.Random) -> ImageDiversity:
-    """Sample the six art-direction axes using the caller's random stream."""
+def sample_image_diversity(
+    rng: random.Random,
+    *,
+    direction_id: str | None = None,
+    source_prompt: str = "",
+) -> ImageDiversity:
+    """Choose one coherent direction using only the caller's random stream.
+
+    ``direction_id`` is used by the prompt planner to carry one locally chosen
+    direction through the image prompt and downstream samplers.  When absent,
+    one of the twelve stable directions is selected.  An explicit photographic
+    or drawn medium in ``source_prompt`` overrides the direction's default
+    medium without changing its intent.
+    """
+    if direction_id is None:
+        spec = _DIRECTION_SPECS[rng.randrange(len(_DIRECTION_SPECS))]
+    else:
+        try:
+            spec = _DIRECTION_BY_ID[direction_id]
+        except KeyError as exc:
+            valid = ", ".join(item.direction.id for item in _DIRECTION_SPECS)
+            raise ValueError(
+                f"unknown image diversity direction ID {direction_id!r}; expected one of: {valid}"
+            ) from exc
+
+    source_medium = _source_medium(source_prompt)
+    is_photographic = (
+        source_medium
+        if source_medium is not None
+        else spec.direction.id in _PHOTOGRAPHIC_DIRECTION_IDS
+    )
+    variant = spec.photographic if is_photographic else spec.drawn
     return ImageDiversity(
-        framings=_sample_weighted_without_replacement(_FRAMING_POOL, 1, rng),
-        subjects=_sample_weighted_without_replacement(_SUBJECT_POOL, 1, rng),
-        lighting=_sample_weighted_without_replacement(_LIGHTING_POOL, 1, rng),
-        palettes=_sample_weighted_without_replacement(_PALETTE_POOL, 1, rng),
-        styles=_sample_weighted_without_replacement(_STYLE_POOL, 1, rng),
-        settings=_sample_weighted_without_replacement(_SETTING_POOL, 1, rng),
+        direction=spec.direction,
+        framing=variant.framing,
+        lighting=variant.lighting,
+        capture=variant.capture,
+        color=variant.color,
+        is_photographic=is_photographic,
     )
 
 
 def render_image_diversity(matrix: ImageDiversity) -> str:
-    """Render sampled directions in the generator's exact prompt format."""
-    return textwrap.dedent(
-        f"""\
-        Image art direction (sampled for this generation; blend it with the persona request rather than treating it as a replacement):
-        - Framing and camera: {"; ".join(option.text for option in matrix.framings)}
-        - Subject focus: {"; ".join(option.text for option in matrix.subjects)}
-        - Lighting situation: {"; ".join(option.text for option in matrix.lighting)}
-        - Palette and mood: {"; ".join(option.text for option in matrix.palettes)}
-        - Visual medium and style: {"; ".join(option.text for option in matrix.styles)}
-        - Setting and surface: {"; ".join(option.text for option in matrix.settings)}
-        Keep the requested subject and scene. Apply each sampled direction where the prompt leaves that axis unspecified. If the prompt explicitly contradicts a sampled direction, the prompt wins for that axis.
-        """
-    ).strip()
+    """Render exactly the selected direction and its compatible choices."""
+    medium_priority = (
+        "Photographic priority: render a realistic photograph captured by a real "
+        "camera or phone the way an amateur actually would - natural framing, "
+        "ordinary exposure, believable imperfections, no studio polish, no "
+        "cinematic glow. Reject illustration, painting, engraving, diagram, "
+        "3D-render, and concept-art appearance."
+        if matrix.is_photographic
+        else "Drawn/design priority: render a deliberate illustration, painting, print, or diagram treatment; do not make it photorealistic."
+    )
+    return "\n".join(
+        (
+            "Image art direction (one selected direction; preserve the persona request):",
+            f"- Direction: {matrix.direction.text}",
+            f"- Framing: {matrix.framing.text}",
+            f"- Lighting: {matrix.lighting.text}",
+            f"- Capture or medium: {matrix.capture.text}",
+            f"- Color: {matrix.color.text}",
+            medium_priority,
+            "Keep the requested subject and location. Vary how it is captured, not what it is; explicit source wording wins when it specifies a medium.",
+        )
+    )
 
 
 def diversity_ids(matrix: ImageDiversity) -> dict[str, tuple[str, ...]]:
-    """Return selected IDs in their sampling order for provenance."""
+    """Return stable selected IDs in prompt and provenance order."""
     return {
-        "framings": tuple(option.id for option in matrix.framings),
-        "subjects": tuple(option.id for option in matrix.subjects),
-        "lighting": tuple(option.id for option in matrix.lighting),
-        "palettes": tuple(option.id for option in matrix.palettes),
-        "styles": tuple(option.id for option in matrix.styles),
-        "settings": tuple(option.id for option in matrix.settings),
+        "direction": (matrix.direction.id,),
+        "framing": (matrix.framing.id,),
+        "lighting": (matrix.lighting.id,),
+        "capture": (matrix.capture.id,),
+        "color": (matrix.color.id,),
     }
 
 

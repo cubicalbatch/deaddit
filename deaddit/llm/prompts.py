@@ -104,7 +104,9 @@ _PROFILE_TOP_LEVEL = frozenset(
 )
 _PROFILE_INTENTS = frozenset({"post", "image", "website", "backstage"})
 _PROFILE_CONTENT_KINDS = frozenset({"comment", "text_post", "media_post"})
-_PROFILE_DIRECTION_KINDS = frozenset({"post", "comment", "backstage"})
+_PROFILE_DIRECTION_KINDS = frozenset(
+    {"post", "comment", "image", "website", "backstage"}
+)
 _PROFILE_VARIABLES = frozenset(
     {
         "persona",
@@ -292,12 +294,8 @@ def parse_visit_profile(body: str | dict) -> VisitProfile:
             if item.id in stable_ids:
                 raise _profile_error(f"duplicate stable id {item.id!r}")
     sample_count = document["sample_count"]
-    if (
-        isinstance(sample_count, bool)
-        or not isinstance(sample_count, int)
-        or not 1 <= sample_count <= 20
-    ):
-        raise _profile_error("sample_count must be an integer between 1 and 20")
+    if sample_count != 1:
+        raise _profile_error("sample_count must be exactly 1")
     for kind, catalog in direction_catalog.items():
         if len(catalog) < sample_count:
             raise _profile_error(

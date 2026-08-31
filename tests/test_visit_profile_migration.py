@@ -101,11 +101,19 @@ def test_phase4_upgrade_migrates_legacy_pin_and_mix(tmp_path):
             }
             for p in profile_bodies
         )
-        # Every migrated profile is valid under current validation and uses
-        # percentage length weights (quantile draws are 0-99).
+        # Unpinned historical versions remain immutable under the pinned-only
+        # rollout; validate the v3-shaped versions produced for active pins.
         from deaddit.llm.prompts import parse_visit_profile
 
-        for profile in profile_bodies:
+        migrated_profiles = [
+            profile
+            for profile in profile_bodies
+            if profile.get("sample_count") == 1
+            and set(profile.get("direction_catalog", {}))
+            == {"post", "comment", "backstage", "image", "website"}
+        ]
+        assert migrated_profiles
+        for profile in migrated_profiles:
             parsed = parse_visit_profile(json.dumps(profile))
             for kind, items in parsed.length_catalog.items():
                 assert sum(item.weight for item in items) == 100.0, (kind, profile)
@@ -166,8 +174,18 @@ def test_profile_data_migrations_upgrade_legacy_documents(tmp_path):
                 {"id": "post.b", "text": "b", "weight": 1},
                 {"id": "post.c", "text": "c", "weight": 1},
             ],
+            "image": [
+                {"id": "image.candid_snapshot", "text": "image", "weight": 1},
+                {"id": "image.object_closeup", "text": "image", "weight": 1},
+                {"id": "image.place_observation", "text": "image", "weight": 1},
+            ],
+            "website": [
+                {"id": "website.news_report", "text": "website", "weight": 1},
+                {"id": "website.magazine_feature", "text": "website", "weight": 1},
+                {"id": "website.personal_blog", "text": "website", "weight": 1},
+            ],
         },
-        "sample_count": 3,
+        "sample_count": 1,
     }
     conn = sqlite3.connect(db_path)
     inserted_version = None
@@ -297,7 +315,7 @@ def test_comment_profile_rollout_clones_active_sources_and_restores_on_downgrade
     finally:
         conn.close()
 
-    assert runner.invoke(args=["db", "upgrade"]).exit_code == 0
+    assert runner.invoke(args=["db", "upgrade", _ROLLOUT_REVISION]).exit_code == 0
 
     conn = sqlite3.connect(db_path)
     try:
@@ -382,11 +400,21 @@ def test_comment_profile_rollout_clones_active_sources_and_restores_on_downgrade
         "comment.medium",
         "comment.long",
     ]
-    from deaddit.agents.prompts import _LENGTH_TARGETS
-
-    assert [item["text"] for item in migrated["length_catalog"]["comment"]] == [
-        target.text for target in _LENGTH_TARGETS["comment"]
+    legacy_texts = [
+        "Length target for this comment: no more than one sentence and no more "
+        "than 20 words. State the point directly; do not add setup, a conclusion, "
+        "or padding.",
+        "Length target for this comment: exactly 2 or 3 sentences and 20-60 words. "
+        "Make every sentence useful; do not add setup, a conclusion, or padding.",
+        "Length target for this comment: one compact paragraph of 60-120 words. "
+        "Use only relevant detail; do not add setup, a conclusion, or padding.",
+        "Length target for this comment: 2 or 3 short paragraphs of 120-250 words. "
+        "Make the extra detail earn its space; do not add setup, a conclusion, or "
+        "padding.",
     ]
+    assert [item["text"] for item in migrated["length_catalog"]["comment"]] == (
+        legacy_texts
+    )
     assert [item["weight"] for item in migrated["length_catalog"]["comment"]] == [
         35,
         50,
@@ -473,3 +501,504 @@ def test_comment_profile_rollout_clones_active_sources_and_restores_on_downgrade
     finally:
         conn.close()
     assert _ROLLOUT_REVISION in [rev.revision for rev in _script().walk_revisions()]
+
+
+_V3_PREDECESSOR = "f4c8e2a6b0d1"
+_V3_REVISION = "f5c8e2a6b0d1"
+_V3_POST_IDS = [
+    "post.personal_experience",
+    "post.everyday_observation",
+    "post.project_in_progress",
+    "post.genuine_question",
+    "post.tip_or_resource",
+    "post.surprising_fact",
+    "post.opinion_or_argument",
+    "post.recommendation",
+    "post.amusing_incident",
+    "post.problem_and_advice",
+    "post.how_to_explain",
+    "post.local_discovery",
+    "post.thoughtful_comparison",
+    "post.creative_prompt",
+    "post.milestone_or_update",
+    "post.niche_reference",
+]
+_V3_COMMENT_IDS = [
+    "comment.honest_reaction",
+    "comment.relevant_fact",
+    "comment.related_anecdote",
+    "comment.answer_or_advice",
+    "comment.follow_up_question",
+    "comment.agree_with_angle",
+    "comment.counterpoint",
+    "comment.joke_or_aside",
+    "comment.clarify_detail",
+    "comment.recommend_resource",
+    "comment.share_lived_detail",
+    "comment.connect_threads",
+]
+_V3_IMAGE_IDS = [
+    "image.candid_snapshot",
+    "image.object_closeup",
+    "image.place_observation",
+    "image.process_documentation",
+    "image.finished_result",
+    "image.before_after",
+    "image.archival_artifact",
+    "image.food_photo",
+    "image.pet_wildlife",
+    "image.macro_detail",
+    "image.diagram_infographic",
+    "image.artwork_craft",
+]
+_V3_WEBSITE_IDS = [
+    "website.news_report",
+    "website.magazine_feature",
+    "website.personal_blog",
+    "website.community_portal",
+    "website.event_program",
+    "website.local_business",
+    "website.nonprofit_campaign",
+    "website.product_page",
+    "website.catalog",
+    "website.reference",
+    "website.data_dashboard",
+    "website.interactive_utility",
+    "website.fan_archive",
+    "website.travel_guide",
+    "website.portfolio",
+    "website.experimental_microsite",
+]
+
+
+def test_v3_rollout_clones_pinned_sources_idempotently_and_downgrades(
+    tmp_path,
+):
+    db_path = tmp_path / "visit-profile-v3.db"
+    app = create_app(
+        {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_path}", "TESTING": True}
+    )
+    runner = app.test_cli_runner()
+    assert runner.invoke(args=["db", "upgrade", _V3_PREDECESSOR]).exit_code == 0
+
+    conn = sqlite3.connect(db_path)
+    try:
+        template_id = conn.execute(
+            "SELECT id FROM prompt_template WHERE name = 'agent.visit_profile'"
+        ).fetchone()[0]
+        source = json.loads(
+            conn.execute(
+                "SELECT body FROM prompt_template_version "
+                "WHERE template_id = ? AND version = 1",
+                (template_id,),
+            ).fetchone()[0]
+        )
+        source["behavior_blocks"] = [
+            {"id": "custom.voice", "text": "Keep the operator's quiet voice."}
+        ]
+        source["layouts"]["post"] = "Use this operator layout: {directions}"
+        source["intent_mix"] = {
+            "post": 0.20,
+            "image": 0.30,
+            "website": 0.10,
+            "backstage": 0.10,
+        }
+        source["length_catalog"]["comment"] = [
+            {
+                "id": "comment.operator_length",
+                "text": "Use the operator's compact comment style.",
+                "weight": 100,
+            }
+        ]
+        source["direction_catalog"]["backstage"] = [
+            {
+                "id": "backstage.operator_topic",
+                "text": "Discuss the operator's latest thought.",
+                "weight": 4,
+            },
+            {
+                "id": "backstage.operator_memory",
+                "text": "Connect the operator's remembered visits.",
+                "weight": 3,
+            },
+            {
+                "id": "backstage.operator_question",
+                "text": "Ask the operator a useful question.",
+                "weight": 2,
+            },
+        ]
+        source["sample_count"] = 3
+        source_version = conn.execute(
+            "SELECT COALESCE(MAX(version), 0) + 1 "
+            "FROM prompt_template_version WHERE template_id = ?",
+            (template_id,),
+        ).fetchone()[0]
+        source_body = json.dumps(source, sort_keys=True, separators=(",", ":"))
+        conn.execute(
+            "INSERT INTO prompt_template_version "
+            "(template_id, version, body, created_by, created_at) "
+            "VALUES (?, ?, ?, 'operator-v3-test', CURRENT_TIMESTAMP)",
+            (template_id, source_version, source_body),
+        )
+        conn.executemany(
+            "INSERT INTO prompt_pin "
+            "(target_kind, target_key, template_id, version_number, updated_at) "
+            "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            [
+                ("agent", "v3-agent", template_id, source_version),
+                ("cohort", "v3-cohort", template_id, source_version),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    upgraded = runner.invoke(args=["db", "upgrade"])
+    assert upgraded.exit_code == 0, upgraded.output
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert (
+            conn.execute(
+                "SELECT body FROM prompt_template_version "
+                "WHERE template_id = ? AND version = ?",
+                (template_id, source_version),
+            ).fetchone()[0]
+            == source_body
+        )
+        clones = conn.execute(
+            "SELECT version, body, created_by FROM prompt_template_version "
+            "WHERE template_id = ? AND created_by LIKE "
+            "'migration:visit_profile_v3:%'",
+            (template_id,),
+        ).fetchall()
+        assert len(clones) == 1
+        clone_version, clone_body, created_by = clones[0]
+        assert created_by == (
+            f"migration:visit_profile_v3:source_version={source_version}"
+        )
+        migrated = json.loads(clone_body)
+        assert migrated["sample_count"] == 1
+        assert set(migrated["direction_catalog"]) == {
+            "post",
+            "comment",
+            "backstage",
+            "image",
+            "website",
+        }
+        assert [
+            item["id"] for item in migrated["direction_catalog"]["post"]
+        ] == _V3_POST_IDS
+        assert [
+            item["id"] for item in migrated["direction_catalog"]["comment"]
+        ] == _V3_COMMENT_IDS
+        assert [
+            item["id"] for item in migrated["direction_catalog"]["image"]
+        ] == _V3_IMAGE_IDS
+        assert [
+            item["id"] for item in migrated["direction_catalog"]["website"]
+        ] == _V3_WEBSITE_IDS
+        for kind in ("post", "comment", "image", "website"):
+            assert {item["weight"] for item in migrated["direction_catalog"][kind]} == {
+                1
+            }
+        assert migrated["behavior_blocks"] == source["behavior_blocks"]
+        assert migrated["layouts"] == source["layouts"]
+        assert migrated["intent_mix"] == source["intent_mix"]
+        assert migrated["length_catalog"] == source["length_catalog"]
+        assert (
+            migrated["direction_catalog"]["backstage"]
+            == source["direction_catalog"]["backstage"]
+        )
+        assert conn.execute(
+            "SELECT target_kind, target_key, version_number FROM prompt_pin "
+            "WHERE template_id = ? ORDER BY target_kind, target_key",
+            (template_id,),
+        ).fetchall() == [
+            ("agent", "v3-agent", clone_version),
+            ("cohort", "v3-cohort", clone_version),
+        ]
+
+        # Exercise the revision itself a second time while the marker clone
+        # remains pinned. A canonical clone must not produce another version.
+        conn.execute(
+            "UPDATE alembic_version SET version_num = ?",
+            (_V3_PREDECESSOR,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    rerun = runner.invoke(args=["db", "upgrade"])
+    assert rerun.exit_code == 0, rerun.output
+    conn = sqlite3.connect(db_path)
+    try:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM prompt_template_version "
+                "WHERE template_id = ? AND created_by LIKE "
+                "'migration:visit_profile_v3:%'",
+                (template_id,),
+            ).fetchone()[0]
+            == 1
+        )
+    finally:
+        conn.close()
+
+    downgraded = runner.invoke(args=["db", "downgrade", _V3_PREDECESSOR])
+    assert downgraded.exit_code == 0, downgraded.output
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT target_kind, target_key, version_number FROM prompt_pin "
+            "WHERE template_id = ? ORDER BY target_kind, target_key",
+            (template_id,),
+        ).fetchall() == [
+            ("agent", "v3-agent", source_version),
+            ("cohort", "v3-cohort", source_version),
+        ]
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM prompt_template_version "
+                "WHERE template_id = ? AND created_by LIKE "
+                "'migration:visit_profile_v3:%'",
+                (template_id,),
+            ).fetchone()[0]
+            == 0
+        )
+    finally:
+        conn.close()
+
+    assert _V3_REVISION in [rev.revision for rev in _script().walk_revisions()]
+
+
+_V4_PREDECESSOR = "f5c8e2a6b0d1"
+_V4_REVISION = "a7d3f1c9e2b4"
+_V4_MARKER = "migration:visit_profile_v4"
+
+# Legacy comment lengths current at the v4 predecessor; pinned locally so the
+# test keeps asserting the values that revision itself installed.
+_V4_LEGACY_COMMENT_LENGTHS = [
+    {
+        "id": "comment.snippet",
+        "text": (
+            "Length target for this comment: no more than one sentence and no more "
+            "than 20 words. State the point directly; do not add setup, a conclusion, "
+            "or padding."
+        ),
+        "weight": 35,
+    },
+    {
+        "id": "comment.short",
+        "text": (
+            "Length target for this comment: exactly 2 or 3 sentences and 20-60 words. "
+            "Make every sentence useful; do not add setup, a conclusion, or padding."
+        ),
+        "weight": 50,
+    },
+    {
+        "id": "comment.medium",
+        "text": (
+            "Length target for this comment: one compact paragraph of 60-120 words. "
+            "Use only relevant detail; do not add setup, a conclusion, or padding."
+        ),
+        "weight": 12,
+    },
+    {
+        "id": "comment.long",
+        "text": (
+            "Length target for this comment: 2 or 3 short paragraphs of 120-250 words. "
+            "Make the extra detail earn its space; do not add setup, a conclusion, or "
+            "padding."
+        ),
+        "weight": 3,
+    },
+]
+_V4_CANONICAL_IDS = [
+    "comment.tiny",
+    "comment.snippet",
+    "comment.short",
+    "comment.medium",
+    "comment.long",
+]
+_V4_CANONICAL_WEIGHTS = [18, 30, 42, 8, 2]
+
+
+def test_v4_rollout_clones_pinned_sources_idempotently_and_downgrades(
+    tmp_path,
+):
+    db_path = tmp_path / "visit-profile-v4.db"
+    app = create_app(
+        {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_path}", "TESTING": True}
+    )
+    runner = app.test_cli_runner()
+    assert runner.invoke(args=["db", "upgrade", _V4_PREDECESSOR]).exit_code == 0
+
+    conn = sqlite3.connect(db_path)
+    try:
+        template_id = conn.execute(
+            "SELECT id FROM prompt_template WHERE name = 'agent.visit_profile'"
+        ).fetchone()[0]
+
+        # Legacy-shaped source: the pre-tiny four-tier comment catalog.
+        source = json.loads(
+            conn.execute(
+                "SELECT body FROM prompt_template_version "
+                "WHERE template_id = ? AND version = 1",
+                (template_id,),
+            ).fetchone()[0]
+        )
+        source["length_catalog"]["comment"] = _V4_LEGACY_COMMENT_LENGTHS
+        source_version = conn.execute(
+            "SELECT COALESCE(MAX(version), 0) + 1 "
+            "FROM prompt_template_version WHERE template_id = ?",
+            (template_id,),
+        ).fetchone()[0]
+        source_body = json.dumps(source, sort_keys=True, separators=(",", ":"))
+        conn.execute(
+            "INSERT INTO prompt_template_version "
+            "(template_id, version, body, created_by, created_at) "
+            "VALUES (?, ?, ?, 'operator-v4-test', CURRENT_TIMESTAMP)",
+            (template_id, source_version, source_body),
+        )
+
+        # Custom (non-legacy-shaped) catalog must stay byte-for-byte untouched.
+        custom = json.loads(source_body)
+        custom["length_catalog"]["comment"] = [
+            {
+                "id": "comment.operator_length",
+                "text": "Use the operator's compact comment style.",
+                "weight": 100,
+            }
+        ]
+        custom_version = source_version + 1
+        custom_body = json.dumps(custom, sort_keys=True, separators=(",", ":"))
+        conn.execute(
+            "INSERT INTO prompt_template_version "
+            "(template_id, version, body, created_by, created_at) "
+            "VALUES (?, ?, ?, 'operator-v4-test', CURRENT_TIMESTAMP)",
+            (template_id, custom_version, custom_body),
+        )
+
+        conn.executemany(
+            "INSERT INTO prompt_pin "
+            "(target_kind, target_key, template_id, version_number, updated_at) "
+            "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            [
+                ("agent", "v4-agent", template_id, source_version),
+                ("cohort", "v4-cohort", template_id, source_version),
+                ("agent", "v4-custom-agent", template_id, custom_version),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    upgraded = runner.invoke(args=["db", "upgrade"])
+    assert upgraded.exit_code == 0, upgraded.output
+
+    conn = sqlite3.connect(db_path)
+    try:
+        # Sources survive untouched.
+        assert (
+            conn.execute(
+                "SELECT body FROM prompt_template_version "
+                "WHERE template_id = ? AND version = ?",
+                (template_id, source_version),
+            ).fetchone()[0]
+            == source_body
+        )
+        assert (
+            conn.execute(
+                "SELECT body FROM prompt_template_version "
+                "WHERE template_id = ? AND version = ?",
+                (template_id, custom_version),
+            ).fetchone()[0]
+            == custom_body
+        )
+
+        # Exactly one clone of the legacy source, carrying tiny at the head.
+        clones = conn.execute(
+            "SELECT version, body, created_by FROM prompt_template_version "
+            "WHERE template_id = ? AND created_by LIKE "
+            f"'{_V4_MARKER}:%'",
+            (template_id,),
+        ).fetchall()
+        assert len(clones) == 1
+        clone_version, clone_body, created_by = clones[0]
+        assert created_by == f"{_V4_MARKER}:source_version={source_version}"
+        migrated = json.loads(clone_body)
+        assert [
+            item["id"] for item in migrated["length_catalog"]["comment"]
+        ] == _V4_CANONICAL_IDS
+        assert [
+            item["weight"] for item in migrated["length_catalog"]["comment"]
+        ] == _V4_CANONICAL_WEIGHTS
+        # Everything except the comment catalog is preserved verbatim.
+        assert migrated["direction_catalog"] == source["direction_catalog"]
+        assert migrated["intent_mix"] == source["intent_mix"]
+        assert migrated["layouts"] == source["layouts"]
+        assert (
+            migrated["length_catalog"]["text_post"]
+            == (source["length_catalog"]["text_post"])
+        )
+
+        # Legacy pins moved to the clone; the custom pin stays put.
+        assert conn.execute(
+            "SELECT target_kind, target_key, version_number FROM prompt_pin "
+            "WHERE template_id = ? ORDER BY target_kind, target_key",
+            (template_id,),
+        ).fetchall() == [
+            ("agent", "v4-agent", clone_version),
+            ("agent", "v4-custom-agent", custom_version),
+            ("cohort", "v4-cohort", clone_version),
+        ]
+
+        # Idempotency: rerunning the revision must not create another clone.
+        conn.execute("UPDATE alembic_version SET version_num = ?", (_V4_PREDECESSOR,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    rerun = runner.invoke(args=["db", "upgrade"])
+    assert rerun.exit_code == 0, rerun.output
+    conn = sqlite3.connect(db_path)
+    try:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM prompt_template_version "
+                "WHERE template_id = ? AND created_by LIKE "
+                f"'{_V4_MARKER}:%'",
+                (template_id,),
+            ).fetchone()[0]
+            == 1
+        )
+    finally:
+        conn.close()
+
+    downgraded = runner.invoke(args=["db", "downgrade", _V4_PREDECESSOR])
+    assert downgraded.exit_code == 0, downgraded.output
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT target_kind, target_key, version_number FROM prompt_pin "
+            "WHERE template_id = ? ORDER BY target_kind, target_key",
+            (template_id,),
+        ).fetchall() == [
+            ("agent", "v4-agent", source_version),
+            ("agent", "v4-custom-agent", custom_version),
+            ("cohort", "v4-cohort", source_version),
+        ]
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM prompt_template_version "
+                "WHERE template_id = ? AND created_by LIKE "
+                f"'{_V4_MARKER}:%'",
+                (template_id,),
+            ).fetchone()[0]
+            == 0
+        )
+    finally:
+        conn.close()
+
+    assert _V4_REVISION in [rev.revision for rev in _script().walk_revisions()]

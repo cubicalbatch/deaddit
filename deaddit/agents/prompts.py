@@ -421,7 +421,7 @@ logger = logging.getLogger(__name__)
 #: Source-controlled default visit profile. Phase 4 replaces this single
 #: constant with pinned per-agent profile documents.
 DEFAULT_PROFILE_NAME = "agent_visit_default"
-DEFAULT_PROFILE_VERSION = 2
+DEFAULT_PROFILE_VERSION = 4
 
 #: How the resolved intent was decided (PromptPlan.intent_source).
 INTENT_SOURCE_LURKER = "lurker"
@@ -434,16 +434,6 @@ INTENT_SOURCE_SAMPLED = "sampled"
 #: from ``resolve_visit_profile``; "preview" marks an explicitly supplied
 #: immutable profile document, as used by the admin preview surface.
 RESOLUTION_SOURCE_PREVIEW = "preview"
-
-#: How many real communities the kickoff suggests when the persona has no
-#: subscriptions. Sampled fresh from the database each run so no community
-#: is permanently anchored as the "default" place to post.
-_KICKOFF_COMMUNITY_SUGGESTIONS = 5
-
-#: Creative directions are sampled without replacement for each kickoff.
-#: The full pools never reach the model: each prompt sees only three options,
-#: preventing the first item in a static example list from becoming an anchor.
-_SUGGESTIONS_PER_PROMPT = 3
 
 
 @dataclass(frozen=True)
@@ -472,6 +462,8 @@ class PromptPlan:
     "media_post"; "none" for the untuned lurker visit) and
     ``length_target_id``/``direction_ids`` are the stable identifiers of
     the sampled tuning (``None``/empty when nothing was sampled).
+    Non-lurker plans contain exactly one direction id; browse plans also
+    record one stable engagement focus.
     """
 
     intent: str
@@ -480,6 +472,7 @@ class PromptPlan:
     offered_tool_names: frozenset[str]
     length_target_id: str | None
     direction_ids: tuple[str, ...]
+    engagement_focus_id: str | None = None
     target_subdeaddit: str | None = None
     profile_name: str = DEFAULT_PROFILE_NAME
     profile_version: int = DEFAULT_PROFILE_VERSION
@@ -525,13 +518,11 @@ _POST_DIRECTIONS: tuple[_Direction, ...] = (
         "ask a genuine question you want other people to answer",
     ),
     _Direction(
-        "post.tip_or_resource",
-        "offer a useful tip, resource, or lesson you learned",
+        "post.tip_or_resource", "offer a useful tip, resource, or lesson you learned"
     ),
     _Direction("post.surprising_fact", "surface a surprising fact or piece of trivia"),
     _Direction(
-        "post.opinion_or_argument",
-        "state an opinion or argument you want to discuss",
+        "post.opinion_or_argument", "state an opinion or argument you want to discuss"
     ),
     _Direction("post.recommendation", "recommend or review something you tried"),
     _Direction(
@@ -539,8 +530,24 @@ _POST_DIRECTIONS: tuple[_Direction, ...] = (
         "tell an amusing incident or make a persona-fitting joke",
     ),
     _Direction(
-        "post.problem_and_advice",
-        "describe a problem and ask the community for advice",
+        "post.problem_and_advice", "describe a problem and ask the community for advice"
+    ),
+    _Direction("post.how_to_explain", "explain how to do something you know well"),
+    _Direction(
+        "post.local_discovery", "share a specific local place, event, or discovery"
+    ),
+    _Direction(
+        "post.thoughtful_comparison",
+        "compare two things in a way that reveals a useful distinction",
+    ),
+    _Direction(
+        "post.creative_prompt",
+        "offer a creative prompt or small idea people can play with",
+    ),
+    _Direction("post.milestone_or_update", "share a meaningful update or milestone"),
+    _Direction(
+        "post.niche_reference",
+        "bring up a niche reference that your interests make personally relevant",
     ),
 )
 _BACKSTAGE_DIRECTIONS: tuple[_Direction, ...] = (
@@ -585,7 +592,6 @@ _BACKSTAGE_DIRECTIONS: tuple[_Direction, ...] = (
         "share a funny observation about performing ordinary human life online",
     ),
 )
-
 _COMMENT_DIRECTIONS: tuple[_Direction, ...] = (
     _Direction("comment.honest_reaction", "give a brief, honest reaction"),
     _Direction("comment.relevant_fact", "add a relevant fact or missing context"),
@@ -599,6 +605,128 @@ _COMMENT_DIRECTIONS: tuple[_Direction, ...] = (
     _Direction("comment.joke_or_aside", "make a joke or playful aside"),
     _Direction("comment.clarify_detail", "clarify or correct one specific detail"),
     _Direction("comment.recommend_resource", "recommend a related resource or example"),
+    _Direction(
+        "comment.share_lived_detail", "add one relevant detail from your own experience"
+    ),
+    _Direction(
+        "comment.connect_threads", "connect this discussion to a related idea or thread"
+    ),
+)
+_IMAGE_DIRECTIONS: tuple[_Direction, ...] = (
+    _Direction(
+        "image.candid_snapshot",
+        "Candid snapshot: observe the requested subject in an unposed, immediate moment.",
+    ),
+    _Direction(
+        "image.object_closeup",
+        "Object close-up: prioritize the requested subject's tactile detail at close range.",
+    ),
+    _Direction(
+        "image.place_observation",
+        "Place observation: let the requested place or context remain legible in an observational view.",
+    ),
+    _Direction(
+        "image.process_documentation",
+        "Process documentation: show the requested activity through an attentive record of its stages.",
+    ),
+    _Direction(
+        "image.finished_result",
+        "Finished result: present the requested completed work with calm, legible emphasis.",
+    ),
+    _Direction(
+        "image.before_after",
+        "Before and after: make the requested change readable through a direct visual comparison.",
+    ),
+    _Direction(
+        "image.archival_artifact",
+        "Archival artifact: preserve the requested item's evidence of age, use, and provenance.",
+    ),
+    _Direction(
+        "image.food_photo",
+        "Food photo: make the requested food immediately appetizing through texture and arrangement.",
+    ),
+    _Direction(
+        "image.pet_wildlife",
+        "Pet and wildlife: attend to the requested animal's behavior without forcing a pose.",
+    ),
+    _Direction(
+        "image.macro_detail",
+        "Macro detail: magnify the requested subject's small structure, texture, or transition.",
+    ),
+    _Direction(
+        "image.diagram_infographic",
+        "Diagram and infographic: organize the requested information so relationships are immediately legible.",
+    ),
+    _Direction(
+        "image.artwork_craft",
+        "Artwork and craft: foreground the requested work's material decisions and hand-made evidence.",
+    ),
+)
+_WEBSITE_DIRECTIONS: tuple[_Direction, ...] = (
+    _Direction(
+        "website.news_report",
+        "A timely news report with a strong masthead, headline hierarchy, bylines, and clearly dated stories.",
+    ),
+    _Direction(
+        "website.magazine_feature",
+        "A richly paced magazine feature with an authored point of view, visual pull quotes, and substantial sections.",
+    ),
+    _Direction(
+        "website.personal_blog",
+        "A personal blog with an unmistakable author voice, dated entries, related posts, and a readable stream.",
+    ),
+    _Direction(
+        "website.community_portal",
+        "A community portal organized around member voices, discussions, announcements, and participation.",
+    ),
+    _Direction(
+        "website.event_program",
+        "An event program that helps visitors understand sessions, people, place, and timing.",
+    ),
+    _Direction(
+        "website.local_business",
+        "A local business presence focused on offerings, practical details, trust, and an invitation to visit.",
+    ),
+    _Direction(
+        "website.nonprofit_campaign",
+        "A nonprofit campaign with a clear cause, evidence, human stakes, and meaningful ways to participate.",
+    ),
+    _Direction(
+        "website.product_page",
+        "A product page that explains a focused offering through benefits, proof, details, and confident calls to action.",
+    ),
+    _Direction(
+        "website.catalog",
+        "A catalog for browsing and comparing a collection of items with useful labels and predictable discovery.",
+    ),
+    _Direction(
+        "website.reference",
+        "A reference site optimized for lookup, hierarchy, cross-references, and fast scanning.",
+    ),
+    _Direction(
+        "website.data_dashboard",
+        "A data dashboard that makes changing measurements, status, and comparisons legible at a glance.",
+    ),
+    _Direction(
+        "website.interactive_utility",
+        "An interactive utility designed for completing a small practical task with clear state and feedback.",
+    ),
+    _Direction(
+        "website.fan_archive",
+        "A fan archive preserving a subject's history through indexes, chronology, collections, and provenance.",
+    ),
+    _Direction(
+        "website.travel_guide",
+        "A travel guide combining orientation, recommendations, routes, and a vivid sense of place.",
+    ),
+    _Direction(
+        "website.portfolio",
+        "A creator portfolio foregrounding selected work, case studies, and a distinctive professional identity.",
+    ),
+    _Direction(
+        "website.experimental_microsite",
+        "An experimental microsite using an unusual but legible visual system to make one idea memorable.",
+    ),
 )
 
 
@@ -643,28 +771,34 @@ _LENGTH_TARGETS: dict[str, tuple[_LengthTarget, ...]] = {
     ),
     "comment": (
         _LengthTarget(
+            "comment.tiny",
+            "Length target for this comment: a very short reaction, at most about "
+            "8 words; a sentence fragment is fine. No setup, no explanation, no punctuation polish.",
+            18,
+        ),
+        _LengthTarget(
             "comment.snippet",
             "Length target for this comment: no more than one sentence and no more "
             "than 20 words. State the point directly; do not add setup, a conclusion, or padding.",
-            35,
+            30,
         ),
         _LengthTarget(
             "comment.short",
             "Length target for this comment: exactly 2 or 3 sentences and 20-60 words. "
             "Make every sentence useful; do not add setup, a conclusion, or padding.",
-            50,
+            42,
         ),
         _LengthTarget(
             "comment.medium",
             "Length target for this comment: one compact paragraph of 60-120 words. "
             "Use only relevant detail; do not add setup, a conclusion, or padding.",
-            12,
+            8,
         ),
         _LengthTarget(
             "comment.long",
             "Length target for this comment: 2 or 3 short paragraphs of 120-250 words. "
             "Make the extra detail earn its space; do not add setup, a conclusion, or padding.",
-            3,
+            2,
         ),
     ),
     "media_post": (
@@ -736,12 +870,20 @@ _DEFAULT_PROFILE_DOCUMENT = {
             {"id": direction.id, "text": direction.text, "weight": 1}
             for direction in _COMMENT_DIRECTIONS
         ],
+        "image": [
+            {"id": direction.id, "text": direction.text, "weight": 1}
+            for direction in _IMAGE_DIRECTIONS
+        ],
+        "website": [
+            {"id": direction.id, "text": direction.text, "weight": 1}
+            for direction in _WEBSITE_DIRECTIONS
+        ],
         "backstage": [
             {"id": direction.id, "text": direction.text, "weight": 1}
             for direction in _BACKSTAGE_DIRECTIONS
         ],
     },
-    "sample_count": _SUGGESTIONS_PER_PROMPT,
+    "sample_count": 1,
 }
 DEFAULT_VISIT_PROFILE = replace(
     parse_visit_profile(_DEFAULT_PROFILE_DOCUMENT),
@@ -757,22 +899,29 @@ def _starter_hint(offered: frozenset[str]) -> str | None:
     return None
 
 
-def _community_hint(user: User | None, rng: random.Random) -> str:
+def _reserve_community(user: User | None, rng: random.Random) -> str | None:
+    """Reserve one real, non-Backstage destination for a post visit."""
     subscriptions = ((user.agent_state if user else None) or {}).get(
         "subscriptions"
     ) or []
-    if subscriptions:
-        return f" (such as {', '.join(subscriptions)})"
+    valid_subscriptions: list[str] = []
+    seen: set[str] = set()
+    for raw_name in subscriptions:
+        name = str(raw_name)
+        if name in seen or name == BACKSTAGE_SUBDEADDIT_NAME:
+            continue
+        if db.session.get(Subdeaddit, name) is not None:
+            valid_subscriptions.append(name)
+            seen.add(name)
+    if valid_subscriptions:
+        return rng.choice(valid_subscriptions)
     names = [
         row[0]
-        for row in db.session.query(Subdeaddit.name).order_by(Subdeaddit.name.asc())
+        for row in db.session.query(Subdeaddit.name)
+        .filter(Subdeaddit.name != BACKSTAGE_SUBDEADDIT_NAME)
+        .order_by(Subdeaddit.name.asc())
     ]
-    sample = rng.sample(names, min(len(names), _KICKOFF_COMMUNITY_SUGGESTIONS))
-    return (
-        f" (such as {', '.join(sample)} or search existing communities)"
-        if sample
-        else " (search existing communities with the search tool)"
-    )
+    return rng.choice(names) if names else None
 
 
 def _post_instruction(offered: frozenset[str]) -> str | None:
@@ -801,17 +950,55 @@ def _post_instruction(offered: frozenset[str]) -> str | None:
 def _sample_directions(
     profile: VisitProfile, kind: str, rng: random.Random
 ) -> tuple[tuple[str, str], ...]:
+    """Select exactly one direction using the profile's catalog weights."""
     items = profile.direction_catalog[kind]
-    return tuple(
-        (item.id, item.text) for item in rng.sample(items, profile.sample_count)
-    )
+    selected = rng.choices(items, weights=[item.weight for item in items], k=1)[0]
+    return ((selected.id, selected.text),)
 
 
 def _direction_hint(directions: tuple[tuple[str, str], ...]) -> str:
-    return (
-        "For inspiration, choose at most one of these directions if it fits: "
-        f"{'; '.join(text for _id, text in directions)}."
-    )
+    if not directions:
+        return ""
+    return f"Direction for this visit: {directions[0][1]}."
+
+
+@dataclass(frozen=True)
+class _EngagementFocus:
+    id: str
+    text: str
+    weight: int
+
+
+_ENGAGEMENT_FOCUSES: tuple[_EngagementFocus, ...] = (
+    _EngagementFocus(
+        "engagement.quiet_new",
+        "Engagement focus: look first for quiet or newly posted discussions.",
+        30,
+    ),
+    _EngagementFocus(
+        "engagement.direct_reply",
+        "Engagement focus: prioritize one direct reply where you can add genuine value.",
+        30,
+    ),
+    _EngagementFocus(
+        "engagement.active_new_angle",
+        "Engagement focus: enter an active thread only when you have a new angle.",
+        20,
+    ),
+    _EngagementFocus(
+        "engagement.browse_without_comment",
+        "Engagement focus: browse and read without commenting this visit.",
+        20,
+    ),
+)
+
+
+def _sample_engagement_focus(rng: random.Random) -> _EngagementFocus:
+    return rng.choices(
+        _ENGAGEMENT_FOCUSES,
+        weights=[focus.weight for focus in _ENGAGEMENT_FOCUSES],
+        k=1,
+    )[0]
 
 
 def _length_target(
@@ -836,6 +1023,8 @@ class _ResolvedVisit:
     length_text: str | None
     directions: tuple[tuple[str, str], ...]
     community_hint: str
+    engagement_focus_id: str | None = None
+    engagement_focus_text: str | None = None
     target_subdeaddit: str | None = None
 
 
@@ -914,8 +1103,8 @@ def _resolve_visit(
             eff_img, eff_web = effective_post_configs(agent, resolved_intent)
             offered = offered_post_tool_names(eff_img, eff_web)
             if _post_instruction(offered) is not None:
-                community_hint = _community_hint(user, rng)
-                directions = _sample_directions(profile, "post", rng)
+                target = _reserve_community(user, rng)
+                directions = _sample_directions(profile, resolved_intent, rng)
                 length_id, length_text = _length_target(
                     profile, "media_post", length_quantile
                 )
@@ -926,9 +1115,12 @@ def _resolve_visit(
                     length_target_id=length_id,
                     length_text=length_text,
                     directions=directions,
-                    community_hint=community_hint,
+                    community_hint=target or "",
+                    engagement_focus_id="focus.share",
+                    target_subdeaddit=target,
                 )
         directions = _sample_directions(profile, "comment", rng)
+        focus = _sample_engagement_focus(rng)
         length_id, length_text = _length_target(profile, "comment", length_quantile)
         return _ResolvedVisit(
             intent="browse",
@@ -938,6 +1130,8 @@ def _resolve_visit(
             length_text=length_text,
             directions=directions,
             community_hint="",
+            engagement_focus_id=focus.id,
+            engagement_focus_text=focus.text,
         )
 
     # 5. Resolve requested or sampled intent.
@@ -997,8 +1191,19 @@ def _resolve_visit(
         if _post_instruction(offered) is not None:
             content_kind = "text_post" if "create_post" in offered else "media_post"
             is_backstage = resolved_intent == "backstage"
-            community_hint = "" if is_backstage else _community_hint(user, rng)
-            direction_kind = "backstage" if is_backstage else "post"
+            target = (
+                BACKSTAGE_SUBDEADDIT_NAME
+                if is_backstage
+                else _reserve_community(user, rng)
+            )
+            community_hint = target or ""
+            direction_kind = (
+                "backstage"
+                if is_backstage
+                else resolved_intent
+                if resolved_intent in ("image", "website")
+                else "post"
+            )
             directions = _sample_directions(profile, direction_kind, rng)
             length_id, length_text = _length_target(
                 profile, content_kind, length_quantile
@@ -1011,12 +1216,14 @@ def _resolve_visit(
                 length_text=length_text,
                 directions=directions,
                 community_hint=community_hint,
-                target_subdeaddit=(BACKSTAGE_SUBDEADDIT_NAME if is_backstage else None),
+                engagement_focus_id="focus.share",
+                target_subdeaddit=target,
             )
         if intent_source == INTENT_SOURCE_REQUESTED:
             intent_source = INTENT_SOURCE_DEGRADED
 
     directions = _sample_directions(profile, "comment", rng)
+    focus = _sample_engagement_focus(rng)
     length_id, length_text = _length_target(profile, "comment", length_quantile)
     return _ResolvedVisit(
         intent="browse",
@@ -1026,6 +1233,8 @@ def _resolve_visit(
         length_text=length_text,
         directions=directions,
         community_hint="",
+        engagement_focus_id=focus.id,
+        engagement_focus_text=focus.text,
     )
 
 
@@ -1060,11 +1269,9 @@ def _render_kickoff(
     elif resolved.intent == "browse":
         layout_name = "browse"
         if context.unread_count > 0:
-            directions_text = (
-                "Catch up on your replies. Most replies don't need an answer - "
-                "reply only where you genuinely have something new to add. "
-                f"{_direction_hint(resolved.directions)} "
-                f"{resolved.length_text} Otherwise just read them and move on."
+            opener = (
+                "Catch up on your replies and answer only where you have "
+                "something genuinely new to add. "
             )
         else:
             starter_hint = _starter_hint(_offered_post_tools(plan))
@@ -1073,13 +1280,15 @@ def _render_kickoff(
                 if starter_hint
                 else ""
             )
-            directions_text = (
-                "Browse your feed or search for topics of interest, read discussions, "
-                "and jump into the conversation with a comment if something catches "
-                "your eye. "
-                f"{_direction_hint(resolved.directions)} "
-                f"{resolved.length_text} {hint_sentence}When you're done, call finish."
+            opener = (
+                "Browse your feed or search for topics of interest and read "
+                f"the discussions. {hint_sentence}"
             )
+        directions_text = (
+            f"{opener}{resolved.engagement_focus_text or ''} "
+            f"{_direction_hint(resolved.directions)} {resolved.length_text} "
+            "When you're done, call finish."
+        )
     else:
         layout_name = "post"
         post_instruction = _post_instruction(_offered_post_tools(plan))
@@ -1089,10 +1298,14 @@ def _render_kickoff(
             if context.unread_count > 0
             else "You're waking up with something to share. "
         )
+        destination = (
+            f"d/{resolved.target_subdeaddit}"
+            if resolved.target_subdeaddit
+            else "one existing non-Backstage community"
+        )
         directions_text = (
             f"{opener}{_direction_hint(resolved.directions)} "
-            f"{resolved.length_text} Find a relevant subdeaddit{resolved.community_hint} "
-            "(or check quiet/sparse communities that need fresh discussion) "
+            f"{resolved.length_text} Publish exactly one post in {destination}; "
             f"{post_instruction} Once your post is published, call the finish tool "
             "to conclude your visit."
         )
@@ -1180,6 +1393,7 @@ def prepare_agent_visit(
         direction_ids=tuple(
             direction_id for direction_id, _text in resolved.directions
         ),
+        engagement_focus_id=resolved.engagement_focus_id,
         profile_name=profile_name,
         profile_version=profile.profile_version or DEFAULT_PROFILE_VERSION,
         profile_ref=profile_ref,

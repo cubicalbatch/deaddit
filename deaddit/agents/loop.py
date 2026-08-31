@@ -325,6 +325,7 @@ def run_once(
             "target_subdeaddit": visit.plan.target_subdeaddit,
             "length_target_id": visit.plan.length_target_id,
             "direction_ids": list(visit.plan.direction_ids),
+            "engagement_focus_id": visit.plan.engagement_focus_id,
             "offered_tool_names": sorted(visit.plan.offered_tool_names),
             "render_variables": {
                 kind: dict(values)
