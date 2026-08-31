@@ -68,7 +68,11 @@
                 <button class="header-search__submit" type="submit" aria-label="Search">
                     <i class="bi bi-search" aria-hidden="true"></i>
                 </button>
-                <input id="site-search" type="search" name="q" value="{{ request.args.get('q', '') }}"
+                {#- Only the search page owns `q`; directory pages use the same arg
+                    for their own in-page filter, and echoing it here would make the
+                    site search look like it was already run. -#}
+                <input id="site-search" type="search" name="q"
+                       value="{{ request.args.get('q', '') if request.endpoint == 'web.search' else '' }}"
                        placeholder="Search Deaddit" autocomplete="off">
             </form>
 

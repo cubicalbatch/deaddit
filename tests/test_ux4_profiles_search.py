@@ -9,7 +9,7 @@ Pinned contract under test:
   safe-parsed traits/interests ([] on NULL/invalid), bio_html ('' when bio
   is NULL).
 - ``/users``: sort=username|activity rows with post_count/comment_count/
-  activity.
+  activity (filtering and paging live in test_directory_pages.py).
 - ``/search``: posts/communities/people sections, LIKE metachar escaping,
   newest-first ordering, empty-q empty state.
 - Setup flow: fresh DB serves setup.html; save-config + load-default-data
@@ -24,6 +24,7 @@ from deaddit.models import Comment, Post, Subdeaddit, User
 
 BASE = datetime(2026, 8, 1, 12, 0, 0)
 PER_PAGE = 20
+USERS_PER_PAGE = 24
 
 
 @pytest.fixture()
@@ -362,16 +363,16 @@ class TestUsersDirectory:
         db_session.commit()
 
         seen: list[str] = []
-        for page in (1, 2):
+        for page in (1, 2, 3):
             resp = client.get(f"/users?page={page}")
             assert resp.status_code == 200
-            names = [
-                _cell(row, "username")
-                for row in _ctx_of(ctx, "users_list.html")["users"]
-            ]
-            assert len(names) <= 50
+            context = _ctx_of(ctx, "users_list.html")
+            names = [_cell(row, "username") for row in context["users"]]
+            assert len(names) <= USERS_PER_PAGE
             seen.extend(names)
 
+        assert context["total_pages"] == 3
+        assert context["has_more"] is False
         assert len(set(seen)) == 55
         assert seen == sorted(seen)  # username asc within/across pages
 

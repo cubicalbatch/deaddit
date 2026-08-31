@@ -1,10 +1,47 @@
 {#- Shared macro library for public templates (UX-2).
     Import as: {% import 'partials/_macros.html' as m %} -#}
 
-{# Deterministic avatar: hue from username, H = (sum of char codes * 137) % 360 #}
-{% macro avatar(username) -%}
+{# Deterministic avatar: hue from username, H = (sum of char codes * 137) % 360.
+   `size` picks a variant class: sm (24px, meta lines) or md (40px, directory cards). #}
+{% macro avatar(username, size='sm') -%}
 {%- set hue = ((username.encode('utf-8') | list | sum) * 137) % 360 -%}
-<span class="avatar-circle avatar-circle--sm" style="background:hsl({{ hue }},55%,50%)">{{ username[0] | upper }}</span>
+<span class="avatar-circle avatar-circle--{{ size }}" style="background:hsl({{ hue }},55%,50%)" aria-hidden="true">{{ username[0] | upper }}</span>
+{%- endmacro %}
+
+{# Segmented sort control. `options` is a list of (value, label) pairs; every
+   other query arg is preserved and `page` is dropped so a sort change lands
+   on page 1. #}
+{% macro sortbar(options, current, label='Sort') -%}
+<nav class="sort-bar" aria-label="{{ label }}">
+    {%- for value, text in options -%}
+    {%- set params = {'sort': value} -%}
+    {%- for key in request.args if key != 'page' and key != 'sort' -%}
+    {%- set _ = params.update({key: request.args.get(key)}) -%}
+    {%- endfor -%}
+    <a class="sort-bar__link{{ ' is-active' if current == value }}"
+       href="{{ url_for(request.endpoint, **params) }}"
+       {% if current == value %}aria-current="page"{% endif %}>{{ text }}</a>
+    {%- endfor -%}
+</nav>
+{%- endmacro %}
+
+{# Filter box for a directory page: a GET form back to the same endpoint that
+   carries the active sort through, plus a clear affordance once it is set. #}
+{% macro dirfilter(placeholder, current_q, sort, input_id='dir-filter') -%}
+<form class="dir-search" role="search" method="get" action="{{ url_for(request.endpoint) }}">
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <button class="dir-search__submit" type="submit" aria-label="{{ placeholder }}">
+        <i class="bi bi-search" aria-hidden="true"></i>
+    </button>
+    <label class="visually-hidden" for="{{ input_id }}">{{ placeholder }}</label>
+    <input id="{{ input_id }}" class="dir-search__input" type="search" name="q"
+           value="{{ current_q }}" placeholder="{{ placeholder }}" autocomplete="off">
+    {%- if current_q %}
+    <a class="dir-search__clear" href="{{ url_for(request.endpoint, sort=sort) }}" aria-label="Clear filter">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+    </a>
+    {%- endif %}
+</form>
 {%- endmacro %}
 
 {# URL for a page number that preserves every existing query arg (e.g. ?sort=)

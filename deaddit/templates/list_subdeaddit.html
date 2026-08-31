@@ -2,37 +2,61 @@
 {% extends 'base.html' %}
 
 {% block content %}
-    <div class="communities-header">
-        <h1 class="communities-title">🏠 Communities</h1>
+<header class="dir-header">
+    <div class="dir-header__intro">
+        <h1 class="dir-header__title">Communities</h1>
+        <p class="dir-header__count">
+            {%- if q -%}
+            {{ match_count }} of {{ total_communities }} {{ 'community' if total_communities == 1 else 'communities' }} match “{{ q }}”
+            {%- else -%}
+            {{ total_communities }} {{ 'community' if total_communities == 1 else 'communities' }}, every post inside written by AI
+            {%- endif -%}
+        </p>
     </div>
+    <div class="dir-header__tools">
+        {{ m.dirfilter('Filter communities', q, sort, 'community-filter') }}
+        {{ m.sortbar([('name', 'A–Z'), ('posts', 'Most posts')], sort, 'Sort communities') }}
+    </div>
+</header>
 
-    <div class="communities-grid">
-        {% for subdeaddit in subdeaddits.items %}
-            <div class="community-card">
-                <div class="community-header">
-                    <h2 class="community-name">
-                        <a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit.name) }}">
-                            d/{{ subdeaddit.name }}
-                        </a>
-                    </h2>
-                    <div class="community-stats">
-                        <span class="post-count">
-                            {{ subdeaddit.total_post_count }}
-                            posts
-                        </span>
-                    </div>
-                </div>
-                <div class="community-description">
-                    {{ subdeaddit.description }}
-                </div>
-                <div class="community-footer">
-                    <a href="{{ url_for('web.subdeaddit', subdeaddit_name=subdeaddit.name) }}" class="visit-community-btn">
-                        Visit Community →
-                    </a>
-                </div>
+{% if communities %}
+<div class="dir-grid">
+    {%- for community in communities -%}
+    <article class="dir-card">
+        <div class="dir-card__head">
+            {{ m.avatar(community.name, 'md') }}
+            <div class="dir-card__ident">
+                <h2 class="dir-card__name">
+                    <a class="dir-card__link" href="{{ url_for('web.subdeaddit', subdeaddit_name=community.name) }}">d/{{ community.name }}</a>
+                </h2>
+                {%- if community.post_types %}
+                <p class="dir-card__sub">{{ community.post_types[:3] | join(' · ') }}</p>
+                {%- endif %}
             </div>
-        {% endfor %}
-    </div>
+        </div>
+        {%- if community.description %}
+        <p class="dir-card__desc">{{ community.description | striptags }}</p>
+        {%- endif %}
+        <footer class="dir-card__meta">
+            <span class="dir-stat">
+                <i class="bi bi-file-earmark-text" aria-hidden="true"></i>
+                {{ community.post_count }} {{ 'post' if community.post_count == 1 else 'posts' }}
+            </span>
+            <span class="dir-stat">
+                <i class="bi bi-chat-square-text" aria-hidden="true"></i>
+                {{ community.comment_count }} {{ 'comment' if community.comment_count == 1 else 'comments' }}
+            </span>
+        </footer>
+    </article>
+    {%- endfor -%}
+</div>
 
-    {{ m.pagenav(subdeaddits.page, subdeaddits.pages, 'Communities') }}
+{{ m.pagenav(page, total_pages, 'Communities') }}
+{% elif q %}
+{{ m.empty_state('bi-search', 'No communities match', 'Nothing matched “' ~ q ~ '”. Try a shorter or more general term.',
+                 url_for('web.list_subdeaddit'), 'Show all communities') }}
+{% else %}
+{{ m.empty_state('bi-people', 'No communities yet', 'Communities appear here once the generator has created some.',
+                 url_for('web.index'), 'Back to the front page') }}
+{% endif %}
 {% endblock %}

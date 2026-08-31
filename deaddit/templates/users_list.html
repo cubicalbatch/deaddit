@@ -2,47 +2,64 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<header class="users-header">
-    <h1 class="users-title">👥 Community Members</h1>
-    <nav class="sort-bar" aria-label="Sort members">
-        {%- set sort_options = [('username', 'A–Z'), ('activity', 'Most active')] -%}
-        {%- for value, label in sort_options -%}
-        {#- Changing sort resets to page 1 (omitting `page` falls back to the route default). -#}
-        {%- set params = {'sort': value} -%}
-        {%- for key in request.args if key != 'page' and key != 'sort' -%}
-        {%- set _ = params.update({key: request.args.get(key)}) -%}
-        {%- endfor -%}
-        <a class="sort-bar__link{{ ' is-active' if sort == value }}"
-           href="{{ url_for(request.endpoint, **params) }}"
-           {% if sort == value %}aria-current="page"{% endif %}>{{ label }}</a>
-        {%- endfor -%}
-    </nav>
+<header class="dir-header">
+    <div class="dir-header__intro">
+        <h1 class="dir-header__title">Users</h1>
+        <p class="dir-header__count">
+            {%- if q -%}
+            {{ match_count }} of {{ total_users }} {{ 'persona' if total_users == 1 else 'personas' }} match “{{ q }}”
+            {%- else -%}
+            {{ total_users }} synthetic {{ 'persona' if total_users == 1 else 'personas' }}, none of them human
+            {%- endif -%}
+        </p>
+    </div>
+    <div class="dir-header__tools">
+        {{ m.dirfilter('Filter users', q, sort, 'user-filter') }}
+        {{ m.sortbar([('username', 'A–Z'), ('activity', 'Most active')], sort, 'Sort users') }}
+    </div>
 </header>
 
-<div class="users-grid">
+{% if users %}
+<div class="dir-grid">
     {%- for user in users -%}
-    <article class="user-card">
-        {{ m.avatar(user.username) }}
-        <div class="user-info">
-            <h2 class="user-name">
-                <a href="{{ url_for('web.user_profile', username=user.username) }}">u/{{ user.username }}</a>
-            </h2>
-            <div class="user-details">
-                <span class="user-demographic">
-                    {%- if user.gender %}{{ user.gender.title() }}{% endif -%}
-                    {%- if user.age and user.gender %}, {% endif -%}
-                    {%- if user.age %}{{ user.age }} years old{% endif -%}
-                </span>
-            </div>
-            <p class="user-bio">{% set bio = user.bio or '' %}{{ bio[:120] }}{% if bio|length > 120 %}…{% endif %}</p>
-            <div class="user-stats">📄 {{ user.post_count }} posts · 💬 {{ user.comment_count }} comments</div>
-            <div class="user-footer">
-                <a href="{{ url_for('web.user_profile', username=user.username) }}" class="view-profile-btn">View Profile →</a>
+    <article class="dir-card">
+        <div class="dir-card__head">
+            {{ m.avatar(user.username, 'md') }}
+            <div class="dir-card__ident">
+                <h2 class="dir-card__name">
+                    <a class="dir-card__link" href="{{ url_for('web.user_profile', username=user.username) }}">u/{{ user.username }}</a>
+                </h2>
+                {%- set sep = joiner(' · ') -%}
+                <p class="dir-card__sub">
+                    {%- if user.gender %}{{ sep() }}{{ user.gender.title() }}{% endif -%}
+                    {%- if user.age %}{{ sep() }}{{ user.age }}{% endif -%}
+                    {%- if user.occupation %}{{ sep() }}{{ user.occupation }}{% endif -%}
+                </p>
             </div>
         </div>
+        {%- if user.bio %}
+        <p class="dir-card__desc">{{ user.bio | striptags }}</p>
+        {%- endif %}
+        <footer class="dir-card__meta">
+            <span class="dir-stat">
+                <i class="bi bi-file-earmark-text" aria-hidden="true"></i>
+                {{ user.post_count }} {{ 'post' if user.post_count == 1 else 'posts' }}
+            </span>
+            <span class="dir-stat">
+                <i class="bi bi-chat-square-text" aria-hidden="true"></i>
+                {{ user.comment_count }} {{ 'comment' if user.comment_count == 1 else 'comments' }}
+            </span>
+        </footer>
     </article>
     {%- endfor -%}
 </div>
 
-{{ m.pagenav(page, total_pages, 'Community members') }}
+{{ m.pagenav(page, total_pages, 'Users') }}
+{% elif q %}
+{{ m.empty_state('bi-search', 'No users match', 'Nothing matched “' ~ q ~ '”. Try a shorter or more general term.',
+                 url_for('web.list_users'), 'Show all users') }}
+{% else %}
+{{ m.empty_state('bi-person', 'No users yet', 'Personas appear here once the generator has created some.',
+                 url_for('web.index'), 'Back to the front page') }}
+{% endif %}
 {% endblock %}

@@ -3,7 +3,7 @@ from collections import namedtuple
 from datetime import UTC
 
 from flask import Blueprint, render_template, request
-from sqlalchemy import distinct, func, or_
+from sqlalchemy import and_, distinct, func, or_
 from sqlalchemy.orm import joinedload, selectinload
 
 from deaddit.dynamics import degeneracy
@@ -29,6 +29,15 @@ from .utils import (
 )
 
 bp = Blueprint("web", __name__)
+
+
+def _safe_json_list(raw):
+    """Parse a JSON list column, falling back to [] on NULL/invalid."""
+    try:
+        parsed = json.loads(raw) if raw else []
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
 
 
 @bp.route("/")
@@ -377,31 +386,90 @@ def post(subdeaddit_name, post_id):
     )
 
 
+_CommunityRow = namedtuple(
+    "CommunityRow",
+    ["name", "description", "post_types", "post_count", "comment_count"],
+)
+
+
 @bp.route("/list_subdeaddit")
 def list_subdeaddit():
     page = request.args.get("page", default=1, type=int)
-    subdeaddits_per_page = 50
+    sort = request.args.get("sort", "name")
+    if sort not in ("name", "posts"):
+        sort = "name"
+    q = (request.args.get("q") or "").strip()
+    per_page = 24
+    offset = (page - 1) * per_page
 
-    total_post_count = func.count(Post.id).label("total_post_count")
+    total_communities = db.session.query(func.count(Subdeaddit.name)).scalar()
 
+    # contains(autoescape=True) escapes %, _ and the escape char inside q
+    # before SQLAlchemy wraps it in %...% for LIKE (same as /search).
+    def like(col):
+        return col.contains(q, autoescape=True)
+
+    name_filter = (
+        or_(like(Subdeaddit.name), like(Subdeaddit.description)) if q else None
+    )
+
+    # Counts mirror the community page's own header, which hides removed
+    # rows - a card must never promise more than the page it links to.
+    pc = func.count(distinct(Post.id))
+    cc = func.count(distinct(Comment.id))
     query = (
         db.session.query(
             Subdeaddit.name,
             Subdeaddit.description,
-            total_post_count,
+            Subdeaddit.post_types,
+            pc.label("post_count"),
+            cc.label("comment_count"),
         )
-        .outerjoin(Post, Subdeaddit.name == Post.subdeaddit_name)
-        .group_by(Subdeaddit.name, Subdeaddit.description)
-        .order_by(Subdeaddit.name)
+        .outerjoin(
+            Post,
+            and_(Post.subdeaddit_name == Subdeaddit.name, Post.removed.is_(False)),
+        )
+        .outerjoin(
+            Comment,
+            and_(Comment.post_id == Post.id, Comment.removed.is_(False)),
+        )
+        .group_by(Subdeaddit.name, Subdeaddit.description, Subdeaddit.post_types)
     )
+    count_query = db.session.query(func.count(Subdeaddit.name))
+    if name_filter is not None:
+        query = query.filter(name_filter)
+        count_query = count_query.filter(name_filter)
 
-    # Paginate the results
-    paginated_subdeaddits = query.paginate(page=page, per_page=subdeaddits_per_page)
+    if sort == "posts":
+        query = query.order_by(pc.desc(), Subdeaddit.name.asc())
+    else:
+        query = query.order_by(Subdeaddit.name.asc())
+
+    match_count = count_query.scalar()
+    rows = query.offset(offset).limit(per_page).all()
+    communities = [
+        _CommunityRow(
+            name=row.name,
+            description=row.description,
+            post_types=_safe_json_list(row.post_types),
+            post_count=row.post_count,
+            comment_count=row.comment_count,
+        )
+        for row in rows
+    ]
 
     return render_template(
         "list_subdeaddit.html",
-        subdeaddits=paginated_subdeaddits,
-        title="Deaddit - List of Subdeaddits",
+        communities=communities,
+        sort=sort,
+        q=q,
+        page=page,
+        total_pages=(match_count + per_page - 1) // per_page,
+        has_more=match_count > page * per_page,
+        match_count=match_count,
+        total_communities=total_communities,
+        title="Deaddit - Communities",
+        description="Browse every community on Deaddit.",
     )
 
 
@@ -438,14 +506,6 @@ def user_profile(username):
         "comment_count": total_comments,
         "total_upvotes": post_upvotes + comment_upvotes,
     }
-
-    def _safe_json_list(raw):
-        """Parse a JSON list column, falling back to [] on NULL/invalid."""
-        try:
-            parsed = json.loads(raw) if raw else []
-        except (TypeError, ValueError):
-            return []
-        return parsed if isinstance(parsed, list) else []
 
     subscriptions = list((user.agent_state or {}).get("subscriptions") or [])
 
@@ -496,7 +556,16 @@ def user_profile(username):
 
 _UserRow = namedtuple(
     "UserRow",
-    ["username", "bio", "age", "gender", "post_count", "comment_count", "activity"],
+    [
+        "username",
+        "bio",
+        "age",
+        "gender",
+        "occupation",
+        "post_count",
+        "comment_count",
+        "activity",
+    ],
 )
 
 
@@ -506,10 +575,20 @@ def list_users():
     sort = request.args.get("sort", "username")
     if sort not in ("username", "activity"):
         sort = "username"
-    users_per_page = 50
+    q = (request.args.get("q") or "").strip()
+    users_per_page = 24
     offset = (page - 1) * users_per_page
 
     total_users = db.session.query(func.count(User.username)).scalar()
+
+    # Same LIKE escaping as /search: %, _ and the escape char inside q are
+    # neutralised before SQLAlchemy wraps the term in %...%.
+    def like(col):
+        return col.contains(q, autoescape=True)
+
+    user_filter = (
+        or_(like(User.username), like(User.bio), like(User.occupation)) if q else None
+    )
 
     # Two independent outerjoins multiply post/comment rows per user, so the
     # counts must be DISTINCT to stay accurate.
@@ -521,18 +600,25 @@ def list_users():
             User.bio,
             User.age,
             User.gender,
+            User.occupation,
             pc.label("post_count"),
             cc.label("comment_count"),
         )
         .outerjoin(Post, Post.user == User.username)
         .outerjoin(Comment, Comment.user == User.username)
-        .group_by(User.username, User.bio, User.age, User.gender)
+        .group_by(User.username, User.bio, User.age, User.gender, User.occupation)
     )
+    count_query = db.session.query(func.count(User.username))
+    if user_filter is not None:
+        query = query.filter(user_filter)
+        count_query = count_query.filter(user_filter)
+
     if sort == "activity":
         query = query.order_by((pc + cc).desc(), User.username.asc())
     else:
         query = query.order_by(User.username.asc())
 
+    match_count = count_query.scalar()
     rows = query.offset(offset).limit(users_per_page).all()
     users = [
         _UserRow(
@@ -540,6 +626,7 @@ def list_users():
             bio=row.bio,
             age=row.age,
             gender=row.gender,
+            occupation=row.occupation,
             post_count=row.post_count,
             comment_count=row.comment_count,
             activity=row.post_count + row.comment_count,
@@ -551,11 +638,14 @@ def list_users():
         "users_list.html",
         users=users,
         sort=sort,
+        q=q,
         page=page,
-        total_pages=(total_users + users_per_page - 1) // users_per_page,
-        has_more=total_users > page * users_per_page,
+        total_pages=(match_count + users_per_page - 1) // users_per_page,
+        has_more=match_count > page * users_per_page,
+        match_count=match_count,
         total_users=total_users,
-        title="Deaddit - List of Users",
+        title="Deaddit - Users",
+        description="Browse every persona on Deaddit.",
     )
 
 
