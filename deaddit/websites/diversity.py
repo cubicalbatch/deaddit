@@ -284,42 +284,42 @@ _MOOD_POOL: tuple[DiversityOption, ...] = (
 _TYPOGRAPHY_POOL: tuple[DiversityOption, ...] = (
     DiversityOption(
         "type.modern_grotesk",
-        "Use a clean contemporary sans system with confident headings, compact labels, and measured tracking.",
+        "Use a contemporary neo-grotesk sans class: confident headings, compact labels, and measured tracking; keep the system distinctly sans rather than serif.",
         1.0,
     ),
     DiversityOption(
         "type.humanist_sans",
-        "Use a friendly humanist sans system with open shapes, approachable hierarchy, and conversational captions.",
+        "Use an old-humanist sans class with open shapes, varied stroke modulation, approachable hierarchy, and conversational captions.",
         1.0,
     ),
     DiversityOption(
         "type.editorial_serif",
-        "Use an expressive serif for major statements paired with a restrained, highly readable companion face.",
+        "Use an editorial high-contrast or transitional serif class for major statements, paired with a restrained reading face; keep the page print-led rather than app-neutral.",
         1.0,
     ),
     DiversityOption(
         "type.condensed_poster",
-        "Use condensed high-impact lettering for headlines and compact navigation labels with poster-like rhythm.",
+        "Use a condensed display sans class with tight widths, high-impact headlines, and compact navigation labels; give it a poster-era rhythm.",
         1.0,
     ),
     DiversityOption(
         "type.monospaced_signal",
-        "Use monospaced type for labels and data signals, contrasted with a comfortable reading face.",
+        "Use a monospaced typewriter/terminal class for labels and data signals, contrasted with a comfortable proportional reading face; use a sans or low-contrast non-classical serif rather than a default Palatino/Iowan face.",
         1.0,
     ),
     DiversityOption(
         "type.minimal_neutral",
-        "Use quiet neutral typography with precise spacing; let scale and alignment carry hierarchy.",
+        "Use a neutral utilitarian sans class—plain, low-contrast, and system-like—with restrained weight changes; let spacing and alignment carry hierarchy.",
         1.0,
     ),
     DiversityOption(
         "type.handmade_accent",
-        "Use a legible primary face with occasional handmade-looking accent lettering for personality.",
+        "Use a conventional readable face with an irregular handwritten or brush-display class only for occasional accents; preserve human-made quirks without turning body copy into a generic serif.",
         1.0,
     ),
     DiversityOption(
         "type.classical_formal",
-        "Use formal proportioned lettering and disciplined hierarchy for an established, ceremonial voice.",
+        "Use a classical Roman/old-style serif class with formal proportions and dignified contrast for an established, ceremonial voice.",
         1.0,
     ),
 )
@@ -327,42 +327,42 @@ _TYPOGRAPHY_POOL: tuple[DiversityOption, ...] = (
 _RHYTHM_POOL: tuple[DiversityOption, ...] = (
     DiversityOption(
         "rhythm.discovery",
-        "Favor scanning and discovery through teasers, filters, related destinations, and several entry points.",
+        "Favor scanning and discovery through teasers, filters, related destinations, and several entry points; keep exploration direct with immediate state changes rather than a choreographed scroll reveal.",
         1.0,
     ),
     DiversityOption(
         "rhythm.narrative",
-        "Favor a paced narrative that reveals context progressively through transitions between sections.",
+        "Favor a paced narrative that reveals context progressively through deliberate section-to-section transitions; allow approximately 3-6 total staged entrances, at most one per major section, to mark chapters without animating everything.",
         1.0,
     ),
     DiversityOption(
         "rhythm.reference",
-        "Favor fast lookup with concise summaries, anchors, search-like controls, and predictable repetition.",
+        "Favor fast lookup with concise summaries, anchors, search-like controls, and predictable repetition; keep the page static/direct, with anchors and results available immediately rather than scroll-revealed.",
         1.0,
     ),
     DiversityOption(
         "rhythm.participatory",
-        "Favor participation through reactions, tabs, toggles, and visible community response.",
+        "Favor participation through reactions, tabs, toggles, and visible community response; make interaction feedback immediate with brief local transitions, not cinematic page motion.",
         1.0,
     ),
     DiversityOption(
         "rhythm.guided",
-        "Favor a guided path with clear next actions, progress cues, and a beginning-to-end sequence.",
+        "Favor a guided path with clear next actions, progress cues, and a beginning-to-end sequence; use stepwise transitions between stages so movement reinforces progress.",
         1.0,
     ),
     DiversityOption(
         "rhythm.showcase",
-        "Favor visual showcase with focal moments, captions, selected highlights, and breathing room.",
+        "Favor visual showcase with focal moments, captions, selected highlights, and breathing room; use approximately 3-6 total staged reveals, at most one per major section, while keeping the composition readable when static.",
         1.0,
     ),
     DiversityOption(
         "rhythm.utilitarian_dense",
-        "Favor a utilitarian dense rhythm: compact controls, status feedback, and quick completion of practical tasks.",
+        "Favor a utilitarian dense rhythm: compact controls, status feedback, and quick completion of practical tasks; keep interactions static/direct and immediate, with no decorative scroll-reveal.",
         1.0,
     ),
     DiversityOption(
         "rhythm.plain_minimal",
-        "Favor a plain minimal rhythm: few controls, simple repeated blocks, and generous quiet space.",
+        "Favor a plain minimal rhythm: few controls, simple repeated blocks, and generous quiet space; default to static/direct presentation, reserving motion for explicit state changes rather than ambient reveals.",
         1.0,
     ),
 )

@@ -85,92 +85,57 @@ def _drawn(
     )
 
 
-# Subject-matter axis: a nudge toward one subject neighbourhood.  The agent's
-# own image_prompt stays authoritative — the fragment only tilts the scene
-# choice away from the safe everyday defaults (food, pets, household objects).
+# Subject-matter hints broaden the scene without replacing the agent's request.
 SUBJECT_OPTIONS: tuple[DiversityOption, ...] = (
     DiversityOption(
         "subject.urban_night",
-        "Lean the scene toward an urban night setting: neon-lit streets, shop "
-        "windows or a dimly lit transit platform after dark.",
+        "an urban-night setting with neon, windows, or transit after dark",
     ),
-    DiversityOption(
-        "subject.wilderness",
-        "Lean the scene toward wilderness: a forest trail, open ridge line or "
-        "riverbank far from any building.",
-        weight=1.0,
-    ),
+    DiversityOption("subject.wilderness", "a wilderness setting far from buildings"),
     DiversityOption(
         "subject.mechanical_industrial",
-        "Lean the scene toward mechanical or industrial matter: gears, engines, "
-        "workshop tools or factory floor details.",
+        "mechanical or industrial details such as gears, engines, or tools",
     ),
     DiversityOption(
         "subject.historical_archival",
-        "Lean the scene toward historical or archival material: old documents, "
-        "museum pieces or weathered monuments that carry visible age.",
+        "historical or archival material showing visible age",
     ),
     DiversityOption(
         "subject.abstract_texture",
-        "Lean the scene toward abstract texture: close-up patterns of rust, "
-        "fabric, peeling paint or rippled sand that read as pure surface.",
+        "an abstract close-up of texture, pattern, or surface",
     ),
     DiversityOption(
-        "subject.candid_portrait",
-        "Lean the scene toward a candid human portrait: one person absorbed in "
-        "an everyday task, unaware of the camera.",
+        "subject.candid_portrait", "a candid portrait of someone absorbed in a task"
     ),
     DiversityOption(
         "subject.architectural_detail",
-        "Lean the scene toward architectural detail: stairwells, facades, "
-        "doorways or the geometry of a building interior.",
+        "architectural details such as stairwells, facades, or doorways",
     ),
     DiversityOption(
-        "subject.weather",
-        "Lean the scene toward weather as the main event: fog, storm clouds, "
-        "rain on glass or after-storm light.",
+        "subject.weather", "weather as the main event: fog, rain, or storm light"
     ),
     DiversityOption(
-        "subject.water_scene",
-        "Lean the scene toward water: a harbour, lakeshore, swimming pool or "
-        "rain-swollen gutter as the centrepiece.",
+        "subject.water_scene", "a water scene such as a harbour, lakeshore, or pool"
     ),
     DiversityOption(
-        "subject.crowd_street",
-        "Lean the scene toward a crowd or street scene: market bustle, a queue "
-        "or passers-by crossing in different directions.",
+        "subject.crowd_street", "a crowd or street scene with varied movement"
     ),
     DiversityOption(
         "subject.macro_nature",
-        "Lean the scene toward macro nature: insects, moss, seed heads or bark "
-        "photographed at close range.",
+        "macro nature such as insects, moss, seed heads, or bark",
     ),
     DiversityOption(
-        "subject.vintage_retro",
-        "Lean the scene toward vintage or retro character: analogue gadgets, "
-        "period clothing or a room that stopped in an earlier decade.",
+        "subject.vintage_retro", "a vintage or retro setting with period details"
     ),
 )
 
-_SUBJECT_BY_ID = {option.id: option for option in SUBJECT_OPTIONS}
 
-
-def sample_subject(
-    rng: random.Random,
-    *,
-    subject_id: str | None = None,
-) -> DiversityOption:
-    """Pick one subject-matter nudge using only the caller's random stream."""
-
-    if subject_id is not None:
-        try:
-            return _SUBJECT_BY_ID[subject_id]
-        except KeyError as exc:
-            valid = ", ".join(option.id for option in SUBJECT_OPTIONS)
-            raise ValueError(
-                f"unknown image diversity subject ID {subject_id!r}; expected one of: {valid}"
-            ) from exc
-    return SUBJECT_OPTIONS[rng.randrange(len(SUBJECT_OPTIONS))]
+def _sample_subject(rng: random.Random) -> DiversityOption:
+    return rng.choices(
+        SUBJECT_OPTIONS,
+        weights=[option.weight for option in SUBJECT_OPTIONS],
+        k=1,
+    )[0]
 
 
 # Direction descriptions deliberately describe *how* to approach the request;
@@ -697,15 +662,13 @@ def sample_image_diversity(
     rng: random.Random,
     *,
     direction_id: str | None = None,
-    subject_id: str | None = None,
     source_prompt: str = "",
 ) -> ImageDiversity:
     """Choose one coherent direction using only the caller's random stream.
 
     ``direction_id`` is used by the prompt planner to carry one locally chosen
     direction through the image prompt and downstream samplers.  When absent,
-    one of the twelve stable directions is selected.  ``subject_id`` carries a
-    locally chosen subject-matter nudge the same way.  An explicit photographic
+    one of the twelve stable directions is selected.  An explicit photographic
     or drawn medium in ``source_prompt`` overrides the direction's default
     medium without changing its intent.
     """
@@ -720,8 +683,7 @@ def sample_image_diversity(
                 f"unknown image diversity direction ID {direction_id!r}; expected one of: {valid}"
             ) from exc
 
-    subject = sample_subject(rng, subject_id=subject_id)
-
+    subject = _sample_subject(rng)
     source_medium = _source_medium(source_prompt)
     is_photographic = (
         source_medium
@@ -744,10 +706,10 @@ def render_image_diversity(matrix: ImageDiversity) -> str:
     """Render exactly the selected direction and its compatible choices."""
     medium_priority = (
         "Photographic priority: render a realistic photograph captured by a real "
-        "camera or phone the way an amateur actually would - natural framing, "
-        "ordinary exposure, believable imperfections, no studio polish, no "
-        "cinematic glow. Reject illustration, painting, engraving, diagram, "
-        "3D-render, and concept-art appearance."
+        "camera or phone, with slightly imperfect, off-center framing and no "
+        "staged golden raking light, floating dust, or staged steam unless the "
+        "requested subject genuinely requires it. Reject illustration, painting, "
+        "engraving, diagram, 3D-render, and concept-art appearance."
         if matrix.is_photographic
         else "Drawn/design priority: render a deliberate illustration, painting, print, or diagram treatment; do not make it photorealistic."
     )
@@ -755,13 +717,13 @@ def render_image_diversity(matrix: ImageDiversity) -> str:
         (
             "Image art direction (one selected direction; preserve the persona request):",
             f"- Direction: {matrix.direction.text}",
-            f"- Subject matter: {matrix.subject.text}",
+            f"- Subject hint (optional): {matrix.subject.text}",
             f"- Framing: {matrix.framing.text}",
             f"- Lighting: {matrix.lighting.text}",
             f"- Capture or medium: {matrix.capture.text}",
             f"- Color: {matrix.color.text}",
             medium_priority,
-            "Keep the requested subject and location. The subject-matter line is a nudge, not a replacement: if the request already names a subject, keep it and let the nudge shape the surrounding scene. Vary how it is captured, not what it is; explicit source wording wins when it specifies a medium.",
+            "Keep the requested subject and location; use the subject hint only when compatible. Explicit source wording wins for medium.",
         )
     )
 
@@ -785,5 +747,4 @@ __all__ = [
     "diversity_ids",
     "render_image_diversity",
     "sample_image_diversity",
-    "sample_subject",
 ]

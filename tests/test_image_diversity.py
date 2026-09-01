@@ -65,46 +65,54 @@ def test_seeded_sampling_is_deterministic_and_varies_multiple_axes():
 
     assert first == second
     assert len({matrix.direction.id for matrix in first}) > 1
+    assert len({matrix.subject.id for matrix in first}) > 1
     assert len({matrix.framing.id for matrix in first}) > 1
     assert len({matrix.capture.id for matrix in first}) > 1
     assert len({matrix.color.id for matrix in first}) > 1
 
 
-def test_subject_axis_varies_independently_of_direction():
-    matrices = [sample_image_diversity(random.Random(seed)) for seed in range(40)]
+def test_subject_hint_is_included_without_replacing_agent_intent():
+    matrix = sample_image_diversity(random.Random(5), direction_id="image.food_photo")
+    rendered = render_image_diversity(matrix)
 
-    assert len({matrix.subject.id for matrix in matrices}) > 1
-    # Subject and direction must not be locked together: at least one subject
-    # id has to appear under more than one direction id.
-    pairs = {(m.direction.id, m.subject.id) for m in matrices}
-    subjects_by_direction: dict[str, set[str]] = {}
-    for direction_id, subject_id in pairs:
-        subjects_by_direction.setdefault(direction_id, set()).add(subject_id)
-    assert any(len(subjects) > 1 for subjects in subjects_by_direction.values())
+    assert rendered.count("- Subject hint (optional):") == 1
+    assert matrix.subject.text in rendered
+    assert "Keep the requested subject and location" in rendered
+    assert "only when compatible" in rendered
 
 
-def test_every_subject_option_is_sampled_over_seeds():
-    sampled = {
-        sample_image_diversity(random.Random(seed)).subject.id for seed in range(200)
-    }
-
-    assert sampled == {option.id for option in diversity.SUBJECT_OPTIONS}
-
-
-def test_subject_nudge_is_rendered_as_hint_not_replacement():
+@pytest.mark.parametrize(
+    ("source_prompt", "medium_marker"),
+    (
+        (
+            "A documentary photograph taken with a phone camera.",
+            "Photographic priority:",
+        ),
+        ("An engraved illustration in watercolor and ink.", "Drawn/design priority:"),
+    ),
+)
+def test_subject_hint_composes_with_photo_and_drawn_modes(source_prompt, medium_marker):
     matrix = sample_image_diversity(
-        random.Random(5),
+        random.Random(7),
         direction_id="image.food_photo",
-        subject_id="subject.urban_night",
+        source_prompt=source_prompt,
     )
     rendered = render_image_diversity(matrix)
 
-    assert rendered.count("- Subject matter:") == 1
-    assert matrix.subject.text in rendered
-    assert "nudge, not a replacement" in rendered
-    # The nudge must not override the persona request contract.
-    assert "Keep the requested subject and location" in rendered
-    assert diversity_ids(matrix)["subject"] == ("subject.urban_night",)
+    assert f"- Subject hint (optional): {matrix.subject.text}" in rendered
+    assert medium_marker in rendered
+
+
+def test_subject_sampling_is_seeded_and_deterministic():
+    first = [
+        sample_image_diversity(random.Random(seed)).subject.id for seed in range(20)
+    ]
+    second = [
+        sample_image_diversity(random.Random(seed)).subject.id for seed in range(20)
+    ]
+
+    assert first == second
+    assert len(set(first)) > 1
 
 
 @pytest.mark.parametrize("direction_id", IMAGE_DIRECTION_IDS)
@@ -122,6 +130,15 @@ def test_explicit_photo_source_wins_over_drawn_default(direction_id):
     )
     rendered = render_image_diversity(matrix)
     assert "Photographic priority: render a realistic photograph" in rendered
+    for cue in (
+        "slightly imperfect",
+        "off-center framing",
+        "golden raking light",
+        "floating dust",
+        "staged steam",
+    ):
+        assert cue in rendered
+    assert "requested subject genuinely requires it" in rendered
     assert "Drawn/design priority:" not in rendered
 
 
@@ -140,6 +157,14 @@ def test_explicit_drawn_source_wins_over_photo_default(direction_id):
     )
     rendered = render_image_diversity(matrix)
     assert "Drawn/design priority:" in rendered
+    for cue in (
+        "slightly imperfect",
+        "off-center framing",
+        "golden raking light",
+        "floating dust",
+        "staged steam",
+    ):
+        assert cue not in rendered
     assert "Photographic priority:" not in rendered
 
 
@@ -194,7 +219,7 @@ def test_render_has_one_selected_direction_and_preserves_subject_location():
     assert rendered.count("- Direction:") == 1
     assert "one selected direction" in rendered
     assert "Keep the requested subject and location" in rendered
-    assert "vary how it is captured, not what it is" in rendered.lower()
+    assert "subject hint only when compatible" in rendered
     # These were old replacement axes and must not leak into the prompt.
     for injected in (
         "city street",

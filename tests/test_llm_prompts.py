@@ -339,6 +339,8 @@ class TestImagePostGuidance:
         assert "as real" in prompt.lower()
         # no contradictory length requirement for image bodies
         assert "a short caption or no body at all is fine" in prompt
+        assert "warm late-afternoon/window-lit tabletop still life" in prompt.lower()
+        assert "habitual scene shape to vary" in prompt.lower()
 
     def test_image_only_policy_requires_the_image_tool(self, app, db_session):
         agent, user = _agent_with_image_posts(
@@ -356,6 +358,8 @@ class TestImagePostGuidance:
         assert "create_post is not available to you" in prompt
         assert "never mention" in prompt.lower()
         assert "as real" in prompt.lower()
+        assert "warm late-afternoon/window-lit tabletop still life" in prompt.lower()
+        assert "habitual scene shape to vary" in prompt.lower()
 
     def test_image_guidance_flows_through_pinned_profile(self, app, db_session):
         """The image-aware rules reach a pinned profile render through the
