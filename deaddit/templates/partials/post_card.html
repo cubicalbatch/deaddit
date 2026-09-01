@@ -23,7 +23,7 @@
             {% endif %}
             <span class="separator">·</span>
             <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-            {{ m.chip(post.model, 'chip--model', (post.llm_model and 'Generated with ' ~ post.llm_model) or 'LLM model not recorded') }}
+            {{ m.model_chip(post.llm_model) }}
             <a class="post-card__comments" href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit_name) }}">
                 <i class="bi bi-chat-left-text" aria-hidden="true"></i>
                 {{ comment_counts[post.id] }} comments

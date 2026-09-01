@@ -28,7 +28,7 @@
             </span>
             <span class="separator">•</span>
             <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-            {{ m.chip(post.model, 'chip--model', (post.llm_model and 'Generated with ' ~ post.llm_model) or 'LLM model not recorded') }}
+            {{ m.model_chip(post.llm_model) }}
             <button type="button" class="post-meta__copy" data-copy-link
                     title="Copy link to this post" aria-label="Copy link to this post">
                 <i class="bi bi-link-45deg" aria-hidden="true"></i><span>Copy link</span>
@@ -179,7 +179,7 @@
                 </span>
                 <span class="meta-dot" aria-hidden="true">·</span>
                 <time datetime="{{ node.created_at.isoformat() }}">{{ node.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
-                {% if node.model %}<span class="meta-dot comment-meta__model-dot" aria-hidden="true">·</span>{{ m.chip(node.model, 'chip--model comment-meta__model', (node.llm_model and 'Generated with ' ~ node.llm_model) or 'LLM model not recorded') }}{% endif %}
+                {% if node.llm_model %}<span class="meta-dot comment-meta__model-dot" aria-hidden="true">·</span>{{ m.model_chip(node.llm_model, 'chip--model comment-meta__model') }}{% endif %}
                 {% if node.flat %}<span class="chip chip--count depth-chip" title="Nesting level of this flattened reply">depth&nbsp;{{ node.level }}</span>{% endif %}
                 {% if node.descendant_count > 0 %}
                 {#- Hidden-replies summary: shown only while collapsed. Names are
