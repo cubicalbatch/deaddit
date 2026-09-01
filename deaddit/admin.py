@@ -3,6 +3,7 @@ Admin interface for Deaddit content management.
 Provides web-based UI for job management and content generation.
 """
 
+import hmac
 import json
 import logging
 import math
@@ -881,7 +882,7 @@ def login():
     if request.method == "POST":
         provided_token = request.form.get("api_token")
 
-        if provided_token == api_token:
+        if hmac.compare_digest((provided_token or "").encode(), api_token.encode()):
             session["admin_authenticated"] = True
             session.permanent = True
             flash("Successfully authenticated!", "success")

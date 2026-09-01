@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 
 from flask import current_app
 from pydantic import BaseModel, Field
@@ -347,7 +348,8 @@ def _website_generation_attempts_this_run(ctx: ToolContext) -> int:
     32K-token responses cannot multiply generation cost within one visit
     (spec invariant, "Atomic publication flow" step 1). Calls rejected
     before generation (policy, the shared post budget, an unknown
-    community, a preflight failure, or an exhausted run deadline) are never
+    community, a banned-word refusal, a preflight failure, or an
+    exhausted run deadline) are never
     billed and do not count here. A successful call counts too, though in
     practice the shared one-post-per-run budget already blocks any later
     attempt in the same run.
@@ -370,6 +372,34 @@ def _is_public_path_taken(public_path: str) -> bool:
         db.session.query(GeneratedWebsite.id).filter_by(public_path=public_path).first()
         is not None
     )
+
+
+def _banned_website_word(params: CreateWebsiteArgs) -> str | None:
+    """Return the first banned word appearing in the website proposal.
+
+    Checks every agent-supplied field of the proposal - title, post body,
+    site brief, and hostname/page hints - because a clean brief behind
+    ``hostname_hint="www.ledger-tools.com"`` is still the banned idea.
+    Matching is case-insensitive with a word-start boundary, so ``ledger``
+    catches ``Ledgers`` and ``ledger-app`` but not ``subledger``.
+    """
+    raw = Config.get("WEBSITE_BANNED_WORDS", "") or ""
+    words = [w for w in re.split(r"[,\s]+", raw.lower()) if w]
+    if not words:
+        return None
+    text = " ".join(
+        (
+            params.title,
+            params.content or "",
+            params.website_description,
+            params.hostname_hint,
+            params.page_name_hint,
+        )
+    ).lower()
+    for word in words:
+        if re.search(rf"(?<!\w){re.escape(word)}", text):
+            return word
+    return None
 
 
 def _create_website(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
@@ -412,6 +442,17 @@ def _create_website(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
             "ok": False,
             "error": f"subdeaddit '{params.community}' does not exist",
             "hint": "use search with type='subdeaddit' to find existing communities",
+        }
+
+    # Proposal-content refusal: rejected before generation, so it never
+    # counts as a billed generation attempt - the agent can retry in this
+    # same visit with a different idea for free.
+    banned = _banned_website_word(params)
+    if banned is not None:
+        return {
+            "ok": False,
+            "error": f"your site idea uses the banned word '{banned}' and cannot be published",
+            "hint": "come up with a completely different website idea and call create_website again",
         }
 
     try:

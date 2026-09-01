@@ -7,6 +7,7 @@ import functools
 import logging
 from datetime import datetime
 
+from flask import session
 from flask_socketio import disconnect, emit, join_room, leave_room
 
 from deaddit.extensions import socketio
@@ -35,7 +36,15 @@ def handle_socket_errors(f):
 @socketio.on("connect", namespace="/admin")
 @handle_socket_errors
 def admin_connect(*args):
-    """Handle admin WebSocket connection."""
+    """Handle admin WebSocket connection.
+
+    Same predicate as ``admin_required``: once API_TOKEN is set, an
+    unauthenticated socket is rejected (return False denies the connect).
+    """
+    from deaddit.config import Config
+
+    if Config.get("API_TOKEN") and not session.get("admin_authenticated"):
+        return False
     logger.info("Admin client connected to WebSocket")
     emit("connected", {"status": "Connected to admin WebSocket"})
 

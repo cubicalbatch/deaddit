@@ -18,11 +18,13 @@ from pathlib import Path
 
 import pytest
 
+import deaddit.settings.service as settings_service
 from deaddit import create_app
 from deaddit import db as _db
 from deaddit.agents import tools_write
 from deaddit.agents.executor import execute
 from deaddit.agents.registry import ToolContext
+from deaddit.config import Config
 from deaddit.images.client import register_adapter, reset_adapters
 from deaddit.images.types import Deadline, ImageGenerationResult
 from deaddit.models import (
@@ -109,6 +111,16 @@ def _clean_adapters():
     reset_adapters()
     yield
     reset_adapters()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_settings_cache():
+    """Isolate the process-global Config TTL cache between tests (mirrors
+    test_a6_config_secrets.py): the banned-words tests write Setting rows
+    that must never leak into another test's database view."""
+    settings_service.clear()
+    yield
+    settings_service.clear()
 
 
 @pytest.fixture()
@@ -888,3 +900,92 @@ def test_website_loop_detection_is_applied_by_executor(
     assert third["force_finish"] is True
     assert "repeating the same action" in third["error"]
     assert fake_llm.requests == []
+
+
+# ---------------------------------------------------------------------------
+# Banned proposal words (WEBSITE_BANNED_WORDS, default "ledger"): the refusal
+# must happen on the proposal, before any HTML generation is billed.
+
+
+def test_create_website_refuses_banned_word_in_brief_before_generation(
+    app, db_session, fake_llm
+):
+    agent = _website_agent(db_session)
+    run = _new_run(db_session, agent)
+    refused = execute(
+        "create_website",
+        {
+            **WEBSITE_ARGS,
+            "website_description": _DESCRIPTION.replace(
+                "aurora-watching community site",
+                "community site built around a shared ledger of aurora sightings",
+            ),
+        },
+        _ctx(agent, run, deadline=Deadline.after(120)),
+    )
+    assert refused["ok"] is False
+    assert "banned word 'ledger'" in refused["error"]
+    assert "different website idea" in refused["hint"]
+    assert fake_llm.requests == []
+    assert Post.query.count() == 0
+    assert _stored_files(app) == []
+    row = ToolCall.query.order_by(ToolCall.id.desc()).first()
+    assert row.name == "create_website" and row.ok is False
+
+
+def test_create_website_banned_word_retry_with_new_idea_succeeds_same_run(
+    app, db_session, fake_llm
+):
+    """The refusal is not a billed generation attempt, so a new idea in the
+    same visit still gets its one attempt."""
+    agent = _website_agent(db_session)
+    run = _new_run(db_session, agent)
+    banned = execute(
+        "create_website",
+        {**WEBSITE_ARGS, "hostname_hint": "www.ledger-tools.com"},
+        _ctx(agent, run, deadline=Deadline.after(120)),
+    )
+    assert banned["ok"] is False and "banned word 'ledger'" in banned["error"]
+    assert fake_llm.requests == []
+
+    fake_llm.enqueue_content(VALID_HTML, finish_reason="stop")
+    retry = execute(
+        "create_website",
+        WEBSITE_ARGS,
+        _ctx(agent, run, deadline=Deadline.after(120)),
+    )
+    assert retry["ok"] is True
+    assert len(fake_llm.requests) == 1
+
+
+def test_create_website_banned_word_matches_case_and_word_start(app, db_session):
+    agent = _website_agent(db_session)
+    for variant in ("Ledgers", "ledger-like"):
+        refused = execute(
+            "create_website",
+            {
+                **WEBSITE_ARGS,
+                "website_description": _DESCRIPTION.replace("aurora-watching", variant),
+            },
+            _ctx(agent, _new_run(db_session, agent), deadline=Deadline.after(120)),
+        )
+        assert refused["ok"] is False
+        assert "banned word 'ledger'" in refused["error"]
+
+
+def test_create_website_empty_ban_list_allows_any_proposal(app, db_session, fake_llm):
+    Config.set("WEBSITE_BANNED_WORDS", "")
+    agent = _website_agent(db_session)
+    fake_llm.enqueue_content(VALID_HTML, finish_reason="stop")
+    result = execute(
+        "create_website",
+        {
+            **WEBSITE_ARGS,
+            "website_description": _DESCRIPTION.replace(
+                "aurora-watching community site",
+                "community site built around a shared ledger of aurora sightings",
+            ),
+        },
+        _ctx(agent, _new_run(db_session, agent), deadline=Deadline.after(120)),
+    )
+    assert result["ok"] is True

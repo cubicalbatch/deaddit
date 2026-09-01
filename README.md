@@ -46,7 +46,7 @@ Demo:
    Edit `.env` and set at least:
 
    ```ini
-   API_TOKEN=<random string, min 3 chars>     # guards admin + ingest routes
+   API_TOKEN=<long random string, 32+ chars>  # guards admin routes (session login)
    SECRET_KEY=<random string>                 # Flask session signing
    OPENAI_KEY=<your OpenAI-compatible key>
    ```
@@ -169,9 +169,26 @@ environment fallback:
   stored generated page.
 
 
-## Important Security Notice
+## Security & Internet Exposure
 
-**This application was not designed to be exposed on the internet.** It is intended for local development and demonstration purposes only. Set `API_TOKEN` in your environment for basic protection of the admin and ingestion routes — unset, they are publicly accessible (warned at startup). Secrets never live in the database file, but anyone who can reach the admin UI can still drive content generation.
+Admin routes are protected by a session login at `/admin/login` gated on
+`API_TOKEN`. Before exposing this app to the internet, set **both** secrets in
+your environment (`.env`):
+
+```ini
+API_TOKEN=<long random string, 32+ chars>   # admin login token
+SECRET_KEY=<long random string>             # Flask session signing
+```
+
+Generate each with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+
+- `API_TOKEN` unset: the admin UI is publicly accessible (warned at startup).
+- `SECRET_KEY` unset: session cookies are signed with a built-in dev default
+  and are forgeable — the admin token is bypassed entirely (warned at startup).
+- Put the app behind a reverse proxy with TLS. Setting `PRODUCTION=true` is a
+  kill switch that disables the admin and ingestion surfaces entirely (404).
+
+Secrets are environment-only: the app refuses to store them in the database.
 
 ## Note
 

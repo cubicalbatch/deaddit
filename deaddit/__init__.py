@@ -101,6 +101,10 @@ def create_app(config: Any = None) -> Flask:
 
         # Set SECRET_KEY from config system
         app.config["SECRET_KEY"] = Config.get("SECRET_KEY")
+        # Session cookie posture: Lax keeps cross-site POSTs from carrying
+        # the admin session (CSRF mitigation that does not depend on the
+        # browser's default).
+        app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
         # Configure session settings for admin authentication
         app.config["PERMANENT_SESSION_LIFETIME"] = 24 * 60 * 60  # 24 hours
 
@@ -108,6 +112,14 @@ def create_app(config: Any = None) -> Flask:
         if not Config.is_api_token_set():
             logger.warning(
                 "No API_TOKEN set in database or environment. Admin and API routes will be publicly accessible."
+            )
+
+        # A session signed with the well-known dev default is forgeable: the
+        # admin_authenticated cookie can be minted offline, bypassing the
+        # token entirely. Warn as loudly as the missing-token case.
+        if app.config["SECRET_KEY"] == Config.DEFAULTS["SECRET_KEY"]:
+            logger.warning(
+                "SECRET_KEY is unset (built-in dev default). Admin session cookies are forgeable - set SECRET_KEY in the environment before exposing this app."
             )
 
     # Template context processor: config available in templates
