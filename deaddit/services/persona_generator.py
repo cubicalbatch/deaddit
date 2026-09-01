@@ -3,9 +3,10 @@
 Generates structured, human-like user personas using the configured LLM endpoint,
 persists them via `create_user()`, and optionally enrolls them as autonomous agents.
 
-Diversity is planned in Python: one assignment matrix per request comes from
 `persona_options.build_persona_assignments`, the prompt renders only the
 still-unresolved rows, and returned personas are resolved by `assignment_id`.
+Subscription balance is steered the same way: under-served communities are
+pre-picked per persona (deficit-weighted) and rendered as prompt nudges.
 """
 
 from __future__ import annotations
@@ -15,10 +16,12 @@ import logging
 import random
 import re
 import uuid
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
+from deaddit.agents.registry import BACKSTAGE_SUBDEADDIT_NAME
 from deaddit.config import Config
 from deaddit.extensions import db
 from deaddit.llm import ChatRequest, LLMClient, LLMError, Sampling, routing
@@ -107,7 +110,9 @@ _INTEREST_ID_BY_TEXT = {option.text: option.id for option in INTERESTS}
 _USERNAME_STYLE_ID_BY_TEXT = {option.text: option.id for option in USERNAME_STYLES}
 
 
-def _persona_seed(assignment: PersonaAssignment) -> dict[str, Any]:
+def _persona_seed(
+    assignment: PersonaAssignment, subscription_target: str | None = None
+) -> dict[str, Any]:
     """Return immutable catalog provenance in JSON-compatible containers."""
     return {
         "catalog_version": PERSONA_CATALOG_VERSION,
@@ -125,25 +130,33 @@ def _persona_seed(assignment: PersonaAssignment) -> dict[str, Any]:
         ],
         "troll_modifier_id": assignment.troll_modifier_id,
         "username_style_id": _USERNAME_STYLE_ID_BY_TEXT.get(assignment.username_style),
+        "subscription_target": subscription_target,
     }
 
 
-def _communities_section(sub_rows: list[tuple[str, str]]) -> str:
+def _communities_section(
+    sub_rows: list[tuple[str, str]], counts: Mapping[str, int]
+) -> str:
     """Prompt block listing real communities and requesting subscriptions.
 
     Empty when the database has no subdeaddits (the field simply is not
     requested then). Names and descriptions come from the database, never
     from a hardcoded list - the persona generator must not suggest
-    communities that do not exist.
+    communities that do not exist. Subscriber counts accompany each name so
+    the model can honor the per-row community nudges (see
+    ``_subscription_targets``) and pick an honest fallback when a nudge
+    truly cannot fit a persona.
     """
     if not sub_rows:
         return ""
     listing = "\n".join(
-        f"- {name}: {' '.join((description or '').split())[:110]}"
+        f"- {name} ({counts.get(name, 0)} subscribers): "
+        f"{' '.join((description or '').split())[:110]}"
         for name, description in sub_rows
     )
     return (
-        "\nThe forum currently has these communities (name: description):\n"
+        "\nThe forum currently has these communities "
+        "(name (subscribers): description):\n"
         f"{listing}\n\n"
         "Each persona object must also include:\n"
         '- "subscriptions": list of exactly 2 community names, copied '
@@ -151,12 +164,25 @@ def _communities_section(sub_rows: list[tuple[str, str]]) -> str:
         "spend time given their interests and personality - a "
         "general-purpose community is the honest pick for a "
         "general-interest person. Never invent or guess community names "
-        'outside the list. Example: "subscriptions": ["books", '
-        '"CasualConversation"]\n'
+        "outside the list. Communities with very few subscribers need "
+        "members: when an assignment row carries a community nudge, make "
+        "that community one of the two subscriptions and flavor one or two "
+        "of that persona's interests toward the community's theme where "
+        "plausible - real people subscribe beyond their core interests. "
+        "Only when the nudged community is truly incompatible with the "
+        "persona's life, substitute the least-subscribed community that "
+        "does fit. "
+        'Example: "subscriptions": ["books", "CasualConversation"]\n'
     )
 
 
-def _matrix_row(index: int, assignment: PersonaAssignment, is_troll: bool) -> str:
+def _matrix_row(
+    index: int,
+    assignment: PersonaAssignment,
+    is_troll: bool,
+    targets: Mapping[str, str],
+    counts: Mapping[str, int],
+) -> str:
     """Render one numbered assignment row for the prompt matrix."""
     lines = [
         f"Persona {index} [assignment_id {assignment.id}]:",
@@ -171,6 +197,12 @@ def _matrix_row(index: int, assignment: PersonaAssignment, is_troll: bool) -> st
     ]
     if is_troll and assignment.troll_modifier:
         lines.append(f"- troll expression: {assignment.troll_modifier}")
+    target = targets.get(assignment.id)
+    if target is not None:
+        lines.append(
+            f"- community nudge: {target} "
+            f"({counts.get(target, 0)} subscribers - under-served)"
+        )
     return "\n".join(lines)
 
 
@@ -180,6 +212,8 @@ def _build_user_prompt(
     topic_section: str,
     communities_section: str,
     is_troll: bool,
+    targets: Mapping[str, str],
+    counts: Mapping[str, int],
 ) -> str:
     """Render the user prompt for exactly the given assignment rows.
 
@@ -188,7 +222,7 @@ def _build_user_prompt(
     and no unassigned catalog fact leaks into the prompt.
     """
     matrix = "\n\n".join(
-        _matrix_row(index, assignment, is_troll)
+        _matrix_row(index, assignment, is_troll, targets, counts)
         for index, assignment in enumerate(assignments, 1)
     )
     return USER_PROMPT_TEMPLATE.format(
@@ -217,6 +251,52 @@ def _existing_snapshots() -> list[ExistingUserSnapshot]:
         )
 
     return snapshots
+
+
+def _subscriber_counts() -> dict[str, int]:
+    """Current subscriber tally per community from persisted ``agent_state``."""
+    counts: dict[str, int] = {}
+    for (state,) in db.session.query(User.agent_state).all():
+        if not isinstance(state, dict):
+            continue
+        for name in state.get("subscriptions") or []:
+            counts[str(name)] = counts.get(str(name), 0) + 1
+    return counts
+
+
+def _subscription_targets(
+    assignments: Sequence[PersonaAssignment],
+    sub_names: set[str],
+    counts: Mapping[str, int],
+    rng: random.Random,
+) -> dict[str, str]:
+    """Pre-pick one under-served community for each persona that needs one.
+
+    A steering nudge only - the LLM still chooses the subscriptions and
+    validation still drops unknown names. Weight is each community's
+    deficit below fair share; every pick virtually adds a subscriber, so
+    one request spreads across the whole deficit pool instead of piling
+    onto the single emptiest community. Backstage is excluded (universal
+    room, not subscription-driven). Empty when nothing is below fair
+    share - a balanced forum gets no nudges at all.
+    """
+    eligible = sorted(sub_names - {BACKSTAGE_SUBDEADDIT_NAME})
+    if not eligible:
+        return {}
+    planned = {name: counts.get(name, 0) for name in eligible}
+    # The 1.0 floor keeps a fully empty forum spreading its first members
+    # evenly instead of skipping nudges (0/len would leave no deficit).
+    fair = max(sum(planned.values()) / len(eligible), 1.0)
+    targets: dict[str, str] = {}
+    for assignment in assignments:
+        deficits = {name: fair - n for name, n in planned.items() if n < fair}
+        if not deficits:
+            break
+        pool = list(deficits)
+        chosen = rng.choices(pool, weights=[deficits[name] for name in pool], k=1)[0]
+        targets[assignment.id] = chosen
+        planned[chosen] += 1
+    return targets
 
 
 def _normalize_subscriptions(raw: object, valid_sub_names: set[str]) -> list[str]:
@@ -531,7 +611,9 @@ def generate_personas(
     writing style, interest seeds, username style, troll modifier) is
     planned in Python for the whole request before any LLM call. The model
     only synthesizes the planned rows into believable bios and voices, and
-    returned rows are resolved by ``assignment_id``.
+    returned rows are resolved by ``assignment_id``. Under-served
+    communities are likewise pre-picked in Python and rendered as per-row
+    subscription nudges.
 
     Args:
         count: Number of personas to generate (1 to 500).
@@ -618,7 +700,8 @@ def generate_personas(
         .all()
     )
     valid_sub_names = {name for name, _ in sub_rows}
-    communities_section = _communities_section(sub_rows)
+    sub_counts = _subscriber_counts()
+    communities_section = _communities_section(sub_rows, sub_counts)
 
     # One assignment plan for the whole request: demographics, traits,
     # styles, and the troll/normal split are fixed before any batch call,
@@ -632,6 +715,9 @@ def generate_personas(
         replace(assignment, username_style=style)
         for assignment, style in zip(assignments, styles, strict=True)
     )
+    # Under-served community nudges, fixed for the whole request so batch
+    # partitioning and retries never reroll them.
+    targets = _subscription_targets(assignments, valid_sub_names, sub_counts, rng)
     normal_rows = [a for a in assignments if a.troll_modifier is None]
     troll_rows = [a for a in assignments if a.troll_modifier is not None]
 
@@ -664,6 +750,8 @@ def generate_personas(
                 topic_section=topic_section,
                 communities_section=communities_section,
                 is_troll=is_troll,
+                targets=targets,
+                counts=sub_counts,
             )
 
             req = ChatRequest(
@@ -727,7 +815,9 @@ def generate_personas(
                 # complete new dictionary so provenance and subscriptions are
                 # persisted together without mutating state in place.
                 user.agent_state = {
-                    "persona_seed": _persona_seed(assignment),
+                    "persona_seed": _persona_seed(
+                        assignment, targets.get(assignment.id)
+                    ),
                     "subscriptions": list(p["subscriptions"]),
                 }
                 created_users.append(user)

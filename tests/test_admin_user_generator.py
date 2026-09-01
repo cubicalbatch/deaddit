@@ -676,6 +676,7 @@ class TestAuthoritativePersonaMerge:
             "interest_seed_ids": [None, None],
             "troll_modifier_id": None,
             "username_style_id": None,
+            "subscription_target": None,
         }
         assert user.agent_state == {"persona_seed": seed, "subscriptions": []}
 
@@ -907,7 +908,7 @@ class TestPersonaSubscriptions:
 
         prompt = _prompt(fake_llm.requests[-1])
         assert "The forum currently has these communities" in prompt
-        assert "- books: Books, authors, literature." in prompt
+        assert "- books (0 subscribers): Books, authors, literature." in prompt
         assert '- "subscriptions"' in prompt
 
     def test_prompt_omits_community_section_without_subs(self, app, fake_llm):
@@ -930,3 +931,96 @@ class TestPersonaSubscriptions:
         row = User.query.filter_by(username=stored).first()
         assert row.agent_state["subscriptions"] == ["books", "localllama"]
         assert row.agent_state["persona_seed"]["assignment_id"] == "a1"
+
+
+class TestSubscriptionNudges:
+    """Deficit-aware community nudges pre-picked before the LLM call.
+
+    The nudge only steers the prompt; the LLM still picks the
+    subscriptions and validation still drops unknown names (see
+    ``TestPersonaSubscriptions``).
+    """
+
+    def test_targets_concentrate_on_deficit(self):
+        names = {"books", "gaming", "space", "BetweenRobots"}
+        counts = {"books": 10, "gaming": 10, "space": 0}
+        assignments = [_fixed_assignment(i) for i in range(1, 7)]
+        targets = pg._subscription_targets(assignments, names, counts, random.Random(7))
+        # Backstage is never targeted; fair share is ~6.7, so only the
+        # empty community has a deficit and every persona points there.
+        assert set(targets.values()) == {"space"}
+        assert set(targets) == {a.id for a in assignments}
+
+    def test_targets_spread_when_all_empty(self):
+        assignments = [_fixed_assignment(i) for i in range(1, 7)]
+        targets = pg._subscription_targets(
+            assignments, {"a", "b", "c"}, {}, random.Random(3)
+        )
+        # The 1.0 fair-share floor spreads the first members one per
+        # community, then stops - no piling onto a single empty sub.
+        assert sorted(targets.values()) == ["a", "b", "c"]
+
+    def test_targets_empty_when_balanced(self):
+        names = {"books", "gaming", "space"}
+        counts = dict.fromkeys(names, 7)
+        assert (
+            pg._subscription_targets(
+                [_fixed_assignment(1)], names, counts, random.Random(1)
+            )
+            == {}
+        )
+
+    def test_targets_empty_without_communities(self):
+        assert (
+            pg._subscription_targets(
+                [_fixed_assignment(1)], set(), {}, random.Random(1)
+            )
+            == {}
+        )
+
+    def test_nudge_rendered_and_target_persisted(self, app, fake_llm):
+        db.session.add_all(
+            [
+                Subdeaddit(name="books", description="Books."),
+                Subdeaddit(name="localllama", description="Local LLMs."),
+                Subdeaddit(name="CasualConversation", description="Casual talk."),
+                User(
+                    username="busy_lurker",
+                    age=30,
+                    gender="Male",
+                    agent_state={"subscriptions": ["books"]},
+                ),
+            ]
+        )
+        db.session.commit()
+        fake_llm.enqueue_content(
+            json.dumps(
+                [
+                    _persona_row("a1", "steered_one", subscriptions=["localllama"]),
+                    _persona_row("a2", "steered_two", subscriptions=["localllama"]),
+                ]
+            )
+        )
+
+        result = generate_personas(
+            count=2, auto_create_agent=False, troll_mode="no_troll"
+        )
+
+        prompt = _prompt(fake_llm.requests[-1])
+        # books is at fair share (1 of ~1): never nudged; the two empty
+        # communities split the two personas one each.
+        nudges = re.findall(r"- community nudge: (\S+) \((\d+) subscribers", prompt)
+        assert [name for name, _ in nudges] == ["CasualConversation", "localllama"] or [
+            name for name, _ in nudges
+        ] == ["localllama", "CasualConversation"]
+        assert "- books (1 subscribers): Books." in prompt
+
+        by_key = {u["username"].replace("_", "").lower(): u for u in result["users"]}
+        row_a = User.query.filter_by(username=by_key["steeredone"]["username"]).first()
+        row_b = User.query.filter_by(username=by_key["steeredtwo"]["username"]).first()
+        # The row's nudge is exactly what gets persisted as provenance.
+        assert row_a.agent_state["persona_seed"]["subscription_target"] == nudges[0][0]
+        assert row_b.agent_state["persona_seed"]["subscription_target"] == nudges[1][0]
+        # The LLM's own picks survive validation untouched.
+        assert row_a.agent_state["subscriptions"] == ["localllama"]
+        assert row_b.agent_state["subscriptions"] == ["localllama"]
