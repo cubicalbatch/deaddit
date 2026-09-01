@@ -119,6 +119,12 @@ _PROFILE_QUALITY_RULES = (
     "  AI); stay inside that community's frame even when it means playing\n"
     "  a role instead of acting fully human."
 )
+_COMMENT_BEHAVIOR_RULE = (
+    "Commenting: inspect the post and visible replies before commenting. "
+    "Do not repeat a point already made; add a genuinely new angle or abstain "
+    "from commenting. Keep the contribution local to the current thread; do "
+    "not cite unrelated threads merely to look novel."
+)
 
 _IMAGE_GUIDANCE_OPTIONAL = (
     "\n\nImage posts: create_image_post is an occasional alternative to "
@@ -131,12 +137,13 @@ _IMAGE_GUIDANCE_OPTIONAL = (
     "generated or discuss how it was made. Give the post a specific, "
     "engaging title, and add body text only when it adds natural context; "
     "a short caption or no body at all is fine."
-    "\n\nWhen you brief an image, deliberately vary framing, camera distance "
-    "and angle, lighting situation, palette and mood, visual medium, and "
-    "setting or surface from images you have described before. Do not "
-    "default to one habitual scene shape; let those choices make each "
-    "requested subject and context distinctive while keeping it plausible "
-    "for your persona. Never mention prompting or generation."
+    "\n\nTreat a warm late-afternoon/window-lit tabletop still life as one "
+    "habitual scene shape to vary, not a universal ideal or ban. Deliberately "
+    "vary framing, camera distance and angle, lighting situation, palette and "
+    "mood, visual medium, and setting or surface from images you have "
+    "described before. Let those choices make each requested subject and "
+    "context distinctive while keeping it plausible for your persona. Never "
+    "mention prompting or generation."
 )
 
 _IMAGE_GUIDANCE_IMAGE_ONLY = (
@@ -149,12 +156,13 @@ _IMAGE_GUIDANCE_IMAGE_ONLY = (
     "never mention that it was generated or discuss how it was made. Give "
     "the post a specific, engaging title, and add body text only when it "
     "adds natural context; a short caption or no body at all is fine."
-    "\n\nWhen you brief an image, deliberately vary framing, camera distance "
-    "and angle, lighting situation, palette and mood, visual medium, and "
-    "setting or surface from images you have described before. Do not "
-    "default to one habitual scene shape; let those choices make each "
-    "requested subject and context distinctive while keeping it plausible "
-    "for your persona. Never mention prompting or generation."
+    "\n\nTreat a warm late-afternoon/window-lit tabletop still life as one "
+    "habitual scene shape to vary, not a universal ideal or ban. Deliberately "
+    "vary framing, camera distance and angle, lighting situation, palette and "
+    "mood, visual medium, and setting or surface from images you have "
+    "described before. Let those choices make each requested subject and "
+    "context distinctive while keeping it plausible for your persona. Never "
+    "mention prompting or generation."
 )
 
 
@@ -237,8 +245,6 @@ def _persona_block(user: User) -> str:
         traits = []
     if traits:
         lines.append("Personality traits: " + ", ".join(str(t) for t in traits))
-    if user.writing_style:
-        lines.append(f"Writing style: {user.writing_style}")
     if getattr(user, "is_troll", False):
         lines.append(_TROLL_MODE_LINE)
     return "\n".join(lines)
@@ -314,8 +320,11 @@ def _memory_section(memories: VisitMemories | None) -> str:
     return "\n\n" + "\n".join(lines)
 
 
-def _profile_behavior_rules(profile: VisitProfile) -> str:
-    return "\n".join(block.text for block in profile.behavior_blocks)
+def _profile_behavior_rules(profile: VisitProfile, content_kind: str = "none") -> str:
+    rules = "\n".join(block.text for block in profile.behavior_blocks)
+    if content_kind == "comment":
+        rules += "\n" + _COMMENT_BEHAVIOR_RULE
+    return rules
 
 
 def system_prompt_variables(
@@ -326,15 +335,23 @@ def system_prompt_variables(
     profile: VisitProfile | None = None,
     offered_tool_names: frozenset[str] | None = None,
     memory_section: str | None = None,
+    content_kind: str | None = None,
 ) -> dict[str, str]:
     """Build the strict variable set consumed by a visit profile layout."""
     if profile is None:
         profile = DEFAULT_VISIT_PROFILE
+    if content_kind is None:
+        tier = getattr(agent.autonomy_tier, "value", agent.autonomy_tier)
+        content_kind = (
+            "comment"
+            if intent == "browse" and tier != AutonomyTier.LURKER.value
+            else "none"
+        )
     if memory_section is None:
         memory_section = _memory_section(visit_memories(user.username))
     tools_line = _TOOLS_LINE
     genuine_line = _GENUINE_LINE
-    quality_rules = _profile_behavior_rules(profile)
+    quality_rules = _profile_behavior_rules(profile, content_kind)
     capability_guidance = _image_guidance_section(
         agent, intent, offered_tool_names=offered_tool_names
     ) + _website_guidance_section(agent, intent, offered_tool_names=offered_tool_names)
@@ -365,7 +382,7 @@ def system_prompt_variables(
         "subscriptions_section": subscriptions,
         "community_hint": "",
         "intent": intent,
-        "content_kind": "none",
+        "content_kind": content_kind,
         "length_target": "",
         "directions": "",
         "sample_count": str(profile.sample_count),
@@ -1242,6 +1259,16 @@ def _offered_post_tools(plan: PromptPlan) -> frozenset[str]:
     return plan.offered_tool_names & frozenset(POST_TOOL_NAMES)
 
 
+def _writing_style_directive(user: User, content_kind: str) -> str:
+    if content_kind == "none" or not user.writing_style:
+        return ""
+    return (
+        f"Action writing style: {user.writing_style}. "
+        "For every text field in this action, follow it for casing, "
+        "punctuation, sentence shape, and level of polish."
+    )
+
+
 def _render_kickoff(
     profile: VisitProfile,
     context: PromptBuildContext,
@@ -1309,6 +1336,10 @@ def _render_kickoff(
             f"{post_instruction} Once your post is published, call the finish tool "
             "to conclude your visit."
         )
+    style_directive = _writing_style_directive(context.user, plan.content_kind)
+    if style_directive:
+        directions_text = f"{style_directive} {directions_text}"
+
     variables = system_prompt_variables(
         context.agent,
         context.user,
@@ -1316,6 +1347,7 @@ def _render_kickoff(
         profile=profile,
         offered_tool_names=plan.offered_tool_names,
         memory_section=memory_section,
+        content_kind=plan.content_kind,
     )
     variables.update(
         {
@@ -1408,6 +1440,7 @@ def prepare_agent_visit(
         profile=profile,
         offered_tool_names=plan.offered_tool_names,
         memory_section=memory_section,
+        content_kind=plan.content_kind,
     )
     system_message = _render_profile_layout(
         profile, profile.layouts["system"], system_variables

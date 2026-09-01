@@ -11,6 +11,8 @@ from deaddit.websites.diversity import (
     _GENRE_POOL,
     _LAYOUT_ALLOWLIST,
     _MOOD_POOL,
+    _RHYTHM_POOL,
+    _TYPOGRAPHY_POOL,
     diversity_ids,
     render_website_diversity,
     sample_website_diversity,
@@ -114,6 +116,51 @@ def test_seeded_coverage_reaches_broad_families_and_both_modes():
         )
         > 0
     )
+
+
+def test_typography_options_call_for_distinct_classes_or_eras():
+    options = {option.id: option.text.lower() for option in _TYPOGRAPHY_POOL}
+    markers = {
+        "type.modern_grotesk": ("neo-grotesk", "sans"),
+        "type.humanist_sans": ("humanist", "sans"),
+        "type.editorial_serif": ("editorial", "serif"),
+        "type.condensed_poster": ("condensed", "display"),
+        "type.monospaced_signal": (
+            "monospaced",
+            "terminal",
+            "proportional",
+            "sans",
+            "non-classical",
+            "palatino/iowan",
+        ),
+        "type.minimal_neutral": ("neutral", "utilitarian", "sans"),
+        "type.handmade_accent": ("handwritten", "brush"),
+        "type.classical_formal": ("roman", "old-style", "serif"),
+    }
+    assert set(options) == set(markers)
+    for option_id, required_markers in markers.items():
+        assert all(marker in options[option_id] for marker in required_markers)
+
+
+def test_rhythm_options_describe_distinct_motion_behaviors():
+    options = {option.id: option.text.lower() for option in _RHYTHM_POOL}
+    markers = {
+        "rhythm.discovery": "direct",
+        "rhythm.narrative": "3-6 total staged entrances",
+        "rhythm.reference": "static/direct",
+        "rhythm.participatory": "immediate",
+        "rhythm.guided": "stepwise",
+        "rhythm.showcase": "3-6 total staged reveals",
+        "rhythm.utilitarian_dense": "static/direct",
+        "rhythm.plain_minimal": "static/direct",
+    }
+    assert set(options) == set(markers)
+    for option_id, marker in markers.items():
+        assert marker in options[option_id]
+    assert "at most one per major section" in options["rhythm.narrative"]
+    assert "at most one per major section" in options["rhythm.showcase"]
+    assert "scroll-revealed" in options["rhythm.reference"]
+    assert "no decorative scroll-reveal" in options["rhythm.utilitarian_dense"]
 
 
 def test_renderer_is_one_decisive_brief_without_contradictory_alternatives():

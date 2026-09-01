@@ -283,12 +283,13 @@ def test_subscriptions_and_prompt_prose_sections_are_stable(app, db_session):
         "generation."
     )
     expected_image_diversity_guidance = (
-        "\n\nWhen you brief an image, deliberately vary framing, camera distance "
-        "and angle, lighting situation, palette and mood, visual medium, and "
-        "setting or surface from images you have described before. Do not "
-        "default to one habitual scene shape; let those choices make each "
-        "requested subject and context distinctive while keeping it plausible "
-        "for your persona. Never mention prompting or generation."
+        "\n\nTreat a warm late-afternoon/window-lit tabletop still life as one "
+        "habitual scene shape to vary, not a universal ideal or ban. Deliberately "
+        "vary framing, camera distance and angle, lighting situation, palette and "
+        "mood, visual medium, and setting or surface from images you have "
+        "described before. Let those choices make each requested subject and "
+        "context distinctive while keeping it plausible for your persona. Never "
+        "mention prompting or generation."
     )
     assert variables["image_guidance_section"].endswith(
         expected_image_diversity_guidance
@@ -325,6 +326,61 @@ def test_subscriptions_and_prompt_prose_sections_are_stable(app, db_session):
     assert "Length target for this text post body:" in kickoff
     assert "You're waking up with something to share." in kickoff
     assert "using the create_post tool" in kickoff
+
+
+def test_persona_style_and_comment_novelty_guidance_are_scoped(app, db_session):
+    agent, user = _make_agent(
+        db_session,
+        "prompt_realism",
+        image_mode="optional",
+        website_mode="optional",
+    )
+    user.writing_style = "all lowercase, sparse punctuation, clipped sentences"
+
+    comment_visit = prepare_agent_visit(agent, user, unread=1)
+    comment_system = comment_visit.messages[0]["content"]
+    comment_kickoff = comment_visit.messages[1]["content"]
+    assert user.writing_style in comment_kickoff
+    assert user.writing_style not in comment_system
+    assert "Action writing style:" in comment_kickoff
+    assert "casing, punctuation, sentence shape, and level of polish" in comment_kickoff
+    assert "inspect the post and visible replies before commenting" in comment_system
+    assert "add a genuinely new angle or abstain" in comment_system
+    assert "Keep the contribution local to the current thread" in comment_system
+    assert "do not cite unrelated threads merely to look novel" in comment_system
+
+    post_visit = prepare_agent_visit(agent, user, requested_intent="post", unread=0)
+    post_system = post_visit.messages[0]["content"]
+    post_kickoff = post_visit.messages[1]["content"]
+    assert user.writing_style in post_kickoff
+    assert user.writing_style not in post_system
+    assert "Writing style above is authoritative" not in post_system
+    assert "Commenting: inspect the post and visible replies" not in post_system
+
+    for intent in ("image", "website"):
+        media_visit = prepare_agent_visit(
+            agent, user, requested_intent=intent, unread=0
+        )
+        media_system = media_visit.messages[0]["content"]
+        media_kickoff = media_visit.messages[1]["content"]
+        assert media_visit.plan.intent == intent
+        assert user.writing_style in media_kickoff
+        assert user.writing_style not in media_system
+
+    lurker, lurker_user = _make_agent(
+        db_session,
+        "prompt_lurker",
+        tier="lurker",
+        image_mode="optional",
+        website_mode="optional",
+    )
+    lurker_user.writing_style = user.writing_style
+    lurker_visit = prepare_agent_visit(
+        lurker, lurker_user, requested_intent="post", unread=0
+    )
+    assert user.writing_style not in lurker_visit.messages[0]["content"]
+    assert user.writing_style not in lurker_visit.messages[1]["content"]
+    assert "Action writing style:" not in lurker_visit.messages[1]["content"]
 
 
 def test_website_guidance_contains_no_concrete_genre_example():
