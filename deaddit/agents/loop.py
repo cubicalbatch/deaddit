@@ -514,9 +514,17 @@ def run_once(
     if agent.is_enabled:
         min_delay = _int_budget(config, "min_delay")
         max_delay = max(min_delay, _int_budget(config, "max_delay"))
-        agent.next_run_at = now + timedelta(
-            seconds=scaled_wake_delay(random.uniform(min_delay, max_delay), now)
+        base_delay = float(random.uniform(min_delay, max_delay))
+        scheduled_delay = float(scaled_wake_delay(base_delay, now))
+        agent.next_run_at = now + timedelta(seconds=scheduled_delay)
+        metadata = (
+            dict(run.prompt_metadata) if isinstance(run.prompt_metadata, dict) else {}
         )
+        metadata["cadence_sample"] = {
+            "base_delay_seconds": base_delay,
+            "scheduled_delay_seconds": scheduled_delay,
+        }
+        run.prompt_metadata = metadata
     try:
         summarize_run(agent, run)
     except Exception:

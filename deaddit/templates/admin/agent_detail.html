@@ -118,6 +118,17 @@
                                 <input type="number" id="edit-max-delay" class="form-control form-control-sm" min="0" placeholder="Max delay (s)">
                             </div>
                         </div>
+                        <div id="edit-estimate-panel" class="mt-2 p-2 border rounded bg-body-tertiary small" role="status" aria-live="polite" aria-atomic="true" aria-label="24-hour agent estimates">
+                            <div class="fw-semibold mb-1">24-hour estimates</div>
+                            <div class="row g-1">
+                                <div class="col-sm-6"><span class="fw-semibold">Estimated posts</span>: <span id="edit-estimated-posts">Unavailable</span></div>
+                                <div class="col-sm-6"><span class="fw-semibold">Estimated comments</span>: <span id="edit-estimated-comments">Unavailable</span></div>
+                                <div class="col-sm-6"><span class="fw-semibold">Estimated LLM calls</span>: <span id="edit-estimated-llm-calls">Unavailable</span></div>
+                                <div class="col-sm-6"><span class="fw-semibold">Estimated input tokens</span>: <span id="edit-estimated-input-tokens">Unavailable</span></div>
+                                <div class="col-sm-6"><span class="fw-semibold">Estimated output tokens</span>: <span id="edit-estimated-output-tokens">Unavailable</span></div>
+                            </div>
+                            <div id="edit-estimate-context" class="text-muted mt-1">Estimate · no historical scheduled-run observations; forecast unavailable</div>
+                        </div>
                     </div>
 
                     <div class="row g-2 mb-2">
@@ -294,6 +305,80 @@
         if (completion != null) return completion;
         return null;
     }
+    let estimateBaseline = null;
+
+    function estimateMetric(key, minDelay, maxDelay, tokenMetric) {
+        const behavior = estimateBaseline && estimateBaseline.behavior_sample;
+        const perRun = estimateBaseline && estimateBaseline.per_run;
+        const sampleCount = Number(behavior && (tokenMetric ? behavior.token_runs : behavior.runs));
+        const value = perRun && perRun[key];
+        const rawMultiplier = estimateBaseline && estimateBaseline.cadence_delay_multiplier;
+        const multiplier = rawMultiplier == null ? 1 : Number(rawMultiplier);
+        const rawOverhead = estimateBaseline && estimateBaseline.cadence_overhead_seconds;
+        const overhead = rawOverhead == null ? 0 : Number(rawOverhead);
+        if (!Number.isFinite(sampleCount) || sampleCount <= 0 || value == null
+            || !Number.isFinite(Number(value)) || !Number.isFinite(multiplier) || multiplier <= 0
+            || !Number.isFinite(overhead) || overhead < 0) return null;
+        if (minDelay === "" || maxDelay === "") return null;
+        const min = Number(minDelay);
+        const max = Number(maxDelay);
+        if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < min) return null;
+        const midpoint = (min + max) / 2;
+        if (!Number.isFinite(midpoint)) return null;
+        const denominator = midpoint * multiplier + overhead;
+        if (!Number.isFinite(denominator) || denominator <= 0) return null;
+        return (86400 / denominator) * Number(value);
+    }
+
+    function renderEstimatePanel(prefix, minId, maxId) {
+        const minDelay = document.getElementById(minId).value;
+        const maxDelay = document.getElementById(maxId).value;
+        const values = {
+            posts: estimateMetric("posts", minDelay, maxDelay, false),
+            comments: estimateMetric("comments", minDelay, maxDelay, false),
+            llm_calls: estimateMetric("turns", minDelay, maxDelay, false),
+            input_tokens: estimateMetric("prompt_tokens", minDelay, maxDelay, true),
+            output_tokens: estimateMetric("completion_tokens", minDelay, maxDelay, true),
+        };
+        Object.entries(values).forEach(([key, value]) => {
+            const node = document.getElementById(prefix + "-estimated-" + key.replaceAll("_", "-"));
+            if (!node) return;
+            node.textContent = value == null ? "Unavailable" : value.toLocaleString(undefined, {maximumFractionDigits: 1});
+        });
+        const behavior = estimateBaseline && estimateBaseline.behavior_sample;
+        const sampleRuns = behavior && Number.isFinite(Number(behavior.runs)) ? Number(behavior.runs) : NaN;
+        const sampleAgents = behavior && Number.isFinite(Number(behavior.agents)) ? Number(behavior.agents) : NaN;
+        const timing = estimateBaseline && estimateBaseline.timing_sample;
+        const intervals = timing && Number.isFinite(Number(timing.intervals)) ? Number(timing.intervals) : NaN;
+        let context;
+        if (!behavior || sampleRuns === 0) {
+            context = "Estimate · no historical scheduled-run observations; forecast unavailable";
+        } else {
+            const runText = Number.isFinite(sampleRuns) && sampleRuns > 0 ? sampleRuns.toLocaleString() : "unavailable";
+            const agentText = Number.isFinite(sampleAgents) && sampleAgents >= 0 ? sampleAgents.toLocaleString() : "unavailable";
+            const timingText = Number.isFinite(intervals) && intervals > 0
+                ? "timing calibrated from " + intervals.toLocaleString() + " persisted intervals"
+                : "timing not yet calibrated";
+            context = "Estimate · all-time pooled behavior history: " + runText
+                + " persisted scheduled runs across " + agentText + " agents; " + timingText;
+        }
+        document.getElementById(prefix + "-estimate-context").textContent = context;
+    }
+
+
+    function updateEditEstimates() {
+        renderEstimatePanel("edit", "edit-min-delay", "edit-max-delay");
+    }
+
+    async function loadEstimateBaseline() {
+        try {
+            estimateBaseline = await api("/admin/api/agents/estimate-baseline");
+        } catch (err) {
+            estimateBaseline = null;
+        }
+        updateEditEstimates();
+    }
+
 
     async function api(path, options) {
         const response = await fetch(path, Object.assign({headers: {"Content-Type": "application/json"}}, options || {}));
@@ -382,6 +467,7 @@
         document.getElementById("edit-ceiling").value = (agent.config && agent.config.daily_request_ceiling != null) ? agent.config.daily_request_ceiling : "";
         document.getElementById("edit-max-actions").value = (agent.config && agent.config.max_actions_per_run != null) ? agent.config.max_actions_per_run : 30;
         document.getElementById("edit-max-seconds").value = (agent.config && agent.config.max_run_seconds != null) ? agent.config.max_run_seconds : 300;
+        updateEditEstimates();
 
         const imgCfg = (agent.config && agent.config.image_posts) || {};
         document.getElementById("edit-image-enabled-switch").checked = Boolean(imgCfg.enabled);
@@ -1191,9 +1277,14 @@
             const maxVal = btn.getAttribute("data-max");
             if (minVal != null) document.getElementById("edit-min-delay").value = minVal;
             if (maxVal != null) document.getElementById("edit-max-delay").value = maxVal;
+            updateEditEstimates();
         });
     });
 
+    ["edit-min-delay", "edit-max-delay"].forEach((id) => {
+        document.getElementById(id).addEventListener("input", updateEditEstimates);
+    });
+    updateEditEstimates();
     // Reset status / re-arm button
     document.getElementById("reset-status-btn").addEventListener("click", async () => {
         if (!agent) return;
@@ -1517,6 +1608,7 @@
         }
     });
 
+    loadEstimateBaseline();
     Promise.all([loadProviders(), loadImageProviders()])
         .then(loadAgent)
         .then(loadRuns)

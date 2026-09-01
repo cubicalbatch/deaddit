@@ -28,9 +28,10 @@ import argparse
 import base64
 import io
 import json
+import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from pydantic import BaseModel
 
@@ -51,6 +52,14 @@ _TOOLS_HINT_RE = re.compile(r"\b(tools?|function)\b", re.IGNORECASE)
 
 # A 400 that names image/vision input is the provider saying "no vision".
 _VISION_HINT_RE = re.compile(r"\b(image|vision|multimodal)\b", re.IGNORECASE)
+
+logger = logging.getLogger(__name__)
+
+# ponytail: a False verdict from a probe is re-checked after this long.
+# Routed endpoints (OpenRouter) rotate upstream providers, so one bad
+# sample can mark a tools-capable model as unsupported. Fixed TTL is fine
+# until a model visibly flips verdicts often.
+_FALSE_VERDICT_TTL = timedelta(hours=6)
 
 LAST_PROBE_EVIDENCE: dict | None = None
 """Raw echo-test evidence from the most recent probe_endpoint call.
@@ -166,6 +175,12 @@ def probe_endpoint(
         if "HTTP 400" in text and _TOOLS_HINT_RE.search(text):
             # The provider told us outright: a VERDICT, not a fallback.
             LAST_PROBE_EVIDENCE = {"error": text}
+            logger.warning(
+                "Tools probe: %s/%s rejected tools (HTTP 400): %.200s",
+                api_url,
+                model_name,
+                text,
+            )
             return _record_verdict(api_url, model_name, supports_tools=False)
         raise
 
@@ -186,6 +201,17 @@ def probe_endpoint(
             except SchemaValidationError:
                 # Envelope present but args don't validate: unreliable.
                 supports_tools = False
+    if not supports_tools:
+        logger.warning(
+            "Tools probe: %s/%s returned no valid tool call "
+            "(finish_reason=%s, tool_name=%s, content=%.200r) — "
+            "recording NOT-SUPPORTED",
+            api_url,
+            model_name,
+            choice.get("finish_reason"),
+            tool_name,
+            message.get("content") or "",
+        )
     LAST_PROBE_EVIDENCE = {
         "response_id": response.get("id"),
         "finish_reason": choice.get("finish_reason"),
@@ -470,8 +496,30 @@ def ensure_tools_allowed(
     ``supports_tools=False``. No row passes unless ``auto_probe`` triggers a
     probe first; a manual override with ``True`` passes even though earlier
     probes failed.
+
+    A stale ``probe_method='probe'`` row with ``supports_tools=False`` is
+    re-probed instead of trusted: routed endpoints rotate upstreams, so a
+    single bad sample must not block the model forever. Manual overrides
+    are never re-probed. If the re-probe fails to determine a verdict, the
+    cached False still governs (same error as before).
     """
     cap = get_capability(api_url, model_name)
+    if (
+        cap is not None
+        and not cap.supports_tools
+        and cap.probe_method == "probe"
+        and cap.probed_at is not None
+        and datetime.utcnow() - cap.probed_at > _FALSE_VERDICT_TTL
+    ):
+        try:
+            cap = probe_endpoint(api_url, model_name, api_key=api_key)
+        except LLMError:
+            logger.warning(
+                "Stale tools re-probe failed for %s/%s; keeping cached verdict",
+                api_url,
+                model_name,
+                exc_info=True,
+            )
     if cap is None and auto_probe:
         cap = probe_endpoint(api_url, model_name, api_key=api_key)
     if cap is None or cap.supports_tools:

@@ -5,11 +5,13 @@ Provides web-based UI for job management and content generation.
 
 import json
 import logging
+import math
 import os
 import random
 import re
 from datetime import UTC, datetime, timedelta
 from functools import wraps
+from statistics import median
 
 from flask import (
     Blueprint,
@@ -27,6 +29,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from deaddit import db
 from deaddit.agents.executor import normalize_persona_rate_caps
+from deaddit.agents.registry import POST_TOOL_NAMES
 from deaddit.config import Config
 from deaddit.dynamics.engagement import (
     SUPPORTED_ALGORITHM_VERSIONS,
@@ -1660,6 +1663,7 @@ def _comment_payload(comment):
         "username": comment.user,
         "post_id": comment.post_id,
         "post_title": comment.post.title if comment.post else "Unknown",
+        "subdeaddit_name": comment.post.subdeaddit_name if comment.post else "",
         "parent_id": comment.parent_id,
         "score": comment.score or 0,
         "created_at": comment.created_at.isoformat() if comment.created_at else "",
@@ -1710,6 +1714,72 @@ def api_update_comment(comment_id):
         db.session.rollback()
         logger.error(f"Error updating comment {comment_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _prompt_origin(tool_names, result_key, row_id):
+    """Find the agent turn whose LLM response produced this content row.
+
+    Verbatim prompts live on AgentTurn.request_messages; the link is
+    ToolCall.result.<result_key> -> row id, ToolCall.turn_id -> AgentTurn.
+    """
+    call = (
+        ToolCall.query.filter(
+            ToolCall.name.in_(tool_names),
+            func.json_extract(ToolCall.result, f"$.{result_key}") == row_id,
+        )
+        .order_by(ToolCall.id)
+        .first()
+    )
+    if call is None:
+        return {"found": False}
+    turn = db.session.get(AgentTurn, call.turn_id) if call.turn_id else None
+    run = db.session.get(AgentRun, call.run_id)
+    return {
+        "found": True,
+        "tool_call": {
+            "name": call.name,
+            "created_at": call.created_at.isoformat() if call.created_at else None,
+        },
+        "run": (
+            {
+                "id": run.id,
+                "persona": run.persona_username,
+                "trigger": run.trigger,
+                "intent": run.intent,
+            }
+            if run
+            else None
+        ),
+        "turn": (
+            {
+                "seq": turn.seq,
+                "model": turn.model,
+                "latency_ms": turn.latency_ms,
+                "request_messages": turn.request_messages,
+                "response_message": turn.response_message,
+            }
+            if turn
+            else None
+        ),
+    }
+
+
+@admin_bp.route("/api/posts/<int:post_id>/prompt")
+@production_disabled
+@admin_required
+def api_post_prompt(post_id):
+    """The agent turn (verbatim prompts) that produced this post."""
+    Post.query.get_or_404(post_id)
+    return jsonify(_prompt_origin(POST_TOOL_NAMES, "post_id", post_id))
+
+
+@admin_bp.route("/api/comments/<int:comment_id>/prompt")
+@production_disabled
+@admin_required
+def api_comment_prompt(comment_id):
+    """The agent turn (verbatim prompts) that produced this comment."""
+    Comment.query.get_or_404(comment_id)
+    return jsonify(_prompt_origin(["create_comment"], "comment_id", comment_id))
 
 
 @admin_bp.route("/api/comments/<int:comment_id>", methods=["GET"])
@@ -3965,6 +4035,212 @@ def api_agent_presets():
             },
             "daily_request_ceiling": {"light": 200, "standard": 2000, "heavy": 8000},
             "cohort_size": {"small": 5, "medium": 12, "large": 20},
+        }
+    )
+
+
+def _estimate_token_value(usage, keys):
+    """Return the first finite numeric token field, or None."""
+    if not isinstance(usage, dict):
+        return None
+    for key in keys:
+        if key not in usage:
+            continue
+        value = usage[key]
+        if isinstance(value, bool):
+            continue
+        try:
+            value = float(value)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(value) and value >= 0:
+            return value
+    return None
+
+
+def _cadence_sample(base_delay, scheduled_delay):
+    """Return a validated persisted cadence sample, or None."""
+    values = []
+    for value in (base_delay, scheduled_delay):
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return None
+        try:
+            value = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(value) or value < 0:
+            return None
+        values.append(value)
+    return tuple(values)
+
+
+@admin_bp.route("/api/agents/estimate-baseline")
+@production_disabled
+@admin_required
+def api_agent_estimate_baseline():
+    """Return pooled all-time scheduled agent activity and cadence calibration."""
+    now = datetime.now(UTC).replace(tzinfo=None)
+    terminal = AgentRun.status.in_(("completed", "failed", "interrupted"))
+    scheduled = AgentRun.trigger == "schedule"
+
+    behavior_rows = (
+        db.session.query(
+            AgentRun.id,
+            AgentRun.token_usage,
+            AgentRun.agent_id,
+            AgentRun.started_at,
+        )
+        .filter(terminal, scheduled, AgentRun.started_at <= now)
+        .all()
+    )
+    token_runs = 0
+    prompt_total = 0.0
+    completion_total = 0.0
+    for _, usage, _, _ in behavior_rows:
+        if not isinstance(usage, dict):
+            continue
+        if not any(
+            key in usage
+            for key in (
+                "prompt_tokens",
+                "prompt",
+                "completion_tokens",
+                "completion",
+            )
+        ):
+            continue
+        prompt = _estimate_token_value(usage, ("prompt_tokens", "prompt"))
+        completion = _estimate_token_value(usage, ("completion_tokens", "completion"))
+        if prompt is None or completion is None:
+            continue
+        token_runs += 1
+        prompt_total += prompt
+        completion_total += completion
+
+    sampled_agent_ids = {
+        agent_id for _, _, agent_id, _ in behavior_rows if agent_id is not None
+    }
+    posts = comments = 0
+    tool_rows = (
+        db.session.query(ToolCall.name, func.count(ToolCall.id))
+        .join(AgentRun, ToolCall.run_id == AgentRun.id)
+        .filter(
+            terminal,
+            scheduled,
+            AgentRun.started_at <= now,
+            ToolCall.ok.is_(True),
+            ToolCall.name.in_((*POST_TOOL_NAMES, "create_comment")),
+        )
+        .group_by(ToolCall.name)
+        .all()
+    )
+    counts = {name: int(count or 0) for name, count in tool_rows}
+    posts = sum(counts.get(name, 0) for name in POST_TOOL_NAMES)
+    comments = counts.get("create_comment", 0)
+    turn_rows = (
+        db.session.query(AgentTurn.run_id, func.count(AgentTurn.id))
+        .join(AgentRun, AgentTurn.run_id == AgentRun.id)
+        .filter(terminal, scheduled, AgentRun.started_at <= now)
+        .group_by(AgentTurn.run_id)
+        .all()
+    )
+    turns = sum(int(count or 0) for _, count in turn_rows)
+    turn_runs = len(turn_rows)
+
+    timing_rows = (
+        db.session.query(
+            AgentRun.agent_id,
+            AgentRun.trigger,
+            AgentRun.started_at,
+            func.json_extract(
+                AgentRun.prompt_metadata, "$.cadence_sample.base_delay_seconds"
+            ),
+            func.json_extract(
+                AgentRun.prompt_metadata, "$.cadence_sample.scheduled_delay_seconds"
+            ),
+        )
+        .filter(AgentRun.started_at <= now)
+        .order_by(AgentRun.agent_id.asc(), AgentRun.started_at.asc(), AgentRun.id.asc())
+        .all()
+    )
+    intervals = []
+    delay_samples = []
+    timing_agent_ids = set()
+    previous_agent_id = object()
+    previous_started_at = None
+    previous_sample = None
+    for (
+        agent_id,
+        trigger,
+        started_at,
+        base_delay,
+        scheduled_delay,
+    ) in timing_rows:
+        if agent_id != previous_agent_id:
+            previous_started_at = None
+            previous_sample = None
+            previous_agent_id = agent_id
+        if (
+            trigger == "schedule"
+            and previous_started_at is not None
+            and previous_sample is not None
+        ):
+            base, previous_scheduled = previous_sample
+            gap = max(0.0, (started_at - previous_started_at).total_seconds())
+            intervals.append(max(0.0, gap - previous_scheduled))
+            if base > 0:
+                delay_samples.append(previous_scheduled / base)
+            timing_agent_ids.add(agent_id)
+        previous_started_at = started_at
+        previous_sample = _cadence_sample(base_delay, scheduled_delay)
+
+    runs = len(behavior_rows)
+    observed_from = (
+        min(row[3] for row in behavior_rows).isoformat() if behavior_rows else None
+    )
+    observed_to = (
+        max(row[3] for row in behavior_rows).isoformat() if behavior_rows else None
+    )
+    return jsonify(
+        {
+            "behavior_sample": {
+                "scope": "all_time",
+                "observed_from": observed_from,
+                "observed_to": observed_to,
+                "runs": runs,
+                "agents": len(sampled_agent_ids),
+                "token_runs": token_runs,
+                "turn_runs": turn_runs,
+            },
+            "timing_sample": {
+                "scope": "all_time",
+                "intervals": len(intervals),
+                "agents": len(timing_agent_ids),
+                "delay_samples": len(delay_samples),
+            },
+            "observed": {
+                "runs": runs,
+                "agents": len(sampled_agent_ids),
+                "token_runs": token_runs,
+                "turns": turns,
+                "posts": posts,
+                "comments": comments,
+                "prompt_tokens": prompt_total,
+                "completion_tokens": completion_total,
+            },
+            "cadence_overhead_seconds": median(intervals) if intervals else None,
+            "cadence_delay_multiplier": median(delay_samples)
+            if delay_samples
+            else None,
+            "per_run": {
+                "posts": posts / runs if runs else None,
+                "turns": turns / runs if runs else None,
+                "comments": comments / runs if runs else None,
+                "prompt_tokens": prompt_total / token_runs if token_runs else None,
+                "completion_tokens": (
+                    completion_total / token_runs if token_runs else None
+                ),
+            },
         }
     )
 

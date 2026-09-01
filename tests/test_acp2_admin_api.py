@@ -131,7 +131,396 @@ def test_presets_endpoint_exposes_form_defaults(seeded_db, admin_client):
     assert set(body["cohort_size"]) == {"small", "medium", "large"}
 
 
-# ---------------------------------------------------------------------------
+def test_estimate_baseline_uses_all_time_behavior_and_token_variants(
+    seeded_db, admin_client, db_session
+):
+    agent = _make_agent(db_session, "alice")
+    now = datetime.utcnow()
+
+    def add_run(started_at, status, token_usage, calls, *, trigger="schedule", turns=0):
+        run = AgentRun(
+            agent_id=agent.id,
+            persona_username="alice",
+            trigger=trigger,
+            status=status,
+            started_at=started_at,
+            finished_at=None
+            if status == "running"
+            else started_at + timedelta(minutes=1),
+            token_usage=token_usage,
+        )
+        db_session.add(run)
+        db_session.flush()
+        db_session.add_all(
+            [
+                ToolCall(
+                    run_id=run.id,
+                    name=name,
+                    arguments={},
+                    result={},
+                    ok=ok,
+                )
+                for name, ok in calls
+            ]
+        )
+        if turns:
+            db_session.add_all(
+                [
+                    AgentTurn(
+                        run_id=run.id, seq=i, request_messages=[], response_message={}
+                    )
+                    for i in range(turns)
+                ]
+            )
+
+    add_run(
+        now - timedelta(hours=1),
+        "completed",
+        {"prompt_tokens": 10, "completion": 20},
+        [("create_post", True), ("create_comment", True), ("create_post", False)],
+        turns=3,
+    )
+    add_run(
+        now - timedelta(hours=2),
+        "failed",
+        {"prompt": 30, "completion_tokens": 40},
+        [
+            ("create_image_post", True),
+            ("create_website", True),
+            ("create_comment", False),
+            ("vote", True),
+        ],
+        turns=2,
+    )
+    add_run(
+        now - timedelta(hours=3),
+        "completed",
+        None,
+        [("create_website", True)],
+    )
+    add_run(
+        now - timedelta(minutes=30),
+        "completed",
+        {"prompt_tokens": 50},
+        [],
+        turns=1,
+    )
+    add_run(
+        now - timedelta(minutes=45),
+        "failed",
+        {"prompt_tokens": "not-a-number", "completion_tokens": 80},
+        [],
+        turns=4,
+    )
+    add_run(
+        now - timedelta(hours=1),
+        "running",
+        {"prompt": 999, "completion": 999},
+        [("create_post", True)],
+    )
+    old = now - timedelta(hours=13)
+    add_run(
+        old,
+        "completed",
+        {"prompt": 999, "completion": 999},
+        [("create_post", True)],
+        turns=2,
+    )
+    add_run(
+        now - timedelta(minutes=20),
+        "completed",
+        {"prompt_tokens": 999, "completion_tokens": 999},
+        [("create_post", True), ("create_comment", True)],
+        trigger="manual",
+    )
+    db_session.commit()
+
+    response = admin_client.get("/admin/api/agents/estimate-baseline")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["behavior_sample"] == {
+        "scope": "all_time",
+        "observed_from": old.isoformat(),
+        "observed_to": (now - timedelta(minutes=30)).isoformat(),
+        "runs": 6,
+        "agents": 1,
+        "token_runs": 3,
+        "turn_runs": 5,
+    }
+    assert body["timing_sample"] == {
+        "scope": "all_time",
+        "intervals": 0,
+        "agents": 0,
+        "delay_samples": 0,
+    }
+    assert body["observed"] == {
+        "runs": 6,
+        "agents": 1,
+        "token_runs": 3,
+        "turns": 12,
+        "posts": 5,
+        "comments": 1,
+        "prompt_tokens": 1039,
+        "completion_tokens": 1059,
+    }
+    assert body["cadence_overhead_seconds"] is None
+    assert body["cadence_delay_multiplier"] is None
+    assert body["per_run"]["posts"] == pytest.approx(5 / 6)
+    assert body["per_run"]["comments"] == pytest.approx(1 / 6)
+    assert body["per_run"]["turns"] == pytest.approx(2)
+    assert body["per_run"]["prompt_tokens"] == pytest.approx(1039 / 3)
+    assert body["per_run"]["completion_tokens"] == pytest.approx(1059 / 3)
+
+
+def test_estimate_baseline_calibrates_persisted_cadence_samples(
+    seeded_db, admin_client, db_session
+):
+    agent = _make_agent(db_session, "alice")
+    now = datetime.utcnow()
+
+    def add_run(started_at, *, trigger="schedule", sample=None):
+        run = AgentRun(
+            agent_id=agent.id,
+            persona_username="alice",
+            trigger=trigger,
+            status="completed",
+            started_at=started_at,
+            finished_at=started_at + timedelta(minutes=1),
+            prompt_metadata={"existing": "value", "cadence_sample": sample}
+            if sample is not None
+            else None,
+        )
+        db_session.add(run)
+
+    add_run(
+        now - timedelta(seconds=800),
+        sample={"base_delay_seconds": -1, "scheduled_delay_seconds": 10},
+    )
+
+    add_run(
+        now - timedelta(seconds=650),
+        sample={"base_delay_seconds": 100, "scheduled_delay_seconds": 120},
+    )
+    add_run(
+        now - timedelta(seconds=520),
+        sample={"base_delay_seconds": 200, "scheduled_delay_seconds": 300},
+    )
+    add_run(
+        now - timedelta(seconds=200),
+        sample={"base_delay_seconds": 0, "scheduled_delay_seconds": 10},
+    )
+    db_session.commit()
+
+    body = admin_client.get("/admin/api/agents/estimate-baseline").get_json()
+    assert body["timing_sample"] == {
+        "scope": "all_time",
+        "intervals": 2,
+        "agents": 1,
+        "delay_samples": 2,
+    }
+    assert body["cadence_overhead_seconds"] == pytest.approx(15)
+    assert body["cadence_delay_multiplier"] == pytest.approx(1.35)
+
+
+def test_estimate_baseline_counts_interrupted_content_without_partial_tokens(
+    seeded_db, admin_client, db_session
+):
+    agent = _make_agent(db_session, "alice")
+    started_at = datetime.utcnow() - timedelta(minutes=5)
+    run = AgentRun(
+        agent_id=agent.id,
+        persona_username="alice",
+        trigger="schedule",
+        status="interrupted",
+        started_at=started_at,
+        finished_at=started_at + timedelta(minutes=1),
+        token_usage={"prompt_tokens": 100},
+    )
+    db_session.add(run)
+    db_session.flush()
+    db_session.add_all(
+        [
+            ToolCall(
+                run_id=run.id,
+                name="create_post",
+                arguments={},
+                result={},
+                ok=True,
+            ),
+            ToolCall(
+                run_id=run.id,
+                name="create_comment",
+                arguments={},
+                result={},
+                ok=True,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    body = admin_client.get("/admin/api/agents/estimate-baseline").get_json()
+
+    assert body["behavior_sample"] == {
+        "scope": "all_time",
+        "observed_from": started_at.isoformat(),
+        "observed_to": started_at.isoformat(),
+        "runs": 1,
+        "agents": 1,
+        "token_runs": 0,
+        "turn_runs": 0,
+    }
+    assert body["observed"]["posts"] == 1
+    assert body["observed"]["comments"] == 1
+    assert body["observed"]["prompt_tokens"] == 0
+    assert body["observed"]["completion_tokens"] == 0
+
+
+def test_estimate_baseline_ignores_malformed_and_missing_timing_scalars(
+    seeded_db, admin_client, db_session
+):
+    agent = _make_agent(db_session, "alice")
+    now = datetime.utcnow()
+
+    def add_run(started_at, sample):
+        db_session.add(
+            AgentRun(
+                agent_id=agent.id,
+                persona_username="alice",
+                trigger="schedule",
+                status="completed",
+                started_at=started_at,
+                finished_at=started_at + timedelta(minutes=1),
+                prompt_metadata=sample,
+            )
+        )
+
+    add_run(
+        now - timedelta(seconds=600),
+        {
+            "cadence_sample": {
+                "base_delay_seconds": "not-a-number",
+                "scheduled_delay_seconds": 120,
+            }
+        },
+    )
+    add_run(
+        now - timedelta(seconds=500),
+        {"cadence_sample": {"scheduled_delay_seconds": 120}},
+    )
+    add_run(
+        now - timedelta(seconds=300),
+        {
+            "cadence_sample": {
+                "base_delay_seconds": 100,
+                "scheduled_delay_seconds": 120,
+            }
+        },
+    )
+    add_run(now - timedelta(seconds=100), None)
+    db_session.commit()
+
+    body = admin_client.get("/admin/api/agents/estimate-baseline").get_json()
+
+    assert body["timing_sample"] == {
+        "scope": "all_time",
+        "intervals": 1,
+        "agents": 1,
+        "delay_samples": 1,
+    }
+    assert body["cadence_overhead_seconds"] == pytest.approx(80)
+    assert body["cadence_delay_multiplier"] == pytest.approx(1.2)
+
+
+def test_estimate_baseline_pairs_manual_cadence_sample_with_next_schedule(
+    seeded_db, admin_client, db_session
+):
+    agent = _make_agent(db_session, "alice", enabled=True)
+    now = datetime.utcnow()
+    manual_started_at = now - timedelta(seconds=300)
+    scheduled_started_at = now - timedelta(seconds=100)
+    db_session.add_all(
+        [
+            AgentRun(
+                agent_id=agent.id,
+                persona_username="alice",
+                trigger="manual",
+                status="completed",
+                started_at=manual_started_at,
+                finished_at=manual_started_at + timedelta(minutes=1),
+                prompt_metadata={
+                    "cadence_sample": {
+                        "base_delay_seconds": 100,
+                        "scheduled_delay_seconds": 120,
+                    }
+                },
+            ),
+            AgentRun(
+                agent_id=agent.id,
+                persona_username="alice",
+                trigger="schedule",
+                status="completed",
+                started_at=scheduled_started_at,
+                finished_at=scheduled_started_at + timedelta(minutes=1),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    body = admin_client.get("/admin/api/agents/estimate-baseline").get_json()
+
+    assert body["timing_sample"] == {
+        "scope": "all_time",
+        "intervals": 1,
+        "agents": 1,
+        "delay_samples": 1,
+    }
+    assert body["cadence_overhead_seconds"] == pytest.approx(80)
+    assert body["cadence_delay_multiplier"] == pytest.approx(1.2)
+
+
+def test_estimate_baseline_returns_null_samples_without_behavior(
+    seeded_db, admin_client
+):
+    response = admin_client.get("/admin/api/agents/estimate-baseline")
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "behavior_sample": {
+            "scope": "all_time",
+            "observed_from": None,
+            "observed_to": None,
+            "runs": 0,
+            "agents": 0,
+            "token_runs": 0,
+            "turn_runs": 0,
+        },
+        "timing_sample": {
+            "scope": "all_time",
+            "intervals": 0,
+            "agents": 0,
+            "delay_samples": 0,
+        },
+        "observed": {
+            "runs": 0,
+            "agents": 0,
+            "token_runs": 0,
+            "posts": 0,
+            "comments": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "turns": 0,
+        },
+        "cadence_overhead_seconds": None,
+        "cadence_delay_multiplier": None,
+        "per_run": {
+            "posts": None,
+            "comments": None,
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "turns": None,
+        },
+    }
+
+
 # POST /admin/api/agents — creation gating
 
 
@@ -952,11 +1341,13 @@ def test_admin_gate_redirects_anonymous_visitors(app, client, monkeypatch):
     assert "/admin/login" in resp.headers["Location"]
 
     assert client.get("/admin/api/jobs/1").status_code == 302
+    assert client.get("/admin/api/agents/estimate-baseline").status_code == 302
 
     with client.session_transaction() as sess:
         sess["admin_authenticated"] = True
     assert client.get("/admin/api/agents").status_code == 200
     assert client.get("/admin/api/jobs/1").status_code == 404
+    assert client.get("/admin/api/agents/estimate-baseline").status_code == 200
 
 
 # ---------------------------------------------------------------------------

@@ -380,6 +380,42 @@ def test_next_run_at_drawn_within_delay_bounds_when_enabled(
     delta = agent.next_run_at - before
     assert timedelta(seconds=55) <= delta <= timedelta(seconds=125)
     assert run.status == "completed"
+    sample = run.prompt_metadata["cadence_sample"]
+    assert isinstance(sample["base_delay_seconds"], float)
+    assert isinstance(sample["scheduled_delay_seconds"], float)
+    assert 60 <= sample["base_delay_seconds"] <= 120
+    assert sample["scheduled_delay_seconds"] == sample["base_delay_seconds"]
+    assert "profile" in run.prompt_metadata
+    assert "intent" in run.prompt_metadata
+
+
+@pytest.mark.parametrize("trigger", ("schedule", "manual"))
+def test_cadence_sample_records_draw_and_scaled_delay(
+    seeded_db, db_session, fake_llm, monkeypatch, trigger
+):
+    agent = _make_agent(db_session, "alice", config={"min_delay": 60, "max_delay": 120})
+    fake_llm.enqueue(
+        _tool_response([_tool_call("call_1", "finish", {"summary": "bye"})])
+    )
+    monkeypatch.setattr(loop_module.random, "uniform", lambda _min, _max: 75.25)
+    monkeypatch.setattr(
+        loop_module,
+        "scaled_wake_delay",
+        lambda base_delay, _now: base_delay * 2,
+    )
+
+    run = run_once(agent.id, trigger=trigger)
+
+    agent = Agent.query.filter_by(user_username="alice").one()
+    assert run.status == "completed"
+    assert run.trigger == trigger
+    assert run.prompt_metadata["cadence_sample"] == {
+        "base_delay_seconds": 75.25,
+        "scheduled_delay_seconds": 150.5,
+    }
+    assert agent.next_run_at - run.finished_at == timedelta(seconds=150.5)
+    assert "profile" in run.prompt_metadata
+    assert "intent" in run.prompt_metadata
 
 
 def test_next_run_at_left_none_when_disabled(seeded_db, db_session, fake_llm):
@@ -388,11 +424,12 @@ def test_next_run_at_left_none_when_disabled(seeded_db, db_session, fake_llm):
         _tool_response([_tool_call("call_1", "finish", {"summary": "bye"})])
     )
 
-    run_once(agent.id)
+    run = run_once(agent.id)
 
     agent = Agent.query.filter_by(user_username="alice").one()
     assert agent.is_enabled is False
     assert agent.next_run_at is None
+    assert "cadence_sample" not in run.prompt_metadata
 
 
 # ---------------------------------------------------------------------------

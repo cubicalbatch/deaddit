@@ -354,6 +354,66 @@ def test_admin_agent_detail_page_renders_form(seeded_db, admin_client, db_sessio
     assert "edit-max-seconds" in html
     assert "reset-status-btn" in html
     assert "save-agent-btn" in html
+    assert 'id="edit-estimate-panel"' in html
+    edit_panel_id_pos = html.index('id="edit-estimate-panel"')
+    edit_panel = html[
+        html.rfind("<div", 0, edit_panel_id_pos) : html.index(">", edit_panel_id_pos)
+    ]
+    assert edit_panel.startswith("<div ")
+    assert 'role="status"' in edit_panel
+    assert 'aria-live="polite"' in edit_panel
+    assert 'aria-atomic="true"' in edit_panel
+    assert 'minDelay === "" || maxDelay === ""' in html
+    assert "min < 0 || max < min" in html
+    assert (
+        "const behavior = estimateBaseline && estimateBaseline.behavior_sample;" in html
+    )
+    assert "if (!behavior || sampleRuns === 0) {" in html
+    assert "estimateBaseline = null;\n        }\n        updateEditEstimates();" in html
+    assert "const midpoint = (min + max) / 2;" in html
+    assert "cadence_delay_multiplier" in html
+    assert "rawMultiplier == null ? 1 : Number(rawMultiplier)" in html
+    assert "cadence_overhead_seconds" in html
+    assert "rawOverhead == null ? 0 : Number(rawOverhead)" in html
+    assert "!Number.isFinite(multiplier) || multiplier <= 0" in html
+    assert "!Number.isFinite(overhead) || overhead < 0" in html
+    assert "const denominator = midpoint * multiplier + overhead;" in html
+    assert "!Number.isFinite(denominator) || denominator <= 0" in html
+    assert "(86400 / denominator) * Number(value)" in html
+    for label in (
+        "Estimated posts",
+        "Estimated comments",
+        "Estimated input tokens",
+        "Estimated output tokens",
+        "Estimated LLM calls",
+    ):
+        assert label in html
+    assert "/admin/api/agents/estimate-baseline" in html
+    assert "updateEditEstimates" in html
+    assert (
+        "addEventListener('input', updateEditEstimates)" in html
+        or 'addEventListener("input", updateEditEstimates)' in html
+    )
+    assert "updateEditEstimates();" in html
+    assert html.count("updateEditEstimates();") >= 4
+    for estimate_id in (
+        "edit-estimated-posts",
+        "edit-estimated-comments",
+        "edit-estimated-input-tokens",
+        "edit-estimated-output-tokens",
+        "edit-estimated-llm-calls",
+    ):
+        assert f'id="{estimate_id}">Unavailable</span>' in html
+    assert "all-time pooled behavior history" in html
+    assert "persisted scheduled runs across" in html
+    assert "timing calibrated from" in html
+    assert "timing not yet calibrated" in html
+    assert "persisted intervals" in html
+    assert "no historical scheduled-run observations; forecast unavailable" in html
+    assert "12-hour" not in html
+    assert "12 hour" not in html
+    assert "last 12 hours" not in html
+
     run_body = admin_client.get(f"/admin/api/agents/{agent.id}/runs").get_json()
     assert run_body["runs"][0]["persona_username"] == "alice"
 
@@ -388,3 +448,77 @@ def test_admin_agents_page_defaults_to_random_persona(seeded_db, admin_client):
     assert random_position < candidates_branch
     assert random_position < placeholder
     assert html.index("updateBackfillLabel();", random_position) > random_position
+    assert 'id="create-estimate-panel"' in html
+    create_panel_id_pos = html.index('id="create-estimate-panel"')
+    create_panel = html[
+        html.rfind("<div", 0, create_panel_id_pos) : html.index(
+            ">", create_panel_id_pos
+        )
+    ]
+    assert create_panel.startswith("<div ")
+    assert 'role="status"' in create_panel
+    assert 'aria-live="polite"' in create_panel
+    assert 'aria-atomic="true"' in create_panel
+    assert 'id="cadence-presets"' in html
+    assert 'id="min-delay-input"' in html
+    assert 'id="max-delay-input"' in html
+    assert (
+        'id="min-delay-input" class="form-control form-control-sm" min="0" value="60"'
+        in html
+    )
+    assert (
+        'id="max-delay-input" class="form-control form-control-sm" min="0" value="900"'
+        in html
+    )
+    assert 'minDelay === "" || maxDelay === ""' in html
+    assert "min < 0 || max < min" in html
+    assert (
+        "const behavior = estimateBaseline && estimateBaseline.behavior_sample;" in html
+    )
+    assert "if (!behavior || sampleRuns === 0) {" in html
+    assert (
+        "estimateBaseline = null;\n        }\n        updateCreateEstimates();" in html
+    )
+    assert "const midpoint = (min + max) / 2;" in html
+    assert "cadence_delay_multiplier" in html
+    assert "rawMultiplier == null ? 1 : Number(rawMultiplier)" in html
+    assert "cadence_overhead_seconds" in html
+    assert "rawOverhead == null ? 0 : Number(rawOverhead)" in html
+    assert "!Number.isFinite(multiplier) || multiplier <= 0" in html
+    assert "!Number.isFinite(overhead) || overhead < 0" in html
+    assert "const denominator = midpoint * multiplier + overhead;" in html
+    assert "!Number.isFinite(denominator) || denominator <= 0" in html
+    assert "(86400 / denominator) * Number(value)" in html
+    for label in (
+        "Estimated posts",
+        "Estimated comments",
+        "Estimated input tokens",
+        "Estimated output tokens",
+        "Estimated LLM calls",
+    ):
+        assert label in html
+    assert "/admin/api/agents/estimate-baseline" in html
+    assert "updateCreateEstimates" in html
+    assert (
+        "addEventListener('input', updateCreateEstimates)" in html
+        or 'addEventListener("input", updateCreateEstimates)' in html
+    )
+    assert "updateCreateEstimates();" in html
+    assert html.count("updateCreateEstimates();") >= 3
+    for estimate_id in (
+        "create-estimated-posts",
+        "create-estimated-comments",
+        "create-estimated-input-tokens",
+        "create-estimated-output-tokens",
+        "create-estimated-llm-calls",
+    ):
+        assert f'id="{estimate_id}">Unavailable</span>' in html
+    assert "all-time pooled behavior history" in html
+    assert "persisted scheduled runs across" in html
+    assert "timing calibrated from" in html
+    assert "timing not yet calibrated" in html
+    assert "persisted intervals" in html
+    assert "no historical scheduled-run observations; forecast unavailable" in html
+    assert "12-hour" not in html
+    assert "12 hour" not in html
+    assert "last 12 hours" not in html

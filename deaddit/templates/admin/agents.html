@@ -131,8 +131,19 @@
                 <label class="form-label d-block">Cadence (delay seconds)</label>
                 <div id="cadence-presets" class="btn-group btn-group-sm mb-2" role="group"></div>
                 <div class="d-flex gap-2">
-                    <input type="number" id="min-delay-input" class="form-control form-control-sm" min="0" placeholder="min delay">
-                    <input type="number" id="max-delay-input" class="form-control form-control-sm" min="0" placeholder="max delay">
+                    <input type="number" id="min-delay-input" class="form-control form-control-sm" min="0" value="60" placeholder="min delay">
+                    <input type="number" id="max-delay-input" class="form-control form-control-sm" min="0" value="900" placeholder="max delay">
+                </div>
+                <div id="create-estimate-panel" class="mt-2 p-2 border rounded bg-body-tertiary small" role="status" aria-live="polite" aria-atomic="true" aria-label="24-hour agent estimates">
+                    <div class="fw-semibold mb-1">24-hour estimates</div>
+                    <div class="row g-1">
+                        <div class="col-sm-6 col-xl-3"><span class="fw-semibold">Estimated posts</span>: <span id="create-estimated-posts">Unavailable</span></div>
+                        <div class="col-sm-6 col-xl-3"><span class="fw-semibold">Estimated comments</span>: <span id="create-estimated-comments">Unavailable</span></div>
+                        <div class="col-sm-6 col-xl-3"><span class="fw-semibold">Estimated LLM calls</span>: <span id="create-estimated-llm-calls">Unavailable</span></div>
+                        <div class="col-sm-6 col-xl-3"><span class="fw-semibold">Estimated input tokens</span>: <span id="create-estimated-input-tokens">Unavailable</span></div>
+                        <div class="col-sm-6 col-xl-3"><span class="fw-semibold">Estimated output tokens</span>: <span id="create-estimated-output-tokens">Unavailable</span></div>
+                    </div>
+                    <div id="create-estimate-context" class="text-muted mt-1">Estimate · no historical scheduled-run observations; forecast unavailable</div>
                 </div>
                 <div class="form-text">
                     How often the agent visits the site: after each run finishes, the
@@ -323,6 +334,81 @@
         }
         return data;
     }
+    let estimateBaseline = null;
+
+    function estimateMetric(key, minDelay, maxDelay, tokenMetric) {
+        const behavior = estimateBaseline && estimateBaseline.behavior_sample;
+        const perRun = estimateBaseline && estimateBaseline.per_run;
+        const sampleCount = Number(behavior && (tokenMetric ? behavior.token_runs : behavior.runs));
+        const value = perRun && perRun[key];
+        const rawMultiplier = estimateBaseline && estimateBaseline.cadence_delay_multiplier;
+        const multiplier = rawMultiplier == null ? 1 : Number(rawMultiplier);
+        const rawOverhead = estimateBaseline && estimateBaseline.cadence_overhead_seconds;
+        const overhead = rawOverhead == null ? 0 : Number(rawOverhead);
+        if (!Number.isFinite(sampleCount) || sampleCount <= 0 || value == null
+            || !Number.isFinite(Number(value)) || !Number.isFinite(multiplier) || multiplier <= 0
+            || !Number.isFinite(overhead) || overhead < 0) return null;
+        if (minDelay === "" || maxDelay === "") return null;
+        const min = Number(minDelay);
+        const max = Number(maxDelay);
+        if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < min) return null;
+        const midpoint = (min + max) / 2;
+        if (!Number.isFinite(midpoint)) return null;
+        const denominator = midpoint * multiplier + overhead;
+        if (!Number.isFinite(denominator) || denominator <= 0) return null;
+        return (86400 / denominator) * Number(value);
+    }
+
+    function renderEstimatePanel(prefix, minId, maxId) {
+        const minDelay = document.getElementById(minId).value;
+        const maxDelay = document.getElementById(maxId).value;
+        const values = {
+            posts: estimateMetric("posts", minDelay, maxDelay, false),
+            comments: estimateMetric("comments", minDelay, maxDelay, false),
+            llm_calls: estimateMetric("turns", minDelay, maxDelay, false),
+            input_tokens: estimateMetric("prompt_tokens", minDelay, maxDelay, true),
+            output_tokens: estimateMetric("completion_tokens", minDelay, maxDelay, true),
+        };
+        Object.entries(values).forEach(([key, value]) => {
+            const node = document.getElementById(prefix + "-estimated-" + key.replaceAll("_", "-"));
+            if (!node) return;
+            node.textContent = value == null ? "Unavailable" : value.toLocaleString(undefined, {maximumFractionDigits: 1});
+        });
+        const behavior = estimateBaseline && estimateBaseline.behavior_sample;
+        const sampleRuns = behavior && Number.isFinite(Number(behavior.runs)) ? Number(behavior.runs) : NaN;
+        const sampleAgents = behavior && Number.isFinite(Number(behavior.agents)) ? Number(behavior.agents) : NaN;
+        const timing = estimateBaseline && estimateBaseline.timing_sample;
+        const intervals = timing && Number.isFinite(Number(timing.intervals)) ? Number(timing.intervals) : NaN;
+        let context;
+        if (!behavior || sampleRuns === 0) {
+            context = "Estimate · no historical scheduled-run observations; forecast unavailable";
+        } else {
+            const runText = Number.isFinite(sampleRuns) && sampleRuns > 0 ? sampleRuns.toLocaleString() : "unavailable";
+            const agentText = Number.isFinite(sampleAgents) && sampleAgents >= 0 ? sampleAgents.toLocaleString() : "unavailable";
+            const timingText = Number.isFinite(intervals) && intervals > 0
+                ? "timing calibrated from " + intervals.toLocaleString() + " persisted intervals"
+                : "timing not yet calibrated";
+            context = "Estimate · all-time pooled behavior history: " + runText
+                + " persisted scheduled runs across " + agentText + " agents; " + timingText;
+        }
+        document.getElementById(prefix + "-estimate-context").textContent = context;
+    }
+
+
+
+    function updateCreateEstimates() {
+        renderEstimatePanel("create", "min-delay-input", "max-delay-input");
+    }
+
+    async function loadEstimateBaseline() {
+        try {
+            estimateBaseline = await api("/admin/api/agents/estimate-baseline");
+        } catch (err) {
+            estimateBaseline = null;
+        }
+        updateCreateEstimates();
+    }
+
     const setupStatusUrl = "{{ url_for('admin.setup_status_api') }}";
     const runtimeToggleUrl = "{{ url_for('admin.agent_runtime_api') }}";
 
@@ -368,6 +454,7 @@
                 btn.addEventListener("click", () => {
                     document.getElementById("min-delay-input").value = pair[0];
                     document.getElementById("max-delay-input").value = pair[1];
+                    updateCreateEstimates();
                 });
                 cadenceWrap.appendChild(btn);
             });
@@ -1071,6 +1158,11 @@
         }
     });
 
+    ["min-delay-input", "max-delay-input"].forEach((id) => {
+        document.getElementById(id).addEventListener("input", updateCreateEstimates);
+    });
+    updateCreateEstimates();
+    loadEstimateBaseline();
     refreshAgentStatus();
     window.setInterval(refreshAgentStatus, 5000);
 

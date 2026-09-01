@@ -297,12 +297,18 @@ class ContentManager {
         return text.length > length ? text.substring(0, length) + '...' : text;
     }
 
-    actionButtons(editCall, deleteCall, viewAttrs = null) {
+    actionButtons(editCall, deleteCall, viewAttrs = null, promptCall = null) {
         const viewBtn = viewAttrs
             ? `<a href="${viewAttrs.href}" class="btn btn-sm btn-info" target="_blank" title="${viewAttrs.title}">
                     <i class="bi bi-eye"></i>
                     <span class="d-none d-sm-inline ms-1">View</span>
                 </a>`
+            : '';
+        const promptBtn = promptCall
+            ? `<button class="btn btn-sm btn-secondary" onclick="${promptCall}" title="Originating prompt">
+                    <i class="bi bi-magic"></i>
+                    <span class="d-none d-lg-inline ms-1">Prompt</span>
+                </button>`
             : '';
         return `
             <div class="action-buttons">
@@ -315,6 +321,7 @@ class ContentManager {
                     <span class="d-none d-sm-inline ms-1">Delete</span>
                 </button>
                 ${viewBtn}
+                ${promptBtn}
             </div>
         `;
     }
@@ -519,13 +526,14 @@ class ContentManager {
                 <td>${this.truncate(post.title, 50)}</td>
                 <td class="d-none d-sm-table-cell">${post.username}</td>
                 <td class="d-none d-md-table-cell">${post.subdeaddit_name}</td>
-                <td class="d-none d-sm-table-cell">\${post.score}</td>
+                <td class="d-none d-sm-table-cell">${post.score}</td>
                 <td class="d-none d-lg-table-cell">${post.comments_count}</td>
                 <td class="d-none d-lg-table-cell">${createdDate}</td>
                 <td>${this.actionButtons(
                     `contentManager.editPost(${post.id})`,
                     `contentManager.deletePost(${post.id})`,
-                    {href: `/post/${post.id}`, title: 'View'}
+                    {href: `/d/${post.subdeaddit_name}/${post.id}`, title: 'View'},
+                    `contentManager.viewPostPrompt(${post.id})`
                 )}</td>
             `;
             tbody.appendChild(row);
@@ -604,12 +612,13 @@ class ContentManager {
                 <td class="d-none d-sm-table-cell">${comment.username}</td>
                 <td class="d-none d-md-table-cell">${this.truncate(comment.post_title, 30)}</td>
                 <td class="d-none d-lg-table-cell">${comment.parent_id ? 'Reply' : 'Root'}</td>
-                <td class="d-none d-sm-table-cell">\${comment.score}</td>
+                <td class="d-none d-sm-table-cell">${comment.score}</td>
                 <td class="d-none d-lg-table-cell">${createdDate}</td>
                 <td>${this.actionButtons(
                     `contentManager.editComment(${comment.id})`,
                     `contentManager.deleteComment(${comment.id})`,
-                    {href: `/post/${comment.post_id}`, title: 'View Post'}
+                    {href: `/d/${comment.subdeaddit_name}/${comment.post_id}`, title: 'View Post'},
+                    `contentManager.viewCommentPrompt(${comment.id})`
                 )}</td>
             `;
             tbody.appendChild(row);
@@ -668,6 +677,76 @@ class ContentManager {
 
     deleteComment(id) {
         this.showDeleteConfirmation('comment', id, `Are you sure you want to delete this comment?`);
+    }
+
+    // ---------------- Originating prompt ----------------
+    viewPostPrompt(id) { this.viewContentPrompt('posts', id); }
+
+    viewCommentPrompt(id) { this.viewContentPrompt('comments', id); }
+
+    async viewContentPrompt(kind, id) {
+        const body = document.getElementById('viewPromptBody');
+        body.innerHTML = '<div class="text-muted">Loading…</div>';
+        new bootstrap.Modal(document.getElementById('viewPromptModal')).show();
+        try {
+            const response = await fetch(`/admin/api/${kind}/${id}/prompt`);
+            const data = await response.json();
+            this.renderPromptOrigin(body, data);
+        } catch (error) {
+            console.error('Error loading prompt:', error);
+            body.innerHTML = '<div class="text-danger">Error loading prompt.</div>';
+        }
+    }
+
+    renderPromptOrigin(body, data) {
+        body.innerHTML = '';
+        if (!data.found) {
+            body.textContent = 'No originating agent prompt — this content was seeded or created outside the agent runtime.';
+            return;
+        }
+        const meta = document.createElement('div');
+        meta.className = 'small text-muted mb-2';
+        const bits = [`tool: ${data.tool_call.name}`];
+        if (data.run) bits.push(`run #${data.run.id} by ${data.run.persona} (${data.run.trigger})`);
+        if (data.turn && data.turn.model) bits.push(`model: ${data.turn.model}`);
+        meta.textContent = bits.join(' · ');
+        body.appendChild(meta);
+
+        if (!data.turn) {
+            const p = document.createElement('div');
+            p.className = 'text-muted';
+            p.textContent = 'The tool call exists but its LLM turn was not retained.';
+            body.appendChild(p);
+            return;
+        }
+        body.appendChild(this.promptHeading('Prompt sent to the LLM (verbatim)'));
+        (data.turn.request_messages || []).forEach(m => body.appendChild(this.promptMessageBlock(m)));
+        body.appendChild(this.promptHeading('LLM response (verbatim)'));
+        body.appendChild(this.promptMessageBlock(data.turn.response_message));
+    }
+
+    promptHeading(text) {
+        const h = document.createElement('h6');
+        h.className = 'mt-3 mb-2';
+        h.textContent = text;
+        return h;
+    }
+
+    promptMessageBlock(message) {
+        const wrap = document.createElement('div');
+        wrap.className = 'border rounded p-2 mb-2';
+        const role = (message && message.role) || '?';
+        const badge = document.createElement('span');
+        badge.className = 'badge bg-info mb-1';
+        badge.textContent = role;
+        wrap.appendChild(badge);
+        const content = message && message.content !== undefined ? message.content : message;
+        const pre = document.createElement('pre');
+        pre.className = 'small mb-0';
+        pre.style.whiteSpace = 'pre-wrap';
+        pre.textContent = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+        wrap.appendChild(pre);
+        return wrap;
     }
 
     // ---------------- Deletion (shared) ----------------
