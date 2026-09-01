@@ -29,6 +29,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from deaddit import db
 from deaddit.agents.executor import normalize_persona_rate_caps
+from deaddit.agents.loop import resolve_agent_llm
 from deaddit.agents.registry import POST_TOOL_NAMES
 from deaddit.config import Config
 from deaddit.dynamics.engagement import (
@@ -3833,6 +3834,7 @@ def _agent_json(agent, counts=None):
             .all()
         )
         counts = dict(rows)
+    provider, _api_url, model = resolve_agent_llm(agent)
     return {
         "id": agent.id,
         "user_username": agent.user_username,
@@ -3850,6 +3852,8 @@ def _agent_json(agent, counts=None):
         "runs_failed": int(counts.get("failed", 0)),
         "runs_interrupted": int(counts.get("interrupted", 0)),
         "runs_total": int(sum(counts.values())),
+        "model": model,
+        "provider_name": provider.name if provider else None,
     }
 
 

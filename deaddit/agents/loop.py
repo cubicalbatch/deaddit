@@ -29,7 +29,7 @@ from deaddit.llm import (
     Sampling,
 )
 from deaddit.llm.prompts import serialize_visit_profile
-from deaddit.models import Agent, AgentRun, AgentTurn, Setting, User
+from deaddit.models import Agent, AgentRun, AgentTurn, LLMProvider, Setting, User
 from deaddit.runtime.lull import scaled_wake_delay
 
 logger = logging.getLogger(__name__)
@@ -100,6 +100,47 @@ def _recover_stale_runs(agent: Agent) -> bool:
 
 def _effective_config(agent: Agent) -> dict[str, Any]:
     return {**DEFAULT_CONFIG, **(agent.config or {})}
+
+
+def resolve_agent_llm(agent: Agent) -> tuple[LLMProvider | None, str, str]:
+    """Resolve the ``(provider, api_url, model)`` an agent visit would use.
+
+    Precedence: agent.config ``provider_id``/``api_url``/``model``, then the
+    provider's defaults, then global Config. Shared by the run loop and the
+    admin agents list so both show the same effective selection.
+    """
+    config = _effective_config(agent)
+    provider = None
+    if config.get("provider_id"):
+        try:
+            provider = db.session.get(LLMProvider, int(config["provider_id"]))
+        except Exception:
+            provider = None
+    if provider is None and config.get("api_url"):
+        try:
+            provider = LLMProvider.query.filter(
+                (LLMProvider.api_url == str(config["api_url"]).rstrip("/"))
+                | (LLMProvider.api_url == str(config["api_url"]))
+            ).first()
+        except Exception:
+            provider = None
+    if provider is None:
+        try:
+            provider = LLMProvider.get_default()
+        except Exception:
+            provider = None
+
+    if provider:
+        api_url = config.get("api_url") or provider.api_url
+        model = (
+            config.get("model")
+            or provider.default_model
+            or Config.get("OPENAI_MODEL", "llama3")
+        )
+    else:
+        api_url = config.get("api_url") or Config.get("OPENAI_API_URL")
+        model = config.get("model") or Config.get("OPENAI_MODEL", "llama3")
+    return provider, api_url, model
 
 
 def _previous_persona(agent: Agent) -> str | None:
@@ -278,51 +319,12 @@ def run_once(
         raise ValueError(f"Agent {agent.id} already has a run in progress")
 
     config = _effective_config(agent)
-    provider_id = config.get("provider_id")
-    provider = None
-    if provider_id:
-        try:
-            from deaddit.models import LLMProvider
-
-            provider = db.session.get(LLMProvider, int(provider_id))
-        except Exception:
-            provider = None
-
-    if provider is None and config.get("api_url"):
-        try:
-            from deaddit.models import LLMProvider
-
-            provider = LLMProvider.query.filter(
-                (LLMProvider.api_url == str(config["api_url"]).rstrip("/"))
-                | (LLMProvider.api_url == str(config["api_url"]))
-            ).first()
-        except Exception:
-            provider = None
-
-    if provider is None:
-        try:
-            from deaddit.models import LLMProvider
-
-            provider = LLMProvider.get_default()
-        except Exception:
-            provider = None
-
-    if provider:
-        api_url = config.get("api_url") or provider.api_url
-        api_key = (
-            provider.api_key.strip()
-            if (provider.api_key and provider.api_key.strip())
-            else Config.get_api_key_for_endpoint(api_url)
-        )
-        model = (
-            config.get("model")
-            or provider.default_model
-            or Config.get("OPENAI_MODEL", "llama3")
-        )
-    else:
-        api_url = config.get("api_url") or Config.get("OPENAI_API_URL")
-        model = config.get("model") or Config.get("OPENAI_MODEL", "llama3")
-        api_key = Config.get_api_key_for_endpoint(api_url)
+    provider, api_url, model = resolve_agent_llm(agent)
+    api_key = (
+        provider.api_key.strip()
+        if (provider and provider.api_key and provider.api_key.strip())
+        else Config.get_api_key_for_endpoint(api_url)
+    )
 
     try:
         run = reserve_persona_run(agent, trigger=trigger)

@@ -278,6 +278,7 @@
                         <th style="width: 2rem;"><input type="checkbox" id="select-all-check" title="Select/deselect all agents" aria-label="Select all agents"></th>
                         <th>Persona</th>
                         <th>Tier</th>
+                        <th>Model</th>
                         <th>Status</th>
                         <th>Enabled</th>
                         <th>Features</th>
@@ -289,7 +290,7 @@
                     </tr>
                 </thead>
                 <tbody id="agents-tbody">
-                    <tr><td colspan="11" class="text-muted text-center">Loading…</td></tr>
+                    <tr><td colspan="12" class="text-muted text-center">Loading…</td></tr>
                 </tbody>
             </table>
         </div>
@@ -877,7 +878,7 @@
                 selectedAgents.clear();
                 const row = el("tr");
                 row.appendChild(el("td", "text-muted text-center", "No agents registered yet."));
-                row.firstChild.colSpan = 11;
+                row.firstChild.colSpan = 12;
                 tbody.appendChild(row);
                 updateBulkBar();
                 return;
@@ -896,6 +897,8 @@
                 personaCell.appendChild(link);
                 row.appendChild(personaCell);
                 row.appendChild(el("td", null, agent.autonomy_tier));
+                row.appendChild(el("td", "small text-muted",
+                    (agent.provider_name || "—") + " · " + (agent.model || "—")));
                 const status = el("td");
                 status.appendChild(el("span", "badge " + (STATUS_BADGE[agent.status] || "bg-dark"), agent.status));
                 row.appendChild(status);
@@ -917,7 +920,7 @@
             tbody.innerHTML = "";
             const row = el("tr");
             row.appendChild(el("td", "text-danger text-center", "Failed to load agents: " + err.message));
-            row.firstChild.colSpan = 11;
+            row.firstChild.colSpan = 12;
             tbody.appendChild(row);
         }
     }
