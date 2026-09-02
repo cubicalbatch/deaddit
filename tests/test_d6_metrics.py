@@ -53,7 +53,7 @@ def rollup_fixtures(app, db_session):
     """Hand-computed raw truth for one UTC day.
 
     Events: 2 posts (alice, bob), 3 comments (bob x2, carol), 4 votes
-    (alice x3, bob), 1 report → total 10 actions by 3 distinct users.
+    (alice x3, bob) → total 9 actions by 3 distinct users.
     LLM usage that day: one priced attempt (100/50 tokens, $0.02) and one
     UNPRICED attempt (10/5 tokens, estimated_cost NULL).
     Provenance: posts split agent:alice=1 / seed=1; comments seed=2, other=1.
@@ -136,7 +136,6 @@ def rollup_fixtures(app, db_session):
         ("vote", "alice", _dt(hour=13)),
         ("vote", "alice", _dt(hour=14)),
         ("vote", "bob", _dt(hour=15)),
-        ("report", "carol", _dt(hour=16)),
     ]
     for kind, who, when in events:
         db_session.add(ActivityEvent(occurred_at=when, event_type=kind, username=who))
@@ -271,9 +270,8 @@ class TestRollupDay:
         assert row.posts == 2
         assert row.comments == 3
         assert row.votes == 4
-        assert row.reports == 1
         assert row.active_agents == 3
-        assert row.actions_per_active == pytest.approx(10 / 3, abs=1e-3)
+        assert row.actions_per_active == pytest.approx(9 / 3, abs=1e-3)
 
         # LLM-3 conventions: token sums COALESCE to 0 over BOTH attempts;
         # cost SUM skips the NULL unpriced row → exactly the priced subtotal.

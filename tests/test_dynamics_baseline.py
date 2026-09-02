@@ -23,11 +23,11 @@ CREATE TABLE tool_call (
 CREATE TABLE llm_usage (id INTEGER PRIMARY KEY, created_at TEXT);
 CREATE TABLE post (
     id INTEGER PRIMARY KEY, title TEXT, user TEXT, subdeaddit_name TEXT,
-    score INTEGER, vote_count INTEGER, created_at TEXT, removed INTEGER
+    score INTEGER, vote_count INTEGER, created_at TEXT
 );
 CREATE TABLE comment (
     id INTEGER PRIMARY KEY, post_id INTEGER, user TEXT, score INTEGER,
-    vote_count INTEGER, created_at TEXT, removed INTEGER
+    vote_count INTEGER, created_at TEXT
 );
 CREATE TABLE vote (
     id INTEGER PRIMARY KEY, voter TEXT, post_id INTEGER, comment_id INTEGER,
@@ -40,18 +40,18 @@ def _build_db(path):
     conn = sqlite3.connect(path)
     conn.executescript(_SCHEMA)
     conn.executemany(
-        "INSERT INTO post VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO post VALUES (?, ?, ?, ?, ?, ?, ?)",
         [
-            (1, "old", "bob", "python", 2, 1, "2026-08-28 09:00:00", 0),
-            (2, "new", "carol", "python", 0, 0, "2026-08-28 12:00:00", 0),
-            (3, "removed", "carol", "other", 99, 1, "2026-08-28 13:00:00", 1),
+            (1, "old", "bob", "python", 2, 1, "2026-08-28 09:00:00"),
+            (2, "new", "carol", "python", 0, 0, "2026-08-28 12:00:00"),
+            (3, "high", "carol", "other", 99, 1, "2026-08-28 13:00:00"),
         ],
     )
     conn.executemany(
-        "INSERT INTO comment VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO comment VALUES (?, ?, ?, ?, ?, ?)",
         [
-            (1, 1, "carol", -1, 1, "2026-08-28 10:00:00", 0),
-            (2, 2, "bob", 0, 0, "2026-08-28 12:30:00", 0),
+            (1, 1, "carol", -1, 1, "2026-08-28 10:00:00"),
+            (2, 2, "bob", 0, 0, "2026-08-28 12:30:00"),
         ],
     )
     conn.executemany(
@@ -157,7 +157,7 @@ def test_report_classifies_runs_and_exposes_vote_baseline(tmp_path):
     assert report["distributions"]["posts"]["zero_vote_fraction"] == 0.666667
     assert report["distributions"]["comments"]["zero_vote_fraction"] == 0.5
     assert report["distributions"]["vote_arrival_latency_seconds"]["median"] == 3630
-    assert [item["post_id"] for item in report["hot_feed"]] == [1, 2]
+    assert [item["post_id"] for item in report["hot_feed"]] == [3, 1]
     assert (
         report["distributions"]["community_concentration"]["top"][0]["key"] == "python"
     )

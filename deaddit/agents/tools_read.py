@@ -82,8 +82,8 @@ def _image_post_ids(post_ids: list[int]) -> set[int]:
 
 
 def _has_image(post: Post, image_post_ids: set[int]) -> bool:
-    """A summary never claims an image for a removed or imageless post."""
-    return post.id in image_post_ids and not post.removed
+    """A summary never claims an image for an imageless post."""
+    return post.id in image_post_ids
 
 
 def _post_summary(post: Post, comment_count: int, has_image: bool) -> dict:
@@ -271,7 +271,7 @@ def _build_comment_tree(post_id: int, params: ReadPostArgs) -> list[dict]:
 
 
 def _load_image_description(ctx: ToolContext, post: Post) -> dict:
-    """Bounded image description for a non-removed image post (plan 5B).
+    """Bounded image description for an image post (plan 5B).
 
     Vision is attempted only when the reading agent's already-resolved
     endpoint/model has a stored ``supports_vision=True`` verdict. False,
@@ -338,7 +338,7 @@ def _read_post(ctx: ToolContext, params: ReadPostArgs) -> dict:
         and comment_count >= post.comment_cap,
         "comments": _build_comment_tree(post.id, params),
     }
-    if post.image is not None and not post.removed:
+    if post.image is not None:
         post_dict["image"] = _load_image_description(ctx, post)
     result: dict = {"ok": True, "post": post_dict}
     nudge = subscribe_nudge(ctx, post.subdeaddit_name)

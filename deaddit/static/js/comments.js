@@ -133,8 +133,7 @@ const NAME_LIMIT = 3;
 function directChildNames(comment) {
     const kids = comment.querySelector(':scope > .comment-children');
     if (!kids) return [];
-    // Removed children render a tombstone without a user link, so the
-    // selector naturally drops them; deeper generations are covered by count.
+    // Deeper generations are covered by the count rather than by name.
     return [...kids.querySelectorAll(':scope > .comment > .comment-main > .comment-header > .comment-meta__user')]
         .map((el) => el.textContent.trim())
         .slice(0, NAME_LIMIT + 1);

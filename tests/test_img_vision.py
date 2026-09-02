@@ -2,7 +2,7 @@
 
 Covers deaddit.llm.vision.describe_image directly (normalization/cap behaviour,
 error propagation) and its use by deaddit.agents.tools_read._read_post (vision
-success, every fallback path, removed/no-image suppression, usage labeling),
+success, every fallback path, no-image suppression, usage labeling),
 plus an explicit end-to-end check that base64 image data never reaches a
 persisted AgentTurn or ToolCall row.
 """
@@ -131,14 +131,13 @@ def _ctx(agent, run, **overrides) -> ToolContext:
     return ToolContext(**fields)
 
 
-def _make_image_post(app, db_session, *, removed=False) -> Post:
+def _make_image_post(app, db_session) -> Post:
     stored = store_variants(_solid_png(), Path(app.config["GENERATED_IMAGES_ROOT"]))
     post = Post(
         title="A cat photo",
         content=None,
         subdeaddit_name="testsub",
         user="alice",
-        removed=removed,
     )
     db_session.add(post)
     db_session.flush()
@@ -272,9 +271,7 @@ def test_read_post_describes_images_when_capable_and_always_falls_back_safely(
     assert missing_file["post"]["image"]["description_source"] == "generation_prompt"
     assert len(fake_llm.requests) == before
 
-    # Removed and text-only posts expose no image at all.
-    removed = _make_image_post(app, db_session, removed=True)
-    assert "image" not in read(removed)["post"]
+    # Text-only posts expose no image at all.
     text_post = Post(
         title="A cat described in words only",
         content="No pixels here.",
@@ -298,8 +295,6 @@ def test_read_post_describes_images_when_capable_and_always_falls_back_safely(
         entries = {entry["id"]: entry for entry in listing[key]}
         assert entries[post.id]["has_image"] is True
         assert entries[text_post.id]["has_image"] is False
-        # A removed post never advertises an image where it is listed at all.
-        assert entries.get(removed.id, {"has_image": False})["has_image"] is False
         assert "description" not in entries[post.id]
         assert "image" not in entries[post.id]
 

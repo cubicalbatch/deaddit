@@ -1,4 +1,4 @@
-"""Generated-website deletion and soft-removal lifecycle."""
+"""Generated-website deletion lifecycle."""
 
 from __future__ import annotations
 
@@ -83,7 +83,6 @@ def _make_website_post(
     hostname="www.example.test",
     page_name="page.html",
     html="<html><body>hello</body></html>",
-    removed=False,
 ) -> _WebsitePaths:
     stored = store_website(
         html.encode("utf-8"), Path(app.config["GENERATED_WEBSITES_ROOT"])
@@ -93,7 +92,6 @@ def _make_website_post(
         content="A generated website",
         subdeaddit_name=subdeaddit,
         user=user,
-        removed=removed,
     )
     db_session.add(post)
     db_session.flush()
@@ -123,24 +121,6 @@ def _assert_deleted(db_session, app, paths: _WebsitePaths) -> None:
     assert db_session.get(GeneratedWebsite, paths.post_id) is None
     assert db_session.get(Post, paths.post_id) is None
     assert not _website_file(app, paths).exists()
-
-
-def test_soft_removal_preserves_file_and_unremoval_restores_serving(
-    app, client, db_session
-):
-    paths = _make_website_post(app, db_session, hostname="soft.example.test")
-    assert client.get(f"/out/{paths.public_path}").status_code == 200
-
-    post = db_session.get(Post, paths.post_id)
-    post.removed = True
-    db_session.commit()
-    assert client.get(f"/out/{paths.public_path}").status_code == 404
-    assert _website_file(app, paths).is_file()
-
-    post.removed = False
-    db_session.commit()
-    assert client.get(f"/out/{paths.public_path}").status_code == 200
-    assert _website_file(app, paths).is_file()
 
 
 def test_hard_delete_removes_post_notifications_before_post_row(

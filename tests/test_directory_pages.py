@@ -12,7 +12,6 @@ Pinned here:
 - ``/users``: ``q`` filtering username+bio+occupation, 24 per page, sort
   preserved across a filter.
 - LIKE metacharacters in ``q`` are escaped, not treated as wildcards.
-- Removed posts/comments never inflate a community card's counts.
 """
 
 from datetime import datetime, timedelta
@@ -46,14 +45,13 @@ def _ctx_of(records, name):
     return matches[-1]["context"]
 
 
-def _post(i, user, sub, removed=False):
+def _post(i, user, sub):
     return Post(
         title=f"Post {i:03d}",
         content="body",
         user=user,
         subdeaddit_name=sub,
         model="m",
-        removed=removed,
         created_at=BASE + timedelta(minutes=i),
     )
 
@@ -75,7 +73,6 @@ class TestCommunitiesDirectory:
         )
         db_session.flush()
         posts = [_post(i, "author", "alpha") for i in range(3)]
-        posts.append(_post(9, "author", "alpha", removed=True))
         posts.extend(_post(i, "author", "beta") for i in range(20, 21))
         db_session.add_all(posts)
         db_session.flush()
@@ -83,18 +80,6 @@ class TestCommunitiesDirectory:
             [
                 Comment(post_id=posts[0].id, content="c1", user="author", model="m"),
                 Comment(post_id=posts[0].id, content="c2", user="author", model="m"),
-                # Neither of these may reach a card: one is removed, the other
-                # hangs off a removed post.
-                Comment(
-                    post_id=posts[1].id,
-                    content="gone",
-                    user="author",
-                    model="m",
-                    removed=True,
-                ),
-                Comment(
-                    post_id=posts[3].id, content="orphan", user="author", model="m"
-                ),
             ]
         )
         db_session.commit()
@@ -117,8 +102,7 @@ class TestCommunitiesDirectory:
         alpha = context["communities"][0]
         assert alpha.post_types == ["discussion", "questions"]
         assert alpha.description == "Talk about telescopes"
-        # 3 visible posts (the removed one is excluded) and 2 visible comments
-        # (removed comment and comment on the removed post both excluded).
+        # Three posts and two comments belong to alpha.
         assert alpha.post_count == 3
         assert alpha.comment_count == 2
         assert context["communities"][2].post_count == 0

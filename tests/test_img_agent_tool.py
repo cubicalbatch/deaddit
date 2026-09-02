@@ -39,7 +39,6 @@ from deaddit.images.types import (
 from deaddit.models import (
     Agent,
     AgentRun,
-    Ban,
     ImageProvider,
     Post,
     PostImage,
@@ -495,23 +494,6 @@ def test_image_post_failures_leave_no_post_no_files_and_share_the_post_budget(
     assert db_failure["ok"] is False and "failed to save" in db_failure["error"]
     assert_nothing_persisted()
     assert ToolCall.query.order_by(ToolCall.id.desc()).first().ok is False
-
-    # A ban landing mid-generation is caught by the commit-time recheck, and
-    # the already-stored files are cleaned up.
-    def generate_then_ban(*args, **kwargs):
-        db_session.add(
-            Ban(username="alice", subdeaddit_name="testsub", reason="mid-flight")
-        )
-        db_session.commit()
-        return _generation()
-
-    with monkeypatch.context() as patched:
-        patched.setattr(tools_write, "generate_image", generate_then_ban)
-        banned = attempt(agent)
-    assert banned["ok"] is False and "banned" in banned["error"]
-    assert_nothing_persisted()
-    Ban.query.delete()
-    db_session.commit()
 
     # Guardrails are shared across create_post and create_image_post: one post
     # per run, and an hourly cap counted across both tool names.

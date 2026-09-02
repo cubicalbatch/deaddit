@@ -3,7 +3,7 @@ from collections import namedtuple
 from datetime import UTC
 
 from flask import Blueprint, redirect, render_template, request, session, url_for
-from sqlalchemy import and_, distinct, func, or_
+from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import joinedload, selectinload
 
 from deaddit.dynamics import degeneracy
@@ -76,7 +76,7 @@ def index():
     page = request.args.get("page", default=1, type=int)
     posts_per_page = 20
 
-    query = Post.query.filter(Post.removed.is_(False))
+    query = Post.query
 
     active_filters = normalize_post_filter(
         request.args.getlist("filter") or request.args.get("filter")
@@ -163,7 +163,7 @@ def subdeaddit(subdeaddit_name):
     # Check if the subdeaddit exists
     community = Subdeaddit.query.filter_by(name=subdeaddit_name).first_or_404()
 
-    query = Post.query.filter_by(subdeaddit_name=subdeaddit_name, removed=False)
+    query = Post.query.filter_by(subdeaddit_name=subdeaddit_name)
 
     active_filters = normalize_post_filter(
         request.args.getlist("filter") or request.args.get("filter")
@@ -251,8 +251,8 @@ def post(subdeaddit_name, post_id):
         scroll jump), so it needs the same numbers the server ranked with.
         Every sort reduces to "metric DESC, id DESC" — `new` included, since
         a newer timestamp is a larger number — so one comparator covers all
-        four. Scores here are the node dict's, i.e. already zeroed for
-        removed comments, which keeps client order identical to server order.
+        four. Scores here are the node dict's, which keeps client order
+        identical to server order.
         """
         up, down = up_down_split(node["score"], node["vote_count"])
         created = node["created_at"]
@@ -269,20 +269,13 @@ def post(subdeaddit_name, post_id):
         comment_dict = {
             comment.id: {
                 "id": comment.id,
-                # Tombstone convention: a removed comment keeps its node (so
-                # children stay attached and thread structure survives) but
-                # its content/author/score are suppressed.
-                "removed": comment.removed,
-                "removal_reason": comment.removal_reason if comment.removed else None,
-                "content": "" if comment.removed else comment.content,
-                "content_html": (
-                    "" if comment.removed else format_content_html(comment.content)
-                ),
-                "score": 0 if comment.removed else comment.score,
-                "vote_count": 0 if comment.removed else comment.vote_count,
-                "user": None if comment.removed else comment.user,
-                "model": None if comment.removed else comment.model,
-                "llm_model": None if comment.removed else comment.llm_model,
+                "content": comment.content,
+                "content_html": format_content_html(comment.content),
+                "score": comment.score,
+                "vote_count": comment.vote_count,
+                "user": comment.user,
+                "model": comment.model,
+                "llm_model": comment.llm_model,
                 "created_at": comment.created_at,
                 "children": [],
             }
@@ -359,28 +352,16 @@ def post(subdeaddit_name, post_id):
     root_comments = build_comment_tree(comments)
     comment_tree = cap_comment_depth(root_comments)
 
-    # Truncate the post title for the page title; a removed post keeps its
-    # direct-link reachability but its title must not leak anywhere.
-    truncated_title = (
-        "removed post"
-        if post.removed
-        else (post.title[:60] + "...")
-        if len(post.title) > 60
-        else post.title
-    )
+    # Truncate the post title for the page title.
+    truncated_title = (post.title[:60] + "...") if len(post.title) > 60 else post.title
 
     return render_template(
         "post.html",
         post=post,
         comment_tree=comment_tree,
-        # Every loaded row is rendered (removed ones as tombstones), so the
-        # header count and the DOM always agree.
         comment_count=len(comments),
         sort=sort,
-        # Direct links to removed posts stay reachable: the template renders
-        # a tombstone notice instead of title/body, comments stay visible.
-        post_body_html=("" if post.removed else format_content_html(post.content)),
-        removal_reason=post.removal_reason,
+        post_body_html=format_content_html(post.content),
         subdeaddit_name=subdeaddit_name,
         visitor_votes=visitor_vote_map([post.id]),
         comment_visitor_votes=visitor_vote_map(
@@ -417,8 +398,6 @@ def list_subdeaddit():
         or_(like(Subdeaddit.name), like(Subdeaddit.description)) if q else None
     )
 
-    # Counts mirror the community page's own header, which hides removed
-    # rows - a card must never promise more than the page it links to.
     pc = func.count(distinct(Post.id))
     cc = func.count(distinct(Comment.id))
     query = (
@@ -431,11 +410,11 @@ def list_subdeaddit():
         )
         .outerjoin(
             Post,
-            and_(Post.subdeaddit_name == Subdeaddit.name, Post.removed.is_(False)),
+            Post.subdeaddit_name == Subdeaddit.name,
         )
         .outerjoin(
             Comment,
-            and_(Comment.post_id == Post.id, Comment.removed.is_(False)),
+            Comment.post_id == Post.id,
         )
         .group_by(Subdeaddit.name, Subdeaddit.description, Subdeaddit.post_types)
     )
@@ -490,10 +469,6 @@ def user_profile(username):
 
     total_posts = Post.query.filter_by(user=username).count()
     total_comments = Comment.query.filter_by(user=username).count()
-    # Listings/pagination exclude removed rows; profile stats keep counting
-    # everything (soft removal must not corrupt the displayed totals).
-    visible_posts = Post.query.filter_by(user=username, removed=False).count()
-    visible_comments = Comment.query.filter_by(user=username, removed=False).count()
 
     post_upvotes = (
         db.session.query(func.coalesce(func.sum(Post.score), 0))
@@ -530,7 +505,7 @@ def user_profile(username):
     if tab == "posts":
         posts = (
             Post.query.options(selectinload(Post.image))
-            .filter_by(user=username, removed=False)
+            .filter_by(user=username)
             .order_by(Post.created_at.desc(), Post.id.desc())
             .offset(offset)
             .limit(per_page)
@@ -541,17 +516,17 @@ def user_profile(username):
         context["comment_counts"] = get_comment_counts_bulk(post_ids)
         context["websites"] = get_websites_bulk(post_ids)
         context["visitor_votes"] = visitor_vote_map(post_ids)
-        total = visible_posts
+        total = total_posts
     else:
         context["comments"] = (
             Comment.query.options(joinedload(Comment.post))
-            .filter_by(user=username, removed=False)
+            .filter_by(user=username)
             .order_by(Comment.created_at.desc(), Comment.id.desc())
             .offset(offset)
             .limit(per_page)
             .all()
         )
-        total = visible_comments
+        total = total_comments
 
     context["total_pages"] = (total + per_page - 1) // per_page
     context["has_more"] = total > page * per_page
@@ -676,10 +651,7 @@ def search():
 
         posts_query = (
             Post.query.options(selectinload(Post.image))
-            .filter(
-                Post.removed.is_(False),
-                or_(like(Post.title), like(Post.content)),
-            )
+            .filter(or_(like(Post.title), like(Post.content)))
             .order_by(Post.created_at.desc(), Post.id.desc())
         )
         total_posts = posts_query.count()

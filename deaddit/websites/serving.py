@@ -1,11 +1,11 @@
 """Guarded public serving for generated website HTML.
 
 Generated pages are stored under the instance-local website root rather than
-in the source-controlled static tree. Every request resolves a concrete,
-live :class:`~deaddit.models.GeneratedWebsite` row first; an unknown public
-path or a soft-removed post is a 404 before any file is opened. The bounded
-cache gives moderation prompt effect, while the CSP sandbox is the security
-boundary for untrusted generated HTML - validation is not a sanitizer.
+in the source-controlled static tree. Every request resolves a concrete
+:class:`~deaddit.models.GeneratedWebsite` row first; an unknown public path is
+a 404 before any file is opened. The bounded cache limits stale responses,
+while the CSP sandbox is the security boundary for untrusted generated HTML -
+validation is not a sanitizer.
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from deaddit.websites.storage import (
 
 bp = Blueprint("websites", __name__, url_prefix="/out")
 
-# Bounded public caching: short enough that a moderation removal becomes
-# effective for caches/CDNs promptly, while avoiding an unbounded cache.
+# Bounded public caching: limits stale responses while avoiding an unbounded
+# cache.
 CACHE_MAX_AGE_SECONDS = 300
 
 CONTENT_SECURITY_POLICY = (
@@ -38,13 +38,10 @@ PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=(), payment=(), usb=
 
 @bp.route("/<hostname>/<page_name>")
 def page(hostname: str, page_name: str):
-    """Serve one generated page owned by a non-removed post."""
+    """Serve one generated page owned by a post."""
     website = (
         GeneratedWebsite.query.join(Post, Post.id == GeneratedWebsite.post_id)
-        .filter(
-            GeneratedWebsite.public_path == f"{hostname}/{page_name}",
-            Post.removed.is_(False),
-        )
+        .filter(GeneratedWebsite.public_path == f"{hostname}/{page_name}")
         .first()
     )
     if website is None:

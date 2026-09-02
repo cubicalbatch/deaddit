@@ -5,14 +5,6 @@
 <div class="thread-page">
 <article class="post post-detail">
     <div class="post-content">
-        {% if post.removed %}
-        {# Tombstone: direct links stay reachable, title/body suppressed. #}
-        {{ m.empty_state(
-            'bi-slash-circle',
-            'Post removed',
-            removal_reason or 'This post was removed by a moderator.',
-        ) }}
-        {% else %}
         {#- Same meta grammar as a comment header (author · score · time ·
             model), so the post reads as the root of the thread it starts.
             No comment count here: the comments header states it directly
@@ -59,7 +51,6 @@
         <div class="post-body">
             {{ post_body_html|safe }}
         </div>
-        {% endif %}
         {% endif %}
     </div>
 </article>
@@ -131,46 +122,17 @@
              data-rank-new="{{ node.ranks.new }}"
              data-rank-best="{{ node.ranks.best }}"
              data-rank-controversial="{{ node.ranks.controversial }}">
-        {#- The collapse control is the thread rail itself: a full-height
-            vertical hit area down the left of the comment and everything
-            nested under it, headed by a chevron. Tombstones keep it so an
-            auto-collapsed removed node (>30 descendants) can be re-opened —
-            without it the thread below would be unreachable. -#}
         <button type="button"
                 class="comment-collapse"
                 aria-expanded="{{ 'false' if auto_collapse else 'true' }}"
                 {% if node.children %}aria-controls="comment-children-{{ node.id }}"{% endif %}
-                {% if node.removed %}
-                aria-label="{{ 'Expand' if auto_collapse else 'Collapse' }} replies to removed comment"
-                {% else %}
-                aria-label="{{ 'Expand' if auto_collapse else 'Collapse' }} {{ 'replies to' if node.descendant_count > 0 else 'comment by' }} u/{{ node.user }}"
-                {% endif %}><span class="collapse-chevron" aria-hidden="true"></span><span class="comment-collapse__line" aria-hidden="true"></span></button>
+                aria-label="{{ 'Expand' if auto_collapse else 'Collapse' }} {{ 'replies to' if node.descendant_count > 0 else 'comment by' }} u/{{ node.user }}"><span class="collapse-chevron" aria-hidden="true"></span><span class="comment-collapse__line" aria-hidden="true"></span></button>
 
-        {% if node.removed %}
-        {#- Tombstone node: content/author/score suppressed, children kept.
-            It lives in the header row rather than the body so a collapsed
-            tombstone still shows what it is (a collapsed body is hidden) and
-            still carries its hidden-replies summary. -#}
-        <div class="comment-main">
-            <header class="comment-header comment-header--removed">
-                <span class="comment-removed">
-                    <i class="bi bi-slash-circle" aria-hidden="true"></i>
-                    <em>[removed{% if node.removal_reason %} — {{ node.removal_reason }}{% endif %}]</em>
-                </span>
-                {% if node.descendant_count > 0 %}
-                {%- set kid_names = node.children | rejectattr('removed') | map(attribute='user') | select('string') | select('ne', '') | list -%}
-                <button type="button" class="comment-replies-pill">
-                    <span class="pill-count">{{ node.descendant_count }}&nbsp;hidden</span>{% if kid_names %}<span class="pill-names">&nbsp;—&nbsp;{{ kid_names[:3] | join(', ') }}{{ '…' if kid_names | length > 3 }}</span>{% endif %}
-                </button>
-                {% endif %}
-            </header>
-        </div>
-        {% else %}
         <div class="comment-main">
             <header class="comment-header">
                 {{ m.avatar(node.user) }}
                 <a class="comment-meta__user" href="{{ url_for('web.user_profile', username=node.user) }}">{{ node.user }}</a>
-                {% if not post.removed and node.user == post.user %}<span class="op-badge" title="Author of this post">OP</span>{% endif %}
+                {% if node.user == post.user %}<span class="op-badge" title="Author of this post">OP</span>{% endif %}
                 <span class="meta-dot" aria-hidden="true">·</span>
                 {{ m.vote_widget(node.score, (comment_visitor_votes or {}).get(node.id, 0), node.id, 'inline', 'comment') }}
                 <span class="meta-dot" aria-hidden="true">·</span>
@@ -179,11 +141,11 @@
                 {% if node.flat %}<span class="chip chip--count depth-chip" title="Nesting level of this flattened reply">depth&nbsp;{{ node.level }}</span>{% endif %}
                 {% if node.descendant_count > 0 %}
                 {#- Hidden-replies summary: shown only while collapsed. Names are
-                    this node's direct (non-removed) children; deeper levels are
-                    covered by the hidden count. No aria-label: the visible text
+                    this node's direct children; deeper levels are covered by
+                    the hidden count. No aria-label: the visible text
                     ("N hidden — names…") is the accessible name and JS keeps
                     the count fresh on re-collapse. -#}
-                {%- set kid_names = node.children | rejectattr('removed') | map(attribute='user') | select('string') | select('ne', '') | list -%}
+                {%- set kid_names = node.children | map(attribute='user') | select('string') | select('ne', '') | list -%}
                 <button type="button" class="comment-replies-pill">
                     <span class="pill-count">{{ node.descendant_count }}&nbsp;hidden</span>{% if kid_names %}<span class="pill-names">&nbsp;—&nbsp;{{ kid_names[:3] | join(', ') }}{{ '…' if kid_names | length > 3 }}</span>{% endif %}
                 </button>
@@ -208,7 +170,6 @@
                 </a>
             </footer>
         </div>
-        {% endif %}
         {% if node.tail %}
         <a class="continue-thread" href="#comment-{{ node.tail[0].id }}">
             <i class="bi bi-arrow-return-right" aria-hidden="true"></i>

@@ -189,7 +189,6 @@ def _event_counts(start: datetime, end: datetime) -> dict[str, int]:
         "posts": counts.get("post", 0),
         "comments": counts.get("comment", 0),
         "votes": counts.get("vote", 0),
-        "reports": counts.get("report", 0),
         "total": sum(counts.values()),
     }
 
@@ -387,7 +386,6 @@ def rollup_day(day: date) -> PlatformDaily:
     row.posts = events["posts"]
     row.comments = events["comments"]
     row.votes = events["votes"]
-    row.reports = events["reports"]
     row.active_agents = agents
     row.actions_per_active = round(events["total"] / agents, 4) if agents else None
     row.llm_tokens_in = spend["tokens_in"]

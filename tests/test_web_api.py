@@ -63,7 +63,7 @@ def db_session(app):
     return _db.session
 
 
-def _make_website_post(app, db_session, *, removed=False):
+def _make_website_post(app, db_session):
     hostname = "www.redaction-example.test"
     page_name = "aurora-9f1a.html"
     stored = store_website(
@@ -75,7 +75,6 @@ def _make_website_post(app, db_session, *, removed=False):
         content="Public commentary for the website post.",
         subdeaddit_name="testsub",
         user="alice",
-        removed=removed,
     )
     db_session.add(post)
     db_session.flush()
@@ -171,17 +170,3 @@ def test_public_and_admin_website_payloads_redact_provenance(
         body = response.get_data(as_text=True)
         for needle in forbidden:
             assert needle not in body, f"leaked {needle!r} in {response.request.path}"
-
-    db_session.query(Post).filter_by(id=post_id).update({"removed": True})
-    db_session.commit()
-
-    removed_detail = client.get(f"/api/post/{post_id}")
-    assert removed_detail.status_code == 200
-    assert removed_detail.get_json()["website"] is None
-    assert all(
-        entry["id"] != post_id for entry in client.get("/api/posts").get_json()["posts"]
-    )
-
-    removed_admin = admin_client.get(f"/admin/api/posts/{post_id}")
-    assert removed_admin.status_code == 200
-    assert removed_admin.get_json()["website"] == expected_website

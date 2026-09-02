@@ -624,8 +624,7 @@ def _create_comment(ctx: ToolContext, params: CreateCommentArgs) -> dict:
             "hint": "use read_post to check the post exists before replying",
         }
     # Thread cap: the post's frozen popularity ceiling. Counted over all
-    # rows (removed comments render as tombstones), so it always matches
-    # the count the site shows.
+    # rows, so it always matches the count the site shows.
     if post.comment_cap is not None:
         existing = Comment.query.filter_by(post_id=params.post_id).count()
         if existing >= post.comment_cap:

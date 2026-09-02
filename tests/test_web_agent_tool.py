@@ -30,7 +30,6 @@ from deaddit.images.types import Deadline, ImageGenerationResult
 from deaddit.models import (
     Agent,
     AgentRun,
-    Ban,
     GeneratedWebsite,
     ImageProvider,
     Post,
@@ -438,17 +437,6 @@ def test_website_post_failures_leave_no_post_no_files_and_share_the_post_budget(
     assert expired["ok"] is False and "time remaining" in expired["error"]
     assert fake_llm.requests == []
     assert_nothing_persisted()
-
-    # A ban preflighted before generation is rejected without paying for a
-    # generation attempt.
-    db_session.add(Ban(username="alice", subdeaddit_name="testsub", reason="pre-gen"))
-    db_session.commit()
-    banned = attempt(agent)
-    assert banned["ok"] is False and "banned" in banned["error"]
-    assert fake_llm.requests == []
-    assert_nothing_persisted()
-    Ban.query.delete()
-    db_session.commit()
 
     # A length-truncated response is never published, and the API key never
     # leaks into the error.

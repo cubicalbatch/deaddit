@@ -238,7 +238,7 @@ def _post_events(newer: bool, cursor) -> list[_EventRow]:
         lambda s: s,
         Post.created_at,
         Post.id,
-        (Post.removed.isnot(True),),
+        (),
         newer,
         cursor,
         "post",
@@ -266,8 +266,6 @@ def _post_events(newer: bool, cursor) -> list[_EventRow]:
 
 
 def _comment_events(newer: bool, cursor) -> list[_EventRow]:
-    # A comment is excluded when it OR its parent post is removed; its
-    # community comes from the parent post.
     rows = _fetch_rows(
         (
             Comment.id,
@@ -281,7 +279,7 @@ def _comment_events(newer: bool, cursor) -> list[_EventRow]:
         lambda s: s.join(Post, Comment.post_id == Post.id),
         Comment.created_at,
         Comment.id,
-        (Comment.removed.isnot(True), Post.removed.isnot(True)),
+        (),
         newer,
         cursor,
         "comment",
@@ -549,14 +547,11 @@ def recent():
 
 
 def max_event_ts() -> datetime | None:
-    """Max event timestamp across the three sources (None on empty DB).
-
-    Removed posts/comments are excluded to match the ticker's visible set.
-    """
+    """Max event timestamp across the three sources (None on empty DB)."""
     candidates = []
     for expr, filters in (
-        (Post.created_at, (Post.removed.isnot(True),)),
-        (Comment.created_at, (Comment.removed.isnot(True),)),
+        (Post.created_at, ()),
+        (Comment.created_at, ()),
         (Vote.created_at, ()),
     ):
         stmt = select(func.max(expr))
@@ -569,7 +564,7 @@ def max_event_ts() -> datetime | None:
 
 
 def count_events_after(ts: datetime | None) -> int:
-    """COUNT of visible rows strictly past ``ts`` across the three sources.
+    """COUNT of rows strictly past ``ts`` across the three sources.
 
     Mirrors the per-source keyset "newer" predicate (ts-only form); votes on
     hard-deleted targets are rare enough that they still tick the counter.
@@ -595,11 +590,10 @@ def count_events_after(ts: datetime | None) -> int:
             .outerjoin(vpc, vc.post_id == vpc.id)
         )
 
-    total = _count(lambda s: s, Post.created_at, (Post.removed.isnot(True),))
+    total = _count(lambda s: s, Post.created_at)
     total += _count(
         lambda s: s.select_from(Comment).join(Post, Comment.post_id == Post.id),
         Comment.created_at,
-        (Comment.removed.isnot(True), Post.removed.isnot(True)),
     )
     total += _count(_vote_joins, Vote.created_at)
     return total

@@ -138,17 +138,6 @@ def test_malformed_requests_are_rejected(client):
     )
 
 
-def test_removed_post_rejection_uses_frozen_reason(client, seeded_db):
-    post = seeded_db["posts"][1]
-    _vote(client, post.id, 1)
-    post.removed = True
-    db.session.commit()
-
-    body = _vote(client, post.id, -1).get_json()
-    assert body["status"] == "rejected"
-    assert body["reason"] == f"post {post.id} was removed"
-
-
 def test_rate_limit_blocks_bursts(client, seeded_db, monkeypatch):
     monkeypatch.setattr(api_module, "_VOTES_PER_MINUTE", 2)
     post = seeded_db["posts"][1]

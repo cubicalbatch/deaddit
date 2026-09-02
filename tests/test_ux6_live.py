@@ -363,72 +363,6 @@ def test_garbage_cursor_falls_back_to_first_page(app, client):
 
 
 # ---------------------------------------------------------------------------
-# 3. Removed filtering
-# ---------------------------------------------------------------------------
-
-
-def test_removed_posts_and_comments_never_appear(app, client):
-    with app.app_context():
-        _users = [User(username=n) for n in ("alice", "bob", "carol")]
-        sub = Subdeaddit(name="testsub", description="removal seed")
-        _db.session.add_all([*_users, sub])
-        visible = Post(
-            title="Visible post",
-            content="b",
-            user="alice",
-            subdeaddit_name="testsub",
-            model="m",
-            created_at=_BASE - timedelta(minutes=1),
-        )
-        removed_post = Post(
-            title="Removed post unique-zz",
-            content="b",
-            user="bob",
-            subdeaddit_name="testsub",
-            model="m",
-            created_at=_BASE - timedelta(minutes=2),
-            removed=True,
-        )
-        _db.session.add_all([visible, removed_post])
-        _db.session.flush()
-        _db.session.add_all(
-            [
-                Comment(
-                    post_id=visible.id,
-                    content="kept comment qq",
-                    user="carol",
-                    model="m",
-                    created_at=_BASE - timedelta(minutes=3),
-                ),
-                Comment(
-                    post_id=visible.id,
-                    content="removed comment zz",
-                    user="carol",
-                    model="m",
-                    created_at=_BASE - timedelta(minutes=4),
-                    removed=True,
-                ),
-                Comment(  # fine itself, but its parent post is removed
-                    post_id=removed_post.id,
-                    content="orphan under removed post yy",
-                    user="alice",
-                    model="m",
-                    created_at=_BASE - timedelta(minutes=5),
-                ),
-            ]
-        )
-        _db.session.commit()
-
-        html = client.get("/live?fragment=1").get_data(as_text=True)
-
-    assert "Visible post" in html
-    assert "kept comment qq" in html
-    assert "Removed post unique-zz" not in html
-    assert "removed comment zz" not in html
-    assert "orphan under removed post yy" not in html
-
-
-# ---------------------------------------------------------------------------
 # 3b. Kind filter (?kinds=)
 # ---------------------------------------------------------------------------
 
@@ -990,16 +924,7 @@ def test_tool_call_content_cards_resolve_per_contract(
         model="m",
         created_at=_BASE,
     )
-    removed_post = Post(
-        title="Moderated card post",
-        content="b",
-        user="bob",
-        subdeaddit_name="testsub",
-        model="m",
-        created_at=_BASE,
-        removed=True,
-    )
-    db_session.add_all([post, removed_post])
+    db_session.add(post)
     db_session.flush()
     comment = Comment(
         post_id=post.id,
@@ -1026,7 +951,6 @@ def test_tool_call_content_cards_resolve_per_contract(
         [
             _call({"post_id": post.id}),
             _call({"comment_id": comment.id}),
-            _call({"post_id": removed_post.id}),
             _call({"truncated": True, "preview": "too big to keep"}),
             _call({"post_id": 999999}),  # hard-deleted row
             _call("not-a-dict"),
@@ -1041,14 +965,9 @@ def test_tool_call_content_cards_resolve_per_contract(
         "kind": "post",
         "href": f"/d/testsub/{post.id}",
         "label": "Card target post",
-        "removed": False,
     }
     assert cards[1]["kind"] == "comment"
     assert cards[1]["href"].endswith(f"#comment-{comment.id}")
-    assert cards[1]["removed"] is False
-    assert cards[2]["removed"] is True
-    assert cards[2]["href"] is None
-    assert cards[2]["label"].endswith("(removed)")
-    assert cards[3] is None  # preview wrapper -> null
-    assert cards[4] is None  # missing row -> null
-    assert cards[5] is None  # non-dict result -> null
+    assert cards[2] is None  # preview wrapper -> null
+    assert cards[3] is None  # missing row -> null
+    assert cards[4] is None  # non-dict result -> null

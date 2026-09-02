@@ -231,7 +231,6 @@ def _check_backstage_rotation(
     latest = (
         Post.query.filter(
             Post.subdeaddit_name == BACKSTAGE_SUBDEADDIT_NAME,
-            Post.removed.is_(False),
         )
         .order_by(Post.created_at.desc(), Post.id.desc())
         .first()

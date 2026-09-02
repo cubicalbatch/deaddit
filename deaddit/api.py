@@ -45,14 +45,9 @@ def _rate_limited(ip: str) -> bool:
         return False
 
 
-def _public_image(image: PostImage | None, removed: bool) -> dict | None:
-    """Public URL/metadata payload for a post's image, or ``None``.
-
-    A removed post never exposes image URLs (moderation tombstone); the
-    private generation provenance (source_prompt, provider snapshots,
-    request IDs) never leaves ``PostImage.to_dict()`` in the first place.
-    """
-    if image is None or removed:
+def _public_image(image: PostImage | None) -> dict | None:
+    """Public URL/metadata payload for a post's image, or ``None``."""
+    if image is None:
         return None
     data = image.to_dict()
     data["original_url"] = url_for("media.original", filename=data["original_url"])
@@ -60,14 +55,9 @@ def _public_image(image: PostImage | None, removed: bool) -> dict | None:
     return data
 
 
-def _public_website(website: GeneratedWebsite | None, removed: bool) -> dict | None:
-    """Public URL/metadata payload for a generated website, or ``None``.
-
-    A removed post never exposes its website URL (moderation tombstone), and
-    private generation provenance never leaves ``GeneratedWebsite`` through
-    this sanctioned public view.
-    """
-    if website is None or removed:
+def _public_website(website: GeneratedWebsite | None) -> dict | None:
+    """Public URL/metadata payload for a generated website, or ``None``."""
+    if website is None:
         return None
     return website.to_public_dict()
 
@@ -97,7 +87,7 @@ def api_posts():
     limit = request.args.get("limit", default=50, type=int)
     title = request.args.get("title")  # New parameter for title filtering
 
-    query = Post.query.filter(Post.removed.is_(False))
+    query = Post.query
 
     # Filter by Subdeaddit if provided
     if subdeaddit_name:
@@ -159,8 +149,8 @@ def api_posts():
             "score": post.score,
             "model": post.model,
             "llm_model": post.llm_model,
-            "image": _public_image(images_by_post_id.get(post.id), post.removed),
-            "website": _public_website(websites_by_post_id.get(post.id), post.removed),
+            "image": _public_image(images_by_post_id.get(post.id)),
+            "website": _public_website(websites_by_post_id.get(post.id)),
         }
         post_data.append(post_info)
 
@@ -193,13 +183,10 @@ def api_post(post_id):
             if post.content is not None
             else None
         ),
-        # Soft-removed posts stay fetchable by direct ID; consumers must
-        # honor the flag (the web surface renders a tombstone instead).
-        "removed": bool(post.removed),
         "comment_count": comment_count,
         "comments": comment_tree,
-        "image": _public_image(post.image, post.removed),
-        "website": _public_website(post.website, post.removed),
+        "image": _public_image(post.image),
+        "website": _public_website(post.website),
     }
 
     return jsonify(post_data)
@@ -219,15 +206,8 @@ def build_comment_tree(comments):
 def format_comment(comment, comment_map):
     formatted_comment = {
         "id": comment.id,
-        # Removed comments keep their tree position (replies stay attached)
-        # but their content/author are suppressed behind a tombstone marker.
-        "removed": bool(comment.removed),
-        "user": None if comment.removed else comment.user,
-        "content": (
-            "[removed]"
-            if comment.removed
-            else comment.content.replace("reddit", "deaddit")
-        ),
+        "user": comment.user,
+        "content": comment.content.replace("reddit", "deaddit"),
         "parent_id": comment.parent_id,
         "replies": [],
     }
@@ -273,8 +253,7 @@ def api_vote():
 
     JSON-only on purpose: combined with the SameSite=Lax voter cookie, a
     cross-site form (which cannot send ``application/json``) cannot forge a
-    vote. Malformed bodies are 400; domain rejections (removed post,
-    downvotes disabled, …) return their frozen reason with HTTP 200 so the
+    vote. Malformed bodies are 400; domain rejections (downvotes disabled, …)
     client can surface it uniformly; the per-IP abuse limit is 429.
     """
     data = request.get_json(silent=True) or {}

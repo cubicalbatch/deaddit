@@ -6,7 +6,7 @@ Mirrors tests/test_content_service.py's image-post conventions. Every
 generated-website file used here is written through the real
 deaddit.websites.storage primitives into a tmp_path-rooted
 GENERATED_WEBSITES_ROOT - never the real instance/ directory - so failure
-tests can assert the file was actually removed from disk.
+tests can assert the file was actually deleted from disk.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from deaddit import create_app
 from deaddit import db as _db
-from deaddit.dynamics.moderation import ban_user
 from deaddit.models import GeneratedWebsite, Post, Subdeaddit, User
 from deaddit.services import content as content_service
 from deaddit.services.content import (
@@ -127,14 +126,6 @@ def test_preflight_website_post_invalid_community_message(seeded_db):
     with pytest.raises(ContentValidationError) as exc:
         preflight_website_post(user="alice", subdeaddit="nope", title="T")
     assert str(exc.value) == "Subdeaddit 'nope' does not exist"
-    assert GeneratedWebsite.query.count() == 0
-
-
-def test_preflight_website_post_rejects_banned_user(seeded_db):
-    ban_user("alice", "test ban")
-    with pytest.raises(ContentValidationError) as exc:
-        preflight_website_post(user="alice", subdeaddit="testsub", title="T")
-    assert str(exc.value) == "User 'alice' is banned"
     assert GeneratedWebsite.query.count() == 0
 
 
@@ -316,32 +307,6 @@ def test_create_website_post_unknown_subdeaddit_message_and_removes_file(
         )
 
     assert str(exc.value) == "Subdeaddit 'nope' does not exist"
-    assert Post.query.count() == 0
-    assert GeneratedWebsite.query.count() == 0
-    assert not file_path.exists()
-
-
-def test_create_website_post_rechecks_ban_established_after_preflight(app, seeded_db):
-    # Simulate the gap between preflight (before generation) and the final
-    # create call (after generation/storage): state can change in between.
-    preflight_website_post(user="bob", subdeaddit="testsub", title="T")
-    ban_user("bob", "caught spamming mid-generation")
-
-    website = _pending_website(
-        app, public_path="www.example.test/banned.html", creator_username_snapshot="bob"
-    )
-    file_path = _file_path(app, website.storage_path)
-
-    with pytest.raises(ContentValidationError) as exc:
-        create_website_post(
-            title="T",
-            content=None,
-            user="bob",
-            subdeaddit="testsub",
-            website=website,
-        )
-
-    assert str(exc.value) == "User 'bob' is banned"
     assert Post.query.count() == 0
     assert GeneratedWebsite.query.count() == 0
     assert not file_path.exists()

@@ -18,21 +18,9 @@ from typing import Any
 from sqlalchemy import func
 
 from deaddit.extensions import db
-from deaddit.models import Comment, Post, Setting, User, Vote
+from deaddit.models import Comment, Post, User, Vote
 
 logger = logging.getLogger(__name__)
-
-_TRUTHY = frozenset({"true", "1", "on", "yes"})
-
-
-# D4-deferred, landed with D6 (plan §6 'optionally strips karma'): when the
-# Setting is true, soft-removed items are EXCLUDED from the karma rebuild
-# (scores stay vote-authoritative regardless — removal never rewrites them).
-def strip_karma_on_remove() -> bool:
-    """Read ``moderation_strip_karma_on_remove``; default false."""
-    return (
-        Setting.get_value("moderation_strip_karma_on_remove", "false") or ""
-    ).strip().lower() in _TRUTHY
 
 
 _PLANS: tuple[tuple[str, type, Any], ...] = (
@@ -60,7 +48,6 @@ def recompute_scores_and_karma() -> dict[str, int]:
     against Vote truth, and karma columns changed.
     """
     repaired = drift_votes = 0
-    _strip_karma_enabled = strip_karma_on_remove()
     effective: dict[tuple[str, int], int] = {}
 
     for name, model, vote_column in _PLANS:
@@ -93,8 +80,6 @@ def recompute_scores_and_karma() -> dict[str, int]:
         attr = "post_karma" if name == "post" else "comment_karma"
         totals: dict[str, int] = {}
         for item in db.session.query(model).all():
-            if _strip_karma_enabled and getattr(item, "removed", False):
-                continue
             eff = effective.get((name, item.id))
             if eff is None:
                 continue

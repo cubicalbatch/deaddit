@@ -10,13 +10,10 @@ from deaddit.models import (
     AgentMemory,
     AgentRun,
     AgentTurn,
-    Ban,
     Comment,
     Notification,
     Post,
-    Report,
     Subdeaddit,
-    SubdeadditModerator,
     ToolCall,
     User,
     Vote,
@@ -174,19 +171,6 @@ def test_delete_user_cascades_posts_comments_and_responses(
     db_session.flush()
     n1_id, n2_id, n3_id = n1.id, n2.id, n3.id
 
-    # Add reports
-    r1 = Report(reporter=user_a.username, post_id=post_d_id, reason="spam")
-    r2 = Report(reporter=user_b.username, comment_id=c5_id, reason="rude")
-    r3 = Report(
-        reporter=user_c.username,
-        post_id=post_a_id,
-        reason="offtopic",
-        resolved_by=user_a.username,
-    )
-    db_session.add_all([r1, r2, r3])
-    db_session.flush()
-    r1_id, r2_id, r3_id = r1.id, r2.id, r3.id
-
     # Add agent & memory for Joe
     agent_a = Agent(
         user_username=user_a.username,
@@ -221,14 +205,6 @@ def test_delete_user_cascades_posts_comments_and_responses(
     db_session.flush()
     tc_a_id = tc_a.id
 
-    # Subdeaddit mod and ban
-    mod_a = SubdeadditModerator(subdeaddit_name=sub.name, username=user_a.username)
-    ban_a = Ban(username=user_a.username, subdeaddit_name=sub.name, reason="test")
-    db_session.add_all([mod_a, ban_a])
-
-    # Post removed_by moderation
-    post_d.removed_by = user_a.username
-    c8.removed_by = user_a.username
     db_session.commit()
 
     username_a = user_a.username
@@ -255,9 +231,6 @@ def test_delete_user_cascades_posts_comments_and_responses(
     assert db_session.get(Post, post_a_id) is None
     # Verify David's post still exists
     assert db_session.get(Post, post_d_id) is not None
-    # Verify Post D's removed_by was reset to None
-    post_d_db = db_session.get(Post, post_d_id)
-    assert post_d_db.removed_by is None
 
     # Verify comments on Post A are all gone
     assert db_session.get(Comment, c1_id) is None
@@ -268,7 +241,6 @@ def test_delete_user_cascades_posts_comments_and_responses(
     # C4 and C8 (David's comments) still exist
     assert db_session.get(Comment, c4_id) is not None
     assert db_session.get(Comment, c8_id) is not None
-    assert db_session.get(Comment, c8_id).removed_by is None
     # C5, C6, C7 (Joe's comment and its response subtree) are all gone
     assert db_session.get(Comment, c5_id) is None
     assert db_session.get(Comment, c6_id) is None
@@ -286,26 +258,12 @@ def test_delete_user_cascades_posts_comments_and_responses(
     assert db_session.get(Notification, n2_id) is None
     assert db_session.get(Notification, n3_id) is None
 
-    # Verify reports
-    assert db_session.get(Report, r1_id) is None
-    assert db_session.get(Report, r2_id) is None
-    assert db_session.get(Report, r3_id) is None
-
     # Verify agent and runs are cleaned up
     assert db_session.get(Agent, agent_a_id) is None
     assert db_session.get(AgentRun, run_a_id) is None
     assert db_session.get(AgentTurn, turn_a_id) is None
     assert db_session.get(ToolCall, tc_a_id) is None
     assert db_session.get(AgentMemory, mem_a_id) is None
-
-    # Verify mod and ban are cleaned up
-    assert (
-        SubdeadditModerator.query.filter_by(
-            subdeaddit_name=sub.name, username=username_a
-        ).first()
-        is None
-    )
-    assert Ban.query.filter_by(username=username_a).first() is None
 
 
 def test_bulk_delete_users_cascades(seeded_db, admin_client, db_session):

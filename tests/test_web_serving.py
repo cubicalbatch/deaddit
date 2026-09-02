@@ -1,8 +1,8 @@
 """Guarded public serving for generated website pages.
 
 The route resolves a live ``GeneratedWebsite`` row before touching disk, then
-uses that row's opaque storage path. Unknown, traversal, missing-file, and
-soft-removed requests must all be ordinary 404 responses.
+uses that row's opaque storage path. Unknown, traversal, and missing-file
+requests must all be ordinary 404 responses.
 """
 
 from __future__ import annotations
@@ -77,7 +77,6 @@ def _make_website_post(
     hostname="www.fake-observatory.com",
     page_name="aurora-map.html",
     html="<html><body>hello</body></html>",
-    removed=False,
     storage_path: str | None = None,
 ) -> _WebsitePaths:
     stored = store_website(
@@ -88,7 +87,6 @@ def _make_website_post(
         content="A generated website",
         subdeaddit_name="testsub",
         user="alice",
-        removed=removed,
     )
     db_session.add(post)
     db_session.flush()
@@ -166,28 +164,6 @@ def test_public_page_404_matrix_and_never_opens_request_path(app, client, db_ses
     assert client.get("/out/..%2fpages/evil.html").status_code == 404
     assert client.get("/out/www.fake-observatory.com/%00evil.html").status_code == 404
     assert client.get("/out/%zz").status_code == 404
-
-
-def test_soft_removed_post_is_404_while_live_page_still_serves(app, client, db_session):
-    removed = _make_website_post(
-        app,
-        db_session,
-        hostname="removed.fake-observatory.com",
-        page_name="retired.html",
-        removed=True,
-    )
-    live = _make_website_post(
-        app,
-        db_session,
-        hostname="live.fake-observatory.com",
-        page_name="current.html",
-        html="<p>still live</p>",
-    )
-
-    assert client.get(f"/out/{removed.public_path}").status_code == 404
-    live_response = client.get(f"/out/{live.public_path}")
-    assert live_response.status_code == 200
-    assert live_response.data == b"<p>still live</p>"
 
 
 def test_hostile_storage_path_is_rejected_after_row_lookup(app, client, db_session):

@@ -2,8 +2,8 @@
 
 ``ActivityEvent`` is the raw truth behind the ``PlatformDaily`` rollup. This
 module is the ONLY writer. It is hooked into the single persistence path
-(``deaddit.services.content``, Resolution 1) and into the vote and report
-services, always strictly AFTER their transactions commit.
+(``deaddit.services.content``, Resolution 1) and into the vote service, always
+strictly AFTER their transactions commit.
 
 Isolation contract (mirrors :mod:`deaddit.dynamics.notifications`): a platform
 action must NEVER fail because event emission failed. Every public entry
@@ -11,7 +11,7 @@ point wraps its whole body in ``try/except Exception``, logs at warning
 level, rolls back any dirty state it left on the shared session, and returns
 normally. Emission is provably non-raising.
 
-Event types: 'post' | 'comment' | 'vote' | 'report'.
+Event types: 'post' | 'comment' | 'vote'.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from deaddit.models import ActivityEvent
 
 logger = logging.getLogger(__name__)
 
-EVENT_TYPES = ("post", "comment", "vote", "report")
+EVENT_TYPES = ("post", "comment", "vote")
 
 
 def record_event(

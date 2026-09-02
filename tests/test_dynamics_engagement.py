@@ -176,8 +176,6 @@ def test_content_policy_resolution_uses_effective_time_and_id_tiebreak(app, db_s
 
 
 def test_voter_eligibility_excludes_all_guardrails(app, db_session, monkeypatch):
-    from deaddit.models import Ban
-
     now = datetime(2026, 1, 2, 12)
     db_session.add(Subdeaddit(name="guardrails"))
     users = [
@@ -186,7 +184,6 @@ def test_voter_eligibility_excludes_all_guardrails(app, db_session, monkeypatch)
             username="subscriber",
             agent_state={"subscriptions": ["guardrails"]},
         ),
-        User(username="banned"),
         User(username="prior"),
         User(username="disabled", agent_state={"rate_caps": {"vote": 0}}),
         User(username="capped", agent_state={"rate_caps": {"vote": 1}}),
@@ -212,7 +209,6 @@ def test_voter_eligibility_excludes_all_guardrails(app, db_session, monkeypatch)
     import deaddit.dynamics.engagement as engagement
 
     monkeypatch.setattr(engagement, "_hash_unit", lambda *parts: 0.5)
-    db_session.add(Ban(username="banned", subdeaddit_name="guardrails", reason="test"))
     db_session.add(
         Vote(
             voter="prior",

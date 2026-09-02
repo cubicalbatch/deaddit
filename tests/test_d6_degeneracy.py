@@ -156,7 +156,7 @@ class TestHotDemotion:
         db_session.add_all([loud, quiet])
         db_session.commit()
 
-        feed_query = Post.query.filter(Post.removed.is_(False))
+        feed_query = Post.query
         unflagged_order = [*post_order_by("hot")]
         assert feed_query.order_by(*unflagged_order).first().user == "echo_a"
 
@@ -276,7 +276,6 @@ class TestRateLimits:
 
 class TestActivityEventsAndNightly:
     def test_events_emitted_for_actions(self, app, db_session, seeded_db):
-        from deaddit.dynamics.moderation import report_content
         from deaddit.dynamics.votes import cast_vote
 
         _ensure_sub(db_session, "ev")
@@ -290,13 +289,11 @@ class TestActivityEventsAndNightly:
         create_comment(post_id=post.id, content="reply text e-1.", user="bob")
         result = cast_vote("bob", "post", post.id, 1)
         assert result["status"] == "ok"
-        report_content("bob", "post", post.id, "spam reason")
 
         kinds = {(row.event_type, row.username) for row in ActivityEvent.query.all()}
         assert ("post", "alice") in kinds
         assert ("comment", "bob") in kinds
         assert ("vote", "bob") in kinds
-        assert ("report", "bob") in kinds
 
     def test_event_emission_failure_isolated(self, app, db_session):
         """record_event swallows its own internal failures (bad meta JSON)."""

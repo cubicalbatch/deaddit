@@ -22,7 +22,7 @@ from functools import cache
 from flask import current_app
 from sqlalchemy.exc import SQLAlchemyError
 
-from deaddit.dynamics import activity, degeneracy, moderation, notifications
+from deaddit.dynamics import activity, degeneracy, notifications
 from deaddit.extensions import cache as flask_cache
 from deaddit.extensions import db
 from deaddit.models import (
@@ -163,18 +163,16 @@ def _validate_post_preflight(
 
     Shared by text posts (:func:`create_post`) and image posts
     (:func:`preflight_image_post` / :func:`create_image_post`) so both
-    contracts reject unknown users/communities, active bans, and an
-    exceeded post rate limit identically. Order matters: field validation
-    first (cheap, no queries), then existence, then ban, then rate limit —
-    matching the original ``create_post`` behavior byte-for-byte.
+    contracts reject unknown users/communities and an exceeded post rate limit
+    identically. Order matters: field validation first (cheap, no queries),
+    then existence, then rate limit — matching the original ``create_post``
+    behavior byte-for-byte.
     """
     _validate_post_fields(title, content, require_content=require_content)
     if not User.query.filter_by(username=user).first():
         raise ContentValidationError(f"User '{user}' does not exist")
     if not Subdeaddit.query.filter_by(name=subdeaddit).first():
         raise ContentValidationError(f"Subdeaddit '{subdeaddit}' does not exist")
-    if moderation.active_ban_for(user, subdeaddit) is not None:
-        raise ContentValidationError(f"User '{user}' is banned")
     _check_rate_limit(user, "post")
 
 
@@ -208,8 +206,7 @@ def create_post(
 
     Raises:
         ContentValidationError: on an empty title/content, unknown author,
-            unknown subdeaddit, an active ban, or an exceeded post rate
-            limit.
+            unknown subdeaddit, or an exceeded post rate limit.
     """
     _validate_post_preflight(
         title=title,
@@ -274,19 +271,19 @@ def preflight_image_post(*, user: str, subdeaddit: str, title: str) -> None:
 
     Call this first, before spending any provider cost on image
     generation. It runs the same checks as :func:`create_post` minus the
-    content requirement: a non-empty title, a known user and subdeaddit,
-    no active ban, and an unexceeded post rate limit.
+    content requirement: a non-empty title, and a known user and subdeaddit,
+    with an unexceeded post rate limit.
 
     This check is advisory for cost avoidance only — it does not reserve
     a rate-limit slot or lock anything. Generation and storage can take
-    long enough for state to change (a new ban lands, the rate-limit
-    window fills, the community is deleted), so :func:`create_image_post`
+    long enough for state to change (the rate-limit window fills, the
+    community is deleted), so :func:`create_image_post`
     independently re-runs every one of these checks immediately before it
     commits.
 
     Raises:
         ContentValidationError: on an empty title, unknown author, unknown
-            subdeaddit, an active ban, or an exceeded post rate limit.
+            subdeaddit, or an exceeded post rate limit.
     """
     _validate_post_preflight(
         title=title,
@@ -425,20 +422,18 @@ def preflight_website_post(*, user: str, subdeaddit: str, title: str) -> None:
     """Validate everything that must hold before a website is generated.
 
     Call this first, before spending any provider cost generating HTML.
-    Runs the same checks as :func:`preflight_image_post`: a non-empty
-    title, a known user and subdeaddit, no active ban, and an unexceeded
-    post rate limit.
+    Runs the same checks as :func:`preflight_image_post`: a non-empty title,
+    a known user and subdeaddit, and an unexceeded post rate limit.
 
     This check is advisory for cost avoidance only - it does not reserve a
     rate-limit slot or lock anything. Generation and storage can take long
-    enough for state to change (a new ban lands, the rate-limit window
-    fills, the community is deleted), so :func:`create_website_post`
-    independently re-runs every one of these checks immediately before it
-    commits.
+    enough for state to change (the rate-limit window fills, the community is
+    deleted), so :func:`create_website_post` independently re-runs every one
+    of these checks immediately before it commits.
 
     Raises:
         ContentValidationError: on an empty title, unknown author, unknown
-            subdeaddit, an active ban, or an exceeded post rate limit.
+            subdeaddit, or an exceeded post rate limit.
     """
     _validate_post_preflight(
         title=title,
@@ -609,10 +604,6 @@ def create_comment(
     post = db.session.get(Post, post_id)
     if post is None:
         raise ContentValidationError(f"Post '{post_id}' does not exist")
-    if post.removed:
-        raise ContentValidationError(f"Post '{post_id}' has been removed")
-    if moderation.active_ban_for(user, post.subdeaddit_name) is not None:
-        raise ContentValidationError(f"User '{user}' is banned")
     _check_rate_limit(user, "comment")
 
     comment = Comment(

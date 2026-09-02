@@ -20,11 +20,8 @@ from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 from typing import Any
 
-from sqlalchemy import or_
-
 from deaddit.extensions import db
 from deaddit.models import (
-    Ban,
     Comment,
     Post,
     Setting,
@@ -971,35 +968,6 @@ class _VoterSnapshot:
     agent_state: dict[str, Any] | None
 
 
-BanIndex = tuple[set[str], dict[str, set[str]]]
-
-
-def _active_ban_index() -> BanIndex:
-    """Snapshot every active ban as ``(site_wide_usernames, scoped_by_user)``.
-
-    ``active_ban_for`` semantics preserved: a site-wide ban always wins, and
-    only a scoped ban matching the target's subdeaddit otherwise applies.
-    Building this once per tick replaces two SQL queries per candidate voter
-    per selection with a single in-memory lookup.
-    """
-    rows = (
-        db.session.query(Ban.username, Ban.subdeaddit_name)
-        .filter(
-            Ban.lifted_at.is_(None),
-            or_(Ban.expires_at.is_(None), Ban.expires_at > datetime.utcnow()),
-        )
-        .all()
-    )
-    site_wide: set[str] = set()
-    scoped: dict[str, set[str]] = {}
-    for username, subdeaddit_name in rows:
-        if subdeaddit_name is None:
-            site_wide.add(username)
-        else:
-            scoped.setdefault(username, set()).add(subdeaddit_name)
-    return site_wide, scoped
-
-
 def _ordered_users() -> list[_VoterSnapshot]:
     return [
         _VoterSnapshot(username=username, agent_state=agent_state)
@@ -1022,13 +990,11 @@ def _select_voter(
     latest_votes: Mapping[str, datetime],
     *,
     users: Sequence[_VoterSnapshot] | None = None,
-    bans: BanIndex | None = None,
 ) -> tuple[_VoterSnapshot | None, str]:
     config = _policy_config(policy)
     voter_config = config.voter
     gap = float(voter_config["minimum_gap_seconds"])
     users = _ordered_users() if users is None else list(users)
-    site_wide, scoped = _active_ban_index() if bans is None else bans
     pool: list[tuple[_VoterSnapshot, float]] = []
     reasons: list[str] = []
     sub_name = _target_subdeaddit(target, target_type)
@@ -1038,9 +1004,6 @@ def _select_voter(
             continue
         if user.username in existing_voters or user.username in selected:
             reasons.append("prior_voter")
-            continue
-        if user.username in site_wide or sub_name in scoped.get(user.username, ()):
-            reasons.append("banned")
             continue
         cap = _vote_cap(user, voter_config["default_hourly_cap"])
         if cap == 0 or hourly_counts.get(user.username, 0) >= cap:
@@ -1144,9 +1107,8 @@ class ActiveWindowEngine:
         result = TickResult()
         casts_used = 0
         # One snapshot per tick: voter selection is O(candidates) lookups and
-        # must not re-query users or bans per attempt.
+        # must not re-query users per attempt.
         tick_users = _ordered_users()
-        tick_bans = _active_ban_index()
         recent_counts: dict[str, int] = {}
         recent_rows = (
             db.session.query(Vote.voter)
@@ -1241,7 +1203,6 @@ class ActiveWindowEngine:
                         hourly_counts,
                         latest_votes,
                         users=tick_users,
-                        bans=tick_bans,
                     )
                     if voter is None:
                         result.skip(reason)
@@ -1312,7 +1273,6 @@ class ActiveWindowEngine:
                 allow_downvotes=allow_downvotes,
                 casts_used=casts_used,
                 users=tick_users,
-                bans=tick_bans,
             )
         return result
 
@@ -1353,7 +1313,6 @@ class ActiveWindowEngine:
         latest_votes: dict[str, datetime],
         casts_used: int,
         users: Sequence[_VoterSnapshot] | None,
-        bans: BanIndex | None,
     ) -> int:
         """Attempt one tail exposure, then use the normal voter/cast path."""
         if (
@@ -1418,7 +1377,6 @@ class ActiveWindowEngine:
             hourly_counts,
             latest_votes,
             users=users,
-            bans=bans,
         )
         if voter is not None and voter.username in existing_voters:
             result.skip("prior_voter")
@@ -1487,7 +1445,6 @@ class ActiveWindowEngine:
         allow_downvotes: bool | None,
         casts_used: int,
         users: Sequence[_VoterSnapshot],
-        bans: BanIndex,
     ) -> None:
         policy = self.policy or resolve_policy_for_tail_exposure(now)
         if policy is None:
@@ -1534,7 +1491,6 @@ class ActiveWindowEngine:
                 latest_votes=latest_votes,
                 casts_used=casts_used,
                 users=users,
-                bans=bans,
             )
         recent_comments = (
             db.session.query(Comment)
@@ -1599,7 +1555,6 @@ class ActiveWindowEngine:
                     latest_votes=latest_votes,
                     casts_used=casts_used,
                     users=users,
-                    bans=bans,
                 )
 
 

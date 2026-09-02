@@ -74,7 +74,6 @@
     {'label': 'Posts', 'sort_key': 'posts'},
     {'label': 'Comments', 'sort_key': 'comments'},
     {'label': 'Votes', 'sort_key': 'votes'},
-    {'label': 'Reports', 'sort_key': 'reports'},
     {'label': 'Active agents', 'sort_key': 'active_agents'},
     {'label': 'Actions/active'},
     {'label': 'LLM tokens in'},
@@ -91,7 +90,6 @@
         <td>{{ row.posts }}</td>
         <td>{{ row.comments }}</td>
         <td>{{ row.votes }}</td>
-        <td>{{ row.reports }}</td>
         <td>{{ row.active_agents }}</td>
         <td>{% if row.actions_per_active is not none %}{{ '%0.1f'|format(row.actions_per_active) }}{% else %}—{% endif %}</td>
         <td>{{ row.llm_tokens_in if row.llm_tokens_in is not none else '—' }}</td>

@@ -54,11 +54,6 @@ class Post(db.Model):
         db.Index("ix_post_subdeaddit_name_created_at", "subdeaddit_name", "created_at"),
         db.Index("ix_post_model_created_at", "model", "created_at"),
     )
-    # --- Phase D4 moderation: soft removal ---
-    removed = db.Column(db.Boolean, default=False, index=True)
-    removed_by = db.Column(db.String(50), db.ForeignKey("user.username"), nullable=True)
-    removal_reason = db.Column(db.Text, nullable=True)
-    removed_at = db.Column(db.DateTime, nullable=True)
 
 
 class Comment(db.Model):
@@ -85,11 +80,6 @@ class Comment(db.Model):
     __table_args__ = (
         db.Index("ix_comment_post_id_created_at", "post_id", "created_at"),
     )
-    # --- Phase D4 moderation: soft removal ---
-    removed = db.Column(db.Boolean, default=False, index=True)
-    removed_by = db.Column(db.String(50), db.ForeignKey("user.username"), nullable=True)
-    removal_reason = db.Column(db.Text, nullable=True)
-    removed_at = db.Column(db.DateTime, nullable=True)
 
 
 class User(db.Model):
@@ -732,13 +722,13 @@ def _validate_loaded_vote_cadence_policy(target, context):
 
 # --- Platform dynamics: notifications ---
 class Notification(db.Model):
-    """An inbox item for a user: reply, mention, or mod action (Phase D3)."""
+    """An inbox item for a user: reply or mention."""
 
     id = db.Column(db.Integer, primary_key=True)
     recipient = db.Column(
         db.String(50), db.ForeignKey("user.username"), nullable=False, index=True
     )
-    kind = db.Column(db.String(16), nullable=False)  # 'reply'|'mention'|'mod_action'
+    kind = db.Column(db.String(16), nullable=False)  # 'reply'|'mention'
     actor = db.Column(db.String(50), db.ForeignKey("user.username"), nullable=True)
     post_id = db.Column(db.Integer, db.ForeignKey("post.id"), nullable=True, index=True)
     comment_id = db.Column(db.Integer, db.ForeignKey("comment.id"), nullable=True)
@@ -747,65 +737,6 @@ class Notification(db.Model):
     )  # first ~200 chars, frozen at write time
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     read_at = db.Column(db.DateTime, nullable=True, index=True)
-
-
-# --- Platform dynamics: moderation ---
-class Report(db.Model):
-    """A user-submitted complaint about a post or a comment (Phase D4).
-
-    Exactly one of post_id / comment_id is set (XOR). The constraint is
-    enforced by the reporting service, not the schema.
-    """
-
-    id = db.Column(db.Integer, primary_key=True)
-    reporter = db.Column(
-        db.String(50), db.ForeignKey("user.username"), nullable=False, index=True
-    )
-    post_id = db.Column(db.Integer, db.ForeignKey("post.id"), nullable=True, index=True)
-    comment_id = db.Column(
-        db.Integer, db.ForeignKey("comment.id"), nullable=True, index=True
-    )
-    reason = db.Column(db.String(500), nullable=False)
-    status = db.Column(
-        db.String(16), nullable=False, default="open"
-    )  # 'open'|'actioned'|'dismissed' (service-enforced)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
-    resolved_by = db.Column(
-        db.String(50), db.ForeignKey("user.username"), nullable=True
-    )
-    resolved_at = db.Column(db.DateTime, nullable=True)
-    resolution_note = db.Column(db.Text, nullable=True)
-
-
-class SubdeadditModerator(db.Model):
-    """Moderator membership for a subdeaddit (Phase D4). Composite PK."""
-
-    subdeaddit_name = db.Column(
-        db.String(50), db.ForeignKey("subdeaddit.name"), primary_key=True
-    )
-    username = db.Column(
-        db.String(50), db.ForeignKey("user.username"), primary_key=True
-    )
-
-
-class Ban(db.Model):
-    """A ban of a user from one subdeaddit or the whole site (Phase D4).
-
-    A NULL subdeaddit_name means a site-wide ban. An active ban is one where
-    lifted_at IS NULL AND (expires_at IS NULL OR expires_at > now).
-    """
-
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(
-        db.String(50), db.ForeignKey("user.username"), nullable=False, index=True
-    )
-    subdeaddit_name = db.Column(
-        db.String(50), db.ForeignKey("subdeaddit.name"), nullable=True
-    )
-    reason = db.Column(db.String(500), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    expires_at = db.Column(db.DateTime, nullable=True)
-    lifted_at = db.Column(db.DateTime, nullable=True, index=True)
 
 
 # --- UX-5: streamed job logs ---
@@ -924,8 +855,7 @@ class PromptRenderAudit(db.Model):
 class ActivityEvent(db.Model):
     """One platform action, the raw truth for the daily rollup (plan §8).
 
-    Emitted by deaddit.dynamics.activity from the content service, vote
-    service, and report service strictly AFTER their transactions commit;
+    Emitted by deaddit.dynamics.activity strictly AFTER transactions commit;
     emission is failure-isolated and never blocks the action itself.
     Retention: raw rows are kept (plan §Risks — ~1 MB/month at this scale).
     """
@@ -934,7 +864,7 @@ class ActivityEvent(db.Model):
     occurred_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     event_type = db.Column(
         db.String(20), nullable=False, index=True
-    )  # 'post' | 'comment' | 'vote' | 'report'
+    )  # 'post' | 'comment' | 'vote'
     username = db.Column(db.String(50), index=True)
     post_id = db.Column(db.Integer)
     comment_id = db.Column(db.Integer)
@@ -959,7 +889,6 @@ class PlatformDaily(db.Model):
     posts = db.Column(db.Integer, nullable=False, server_default="0")
     comments = db.Column(db.Integer, nullable=False, server_default="0")
     votes = db.Column(db.Integer, nullable=False, server_default="0")
-    reports = db.Column(db.Integer, nullable=False, server_default="0")
     active_agents = db.Column(
         db.Integer, nullable=False, server_default="0"
     )  # distinct users with >=1 event

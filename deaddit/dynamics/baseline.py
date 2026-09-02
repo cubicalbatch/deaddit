@@ -438,13 +438,13 @@ def compute_report(
 
     posts = conn.execute(
         """
-        SELECT id, title, user, subdeaddit_name, score, vote_count, created_at, removed
+        SELECT id, title, user, subdeaddit_name, score, vote_count, created_at
         FROM post ORDER BY id
         """
     ).fetchall()
     comments = conn.execute(
         """
-        SELECT id, post_id, user, score, vote_count, created_at, removed
+        SELECT id, post_id, user, score, vote_count, created_at
         FROM comment ORDER BY id
         """
     ).fetchall()
@@ -506,7 +506,7 @@ def compute_report(
         source_split[vote["source"]] += 1
     source_split = dict(sorted(source_split.items()))
     collisions, collision_count = _collision_report(parsed_calls, votes_by_key)
-    hot_rows = [row for row in posts if not bool(row["removed"])]
+    hot_rows = posts
 
     return {
         "schema_version": _REPORT_VERSION,

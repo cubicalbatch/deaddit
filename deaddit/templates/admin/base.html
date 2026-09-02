@@ -72,13 +72,6 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'admin.reports' %}active{% endif %}"
-                       href="{{ url_for('admin.reports') }}">
-                        <i class="bi bi-flag"></i>
-                        <span class="nav-text">Reports</span>
-                    </a>
-                </li>
-                <li class="nav-item">
                     <a class="nav-link {% if request.endpoint == 'admin.content' %}active{% endif %}"
                        href="{{ url_for('admin.content') }}">
                         <i class="bi bi-file-text"></i>

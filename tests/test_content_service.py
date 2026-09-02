@@ -8,7 +8,6 @@ from datetime import datetime
 import pytest
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from deaddit.dynamics.moderation import ban_user
 from deaddit.models import Comment, Post, PostImage, Subdeaddit, User
 from deaddit.services import content as content_service
 from deaddit.services.content import (
@@ -140,13 +139,6 @@ def test_preflight_image_post_unknown_subdeaddit_message(seeded_db):
     assert str(exc.value) == "Subdeaddit 'nope' does not exist"
 
 
-def test_preflight_image_post_rejects_banned_user(seeded_db):
-    ban_user("alice", "spamming")
-    with pytest.raises(ContentValidationError) as exc:
-        preflight_image_post(user="alice", subdeaddit="testsub", title="T")
-    assert str(exc.value) == "User 'alice' is banned"
-
-
 def test_create_image_post_persists_post_and_image_with_blank_content(
     seeded_db, db_session, cache_spy
 ):
@@ -232,24 +224,6 @@ def test_create_image_post_unknown_subdeaddit_message(seeded_db):
             image=_pending_image(),
         )
     assert str(exc.value) == "Subdeaddit 'nope' does not exist"
-    assert PostImage.query.count() == 0
-
-
-def test_create_image_post_rechecks_ban_established_after_preflight(seeded_db):
-    # Simulate the gap between preflight (before generation) and the final
-    # create call (after generation/storage): state can change in between.
-    preflight_image_post(user="bob", subdeaddit="testsub", title="T")
-    ban_user("bob", "caught spamming mid-generation")
-
-    with pytest.raises(ContentValidationError) as exc:
-        create_image_post(
-            title="T",
-            content=None,
-            user="bob",
-            subdeaddit="testsub",
-            image=_pending_image(),
-        )
-    assert str(exc.value) == "User 'bob' is banned"
     assert PostImage.query.count() == 0
 
 

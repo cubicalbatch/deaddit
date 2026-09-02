@@ -2,12 +2,11 @@
 
 The original/thumbnail routes resolve a concrete PostImage row before ever
 touching a file, so an unknown filename, a traversal attempt, a filename that
-belongs to the other variant, a missing file on disk, and a soft-removed post's
-own file all return 404. Public JSON and HTML expose only the public image
-contract (URLs, dimensions, alt text) - never the private generation prompt,
-provider snapshots, request IDs, or filesystem paths. Every hard-delete route
-that can remove a post must also remove that post's stored files, while soft
-removal keeps them for tombstone/audit purposes.
+belongs to the other variant, and a missing file on disk all return 404. Public
+JSON and HTML expose only the public image contract (URLs, dimensions, alt text)
+never the private generation prompt, provider snapshots, request IDs, or
+filesystem paths. Every hard-delete route that can remove a post must also
+remove that post's stored files.
 
 Path strings are captured immediately after a fixture creates a ``PostImage``
 row: once a hard-delete route removes the row, the same session's identity map
@@ -107,7 +106,6 @@ def _make_image_post(
     content="body text",
     user="alice",
     subdeaddit="testsub",
-    removed=False,
 ) -> _ImagePaths:
     root = Path(app.config["GENERATED_IMAGES_ROOT"])
     stored = store_variants(_solid_png(color=(title.encode()[0], 50, 10)), root)
@@ -116,7 +114,6 @@ def _make_image_post(
         content=content,
         subdeaddit_name=subdeaddit,
         user=user,
-        removed=removed,
     )
     db_session.add(post)
     db_session.flush()
@@ -189,8 +186,6 @@ def test_media_routes_serve_only_files_owned_by_a_live_post(app, client, db_sess
     assert original.status_code == 200
     assert original.mimetype == "image/png"
     assert original.content_length == image.byte_size
-    # Bounded and public, but never immutable: soft removal must be able to
-    # take an image out of circulation.
     assert original.headers["Cache-Control"] == "public, max-age=300"
 
     thumbnail = client.get(f"/media/images/thumbnail/{thumbnail_name}")
@@ -210,18 +205,6 @@ def test_media_routes_serve_only_files_owned_by_a_live_post(app, client, db_sess
     # A row whose file has vanished 404s rather than erroring.
     (Path(app.config["GENERATED_IMAGES_ROOT"]) / paths.original_path).unlink()
     assert client.get(f"/media/images/original/{original_name}").status_code == 404
-
-    # A soft-removed post keeps its files but is no longer servable.
-    removed = _make_image_post(app, db_session, title="Removed", removed=True)
-    assert _files_exist(app, removed)
-    for variant, relpath in (
-        ("original", removed.original_path),
-        ("thumbnail", removed.thumbnail_path),
-    ):
-        assert (
-            client.get(f"/media/images/{variant}/{Path(relpath).name}").status_code
-            == 404
-        )
 
 
 def test_public_json_and_html_show_images_without_leaking_private_metadata(
@@ -300,21 +283,13 @@ def test_public_json_and_html_show_images_without_leaking_private_metadata(
     assert 'class="post-body"' not in body_html
     assert 'class="post-detail__image"' in body_html
 
-    # A removed post never leaks its image anywhere.
-    removed = _make_image_post(app, db_session, title="Removed", removed=True)
-    removed_detail = client.get(f"/d/testsub/{removed.post_id}").get_data(as_text=True)
-    assert "post-detail__image" not in removed_detail
-    assert Path(removed.original_path).name not in removed_detail
-    assert client.get(f"/api/post/{removed.post_id}").get_json()["image"] is None
-    assert all(
-        entry["id"] != removed.post_id
-        for entry in client.get("/api/posts").get_json()["posts"]
-    )
-
     # A text-only post carries no image markup and a null image in JSON.
     _db.session.query(PostImage).delete()
     _db.session.query(Post).delete()
     _db.session.commit()
+    # Bulk deletes bypass the session: drop stale identity-map entries so
+    # the reused SQLite rowid cannot collide with a dead instance.
+    _db.session.expunge_all()
     text_post = _make_text_post(db_session)
     text_html = client.get("/").get_data(as_text=True)
     assert "post-card__media" not in text_html
@@ -404,8 +379,7 @@ def test_hard_deletes_remove_files_and_reconciliation_defaults_to_a_dry_run(
     )
     assert not _files_exist(app, spared)
 
-    # Reconciliation: dry run by default, and never touches referenced files
-    # (including a soft-removed post's evidence).
+    # Reconciliation: dry run by default, and never touches referenced files.
     db_session.add(Subdeaddit(name="testsub", description="A test subdeaddit"))
     db_session.commit()
     monkeypatch.setattr(images_cli, "create_app", lambda *a, **k: app)
@@ -415,8 +389,6 @@ def test_hard_deletes_remove_files_and_reconciliation_defaults_to_a_dry_run(
     root = Path(app.config["GENERATED_IMAGES_ROOT"])
     orphan = root / store_variants(_solid_png(), root).original_path
     kept = _make_image_post(app, db_session, title="Kept")
-    soft_removed = _make_image_post(app, db_session, title="Tombstone")
-    db_session.get(Post, soft_removed.post_id).removed = True
     missing = _make_image_post(app, db_session, title="Missing")
     (root / missing.original_path).unlink()
     db_session.commit()
@@ -443,7 +415,6 @@ def test_hard_deletes_remove_files_and_reconciliation_defaults_to_a_dry_run(
     assert applied.exit_code == 0
     assert not orphan.is_file()
     assert _files_exist(app, kept)
-    assert _files_exist(app, soft_removed), "soft removal must keep evidence files"
 
 
 def test_regenerate_thumbnails_cli_rebuilds_legacy_thumbnails(

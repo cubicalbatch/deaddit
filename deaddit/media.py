@@ -2,15 +2,14 @@
 
 Generated image files live under the instance-local media root
 (``deaddit/images/storage.py``), not the source-controlled static tree, so
-they survive container replacement and moderation can suppress them. Every
-request here resolves a concrete :class:`~deaddit.models.PostImage` row
-first; an opaque filename with no matching, non-removed row is a 404 - the
-file is never opened based on the request path alone.
+they survive container replacement. Every request here resolves a concrete
+:class:`~deaddit.models.PostImage` row first; an opaque filename with no
+matching row is a 404 - the file is never opened based on the request path
+alone.
 
-Cache headers are bounded (not the permanent/immutable caching normally
-appropriate for content-addressed filenames) because a soft-removed post
-must stop being served within a bounded window: moderation needs to take
-effect, not wait out a "forever" client or proxy cache.
+Cache headers are bounded rather than permanent/immutable, limiting stale
+responses while avoiding re-fetching a thumbnail on every feed scroll within
+one browsing session.
 """
 
 from __future__ import annotations
@@ -22,8 +21,7 @@ from deaddit.models import Post, PostImage
 
 bp = Blueprint("media", __name__, url_prefix="/media/images")
 
-# Bounded public caching: short enough that a moderation removal becomes
-# effective for caches/CDNs promptly, long enough to avoid re-fetching a
+# Bounded public caching: limits stale responses while avoiding re-fetching a
 # thumbnail on every feed scroll within one browsing session.
 CACHE_MAX_AGE_SECONDS = 300
 
@@ -39,7 +37,7 @@ def _serve_variant(kind: str, filename: str):
 
     image = (
         PostImage.query.join(Post, Post.id == PostImage.post_id)
-        .filter(column == relpath, Post.removed.is_(False))
+        .filter(column == relpath)
         .first()
     )
     if image is None:
@@ -49,8 +47,8 @@ def _serve_variant(kind: str, filename: str):
     try:
         # Resolve from the row's own stored path, not the raw request
         # filename - resolve_media_path is the single sanctioned join point
-        # and rejects traversal/escape even though the DB lookup above
-        # already pins this to a real, non-removed post's own file.
+        # and rejects traversal/escape after the DB lookup pins this to a
+        # real post's own file.
         path = resolve_media_path(root, getattr(image, path_attr))
     except MediaStorageError:
         abort(404)

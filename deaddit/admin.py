@@ -55,7 +55,6 @@ from deaddit.models import (
     AgentRun,
     AgentTurn,
     ApiModel,
-    Ban,
     Comment,
     DegeneracyFlag,
     EndpointCapability,
@@ -74,10 +73,8 @@ from deaddit.models import (
     PromptRenderAudit,
     PromptTemplate,
     PromptTemplateVersion,
-    Report,
     Setting,
     Subdeaddit,
-    SubdeadditModerator,
     ToolCall,
     User,
     Vote,
@@ -114,16 +111,6 @@ def _delete_post_notifications(post_ids):
             )
 
 
-def _delete_post_reports(post_ids):
-    """Delete reports that would block hard deletion of these posts."""
-    post_ids = list(post_ids)
-    if post_ids:
-        for chunk in _chunked(post_ids, 500):
-            Report.query.filter(Report.post_id.in_(chunk)).delete(
-                synchronize_session=False
-            )
-
-
 def _get_comment_ids_with_descendants(root_comment_ids):
     """Recursively collect all descendant comment IDs for the given comment IDs."""
     all_ids = set(root_comment_ids)
@@ -147,7 +134,7 @@ def _get_comment_ids_with_descendants(root_comment_ids):
 
 
 def _delete_comments(comment_ids):
-    """Delete comments and all child comments/responses, plus their votes, notifications, reports."""
+    """Delete comments and all child comments/responses, plus their votes and notifications."""
     comment_ids = list(comment_ids)
     if not comment_ids:
         return 0
@@ -158,9 +145,6 @@ def _delete_comments(comment_ids):
     for chunk in _chunked(all_comment_ids, 500):
         Vote.query.filter(Vote.comment_id.in_(chunk)).delete(synchronize_session=False)
         Notification.query.filter(Notification.comment_id.in_(chunk)).delete(
-            synchronize_session=False
-        )
-        Report.query.filter(Report.comment_id.in_(chunk)).delete(
             synchronize_session=False
         )
         # Detach every child pointing at this chunk, including children
@@ -175,7 +159,7 @@ def _delete_comments(comment_ids):
 
 
 def _delete_posts_cascade(post_ids):
-    """Delete posts and all associated comments, images, websites, votes, notifications, reports."""
+    """Delete posts and all associated comments, images, websites, votes, and notifications."""
     post_ids = list(post_ids)
     if not post_ids:
         return 0, 0
@@ -192,7 +176,6 @@ def _delete_posts_cascade(post_ids):
 
     for chunk in _chunked(post_ids, 500):
         _delete_post_notifications(chunk)
-        _delete_post_reports(chunk)
         Vote.query.filter(Vote.post_id.in_(chunk)).delete(synchronize_session=False)
         PostImage.query.filter(PostImage.post_id.in_(chunk)).delete(
             synchronize_session=False
@@ -208,7 +191,7 @@ def _delete_posts_cascade(post_ids):
 
 
 def _delete_users_cascade(usernames):
-    """Delete one or more users and all their posts, comments, responses to comments, votes, moderation records, etc."""
+    """Delete one or more users and all their posts, comments, responses to comments, and votes."""
     usernames = list(usernames)
     if not usernames:
         return {
@@ -249,14 +232,13 @@ def _delete_users_cascade(usernames):
             )
     all_root_comment_ids = list(set(user_comment_ids + post_comment_ids))
 
-    # 2. Delete all comments and their descendant responses, votes, notifications, reports
+    # 2. Delete all comments and their descendant responses, votes, and notifications
     total_comments_deleted = _delete_comments(all_root_comment_ids)
 
     # 3. Delete the users' posts
     if post_ids:
         for chunk in _chunked(post_ids, 500):
             _delete_post_notifications(chunk)
-            _delete_post_reports(chunk)
             Vote.query.filter(Vote.post_id.in_(chunk)).delete(synchronize_session=False)
             PostImage.query.filter(PostImage.post_id.in_(chunk)).delete(
                 synchronize_session=False
@@ -267,18 +249,10 @@ def _delete_users_cascade(usernames):
             Post.query.filter(Post.id.in_(chunk)).delete(synchronize_session=False)
 
     for chunk in _chunked(usernames, 500):
-        # 4. Clean up moderator removed_by FK on remaining posts/comments
-        Post.query.filter(Post.removed_by.in_(chunk)).update(
-            {Post.removed_by: None}, synchronize_session=False
-        )
-        Comment.query.filter(Comment.removed_by.in_(chunk)).update(
-            {Comment.removed_by: None}, synchronize_session=False
-        )
-
-        # 5. Clean up votes cast by the user(s) on ANY remaining posts/comments
+        # 4. Clean up votes cast by the user(s) on ANY remaining posts/comments
         Vote.query.filter(Vote.voter.in_(chunk)).delete(synchronize_session=False)
 
-        # 6. Clean up notifications where the user is recipient or actor
+        # 5. Clean up notifications where the user is recipient or actor
         Notification.query.filter(Notification.recipient.in_(chunk)).delete(
             synchronize_session=False
         )
@@ -286,21 +260,7 @@ def _delete_users_cascade(usernames):
             synchronize_session=False
         )
 
-        # 7. Clean up reports filed by or resolved by the user
-        Report.query.filter(Report.reporter.in_(chunk)).delete(
-            synchronize_session=False
-        )
-        Report.query.filter(Report.resolved_by.in_(chunk)).update(
-            {Report.resolved_by: None}, synchronize_session=False
-        )
-
-        # 8. Clean up subdeaddit moderators and bans
-        SubdeadditModerator.query.filter(
-            SubdeadditModerator.username.in_(chunk)
-        ).delete(synchronize_session=False)
-        Ban.query.filter(Ban.username.in_(chunk)).delete(synchronize_session=False)
-
-        # 9. Clean up agents and agent runtime data
+        # 6. Clean up agents and agent runtime data
         AgentMemory.query.filter(AgentMemory.user_username.in_(chunk)).delete(
             synchronize_session=False
         )
@@ -343,7 +303,7 @@ def _delete_users_cascade(usernames):
                     )
             db.session.delete(agent)
 
-        # 10. Delete the user records themselves
+        # 7. Delete the user records themselves
         users = User.query.filter(User.username.in_(chunk)).all()
         for u in users:
             db.session.delete(u)
@@ -863,11 +823,6 @@ def voting_policy_api():
     return jsonify({"policy": _policy_record(policy)}), 201
 
 
-def _moderator_user() -> User | None:
-    """Return the shared admin principal when it exists."""
-    return db.session.get(User, "admin")
-
-
 @admin_bp.route("/login", methods=["GET", "POST"])
 @production_disabled
 def login():
@@ -971,12 +926,10 @@ def dashboard():
     degeneracy_active = DegeneracyFlag.query.filter(
         DegeneracyFlag.created_at >= since
     ).count()
-    reports_pending = Report.query.filter(Report.status == "open").count()
     pulse = {
         "posts_today": _bucket(post_rows),
         "comments_today": _bucket(comment_rows),
         "degeneracy_flags_24h": degeneracy_active,
-        "reports_open": reports_pending,
     }
 
     # --- LLM spend today ---
@@ -1408,11 +1361,6 @@ def api_delete_subdeaddit(name):
         website_paths = website_service.website_paths_for_posts(post_ids)
         posts_count, comments_count = _delete_posts_cascade(post_ids)
 
-        SubdeadditModerator.query.filter_by(subdeaddit_name=name).delete(
-            synchronize_session=False
-        )
-        Ban.query.filter_by(subdeaddit_name=name).delete(synchronize_session=False)
-
         db.session.delete(subdeaddit)
         db.session.commit()
         media_service.delete_media_files(current_app, media_paths)
@@ -1472,12 +1420,6 @@ def api_bulk_delete_subdeaddits():
                 website_paths.extend(website_service.website_paths_for_posts(post_ids))
                 posts_count, comments_count = _delete_posts_cascade(post_ids)
 
-                SubdeadditModerator.query.filter_by(subdeaddit_name=name).delete(
-                    synchronize_session=False
-                )
-                Ban.query.filter_by(subdeaddit_name=name).delete(
-                    synchronize_session=False
-                )
                 db.session.delete(subdeaddit)
 
                 deleted_count += 1
@@ -4135,8 +4077,6 @@ def _tool_content_card(result):
     Cards link to the post/comment a successful create_post/create_comment
     call produced; hard-deleted rows, non-dict results, and preview-wrapper
     results ({'truncated': ..., 'preview': ...}) all resolve to None.
-    Removed content renders as plain text: href is None and the label gains a
-    " (removed)" suffix.
     """
     from deaddit.models import Comment, Post
 
@@ -4155,11 +4095,7 @@ def _tool_content_card(result):
             href = url_for(
                 "web.post", subdeaddit_name=post.subdeaddit_name, post_id=post.id
             )
-            removed = bool(post.removed)
-            if removed:
-                href = None
-                label += " (removed)"
-            return {"kind": "post", "href": href, "label": label, "removed": removed}
+            return {"kind": "post", "href": href, "label": label}
         comment = db.session.get(Comment, comment_id)
         if comment is None:
             return None
@@ -4167,20 +4103,15 @@ def _tool_content_card(result):
         if post is None:
             return None
         label = _truncate(comment.content)
-        removed = bool(comment.removed or post.removed)
-        href = None
-        if removed:
-            label += " (removed)"
-        else:
-            href = (
-                url_for(
-                    "web.post",
-                    subdeaddit_name=post.subdeaddit_name,
-                    post_id=post.id,
-                )
-                + f"#comment-{comment.id}"
+        href = (
+            url_for(
+                "web.post",
+                subdeaddit_name=post.subdeaddit_name,
+                post_id=post.id,
             )
-        return {"kind": "comment", "href": href, "label": label, "removed": removed}
+            + f"#comment-{comment.id}"
+        )
+        return {"kind": "comment", "href": href, "label": label}
     except SQLAlchemyError:
         # Malformed id types or vanished rows must never break serialization.
         return None
@@ -5603,219 +5534,6 @@ def agents_dashboard():
 def agent_detail(agent_id):
     """Single-agent detail page addressed by numeric agent id."""
     return render_template("admin/agent_detail.html", agent_id=agent_id)
-
-
-# --- Moderation: reports queue (Phase D4) ---
-
-_REPORT_STATUSES = ("open", "actioned", "dismissed", "all")
-
-
-def _report_target(report):
-    """Resolve a report's target to (kind, item_or_None).
-
-    kind is "post" or "comment"; item is None when the row was hard-deleted
-    by bulk cleanup (the queue still lists the report).
-    """
-    if report.post_id:
-        return "post", Post.query.get(report.post_id)
-    if report.comment_id:
-        return "comment", Comment.query.get(report.comment_id)
-    return None, None
-
-
-def _report_row(report):
-    """View model for one queue row: links, preview snippet, author."""
-    kind, item = _report_target(report)
-    url = None
-    snippet = "(content no longer exists)"
-    author = None
-    subdeaddit_name = None
-    if kind == "post" and item is not None:
-        url = url_for(
-            "web.post",
-            subdeaddit_name=item.subdeaddit_name,
-            post_id=item.id,
-        )
-        snippet = (item.title or item.content or "")[:120]
-        author = item.user
-        subdeaddit_name = item.subdeaddit_name
-    elif kind == "comment" and item is not None:
-        url = url_for(
-            "web.post",
-            subdeaddit_name=item.post.subdeaddit_name,
-            post_id=item.post_id,
-            _anchor=f"comment-{item.id}",
-        )
-        snippet = (item.content or "")[:120]
-        author = item.user
-        subdeaddit_name = item.post.subdeaddit_name
-    return {
-        "report": report,
-        "kind": kind,
-        "url": url,
-        "snippet": snippet,
-        "author": author,
-        "subdeaddit_name": subdeaddit_name,
-    }
-
-
-def _report_subdeaddit_name(report):
-    """Subdeaddit scope for a ban: the reported item's community."""
-    _, item = _report_target(report)
-    if item is None:
-        return None
-    return (
-        item.subdeaddit_name
-        if hasattr(item, "subdeaddit_name")
-        else item.post.subdeaddit_name
-    )
-
-
-@admin_bp.route("/reports")
-@production_disabled
-@admin_required
-def reports():
-    """Moderation report queue (Phase D4)."""
-    status = request.args.get("status", "open")
-    if status not in _REPORT_STATUSES:
-        status = "open"
-
-    from deaddit.dynamics import moderation
-
-    if status == "all":
-        query = Report.query.order_by(desc(Report.created_at), desc(Report.id))
-    else:
-        query = moderation.list_reports(status=status)
-
-    page = int(request.args.get("page", 1))
-    pagination = query.paginate(page=page, per_page=20, error_out=False)
-
-    return render_template(
-        "admin/reports.html",
-        rows=[_report_row(report) for report in pagination.items],
-        pagination=pagination,
-        statuses=_REPORT_STATUSES,
-        current_status=status,
-    )
-
-
-@admin_bp.route("/reports/<int:report_id>/remove", methods=["POST"])
-@production_disabled
-@admin_required
-def report_remove(report_id):
-    """Action a report: soft-remove the reported content (Phase D4)."""
-    removal_reason = (request.form.get("removal_reason") or "").strip() or None
-
-    from deaddit.dynamics import moderation
-
-    moderator = _moderator_user()
-    if moderator is None:
-        flash(
-            "Moderation actions require the 'admin' user to exist; create it first.",
-            "error",
-        )
-        return redirect(url_for("admin.reports"))
-
-    try:
-        report = moderation.remove_report(
-            report_id, moderator=moderator.username, removal_reason=removal_reason
-        )
-    except ValueError as exc:
-        flash(str(exc), "error")
-        return redirect(url_for("admin.reports"))
-
-    flash(f"Report #{report.id} actioned: content removed.", "success")
-    return redirect(url_for("admin.reports"))
-
-
-@admin_bp.route("/reports/<int:report_id>/dismiss", methods=["POST"])
-@production_disabled
-@admin_required
-def report_dismiss(report_id):
-    """Dismiss a report without acting on the content (Phase D4)."""
-    note = (request.form.get("note") or "").strip() or None
-
-    from deaddit.dynamics import moderation
-
-    moderator = _moderator_user()
-    if moderator is None:
-        flash(
-            "Moderation actions require the 'admin' user to exist; create it first.",
-            "error",
-        )
-        return redirect(url_for("admin.reports"))
-
-    try:
-        report = moderation.dismiss_report(
-            report_id, moderator=moderator.username, note=note
-        )
-    except ValueError as exc:
-        flash(str(exc), "error")
-        return redirect(url_for("admin.reports"))
-
-    flash(f"Report #{report.id} dismissed.", "success")
-    return redirect(url_for("admin.reports"))
-
-
-@admin_bp.route("/reports/<int:report_id>/ban", methods=["POST"])
-@production_disabled
-@admin_required
-def report_ban(report_id):
-    """Ban the author of the reported content (Phase D4)."""
-    report = Report.query.get_or_404(report_id)
-    _, item = _report_target(report)
-    if item is None:
-        flash("Reported content no longer exists; cannot ban its author.", "error")
-        return redirect(url_for("admin.reports", status=request.args.get("status")))
-
-    username = item.user
-    scope = request.form.get("scope", "site")
-    reason = (request.form.get("reason") or "").strip()
-    duration_raw = (request.form.get("duration_days") or "").strip()
-
-    if not reason:
-        flash("A ban reason is required.", "error")
-        return redirect(url_for("admin.reports"))
-
-    expires_at = None
-    if duration_raw:
-        try:
-            days = int(duration_raw)
-            if days <= 0:
-                raise ValueError("duration must be positive")
-        except ValueError as exc:
-            flash(f"Invalid ban duration: {exc}", "error")
-            return redirect(url_for("admin.reports"))
-        expires_at = datetime.utcnow() + timedelta(days=days)
-
-    subdeaddit_name = _report_subdeaddit_name(report) if scope == "subdeaddit" else None
-
-    from deaddit.dynamics import moderation
-
-    moderator = _moderator_user()
-    if moderator is None:
-        flash(
-            "Moderation actions require the 'admin' user to exist; create it first.",
-            "error",
-        )
-        return redirect(url_for("admin.reports"))
-
-    try:
-        ban = moderation.ban_user(
-            username,
-            reason,
-            subdeaddit_name=subdeaddit_name,
-            expires_at=expires_at,
-            banned_by=moderator.username,
-        )
-    except ValueError as exc:
-        flash(str(exc), "error")
-        return redirect(url_for("admin.reports"))
-
-    scope_label = ban.subdeaddit_name or "site-wide"
-    duration_label = f" until {ban.expires_at:%Y-%m-%d}" if ban.expires_at else ""
-    flash(f"Banned u/{username} ({scope_label}){duration_label}.", "success")
-    return redirect(url_for("admin.reports"))
 
 
 # --- LLM-5: prompt versioning (read-only visibility + version creation) ---
