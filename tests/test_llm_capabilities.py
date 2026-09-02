@@ -105,6 +105,52 @@ def test_probe_with_schema_invalid_args_is_verdict_false(
     assert capabilities.LAST_PROBE_EVIDENCE["tool_name"] == "echo_probe"
 
 
+def test_unwrap_envelope_branches():
+    """Only proxies nesting a real OpenAI body under ``data`` get unwrapped."""
+    from deaddit.llm.transport import _unwrap_envelope
+
+    inner = {"choices": [{"finish_reason": "stop"}]}
+    assert _unwrap_envelope({"success": True, "data": inner}) is inner
+    assert _unwrap_envelope({"choices": [1]}) == {"choices": [1]}
+    assert _unwrap_envelope({"data": {"error": "x"}}) == {"data": {"error": "x"}}
+    assert _unwrap_envelope({"success": False}) == {"success": False}
+
+
+def test_probe_unwraps_data_nested_envelope(app, db_session, monkeypatch):
+    """cline-style proxies wrap the OpenAI body as {"success", "data"}.
+
+    The probe must still reach the tool call and record a True verdict.
+    """
+    from deaddit.llm import transport
+
+    body = {
+        "success": True,
+        "data": {
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": _tool_call(json.dumps({"message": "ping"})),
+                    },
+                }
+            ]
+        },
+    }
+
+    class _FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return body
+
+    session = type("S", (), {"post": staticmethod(lambda *a, **k: _FakeResponse())})()
+    monkeypatch.setattr(transport, "get_session", lambda: session)
+    cap = probe_endpoint(API_URL, MODEL)
+    assert cap.supports_tools is True
+    assert capabilities.LAST_PROBE_EVIDENCE["arguments"] == {"message": "ping"}
+
+
 def test_probe_missing_tool_calls_is_verdict_false(app, db_session, fake_llm):
     fake_llm.enqueue_content("I will not use tools.")
     cap = probe_endpoint(API_URL, MODEL)

@@ -183,7 +183,9 @@ class LLMClient:
             from deaddit.llm.capabilities import ensure_tools_allowed
 
             # Raises CapabilityError on an explicit supports_tools=False verdict.
-            ensure_tools_allowed(req.api_url, req.model, request_id=req.request_id)
+            ensure_tools_allowed(
+                req.api_url, req.model, api_key=req.api_key, request_id=req.request_id
+            )
         payload = _build_payload(req)
         started = time.monotonic()
         rec = accounting.AttemptRecorder(req)

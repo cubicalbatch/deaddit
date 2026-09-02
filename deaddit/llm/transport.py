@@ -50,6 +50,18 @@ def get_session() -> requests.Session:
     return _session
 
 
+def _unwrap_envelope(data: dict) -> dict:
+    """Unwrap proxies that nest the OpenAI response under ``data``.
+
+    e.g. cline returns ``{"success": true, "data": {choices: [...]}}``;
+    every OpenAI-shaped consumer reads ``choices`` off the top level.
+    """
+    inner = data.get("data")
+    if not data.get("choices") and isinstance(inner, dict) and inner.get("choices"):
+        return inner
+    return data
+
+
 def post_chat(
     api_url: str,
     payload: dict,
@@ -101,7 +113,7 @@ def post_chat(
             continue
 
         if response.status_code == 200:
-            data = response.json()
+            data = _unwrap_envelope(response.json())
             _notify(on_attempt, attempt, scoped_id, data)
             _last_attempts.value = attempt
             return data
