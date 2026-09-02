@@ -173,6 +173,31 @@ def test_starter_agents_are_free_and_idempotent(admin_client, db_session, fake_l
     assert fake_llm.requests == []
 
 
+def test_starter_agents_are_random_personas_with_cadence(
+    admin_client, db_session, fake_llm
+):
+    db_session.add_all(
+        [
+            User(username="starter_a", bio="A", interests="[]"),
+            User(username="starter_b", bio="B", interests="[]"),
+        ]
+    )
+    db_session.commit()
+
+    response = admin_client.post(
+        "/admin/api/setup/agents-from-personas",
+        json={"count": 1, "min_delay": 10, "max_delay": 3},
+    )
+    assert response.status_code == 200
+    agent = Agent.query.one()
+    assert agent.persona_mode == "random"
+    assert agent.user_username is None
+    assert agent.is_enabled and agent.next_run_at is not None
+    assert agent.config["min_delay"] == 10
+    assert agent.config["max_delay"] == 10
+    assert fake_llm.requests == []
+
+
 def test_setup_voting_is_live_and_idempotent(admin_client, db_session):
     first = admin_client.post("/admin/api/setup/voting")
     second = admin_client.post("/admin/api/setup/voting")

@@ -3433,10 +3433,10 @@ def setup_voting_api():
 @production_disabled
 @admin_required
 def setup_agents_from_personas_api():
-    """Enroll a deterministic set of starter users without touching the LLM."""
+    """Enroll autonomous random-persona agents without touching the LLM."""
     payload = request.get_json(silent=True) or {}
     try:
-        count = int(payload.get("count", 3))
+        count = int(payload.get("count", 1))
     except (TypeError, ValueError):
         return jsonify({"success": False, "error": "count must be an integer"}), 400
     if count < 1 or count > 50:
@@ -3444,46 +3444,19 @@ def setup_agents_from_personas_api():
             jsonify({"success": False, "error": "count must be between 1 and 50"}),
             400,
         )
-
-    posts_sq = (
-        db.session.query(Post.user.label("username"), func.count(Post.id).label("n"))
-        .group_by(Post.user)
-        .subquery()
-    )
-    comments_sq = (
-        db.session.query(
-            Comment.user.label("username"), func.count(Comment.id).label("n")
+    try:
+        min_delay = int(payload.get("min_delay", 30))
+        max_delay = int(payload.get("max_delay", 60))
+    except (TypeError, ValueError):
+        return (
+            jsonify(
+                {"success": False, "error": "min_delay/max_delay must be integers"}
+            ),
+            400,
         )
-        .group_by(Comment.user)
-        .subquery()
-    )
-    activity = func.coalesce(posts_sq.c.n, 0) + func.coalesce(comments_sq.c.n, 0)
-    users = (
-        db.session.query(User)
-        .outerjoin(posts_sq, User.username == posts_sq.c.username)
-        .outerjoin(comments_sq, User.username == comments_sq.c.username)
-        .order_by(desc(activity), User.username)
-        .limit(count)
-        .all()
-    )
-    if not users:
-        return jsonify(
-            {
-                "success": True,
-                "agents": [],
-                "created": 0,
-                "skipped": count,
-                "requested": count,
-            }
-        )
+    min_delay = max(min_delay, 5)
+    max_delay = max(max_delay, min_delay)
 
-    usernames = [user.username for user in users]
-    existing = {
-        agent.user_username: agent
-        for agent in Agent.query.filter(
-            Agent.persona_mode == "fixed", Agent.user_username.in_(usernames)
-        ).all()
-    }
     provider = LLMProvider.get_default()
     api_url = str(
         provider.api_url if provider else Config.get("OPENAI_API_URL") or ""
@@ -3494,36 +3467,45 @@ def setup_agents_from_personas_api():
         else Config.get("OPENAI_MODEL", "llama3")
     ).strip()
     now = datetime.utcnow()
-    agents = []
+    agents = (
+        Agent.query.filter(Agent.persona_mode == "random")
+        .order_by(Agent.id)
+        .limit(count)
+        .all()
+    )
+    for agent in agents:
+        config = dict(agent.config or {})
+        config["min_delay"] = min_delay
+        config["max_delay"] = max_delay
+        agent.config = config
     created_count = 0
-    for username in usernames:
-        agent = existing.get(username)
-        if agent is None:
-            agent = Agent(
-                persona_mode="fixed",
-                user_username=username,
-                autonomy_tier="regular",
-                is_enabled=True,
-                status="idle",
-                config={
-                    "provider_id": provider.id if provider else None,
-                    "api_url": api_url,
-                    "model": model,
-                    "max_actions_per_run": 30,
-                    "max_run_seconds": 300,
-                    "min_delay": 60,
-                    "max_delay": 900,
-                },
-                state={},
-                next_run_at=now,
-                consecutive_failures=0,
-            )
-            db.session.add(agent)
-            created_count += 1
-        elif not agent.is_enabled or agent.next_run_at is None:
+    for _ in range(count - len(agents)):
+        agent = Agent(
+            persona_mode="random",
+            user_username=None,
+            autonomy_tier="regular",
+            is_enabled=True,
+            status="idle",
+            config={
+                "provider_id": provider.id if provider else None,
+                "api_url": api_url,
+                "model": model,
+                "max_actions_per_run": 30,
+                "max_run_seconds": 300,
+                "min_delay": min_delay,
+                "max_delay": max_delay,
+            },
+            state={},
+            next_run_at=now,
+            consecutive_failures=0,
+        )
+        db.session.add(agent)
+        agents.append(agent)
+        created_count += 1
+    for agent in agents:
+        if not agent.is_enabled or agent.next_run_at is None:
             agent.is_enabled = True
             agent.next_run_at = now
-        agents.append(agent)
     db.session.commit()
     _setup_status()
     return jsonify(
