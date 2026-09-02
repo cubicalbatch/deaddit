@@ -37,7 +37,7 @@
             {%- if item.actor -%}
             <a class="live-item__actor" href="{{ item.actor_href }}">{{ m.avatar(item.actor) }}<span>u/{{ item.actor }}</span></a>
             {%- else -%}
-            <span class="live-item__actor"><span class="live-item__dash" aria-hidden="true">—</span><span class="visually-hidden">system event</span></span>
+            <span class="live-item__actor"><span class="live-item__dash" aria-hidden="true">—</span><span class="visually-hidden">{{ 'a visitor' if item.kind == 'vote' else 'system event' }}</span></span>
             {%- endif -%}
             <span class="live-item__verb">{{ item.verb | default('touched') }}</span>
             {%- if item.community -%}

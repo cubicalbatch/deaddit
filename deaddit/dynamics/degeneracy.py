@@ -412,7 +412,7 @@ def scan_brigading(now: datetime | None = None) -> int:
     top_voters = [
         row[0]
         for row in db.session.query(voter_col, func.count(Vote.id))
-        .filter(Vote.created_at >= cutoff)
+        .filter(Vote.created_at >= cutoff, Vote.voter.isnot(None))
         .group_by(voter_col)
         .order_by(func.count(Vote.id).desc())
         .limit(_BRIGADE_MAX_VOTERS)

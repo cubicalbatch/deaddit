@@ -41,8 +41,12 @@ def _success(score: int, changed: bool, change_kind: str) -> dict[str, Any]:
     }
 
 
-def _find_vote(voter: str, target: str, target_id: int) -> Vote | None:
-    filters: dict[str, Any] = {"voter": voter}
+def _find_vote(
+    voter: str | None, target: str, target_id: int, visitor_hash: str | None = None
+) -> Vote | None:
+    filters: dict[str, Any] = (
+        {"visitor_hash": visitor_hash} if visitor_hash else {"voter": voter}
+    )
     if target == "post":
         filters["post_id"] = target_id
     else:
@@ -51,7 +55,7 @@ def _find_vote(voter: str, target: str, target_id: int) -> Vote | None:
 
 
 def cast_vote(
-    voter: str,
+    voter: str | None,
     target: str,
     target_id: int,
     value: int,
@@ -59,15 +63,25 @@ def cast_vote(
     *,
     source: str = "simulated",
     allow_recast: bool = True,
+    visitor_hash: str | None = None,
 ) -> dict[str, Any]:
     """Cast a vote while keeping score, vote count, and karma canonical.
 
     ``source`` defaults to ``"simulated"`` and ``allow_recast`` defaults to ``True``.
     Returns a standardized dictionary containing ``status``, ``score``, ``changed``,
     and ``change_kind`` metadata.
+
+    Identity: either a platform ``voter`` username, or ``visitor_hash`` (the
+    keyed hash of an anonymous browser's voter cookie) with ``voter=None`` —
+    the visitor path skips user/ban/self checks, since an anonymous browser
+    is never a user and never authors content.
+
+    ``value`` is 1, -1, or 0. Zero means "clear my existing vote" (delete the
+    row and reverse its bookkeeping); with no existing row it is a no-op.
     """
     requested_source = source
     recast = allow_recast
+    is_visitor = visitor_hash is not None
 
     model = _MODELS.get(target)
     item = db.session.get(model, target_id) if model else None
@@ -75,16 +89,17 @@ def cast_vote(
         return _reject(f"{target} {target_id} does not exist", 0)
     score = int(item.score or 0)
 
-    if value not in (1, -1):
+    if value not in (1, -1, 0):
         return _reject("value must be 1 or -1", score)
 
-    if db.session.get(User, voter) is None:
+    if not is_visitor and db.session.get(User, voter) is None:
         return _reject(f"user '{voter}' does not exist", score)
 
     # Phase D4: banned voters and removed content are rejected. The frozen
-    # D1 vocabulary above is untouched; these are additive reasons.
+    # D1 vocabulary above is untouched; these are additive reasons. Visitors
+    # have no username to ban; they still cannot vote on removed content.
     ban_sub = item.subdeaddit_name if target == "post" else item.post.subdeaddit_name
-    if active_ban_for(voter, ban_sub) is not None:
+    if not is_visitor and active_ban_for(voter, ban_sub) is not None:
         return _reject(f"user '{voter}' is banned", score)
     if getattr(item, "removed", False):
         return _reject(f"{target} {target_id} was removed", score)
@@ -100,10 +115,22 @@ def cast_vote(
     changed = False
     change_kind = "same_value_noop"
     try:
-        vote = _find_vote(voter, target, target_id)
-        if vote is None:
+        vote = _find_vote(voter, target, target_id, visitor_hash)
+        if value == 0:
+            # Clear: delete the row and reverse its bookkeeping. The
+            # simulator is insert-only and never requests this.
+            if vote is not None and recast:
+                delta = -vote.value
+                db.session.delete(vote)
+                item.vote_count -= 1
+                changed = True
+                change_kind = "remove"
+            else:
+                change_kind = "same_value_noop"
+        elif vote is None:
             vote = Vote(
                 voter=voter,
+                visitor_hash=visitor_hash,
                 value=value,
                 source=requested_source,
                 post_id=target_id if is_post else None,
@@ -147,12 +174,13 @@ def cast_vote(
             _retried=True,
             source=source,
             allow_recast=allow_recast,
+            visitor_hash=visitor_hash,
         )
 
     if changed:
         activity.record_event(
             event_type="vote",
-            username=voter,
+            username=None if is_visitor else voter,
             post_id=target_id if is_post else None,
             comment_id=None if is_post else target_id,
         )

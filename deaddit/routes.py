@@ -26,6 +26,7 @@ from .utils import (
     format_content_html,
     get_comment_counts_bulk,
     get_websites_bulk,
+    visitor_vote_map,
 )
 
 bp = Blueprint("web", __name__)
@@ -144,6 +145,7 @@ def index():
         posts=posts,
         comment_counts=comment_counts,
         websites=websites,
+        visitor_votes=visitor_vote_map(post_ids),
         page=page,
         has_more=has_more,
         title="Deaddit - The Reddit clone with AI users",
@@ -206,6 +208,7 @@ def subdeaddit(subdeaddit_name):
         posts=paginated_posts,
         comment_counts=comment_counts,
         websites=websites,
+        visitor_votes=visitor_vote_map(post_ids),
         page=page,
         subdeaddit_name=subdeaddit_name,
         has_more=has_more,
@@ -382,6 +385,7 @@ def post(subdeaddit_name, post_id):
         post_body_html=("" if post.removed else format_content_html(post.content)),
         removal_reason=post.removal_reason,
         subdeaddit_name=subdeaddit_name,
+        visitor_votes=visitor_vote_map([post.id]),
         title=f"Deaddit - {truncated_title}",
     )
 
@@ -536,6 +540,7 @@ def user_profile(username):
         context["posts"] = posts
         context["comment_counts"] = get_comment_counts_bulk(post_ids)
         context["websites"] = get_websites_bulk(post_ids)
+        context["visitor_votes"] = visitor_vote_map(post_ids)
         total = visible_posts
     else:
         context["comments"] = (
@@ -724,6 +729,7 @@ def search():
         posts=posts,
         comment_counts=comment_counts,
         websites=websites,
+        visitor_votes=visitor_vote_map([post.id for post in posts]),
         communities=communities,
         people=people,
         total_posts=total_posts,

@@ -557,12 +557,18 @@ class Vote(db.Model):
     ``human``, or ``backfill``). A durable row is created only for a changed
     vote; same-value re-votes and insert-only collisions are no-ops and do not
     emit activity.
+
+    Identity is exactly one of: ``voter`` (a platform user) or ``visitor_hash``
+    (keyed hash of an anonymous browser's voter cookie — never an IP, never
+    reversible without the server secret). ``human``-source rows carry
+    ``visitor_hash`` and a NULL ``voter``.
     """
 
     id = db.Column(db.Integer, primary_key=True)
     voter = db.Column(
-        db.String(50), db.ForeignKey("user.username"), nullable=False, index=True
+        db.String(50), db.ForeignKey("user.username"), nullable=True, index=True
     )
+    visitor_hash = db.Column(db.String(64), nullable=True)
     post_id = db.Column(db.Integer, db.ForeignKey("post.id"), nullable=True, index=True)
     comment_id = db.Column(
         db.Integer, db.ForeignKey("comment.id"), nullable=True, index=True
@@ -580,8 +586,13 @@ class Vote(db.Model):
     __table_args__ = (
         db.CheckConstraint("value IN (1, -1)"),
         db.CheckConstraint("(post_id IS NULL) != (comment_id IS NULL)"),
+        db.CheckConstraint("(voter IS NULL) != (visitor_hash IS NULL)"),
         db.UniqueConstraint("voter", "post_id", name="uq_vote_post"),
         db.UniqueConstraint("voter", "comment_id", name="uq_vote_comment"),
+        db.UniqueConstraint("visitor_hash", "post_id", name="uq_vote_visitor_post"),
+        db.UniqueConstraint(
+            "visitor_hash", "comment_id", name="uq_vote_visitor_comment"
+        ),
     )
 
 

@@ -2,17 +2,23 @@
 Utility functions for the Deaddit application.
 """
 
+import hashlib
+import hmac
 import html
 import re
 from functools import wraps
 
-from flask import abort
+from flask import abort, current_app, request
 from sqlalchemy import func
 
 from deaddit.config import Config
 from deaddit.extensions import cache, db
 
-from .models import Comment, GeneratedWebsite
+from .models import Comment, GeneratedWebsite, Vote
+
+# Name of the long-lived cookie that anonymously identifies a voting browser.
+VOTER_COOKIE = "deaddit_voter"
+VOTER_COOKIE_MAX_AGE = 365 * 24 * 3600
 
 
 def production_disabled(f):
@@ -101,6 +107,37 @@ def get_websites_bulk(post_ids: list[int]) -> dict[int, GeneratedWebsite]:
         GeneratedWebsite.post_id.in_(post_ids)
     ).all()
     return {website.post_id: website for website in websites}
+
+
+def visitor_hash_for(token: str) -> str:
+    """Keyed hash of a voter cookie token: the only identity we persist.
+
+    HMAC over the app secret, so the stored value is unlinkable without the
+    key (never an IP or user agent). Rotating SECRET_KEY invalidates dedup
+    against old rows — same failure mode as session invalidation.
+    """
+    key = (current_app.config["SECRET_KEY"] or "").encode()
+    return hmac.new(key, token.encode(), hashlib.sha256).hexdigest()
+
+
+def visitor_vote_map(post_ids: list[int]) -> dict[int, int]:
+    """{post_id: value} for the current browser's visitor votes, {} if none.
+
+    Server-rendered voted-state source for feed/detail templates: one bulk
+    query keyed on the hashed voter cookie.
+    """
+    token = request.cookies.get(VOTER_COOKIE)
+    if not token or not post_ids:
+        return {}
+    rows = (
+        db.session.query(Vote.post_id, Vote.value)
+        .filter(
+            Vote.visitor_hash == visitor_hash_for(token),
+            Vote.post_id.in_(post_ids),
+        )
+        .all()
+    )
+    return dict(rows)
 
 
 def process_post_title(title: str) -> str:

@@ -19,7 +19,7 @@ def _refresh(db_session, model, pk):
 
 def test_rejects_invalid_value(seeded_db):
     post = seeded_db["posts"][1]
-    result = cast_vote("alice", "post", post.id, 0)
+    result = cast_vote("alice", "post", post.id, 3)
     assert result == {
         "status": "rejected",
         "reason": "value must be 1 or -1",
@@ -263,6 +263,36 @@ def test_downvote_toggle_both_directions_full_cycle(seeded_db, db_session):
     assert db_session.get(User, "bob").post_karma == -1
 
 
+def test_clear_vote_reverses_bookkeeping(seeded_db, db_session):
+    """value=0 deletes the row and undoes score/vote_count/karma exactly."""
+    post = seeded_db["posts"][1]
+    cast_vote("alice", "post", post.id, 1)
+    cleared = cast_vote("alice", "post", post.id, 0)
+    assert cleared == {
+        "status": "ok",
+        "score": 0,
+        "changed": True,
+        "change_kind": "remove",
+    }
+
+    post = _refresh(db_session, Post, post.id)
+    assert (post.score, post.vote_count) == (0, 0)
+    assert db_session.get(User, "bob").post_karma == 0
+    assert Vote.query.filter_by(voter="alice").count() == 0
+
+
+def test_clear_without_existing_vote_is_noop(seeded_db, db_session):
+    post = seeded_db["posts"][1]
+    result = cast_vote("alice", "post", post.id, 0)
+    assert result == {
+        "status": "ok",
+        "score": 0,
+        "changed": False,
+        "change_kind": "same_value_noop",
+    }
+    assert Vote.query.count() == 0
+
+
 def test_switch_on_comment_keeps_vote_count(seeded_db, db_session):
     comment = seeded_db["comments"][0]  # bob's comment
     assert cast_vote("alice", "comment", comment.id, 1)["status"] == "ok"
@@ -306,10 +336,10 @@ def test_concurrent_duplicate_insert_rolls_back_and_resolves(
     real_find = votes_module._find_vote
     calls: list[int] = []
 
-    def flaky_find(voter, target, target_id):
+    def flaky_find(voter, target, target_id, visitor_hash=None):
         calls.append(1)
         if len(calls) > 1:
-            return real_find(voter, target, target_id)
+            return real_find(voter, target, target_id, visitor_hash)
         return None  # stale snapshot during the race
 
     monkeypatch.setattr(votes_module, "_find_vote", flaky_find)

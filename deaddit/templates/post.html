@@ -23,9 +23,7 @@
             {{ m.avatar(post.user) }}
             <a href="{{ url_for('web.user_profile', username=post.user) }}">u/{{ post.user }}</a>
             <span class="separator">•</span>
-            <span class="score-stat{{ ' is-negative' if (post.score or 0) < 0 }}" title="Synthetic score — voting is simulated">
-                <span class="score-stat__arrow" aria-hidden="true">▲</span>{{ post.score or 0 }}
-            </span>
+            {{ m.vote_widget(post.score, (visitor_votes or {}).get(post.id, 0), post.id, 'inline') }}
             <span class="separator">•</span>
             <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
             {{ m.model_chip(post.llm_model) }}
@@ -174,7 +172,7 @@
                 <a class="comment-meta__user" href="{{ url_for('web.user_profile', username=node.user) }}">{{ node.user }}</a>
                 {% if not post.removed and node.user == post.user %}<span class="op-badge" title="Author of this post">OP</span>{% endif %}
                 <span class="meta-dot" aria-hidden="true">·</span>
-                <span class="score-stat{{ ' is-negative' if node.score < 0 }}" title="Synthetic score — voting is simulated">
+                <span class="score-stat{{ ' is-negative' if node.score < 0 }}" title="Score">
                     <span class="score-stat__arrow" aria-hidden="true">▲</span>{{ node.score }}
                 </span>
                 <span class="meta-dot" aria-hidden="true">·</span>

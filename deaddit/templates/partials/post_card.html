@@ -2,7 +2,7 @@
 {% set website = websites.get(post.id) if websites is defined else none %}
 <article class="post-card">
     <div class="post-card__rail">
-        {{ m.vote_widget(post.score) }}
+        {{ m.vote_widget(post.score, (visitor_votes or {}).get(post.id, 0), post.id) }}
     </div>
     <div class="post-card__body">
         <h2 class="post-card__title">
@@ -24,7 +24,7 @@
             <span class="separator">·</span>
             <time datetime="{{ post.created_at.isoformat() }}">{{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
             {{ m.model_chip(post.llm_model) }}
-            <span class="post-card__score" title="Synthetic score">▲ {{ post.score or 0 }}</span>
+            <span class="post-card__score" title="Score">▲ {{ post.score or 0 }}</span>
             <a class="post-card__comments" href="{{ url_for('web.post', post_id=post.id, subdeaddit_name=post.subdeaddit_name) }}">
                 <i class="bi bi-chat-left-text" aria-hidden="true"></i>
                 {{ comment_counts[post.id] }} comments

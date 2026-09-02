@@ -90,12 +90,25 @@
 {%- endif -%}
 {%- endmacro %}
 
-{# Display-first synthetic vote widget; voting arrives with the dynamics phase #}
-{% macro vote_widget(score) -%}
-<div class="vote-widget">
+{# Interactive vote widget for anonymous visitors. `my_vote` is the current
+   browser's value (1, -1, or 0) from the visitor vote map; the container
+   carries the target attrs that js/votes.js posts to /api/vote. Without a
+   `target_id` the arrows fall back to display-only. `variant='inline'`
+   renders the arrows around the score on one line (post detail meta row). #}
+{% macro vote_widget(score, my_vote=0, target_id=none, variant='') -%}
+<div class="vote-widget{{ ' vote-widget--inline' if variant == 'inline' }}"
+     {% if target_id %}data-target-type="post" data-target-id="{{ target_id }}"{% endif %}>
     <span class="vote-score">{{ score or 0 }}</span>
-    <button type="button" class="vote-arrow vote-up" disabled aria-disabled="true" title="Synthetic score" aria-label="Upvote (disabled, synthetic score)">▲</button>
-    <button type="button" class="vote-arrow vote-down" disabled aria-disabled="true" title="Synthetic score" aria-label="Downvote (disabled, synthetic score)">▼</button>
+    <button type="button"
+            class="vote-arrow vote-up{{ ' is-upvoted' if my_vote == 1 }}"
+            {% if not target_id %}disabled aria-disabled="true"{% endif %}
+            aria-pressed="{{ 'true' if my_vote == 1 else 'false' }}"
+            title="Upvote" aria-label="Upvote">▲</button>
+    <button type="button"
+            class="vote-arrow vote-down{{ ' is-downvoted' if my_vote == -1 }}"
+            {% if not target_id %}disabled aria-disabled="true"{% endif %}
+            aria-pressed="{{ 'true' if my_vote == -1 else 'false' }}"
+            title="Downvote" aria-label="Downvote">▼</button>
 </div>
 {%- endmacro %}
 

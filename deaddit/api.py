@@ -1,14 +1,48 @@
 import json
+import secrets
+import threading
+import time
+from collections import deque
 from datetime import datetime, timedelta
 
 from flask import Blueprint, jsonify, request, url_for
 from sqlalchemy import func
 
-from deaddit.utils import get_websites_bulk
+from deaddit.dynamics.votes import cast_vote
+from deaddit.utils import (
+    VOTER_COOKIE,
+    VOTER_COOKIE_MAX_AGE,
+    get_websites_bulk,
+    visitor_hash_for,
+)
 
 from .models import Comment, GeneratedWebsite, Post, PostImage, Subdeaddit, User
 
 bp = Blueprint("api", __name__)
+
+
+# --- Visitor voting -------------------------------------------------------
+#
+# Anonymous vote endpoint. Identity = long-lived random cookie, stored only as
+# a keyed hash (see utils.visitor_hash_for); dedup is the DB uniqueness
+# constraint, and this in-RAM per-IP sliding window is the abuse brake.
+# ponytail: process-local state — sound because web is pinned to a single
+# gunicorn worker; a shared store only if workers ever multiply.
+_VOTES_PER_MINUTE = 30
+_vote_hits: dict[str, deque[float]] = {}
+_vote_hits_lock = threading.Lock()
+
+
+def _rate_limited(ip: str) -> bool:
+    now = time.monotonic()
+    with _vote_hits_lock:
+        hits = _vote_hits.setdefault(ip, deque())
+        while hits and hits[0] <= now - 60.0:
+            hits.popleft()
+        if len(hits) >= _VOTES_PER_MINUTE:
+            return True
+        hits.append(now)
+        return False
 
 
 def _public_image(image: PostImage | None, removed: bool) -> dict | None:
@@ -230,3 +264,61 @@ def get_users():
         for user in users
     ]
     return jsonify({"users": user_list})
+
+
+@bp.route("/api/vote", methods=["POST"])
+def api_vote():
+    """Cast, switch, or clear (value 0) the current browser's vote on a post.
+
+    JSON-only on purpose: combined with the SameSite=Lax voter cookie, a
+    cross-site form (which cannot send ``application/json``) cannot forge a
+    vote. Malformed bodies are 400; domain rejections (removed post,
+    downvotes disabled, …) return their frozen reason with HTTP 200 so the
+    client can surface it uniformly; the per-IP abuse limit is 429.
+    """
+    data = request.get_json(silent=True) or {}
+    target = data.get("target")
+    try:
+        target_id = int(data.get("id"))
+    except (TypeError, ValueError):
+        target_id = 0
+    try:
+        value = int(data.get("value"))
+    except (TypeError, ValueError):
+        value = 99
+    if target != "post" or target_id <= 0 or value not in (1, -1, 0):
+        return jsonify({"error": "expected {target: 'post', id, value: 1|-1|0}"}), 400
+
+    if _rate_limited(request.remote_addr or "unknown"):
+        return jsonify({"error": "too many votes, slow down"}), 429
+
+    token = request.cookies.get(VOTER_COOKIE)
+    new_token = token is None
+    if new_token:
+        token = secrets.token_urlsafe(24)
+
+    result = cast_vote(
+        None,
+        target,
+        target_id,
+        value,
+        source="human",
+        visitor_hash=visitor_hash_for(token),
+    )
+
+    my_vote = value if result["status"] == "ok" and value else 0
+    if result["status"] == "ok" and new_token:
+        # Identity is issued lazily on the first accepted interaction, so
+        # plain page views (and crawlers) never receive a cookie.
+        response = jsonify({**result, "my_vote": my_vote})
+        response.set_cookie(
+            VOTER_COOKIE,
+            token,
+            max_age=VOTER_COOKIE_MAX_AGE,
+            httponly=True,
+            samesite="Lax",
+            secure=request.is_secure,
+            path="/",
+        )
+        return response
+    return jsonify({**result, "my_vote": my_vote})
