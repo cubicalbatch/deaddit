@@ -956,9 +956,9 @@ class TestSubscriptionNudges:
         targets = pg._subscription_targets(
             assignments, {"a", "b", "c"}, {}, random.Random(3)
         )
-        # The 1.0 fair-share floor spreads the first members one per
-        # community, then stops - no piling onto a single empty sub.
-        assert sorted(targets.values()) == ["a", "b", "c"]
+        # Fair share spans the request itself: 6 personas into 3 empty
+        # communities nudges each persona, two per community.
+        assert sorted(targets.values()) == ["a", "a", "b", "b", "c", "c"]
 
     def test_targets_empty_when_balanced(self):
         names = {"books", "gaming", "space"}

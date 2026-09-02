@@ -161,18 +161,27 @@ def _communities_section(
         "Each persona object must also include:\n"
         '- "subscriptions": list of exactly 2 community names, copied '
         "verbatim from the list above, where this persona would genuinely "
-        "spend time given their interests and personality - a "
-        "general-purpose community is the honest pick for a "
-        "general-interest person. Never invent or guess community names "
-        "outside the list. Communities with very few subscribers need "
-        "members: when an assignment row carries a community nudge, make "
-        "that community one of the two subscriptions and flavor one or two "
-        "of that persona's interests toward the community's theme where "
-        "plausible - real people subscribe beyond their core interests. "
-        "Only when the nudged community is truly incompatible with the "
-        "persona's life, substitute the least-subscribed community that "
-        "does fit. "
-        'Example: "subscriptions": ["books", "CasualConversation"]\n'
+        "spend time given their interests and personality. Never invent "
+        "or guess community names outside the list. Communities with "
+        "very few subscribers need members: when an assignment row "
+        "carries a community nudge, treat it as this persona's home "
+        "community and design the persona around belonging there. "
+        "Write the bio and choose the free interest slots so that "
+        "membership reads as a natural core of their life - a job, "
+        "study, habit, or long-running hobby that leads there - not a "
+        "late add-on; keep every assigned fact (age, gender, "
+        "occupation, education, required traits, writing style) "
+        "exactly as given. Make that community one of the two "
+        "subscriptions. Only when the nudged community is truly "
+        "incompatible with the persona's life, substitute the "
+        "least-subscribed community that does fit. For "
+        "the remaining free slot, weigh the subscriber counts: "
+        "communities far above fair share are already crowded, so pick "
+        "the least-subscribed community the persona would genuinely "
+        "enjoy rather than defaulting to the biggest general-purpose "
+        "one. "
+        'Example shape: "subscriptions": ["<community-name>", '
+        '"<community-name>"]\n'
     )
 
 
@@ -276,17 +285,23 @@ def _subscription_targets(
     validation still drops unknown names. Weight is each community's
     deficit below fair share; every pick virtually adds a subscriber, so
     one request spreads across the whole deficit pool instead of piling
-    onto the single emptiest community. Backstage is excluded (universal
-    room, not subscription-driven). Empty when nothing is below fair
-    share - a balanced forum gets no nudges at all.
+    onto the single emptiest community. Fair share counts the incoming
+    request itself, so a large cold-start batch distributes across every
+    community instead of stopping after one nudge each. Backstage is
+    excluded (universal room, not subscription-driven). Empty when
+    nothing is below fair share - a balanced forum plus a small batch
+    gets no nudges at all.
     """
     eligible = sorted(sub_names - {BACKSTAGE_SUBDEADDIT_NAME})
     if not eligible:
         return {}
     planned = {name: counts.get(name, 0) for name in eligible}
-    # The 1.0 floor keeps a fully empty forum spreading its first members
-    # evenly instead of skipping nudges (0/len would leave no deficit).
-    fair = max(sum(planned.values()) / len(eligible), 1.0)
+    # Fair share spans both the existing population and the request itself
+    # (a 100-persona request into 19 communities owes each ~5 members).
+    # The 1.0 floor keeps a tiny batch into a fully empty forum spreading
+    # its first members evenly instead of skipping nudges.
+    fair = max(sum(planned.values()), len(assignments)) / len(eligible)
+    fair = max(fair, 1.0)
     targets: dict[str, str] = {}
     for assignment in assignments:
         deficits = {name: fair - n for name, n in planned.items() if n < fair}
@@ -769,10 +784,11 @@ def generate_personas(
             except (LLMError, PersonaGenerationError) as exc:
                 last_error = exc
                 logger.warning(
-                    "Persona batch attempt %d/%d failed for assignment IDs %s",
+                    "Persona batch attempt %d/%d failed for assignment IDs %s: %s",
                     attempt,
                     PERSONA_BATCH_ATTEMPTS,
                     [assignment.id for assignment in pending],
+                    exc,
                 )
                 continue
             if not raw_personas:

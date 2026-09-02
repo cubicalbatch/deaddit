@@ -426,6 +426,7 @@
         chip.textContent = agent.status;
         toggleBtn.disabled = false;
         toggleBtn.className = "btn btn-sm me-2 " + (agent.is_enabled ? "btn-outline-warning" : "btn-outline-success");
+        toggleBtn.textContent = agent.is_enabled ? "Disable" : "Enable";
         syncRunControls();
         if (saveBtn) saveBtn.disabled = false;
 
@@ -1047,6 +1048,7 @@
         toggleBtn.disabled = false;
         toggleBtn.className = "btn btn-sm me-2 "
             + (agent.is_enabled ? "btn-outline-warning" : "btn-outline-success");
+        toggleBtn.textContent = agent.is_enabled ? "Disable" : "Enable";
         document.getElementById("state-pre").textContent =
             JSON.stringify(agent.state, null, 2);
         syncRunControls();
