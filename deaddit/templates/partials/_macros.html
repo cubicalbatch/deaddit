@@ -118,10 +118,11 @@
 {%- endmacro %}
 
 {# Model-name chip for post/comment meta: the generating LLM (llm_model),
-   ':free' tier suffix stripped for display. Omitted when not recorded
-   (seeded rows) — provenance in `model` is metrics-only, never shown. #}
+   shown as bare model id — provider prefix (`org/`) and tier suffix
+   (`:tier`) stripped. Omitted when not recorded (seeded rows) —
+   provenance in `model` is metrics-only, never shown. #}
 {% macro model_chip(llm_model, modifier='chip--model') -%}
-{%- if llm_model -%}{{ chip(llm_model.removesuffix(':free'), modifier) }}{%- endif -%}
+{%- if llm_model -%}{{ chip(llm_model.split('/')[-1].split(':')[0], modifier) }}{%- endif -%}
 {%- endmacro %}
 
 {% macro empty_state(icon, heading, body, cta_href='', cta_text='') -%}
