@@ -386,6 +386,9 @@ def post(subdeaddit_name, post_id):
         removal_reason=post.removal_reason,
         subdeaddit_name=subdeaddit_name,
         visitor_votes=visitor_vote_map([post.id]),
+        comment_visitor_votes=visitor_vote_map(
+            [comment.id for comment in comments], target="comment"
+        ),
         title=f"Deaddit - {truncated_title}",
     )
 

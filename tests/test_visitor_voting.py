@@ -14,10 +14,10 @@ from deaddit.extensions import db
 from deaddit.models import User, Vote
 
 
-def _vote(client, post_id, value):
+def _vote(client, target_id, value, target="post"):
     return client.post(
         "/api/vote",
-        json={"target": "post", "id": post_id, "value": value},
+        json={"target": target, "id": target_id, "value": value},
     )
 
 
@@ -187,3 +187,60 @@ def test_karma_repair_keeps_visitor_votes(client, seeded_db):
     db.session.refresh(post)
     assert post.score == 1
     assert db.session.get(User, "bob").post_karma == 1
+
+
+def test_comment_vote_round_trip(client, seeded_db):
+    comment = seeded_db["comments"][0]  # bob's comment on alice's post
+
+    up = _vote(client, comment.id, 1, target="comment")
+    assert up.status_code == 200
+    body = up.get_json()
+    assert body["status"] == "ok"
+    assert body["my_vote"] == 1
+
+    vote = Vote.query.one()
+    assert vote.comment_id == comment.id
+    assert vote.post_id is None
+    assert vote.source == "human"
+    db.session.refresh(comment)
+    assert (comment.score, comment.vote_count) == (1, 1)
+    assert db.session.get(User, "bob").comment_karma == 1
+
+    # Toggle-off clears the row and reverses score + karma.
+    assert _vote(client, comment.id, 0, target="comment").get_json()["my_vote"] == 0
+    db.session.refresh(comment)
+    assert (comment.score, comment.vote_count) == (0, 0)
+    assert db.session.get(User, "bob").comment_karma == 0
+    assert Vote.query.count() == 0
+
+
+def test_post_and_comment_votes_are_independent(client, seeded_db):
+    post = seeded_db["posts"][0]
+    comment = seeded_db["comments"][0]
+    assert _vote(client, post.id, 1).status_code == 200
+    assert _vote(client, comment.id, -1, target="comment").status_code == 200
+
+    assert Vote.query.count() == 2
+    db.session.refresh(post)
+    db.session.refresh(comment)
+    assert (post.score, comment.score) == (1, -1)
+
+    # Clearing the post vote leaves the comment vote untouched.
+    assert _vote(client, post.id, 0).status_code == 200
+    assert Vote.query.count() == 1
+    assert Vote.query.one().comment_id == comment.id
+
+
+def test_rendered_comment_shows_voted_state(client, seeded_db):
+    comment = seeded_db["comments"][1]  # alice's comment on bob's testsub post
+    _vote(client, comment.id, 1, target="comment")
+
+    detail = client.get(f"/d/testsub/{comment.post_id}").get_data(as_text=True)
+    assert 'data-target-type="comment"' in detail
+    assert f'data-target-id="{comment.id}"' in detail
+    assert "vote-up is-upvoted" in detail
+
+    _vote(client, comment.id, -1, target="comment")
+    detail = client.get(f"/d/testsub/{comment.post_id}").get_data(as_text=True)
+    assert "vote-down is-downvoted" in detail
+    assert "vote-up is-upvoted" not in detail

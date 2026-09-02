@@ -120,20 +120,22 @@ def visitor_hash_for(token: str) -> str:
     return hmac.new(key, token.encode(), hashlib.sha256).hexdigest()
 
 
-def visitor_vote_map(post_ids: list[int]) -> dict[int, int]:
-    """{post_id: value} for the current browser's visitor votes, {} if none.
+def visitor_vote_map(target_ids: list[int], *, target: str = "post") -> dict[int, int]:
+    """{target_id: value} for the current browser's visitor votes, {} if none.
 
     Server-rendered voted-state source for feed/detail templates: one bulk
-    query keyed on the hashed voter cookie.
+    query keyed on the hashed voter cookie. ``target`` is "post" or
+    "comment" and selects the Vote column to key on.
     """
     token = request.cookies.get(VOTER_COOKIE)
-    if not token or not post_ids:
+    if not token or not target_ids:
         return {}
+    column = Vote.post_id if target == "post" else Vote.comment_id
     rows = (
-        db.session.query(Vote.post_id, Vote.value)
+        db.session.query(column, Vote.value)
         .filter(
             Vote.visitor_hash == visitor_hash_for(token),
-            Vote.post_id.in_(post_ids),
+            column.in_(target_ids),
         )
         .all()
     )

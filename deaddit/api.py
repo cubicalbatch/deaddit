@@ -268,7 +268,8 @@ def get_users():
 
 @bp.route("/api/vote", methods=["POST"])
 def api_vote():
-    """Cast, switch, or clear (value 0) the current browser's vote on a post.
+    """Cast, switch, or clear (value 0) the current browser's vote on a
+    post or comment.
 
     JSON-only on purpose: combined with the SameSite=Lax voter cookie, a
     cross-site form (which cannot send ``application/json``) cannot forge a
@@ -286,8 +287,13 @@ def api_vote():
         value = int(data.get("value"))
     except (TypeError, ValueError):
         value = 99
-    if target != "post" or target_id <= 0 or value not in (1, -1, 0):
-        return jsonify({"error": "expected {target: 'post', id, value: 1|-1|0}"}), 400
+    if target not in ("post", "comment") or target_id <= 0 or value not in (1, -1, 0):
+        return (
+            jsonify(
+                {"error": "expected {target: 'post'|'comment', id, value: 1|-1|0}"}
+            ),
+            400,
+        )
 
     if _rate_limited(request.remote_addr or "unknown"):
         return jsonify({"error": "too many votes, slow down"}), 429

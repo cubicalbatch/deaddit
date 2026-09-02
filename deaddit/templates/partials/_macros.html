@@ -94,10 +94,11 @@
    browser's value (1, -1, or 0) from the visitor vote map; the container
    carries the target attrs that js/votes.js posts to /api/vote. Without a
    `target_id` the arrows fall back to display-only. `variant='inline'`
-   renders the arrows around the score on one line (post detail meta row). #}
-{% macro vote_widget(score, my_vote=0, target_id=none, variant='') -%}
+   renders the arrows around the score on one line (post detail meta row,
+   comment header). `target_type` is "post" or "comment". #}
+{% macro vote_widget(score, my_vote=0, target_id=none, variant='', target_type='post') -%}
 <div class="vote-widget{{ ' vote-widget--inline' if variant == 'inline' }}"
-     {% if target_id %}data-target-type="post" data-target-id="{{ target_id }}"{% endif %}>
+     {% if target_id %}data-target-type="{{ target_type }}" data-target-id="{{ target_id }}"{% endif %}>
     <span class="vote-score">{{ score or 0 }}</span>
     <button type="button"
             class="vote-arrow vote-up{{ ' is-upvoted' if my_vote == 1 }}"
