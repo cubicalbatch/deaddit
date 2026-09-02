@@ -1,8 +1,11 @@
 """Regression tests for the first-startup setup wizard and admin controls."""
 
+from datetime import datetime
+
 import pytest
 
-from deaddit.models import Agent, Setting
+from deaddit.config import Config
+from deaddit.models import Agent, LLMProvider, Setting, Subdeaddit, User
 
 
 @pytest.fixture()
@@ -18,6 +21,7 @@ def _assert_setup_wizard(response):
     html = response.get_data(as_text=True)
     assert 'class="setup-wizard"' in html
     assert "Connect your LLM" in html
+    assert "Dismiss this guide" in html
 
 
 def test_fresh_empty_db_renders_setup_wizard(client):
@@ -34,13 +38,13 @@ def test_setup_wizard_remains_after_saving_only_llm_url(admin_client):
     _assert_setup_wizard(admin_client.get("/"))
 
 
-def test_loading_default_data_replaces_wizard_with_feed(admin_client):
+def test_loading_default_data_keeps_wizard_visible(admin_client):
     response = admin_client.post("/admin/api/load-default-data")
     assert response.status_code == 200
 
     response = admin_client.get("/")
     assert response.status_code == 200
-    assert 'class="setup-wizard"' not in response.get_data(as_text=True)
+    assert 'class="setup-wizard"' in response.get_data(as_text=True)
 
 
 def test_setup_status_contract_and_enabled_agent_count(admin_client, db_session):
@@ -54,6 +58,7 @@ def test_setup_status_contract_and_enabled_agent_count(admin_client, db_session)
             config={},
             state={},
             consecutive_failures=0,
+            next_run_at=datetime(2026, 1, 1),
         )
     )
     db_session.commit()
@@ -73,11 +78,17 @@ def test_setup_status_contract_and_enabled_agent_count(admin_client, db_session)
         "agent_count",
         "enabled_agent_count",
         "runtime_enabled",
+        "voting_live",
         "worker_last_seen_iso",
         "worker_alive",
+        "worker_start_command",
+        "worker_logs_command",
+        "next_agent_wake",
+        "setup_complete",
     }
     assert status["agent_count"] == 1
     assert status["enabled_agent_count"] == 1
+    assert status["next_agent_wake"] == "2026-01-01T00:00:00+00:00"
 
 
 def test_runtime_toggle_validates_boolean_and_persists_setting(admin_client):
@@ -105,3 +116,133 @@ def test_admin_setup_always_renders_wizard(admin_client, configured):
         assert response.status_code == 200
 
     _assert_setup_wizard(admin_client.get("/admin/setup"))
+
+
+def test_token_protects_incomplete_homepage(client, monkeypatch):
+    monkeypatch.setenv("API_TOKEN", "setup-token")
+    response = client.get("/")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/admin/login?next=/admin/setup")
+
+    response = client.post(
+        "/admin/login?next=/admin/setup",
+        data={"api_token": "setup-token"},
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/admin/setup")
+
+
+def test_setup_provider_upsert_stores_key_and_reports_presence(
+    admin_client, db_session
+):
+    payload = {
+        "openai_api_url": "http://llm.example/v1",
+        "openai_model": "starter-model",
+        "openai_key": "sk-setup-secret",
+    }
+    assert admin_client.post("/admin/api/save-config", json=payload).status_code == 200
+    assert admin_client.post("/admin/api/save-config", json=payload).status_code == 200
+
+    providers = db_session.query(LLMProvider).all()
+    assert len(providers) == 1
+    assert providers[0].is_default is True
+    assert providers[0].api_key == "sk-setup-secret"
+    status = admin_client.get("/admin/api/setup/status").get_json()
+    assert status["api_key_set"] is True
+
+
+def test_starter_agents_are_free_and_idempotent(admin_client, db_session, fake_llm):
+    db_session.add_all(
+        [
+            User(username="starter_a", bio="A", interests="[]"),
+            User(username="starter_b", bio="B", interests="[]"),
+        ]
+    )
+    db_session.commit()
+
+    first = admin_client.post(
+        "/admin/api/setup/agents-from-personas", json={"count": 2}
+    )
+    second = admin_client.post(
+        "/admin/api/setup/agents-from-personas", json={"count": 2}
+    )
+    assert first.status_code == second.status_code == 200
+    assert Agent.query.count() == 2
+    assert all(agent.is_enabled and agent.next_run_at for agent in Agent.query.all())
+    assert fake_llm.requests == []
+
+
+def test_setup_voting_is_live_and_idempotent(admin_client, db_session):
+    first = admin_client.post("/admin/api/setup/voting")
+    second = admin_client.post("/admin/api/setup/voting")
+    assert first.status_code == second.status_code == 200
+    assert (
+        db_session.query(Setting).filter_by(key="SIMULATED_VOTING_MODE").one().value
+        == "live"
+    )
+    assert Setting.get_value("AGENT_RUNTIME_ENABLED") == "true"
+    assert db_session.query(Setting).filter_by(key="SIMULATED_VOTING_MODE").count() == 1
+
+
+def test_setup_completion_persists_without_worker_heartbeat(admin_client, db_session):
+    db_session.add_all(
+        [
+            LLMProvider(
+                name="default",
+                api_url="http://llm.example/v1",
+                default_model="starter",
+                is_default=True,
+            ),
+            User(username="complete_user", bio="A", interests="[]"),
+            Subdeaddit(name="complete_sub", description="A"),
+        ]
+    )
+    db_session.flush()
+    db_session.add(
+        Agent(
+            persona_mode="fixed",
+            user_username="complete_user",
+            autonomy_tier="regular",
+            is_enabled=True,
+            status="idle",
+            config={},
+            state={},
+            consecutive_failures=0,
+        )
+    )
+    db_session.commit()
+    Setting.set_value("AGENT_RUNTIME_ENABLED", "true")
+    Setting.set_value("SIMULATED_VOTING_MODE", "live")
+
+    status = admin_client.get("/admin/api/setup/status").get_json()
+    assert status["setup_complete"] is True
+    assert Setting.get_value("SETUP_COMPLETED_AT")
+    assert status["worker_alive"] is False
+    home = admin_client.get("/")
+    assert home.status_code == 200
+    assert 'class="setup-wizard"' not in home.get_data(as_text=True)
+
+
+def test_setup_status_exposes_environment_worker_commands(admin_client, monkeypatch):
+    monkeypatch.setenv("DEADDIT_DOCKER", "true")
+    status = admin_client.get("/admin/api/setup/status").get_json()
+    assert status["worker_start_command"] == "docker compose up -d worker"
+    assert status["worker_logs_command"] == "docker compose logs -f worker"
+
+
+def test_setup_dismiss_is_idempotent(admin_client):
+    first = admin_client.post("/admin/api/setup/dismiss").get_json()
+    second = admin_client.post("/admin/api/setup/dismiss").get_json()
+    assert first["success"] is True
+    assert second["setup_complete"] is True
+    assert second["setup_completed_at"] == first["setup_completed_at"]
+
+
+def test_production_empty_homepage_never_renders_wizard(client):
+    Config.set("PRODUCTION", "true")
+
+    home = client.get("/")
+    assert home.status_code == 200
+    assert 'class="setup-wizard"' not in home.get_data(as_text=True)
+    assert 'href="/admin/setup"' not in home.get_data(as_text=True)
+    assert client.get("/admin/setup").status_code == 404

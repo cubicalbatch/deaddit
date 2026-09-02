@@ -8,8 +8,8 @@ import re
 
 import pytest
 
-from deaddit.extensions import db
-from deaddit.models import Agent, Subdeaddit, User
+from deaddit import db, jobs
+from deaddit.models import Agent, Job, Subdeaddit, User
 from deaddit.services import persona_generator as pg
 from deaddit.services.persona_generator import (
     PERSONA_BATCH_ATTEMPTS,
@@ -735,7 +735,7 @@ class TestAdminUserGeneratorAPI:
         assert resp.status_code == 400
         assert "Unknown tier" in resp.get_json()["error"]
 
-    def test_api_generate_success(self, admin_client, fake_llm):
+    def test_api_generate_success(self, admin_client, fake_llm, app):
         fake_llm.enqueue_content(SAMPLE_PERSONAS_JSON)
 
         payload = {
@@ -746,31 +746,28 @@ class TestAdminUserGeneratorAPI:
             "troll_mode": "no_troll",
         }
         resp = admin_client.post("/admin/api/users/generate", json=payload)
-        assert resp.status_code == 201
+        assert resp.status_code == 202
         data = resp.get_json()
+        assert set(data) == {"success", "job"}
         assert data["success"] is True
-        assert set(data) == {"success", "users", "agents", "skipped"}
-        assert len(data["users"]) == 2
-        assert len(data["agents"]) == 2
-        assert all(
-            "assignment_id" not in user and "persona_seed" not in user
-            for user in data["users"]
-        )
+        job = Job.query.get(data["job"]["id"])
+        assert job.type.value == "batch_operation"
+        assert job.parameters["operation"] == "persona_generation"
+        result = jobs.execute_job(job.id, app=app)
+        assert len(result["users"]) == 2
+        assert len(result["agents"]) == 2
 
-        # Verify agent tier and config
-        for agent in data["agents"]:
+        for agent in result["agents"]:
             assert agent["autonomy_tier"] == "lurker"
             assert agent["is_enabled"] is True
             assert agent["config"]["max_actions_per_run"] == 30
             assert agent["config"]["min_delay"] == 300
             assert agent["config"]["max_delay"] == 1800
 
-        # Verify LLM request included topic hint
-        assert len(fake_llm.requests) == 1
         prompt = _prompt(fake_llm.requests[0])
         assert "coffee lovers" in prompt
 
-    def test_api_generate_without_agents(self, admin_client, fake_llm):
+    def test_api_generate_without_agents(self, admin_client, fake_llm, app):
         fake_llm.enqueue_content(json.dumps([SAMPLE_PERSONAS[0]]))
 
         payload = {
@@ -779,13 +776,13 @@ class TestAdminUserGeneratorAPI:
             "troll_mode": "no_troll",
         }
         resp = admin_client.post("/admin/api/users/generate", json=payload)
-        assert resp.status_code == 201
-        data = resp.get_json()
-        assert data["success"] is True
-        assert len(data["users"]) == 1
-        assert len(data["agents"]) == 0
+        assert resp.status_code == 202
+        job = Job.query.get(resp.get_json()["job"]["id"])
+        result = jobs.execute_job(job.id, app=app)
+        assert len(result["users"]) == 1
+        assert len(result["agents"]) == 0
 
-    def test_api_generate_defaults_to_personas_only(self, admin_client, fake_llm):
+    def test_api_generate_defaults_to_personas_only(self, admin_client, fake_llm, app):
         """Omitting auto_create_agent must NOT enroll agents (admin UI default)."""
         fake_llm.enqueue_content(json.dumps([SAMPLE_PERSONAS[0]]))
 
@@ -793,11 +790,11 @@ class TestAdminUserGeneratorAPI:
             "/admin/api/users/generate",
             json={"count": 1, "troll_mode": "no_troll"},
         )
-        assert resp.status_code == 201
-        data = resp.get_json()
-        assert data["success"] is True
-        assert len(data["users"]) == 1
-        assert data["agents"] == []
+        assert resp.status_code == 202
+        job = Job.query.get(resp.get_json()["job"]["id"])
+        result = jobs.execute_job(job.id, app=app)
+        assert len(result["users"]) == 1
+        assert result["agents"] == []
         assert Agent.query.count() == 0
 
     def test_generate_personas_batches_over_ten(self, app, fake_llm, monkeypatch):

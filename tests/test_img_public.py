@@ -29,7 +29,7 @@ from deaddit import create_app
 from deaddit import db as _db
 from deaddit.images import cli as images_cli
 from deaddit.images.storage import store_variants
-from deaddit.models import Post, PostImage, Subdeaddit, User
+from deaddit.models import Post, PostImage, Setting, Subdeaddit, User
 
 _PRIVATE_PROMPT = "a private generation prompt that must never leak publicly"
 _PUBLIC_IMAGE_KEYS = {
@@ -89,6 +89,7 @@ def db_session(app):
         ]
     )
     _db.session.commit()
+    Setting.set_value("SETUP_COMPLETED_AT", "2026-01-01T00:00:00Z")
     return _db.session
 
 

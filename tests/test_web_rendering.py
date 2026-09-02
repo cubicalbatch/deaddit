@@ -11,7 +11,7 @@ from sqlalchemy import event
 
 from deaddit import create_app
 from deaddit import db as _db
-from deaddit.models import Comment, GeneratedWebsite, Post, Subdeaddit, User
+from deaddit.models import Comment, GeneratedWebsite, Post, Setting, Subdeaddit, User
 from deaddit.websites.storage import store_website
 
 
@@ -45,6 +45,7 @@ def db_session(app):
         ]
     )
     _db.session.commit()
+    Setting.set_value("SETUP_COMPLETED_AT", "2026-01-01T00:00:00Z")
     return _db.session
 
 

@@ -139,25 +139,32 @@ def _update_job_progress(progress: int):
 
 
 def _execute_batch_operation(job: Job) -> dict[str, Any]:
-    """Execute batch operation job."""
-    params = job.parameters
+    """Execute a batch operation job, including queued persona generation."""
+    params = job.parameters or {}
+    if params.get("operation") == "persona_generation":
+        from deaddit.services.persona_generator import generate_personas
+
+        result = generate_personas(
+            count=params.get("count", 1),
+            topic_hint=params.get("topic_hint"),
+            auto_create_agent=params.get("auto_create_agent", False),
+            tier=params.get("tier", "regular"),
+            api_url=params.get("api_url"),
+            model=params.get("model"),
+            troll_mode=params.get("troll_mode", "chance"),
+        )
+        return {"operation": "persona_generation", **result}
+
     operations = params.get("operations", [])
-
     results = []
-
     for i, operation in enumerate(operations):
-        # Update progress
         _update_job_progress(i)
-
-        # Create sub-job for each operation
         sub_job = create_job(
             job_type=JobType(operation["type"]),
             parameters=operation["parameters"],
             priority=job.priority,
         )
-
         results.append({"operation": operation, "job_id": sub_job.id})
-
     return {"batch_results": results, "count": len(results)}
 
 

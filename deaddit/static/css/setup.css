@@ -1,0 +1,372 @@
+/* ============================================================
+   setup.css - First-run onboarding wizard (setup.html)
+   Loaded by setup.html itself so the wizard renders identically
+   inside the public shell (base.html) and the admin shell
+   (admin/base.html). Token-only colors.
+   ============================================================ */
+
+.setup-wizard {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    max-width: 46rem;
+}
+
+.setup-intro__lead {
+    margin: var(--space-xs) 0 0;
+    color: var(--text-2);
+    max-width: 40rem;
+}
+
+/* --- Progress rail --- */
+.setup-progress {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.setup-progress__label {
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+}
+
+.setup-progress__steps {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    flex-wrap: wrap;
+}
+
+.setup-progress__steps li {
+    padding: var(--space-xs) var(--space-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    font-size: var(--font-size-sm);
+    color: var(--text-2);
+}
+
+.setup-progress__step--done {
+    background-color: var(--status-success-soft);
+    border-color: var(--status-success);
+    color: var(--status-success);
+    font-weight: 600;
+}
+
+/* --- Steps --- */
+.setup-step {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    background-color: var(--bg-surface);
+}
+
+.setup-step--done {
+    background-color: var(--status-success-soft);
+}
+
+.setup-step--pending {
+    background-color: var(--status-warning-soft);
+}
+
+.setup-step__dot {
+    width: 10px;
+    height: 10px;
+    margin-top: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background-color: var(--text-3);
+}
+
+.setup-step--done .setup-step__dot {
+    background-color: var(--status-success);
+}
+
+.setup-step--pending .setup-step__dot {
+    background-color: var(--status-warning);
+}
+
+.setup-step__body {
+    flex: 1;
+    min-width: 0;
+}
+
+.setup-step__header,
+.setup-form__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.setup-step__header {
+    justify-content: space-between;
+}
+
+.setup-step__header h2 {
+    margin: 0;
+    font-size: var(--font-size-lg);
+}
+
+.setup-state-chip {
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.setup-step--done .setup-state-chip {
+    color: var(--status-success);
+}
+
+.setup-step__desc {
+    margin: var(--space-xs) 0 var(--space-sm);
+    color: var(--text-2);
+}
+
+.setup-step__note {
+    margin: var(--space-xs) 0 0;
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+}
+
+/* --- Forms --- */
+.setup-form__field {
+    margin-bottom: var(--space-sm);
+}
+
+.setup-form__field label {
+    display: block;
+    margin-bottom: var(--space-xs);
+    font-weight: 600;
+}
+
+.setup-form__field input,
+.setup-form__field select {
+    width: 100%;
+    max-width: 36rem;
+}
+
+.setup-form__help {
+    margin: var(--space-xs) 0;
+    color: var(--text-2);
+    font-size: var(--font-size-sm);
+}
+
+/* Inline controls inside action rows (step 3 count/tier) */
+.setup-field-label {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+}
+
+.setup-count-input {
+    width: 5rem;
+}
+
+.setup-tier-select {
+    width: auto;
+}
+
+.setup-key-status {
+    color: var(--status-success);
+    font-size: var(--font-size-sm);
+}
+
+/* --- Buttons --- */
+.setup-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    min-height: 44px;
+    padding: var(--space-sm) var(--space-lg);
+    /* accent-strong + on-accent keeps AA text contrast in both themes */
+    background-color: var(--accent-strong);
+    border: 1px solid var(--accent-strong);
+    border-radius: var(--radius-md);
+    color: var(--on-accent);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color var(--motion-fast) var(--ease-out-quart),
+        border-color var(--motion-fast) var(--ease-out-quart);
+}
+
+.setup-btn:hover {
+    background-color: var(--accent-strong-hover);
+    border-color: var(--accent-strong-hover);
+}
+
+.setup-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.setup-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.setup-btn--secondary {
+    background-color: transparent;
+    border-color: var(--border);
+    color: var(--text-1);
+}
+
+.setup-btn--secondary:hover {
+    background-color: var(--bg-hover-row);
+    border-color: var(--border);
+}
+
+/* --- Status lines --- */
+.setup-status {
+    margin: var(--space-xs) 0 0;
+    font-size: var(--font-size-sm);
+}
+
+.setup-status--success {
+    color: var(--status-success);
+}
+
+.setup-status--error {
+    color: var(--status-danger);
+}
+
+.setup-status:empty {
+    display: none;
+}
+
+.setup-status a {
+    color: var(--link);
+}
+
+/* --- Secondary path disclosure (generate personas) --- */
+.setup-secondary {
+    margin-top: var(--space-md);
+    border-top: 1px dashed var(--border);
+    padding-top: var(--space-md);
+}
+
+.setup-secondary summary {
+    color: var(--link);
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.setup-secondary summary:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.setup-secondary[open] summary {
+    margin-bottom: var(--space-sm);
+}
+
+/* --- Worker command block --- */
+.setup-command {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+    margin: var(--space-sm) 0;
+}
+
+.setup-command code {
+    display: inline-block;
+    padding: var(--space-xs) var(--space-sm);
+    background-color: var(--bg-canvas);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    overflow-wrap: anywhere;
+}
+
+.setup-copy {
+    padding: var(--space-xs) var(--space-sm);
+    background-color: var(--bg-canvas);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-1);
+    font: inherit;
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+}
+
+.setup-copy:hover {
+    background-color: var(--bg-hover-row);
+}
+
+.setup-copy:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* --- Completion card --- */
+.setup-complete__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    margin-top: var(--space-sm);
+}
+
+.setup-complete__link {
+    color: var(--link);
+    font-weight: 600;
+}
+
+.setup-complete__link:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* --- Dismissal --- */
+.setup-dismiss {
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--text-3);
+    font: inherit;
+    font-size: var(--font-size-sm);
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.setup-dismissed__note {
+    margin: 0;
+    color: var(--text-2);
+}
+.setup-dismiss:hover {
+    color: var(--text-2);
+}
+
+.setup-dismiss:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.setup-dismissed {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    background-color: var(--bg-surface);
+}
+
+@media (max-width: 540px) {
+    .setup-progress {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}

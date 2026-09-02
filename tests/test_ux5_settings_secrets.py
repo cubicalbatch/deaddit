@@ -1,24 +1,16 @@
-"""Settings secrets contract (UX-5 slice, updated by A6).
+"""Settings secret contract and deliberate provider-row key storage.
 
-Since refactor A6, secrets are ENVIRONMENT-ONLY: the app resolves
-API_TOKEN / SECRET_KEY / OPENAI_KEY / API_KEY_* from the environment and
-refuses to persist them (``SecretNotPersistable``). These tests pin the
-post-A6 behaviour of /admin/settings and its save APIs:
-
-* blank/absent secret fields never touch anything,
-* non-empty secrets are REFUSED with an explicit environment-only
-  message while the non-secret rest of the request still commits,
-* short tokens keep their dedicated validation error,
-* no bullet-mask placeholder and no secret value ever reaches the
-  rendered HTML or the JSON API responses,
-* the endpoint-key status endpoint reports has_key/last4 only.
+Global credentials remain environment-only. The setup/provider API may store an
+admin-entered LLM key in ``LLMProvider.api_key`` because that is the provider's
+existing persistence behavior; it never mirrors that value into Setting rows or
+API responses.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from deaddit.models import Setting
+from deaddit.models import LLMProvider, Setting
 
 OPENAI_KEY = "sk-test-openai-key-abcdef123456"
 API_TOKEN = "unit-test-token-987654"
@@ -92,23 +84,22 @@ def test_whitespace_only_secret_is_ignored(admin_client, db_session):
 
 
 # ---------------------------------------------------------------------------
-# (b) non-empty secrets are refused: the database is no longer their home
+# (b) provider-row keys are stored only on the matching provider
 
 
-def test_nonempty_secrets_are_refused_env_only(admin_client, db_session):
-    """A6: save APIs reject secret values and write NO secret rows.
-
-    Regression guard for the UX-5 double-write defect too: even when the
-    posted endpoint equals the current OPENAI_API_URL, neither OPENAI_KEY
-    nor the mirrored API_KEY_* row may appear.
-    """
+def test_nonempty_setup_key_is_stored_on_provider(admin_client, db_session):
     resp = admin_client.post(
         "/admin/api/save-config",
         json={"openai_api_url": ENDPOINT, "openai_key": OPENAI_KEY},
     )
     body = resp.get_json()
-    assert body["success"] is False
-    assert "environment-only" in body["message"]
+    assert body["success"] is True
+
+    provider = db_session.query(LLMProvider).one()
+    assert provider.api_key == OPENAI_KEY
+    assert provider.is_default is True
+    assert _setting_value(db_session, "OPENAI_KEY") is None
+    assert _setting_value(db_session, "API_KEY_GROQ") is None
 
     resp = admin_client.post(
         "/admin/api/save-deaddit-config", json={"api_token": API_TOKEN}
@@ -116,13 +107,10 @@ def test_nonempty_secrets_are_refused_env_only(admin_client, db_session):
     body = resp.get_json()
     assert body["success"] is False
     assert "environment-only" in body["message"]
-
-    for key in SECRET_KEYS:
-        assert _setting_value(db_session, key) is None
+    assert _setting_value(db_session, "API_TOKEN") is None
 
 
-def test_refused_secret_still_commits_other_fields(admin_client, db_session):
-    """The non-secret rest of a request survives the secret refusal."""
+def test_provider_key_save_still_commits_other_fields(admin_client, db_session):
     resp = admin_client.post(
         "/admin/api/save-config",
         json={
@@ -131,7 +119,7 @@ def test_refused_secret_still_commits_other_fields(admin_client, db_session):
             "openai_model": "llama3",
         },
     )
-    assert resp.get_json()["success"] is False
+    assert resp.get_json()["success"] is True
     assert _setting_value(db_session, "OPENAI_MODEL") == "llama3"
     assert _setting_value(db_session, "OPENAI_API_URL") == ENDPOINT
 
@@ -173,8 +161,8 @@ def test_save_config_response_has_no_secret_echo(admin_client, db_session):
     text = resp.get_data(as_text=True)
     assert OPENAI_KEY not in text
     body = resp.get_json()
-    # Refused under A6 (env-only), and the refusal never echoes the value.
-    assert body["success"] is False
+    # The provider stores the key, but the response exposes only status fields.
+    assert body["success"] is True
     assert "openai_key" not in body["config"]
 
 

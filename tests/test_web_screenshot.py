@@ -12,7 +12,7 @@ from PIL import Image
 
 from deaddit import create_app
 from deaddit import db as _db
-from deaddit.models import GeneratedWebsite, Post, PostImage, Subdeaddit, User
+from deaddit.models import GeneratedWebsite, Post, PostImage, Setting, Subdeaddit, User
 from deaddit.services.content import (
     PendingGeneratedWebsite,
     PendingPostImage,
@@ -59,6 +59,7 @@ def db_session(app):
         ]
     )
     _db.session.commit()
+    Setting.set_value("SETUP_COMPLETED_AT", "2026-01-01T00:00:00Z")
     return _db.session
 
 

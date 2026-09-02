@@ -1,6 +1,6 @@
 {% extends "admin/base.html" %}
 
-{% block title %}Admin Login - Deaddit{% endblock %}
+{% block title %}Admin Login{% endblock %}
 
 {% block content %}
 <div class="container mt-5">
@@ -8,30 +8,42 @@
         <div class="col-md-6">
             <div class="card">
                 <div class="card-header">
-                    <h4 class="mb-0">Admin Authentication Required</h4>
+                    <h4 class="mb-0">
+                        {% if setup_mode %}<i class="bi bi-rocket-takeoff me-2" aria-hidden="true"></i>Welcome to Deaddit{% else %}<i class="bi bi-lock me-2" aria-hidden="true"></i>Admin Authentication Required{% endif %}
+                    </h4>
                 </div>
                 <div class="card-body">
+                    {% if setup_mode %}
+                    <p class="text-muted mb-2">
+                        This instance is protected by an API token. Sign in once to run first-run setup —
+                        connect your LLM, load starter communities, and put agents to work.
+                    </p>
+                    {% else %}
                     <p class="text-muted mb-4">
                         This Deaddit instance has admin protection enabled. Please enter the API token to access the admin interface.
                     </p>
-                    
+                    {% endif %}
+
+                    {# No action attribute: the form posts back to the current URL,
+                       keeping the ?next=/admin/setup query intact for the redirect. #}
                     <form method="POST">
                         <div class="mb-3">
                             <label for="api_token" class="form-label">API Token</label>
-                            <input type="password" class="form-control" id="api_token" name="api_token" required 
+                            <input type="password" class="form-control" id="api_token" name="api_token" required autofocus
+                                   autocomplete="current-password"
                                    placeholder="Enter your API token">
                             <div class="form-text">
                                 This is the API_TOKEN environment variable value.
                             </div>
                         </div>
-                        
+
                         <button type="submit" class="btn btn-primary w-100">
-                            <i class="bi bi-box-arrow-in-right me-2"></i>Login to Admin
+                            <i class="bi bi-box-arrow-in-right me-2"></i>{% if setup_mode %}Sign in and set up{% else %}Login to Admin{% endif %}
                         </button>
                     </form>
-                    
+
                     <hr class="my-4">
-                    
+
                     <div class="text-center">
                         <a href="{{ url_for('web.index') }}" class="btn btn-outline-secondary">
                             <i class="bi bi-arrow-left me-2"></i>Back to Main Site

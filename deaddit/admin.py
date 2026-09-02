@@ -522,24 +522,25 @@ def check_has_more_pages(models_data, page_models, per_page):
     return len(page_models) == per_page
 
 
+def _safe_local_next(value):
+    """Return a local redirect path, never an absolute or protocol-relative URL."""
+    if not isinstance(value, str) or not value.startswith("/"):
+        return None
+    if value.startswith("//") or "\\" in value or "://" in value:
+        return None
+    return value
+
+
 def admin_required(f):
     """Decorator to check admin authentication when API_TOKEN is set."""
 
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Get API_TOKEN from database first, then environment
-        from deaddit.config import Config
-
         api_token = Config.get("API_TOKEN")
-
-        # If no API_TOKEN is set, allow access
         if not api_token:
             return f(*args, **kwargs)
-
-        # Check if user is authenticated
         if not session.get("admin_authenticated"):
-            return redirect(url_for("admin.login"))
-
+            return redirect(url_for("admin.login", next=request.full_path))
         return f(*args, **kwargs)
 
     return decorated_function
@@ -871,26 +872,26 @@ def _moderator_user() -> User | None:
 @production_disabled
 def login():
     """Admin login page."""
-    from deaddit.config import Config
-
     api_token = Config.get("API_TOKEN")
-
-    # If no API_TOKEN is set, redirect to dashboard
     if not api_token:
         return redirect(url_for("admin.dashboard"))
 
+    requested_next = request.form.get("next") or request.args.get("next")
+    next_path = _safe_local_next(requested_next)
     if request.method == "POST":
         provided_token = request.form.get("api_token")
-
         if hmac.compare_digest((provided_token or "").encode(), api_token.encode()):
             session["admin_authenticated"] = True
             session.permanent = True
             flash("Successfully authenticated!", "success")
-            return redirect(url_for("admin.dashboard"))
-        else:
-            flash("Invalid API token.", "error")
+            return redirect(next_path or url_for("admin.dashboard"))
+        flash("Invalid API token.", "error")
 
-    return render_template("admin/login.html")
+    return render_template(
+        "admin/login.html",
+        next=next_path or "",
+        setup_mode=next_path == "/admin/setup",
+    )
 
 
 @admin_bp.route("/logout")
@@ -2075,39 +2076,17 @@ def system_info_api():
 @production_disabled
 @admin_required
 def save_config_api():
-    """API endpoint to save configuration to database."""
+    """Save setup configuration and make its endpoint the default provider."""
     try:
         data = request.get_json(silent=True) or request.form.to_dict()
-
-        # Save configuration values to database
-        endpoint_url = None
-        if data.get("openai_api_url"):
-            endpoint_url = data["openai_api_url"].rstrip("/")
+        endpoint_url = str(data.get("openai_api_url") or "").strip().rstrip("/")
+        if endpoint_url:
             Config.set("OPENAI_API_URL", endpoint_url)
 
-        # Empty-means-unchanged: an absent or blank secret never overwrites the
-        # stored value. Only a non-empty key is written. Since A6 secrets are
-        # environment-only: a non-empty key is refused, other settings in the
-        # same request still commit.
-        openai_key = (data.get("openai_key") or "").strip()
-        openai_key_refused = False
-        if openai_key:
-            try:
-                if endpoint_url:
-                    Config.set_api_key_for_endpoint(endpoint_url, openai_key)
-                    # If no endpoint URL, use current endpoint
-                    current_endpoint = Config.get("OPENAI_API_URL")
-                    if current_endpoint:
-                        Config.set_api_key_for_endpoint(current_endpoint, openai_key)
-                    else:
-                        Config.set("OPENAI_KEY", openai_key)
-            except SecretNotPersistable:
-                openai_key_refused = True
-
-        if data.get("openai_model"):
-            Config.set("OPENAI_MODEL", data["openai_model"])
+        model_value = str(data.get("openai_model") or "").strip()
+        if model_value:
+            Config.set("OPENAI_MODEL", model_value)
         troll_chance_raw = str(data.get("troll_user_chance") or "").strip()
-
         if troll_chance_raw:
             try:
                 troll_chance = float(troll_chance_raw)
@@ -2133,34 +2112,65 @@ def save_config_api():
                 )
             Config.set("TROLL_USER_CHANCE", str(troll_chance))
 
-        # Return updated config
-        current_endpoint = Config.get("OPENAI_API_URL")
-        config = {
-            "openai_api_url": current_endpoint or "Not set",
-            "openai_key_set": bool(Config.get_api_key_for_endpoint(current_endpoint)),
-        }
-
-        if openai_key_refused:
-            return jsonify(
-                {
-                    "success": False,
-                    "message": "OPENAI_KEY is environment-only since refactor A6 — set it in your environment/.env (other settings were saved).",
-                    "config": config,
-                }
+        if endpoint_url:
+            configured_model = (
+                model_value
+                or str(Config.get("OPENAI_MODEL", "llama3") or "llama3").strip()
             )
+            key = str(data.get("openai_key") or "").strip()
+            providers = (
+                LLMProvider.query.filter(
+                    (LLMProvider.api_url == endpoint_url)
+                    | (LLMProvider.api_url == endpoint_url + "/")
+                )
+                .order_by(LLMProvider.is_default.desc(), LLMProvider.id.asc())
+                .all()
+            )
+            provider = (
+                providers[0]
+                if providers
+                else LLMProvider(
+                    name="Default",
+                    api_url=endpoint_url,
+                    is_default=True,
+                )
+            )
+            if not providers:
+                db.session.add(provider)
+            for duplicate in providers[1:]:
+                if not provider.api_key and duplicate.api_key:
+                    provider.api_key = duplicate.api_key
+                if not provider.default_model and duplicate.default_model:
+                    provider.default_model = duplicate.default_model
+                db.session.delete(duplicate)
+            provider.api_url = endpoint_url
+            provider.default_model = configured_model or provider.default_model
+            if key and key != "••••••••••••••••":
+                provider.api_key = key
+            for candidate in LLMProvider.query.all():
+                candidate.is_default = candidate is provider
+            db.session.commit()
+        _setup_status()
 
+        current_endpoint = Config.get("OPENAI_API_URL")
+        current_key = Config.get_api_key_for_endpoint(current_endpoint or "")
         return jsonify(
             {
                 "success": True,
-                "message": "Configuration saved to database successfully",
-                "config": config,
+                "message": "Configuration saved successfully",
+                "config": {
+                    "openai_api_url": current_endpoint or "Not set",
+                    "openai_model": Config.get("OPENAI_MODEL"),
+                    "openai_key_set": bool((current_key or "").strip()),
+                },
             }
         )
-
-    except Exception as e:
+    except Exception as exc:
+        db.session.rollback()
+        logger.exception("Failed to save configuration: %s", exc)
         return jsonify(
-            {"success": False, "message": f"Failed to save configuration: {str(e)}"}
-        )
+            {"success": False, "message": f"Failed to save configuration: {exc}"}
+        ), 500
 
 
 @admin_bp.route("/api/save-deaddit-config", methods=["POST"])
@@ -3259,16 +3269,42 @@ def clear_jobs_api():
 
 def _setup_status():
     """Return the live state needed by the first-run setup wizard."""
-    api_url = Config.get("OPENAI_API_URL")
-    model = Config.get("OPENAI_MODEL")
+    provider = LLMProvider.get_default()
+    api_url = provider.api_url if provider else Config.get("OPENAI_API_URL")
+    model = (
+        provider.default_model
+        if provider and provider.default_model
+        else Config.get("OPENAI_MODEL")
+    )
     subdeaddit_count = Subdeaddit.query.count()
     user_count = User.query.count()
     post_count = Post.query.count()
     agent_count = Agent.query.count()
     enabled_agent_count = Agent.query.filter(Agent.is_enabled.is_(True)).count()
-    configured = LLMProvider.query.count() > 0 or bool(
-        api_url and api_url != "http://localhost/v1"
+    configured = bool(provider) or bool(api_url and api_url != "http://localhost/v1")
+    has_content = post_count > 0 or user_count > 0 or subdeaddit_count > 0
+    runtime_enabled = str(
+        Setting.get_value("AGENT_RUNTIME_ENABLED", "false")
+    ).lower() in {"true", "1", "yes", "on"}
+    voting_live = (
+        _normalize_voting_mode(Setting.get_value(_VOTING_MODE_SETTING, "off")) == "live"
     )
+    completion_requirements_met = (
+        configured
+        and has_content
+        and enabled_agent_count > 0
+        and runtime_enabled
+        and voting_live
+    )
+    completed_at = Setting.get_value("SETUP_COMPLETED_AT")
+    if not completed_at and completion_requirements_met:
+        completed_at = datetime.utcnow().isoformat()
+        Setting.set_value(
+            "SETUP_COMPLETED_AT",
+            completed_at,
+            description="Timestamp when first-run setup became complete",
+        )
+
     heartbeat = Setting.get_value(WORKER_LIVENESS_SETTING_KEY)
     worker_alive = False
     if heartbeat:
@@ -3280,23 +3316,45 @@ def _setup_status():
         except (TypeError, ValueError):
             pass
 
+    next_agent = (
+        Agent.query.filter(Agent.is_enabled.is_(True), Agent.next_run_at.isnot(None))
+        .order_by(Agent.next_run_at.asc(), Agent.id.asc())
+        .first()
+    )
+    if os.path.exists("/.dockerenv") or str(
+        os.environ.get("DEADDIT_DOCKER", "")
+    ).lower() in {"1", "true", "yes", "on"}:
+        worker_start_command = "docker compose up -d worker"
+        worker_logs_command = "docker compose logs -f worker"
+    else:
+        worker_start_command = "uv run deaddit-worker"
+        worker_logs_command = "tail -f logs/worker.log"
+
     return {
         "configured": configured,
         "api_url": api_url,
         "model": model,
-        "api_key_set": bool((Config.get_api_key_for_endpoint(api_url) or "").strip()),
-        "has_content": post_count > 0 or user_count > 0 or subdeaddit_count > 0,
+        "api_key_set": bool(
+            (Config.get_api_key_for_endpoint(api_url or "") or "").strip()
+        ),
+        "has_content": has_content,
         "subdeaddit_count": subdeaddit_count,
         "user_count": user_count,
         "post_count": post_count,
         "agent_count": agent_count,
         "enabled_agent_count": enabled_agent_count,
-        "runtime_enabled": str(
-            Setting.get_value("AGENT_RUNTIME_ENABLED", "false")
-        ).lower()
-        in {"true", "1", "yes", "on"},
+        "runtime_enabled": runtime_enabled,
+        "voting_live": voting_live,
         "worker_last_seen_iso": str(heartbeat) if heartbeat else None,
         "worker_alive": worker_alive,
+        "worker_start_command": worker_start_command,
+        "worker_logs_command": worker_logs_command,
+        "next_agent_wake": (
+            next_agent.next_run_at.replace(tzinfo=UTC).isoformat()
+            if next_agent
+            else None
+        ),
+        "setup_complete": bool(completed_at),
     }
 
 
@@ -3322,6 +3380,8 @@ def setup_page():
         description="Configure Deaddit and start its autonomous agents.",
         is_configured=status["configured"],
         worker_age_seconds=worker_age_seconds,
+        admin_shell=True,
+        setup_incomplete=not status["setup_complete"],
         **status,
         key_set=status["api_key_set"],
         counts={
@@ -3358,7 +3418,181 @@ def agent_runtime_api():
         "true" if enabled else "false",
         description="Whether the autonomous agent runtime is enabled",
     )
+    _setup_status()
     return jsonify({"success": True, "runtime_enabled": enabled})
+
+
+@admin_bp.route("/api/setup/dismiss", methods=["POST"])
+@production_disabled
+@admin_required
+def setup_dismiss_api():
+    """Persist an explicit request to stop showing first-run setup."""
+    completed_at = Setting.get_value("SETUP_COMPLETED_AT")
+    if not completed_at:
+        completed_at = datetime.utcnow().isoformat()
+        Setting.set_value(
+            "SETUP_COMPLETED_AT",
+            completed_at,
+            description="Timestamp when first-run setup was dismissed",
+        )
+    return jsonify(
+        {"success": True, "setup_complete": True, "setup_completed_at": completed_at}
+    )
+
+
+@admin_bp.route("/api/setup/voting", methods=["POST"])
+@production_disabled
+@admin_required
+def setup_voting_api():
+    """Enable the canonical natural simulated-voting policy and runtime."""
+    config = validate_policy(preset_config("natural"))
+    algorithm_version = max(SUPPORTED_ALGORITHM_VERSIONS)
+    policy = (
+        VoteCadencePolicy.query.filter_by(
+            preset="natural", algorithm_version=algorithm_version
+        )
+        .order_by(VoteCadencePolicy.id.desc())
+        .first()
+    )
+    created = False
+    if policy is None or validate_policy(policy.config) != config:
+        policy = VoteCadencePolicy(
+            preset="natural",
+            algorithm_version=algorithm_version,
+            config=config,
+            effective_at=datetime.utcnow(),
+        )
+        db.session.add(policy)
+        db.session.commit()
+        created = True
+    Setting.set_value(
+        _VOTING_MODE_SETTING,
+        "live",
+        description="Simulated voting worker mode (off, shadow, or live)",
+    )
+    Setting.set_value(
+        "AGENT_RUNTIME_ENABLED",
+        "true",
+        description="Whether the autonomous agent runtime is enabled",
+    )
+    _setup_status()
+    return jsonify(
+        {
+            "success": True,
+            "policy": _policy_record(policy),
+            "mode": "live",
+            "runtime_enabled": True,
+            "created": created,
+        }
+    )
+
+
+@admin_bp.route("/api/setup/agents-from-personas", methods=["POST"])
+@production_disabled
+@admin_required
+def setup_agents_from_personas_api():
+    """Enroll a deterministic set of starter users without touching the LLM."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        count = int(payload.get("count", 3))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "count must be an integer"}), 400
+    if count < 1 or count > 50:
+        return (
+            jsonify({"success": False, "error": "count must be between 1 and 50"}),
+            400,
+        )
+
+    posts_sq = (
+        db.session.query(Post.user.label("username"), func.count(Post.id).label("n"))
+        .group_by(Post.user)
+        .subquery()
+    )
+    comments_sq = (
+        db.session.query(
+            Comment.user.label("username"), func.count(Comment.id).label("n")
+        )
+        .group_by(Comment.user)
+        .subquery()
+    )
+    activity = func.coalesce(posts_sq.c.n, 0) + func.coalesce(comments_sq.c.n, 0)
+    users = (
+        db.session.query(User)
+        .outerjoin(posts_sq, User.username == posts_sq.c.username)
+        .outerjoin(comments_sq, User.username == comments_sq.c.username)
+        .order_by(desc(activity), User.username)
+        .limit(count)
+        .all()
+    )
+    if not users:
+        return jsonify(
+            {
+                "success": True,
+                "agents": [],
+                "created": 0,
+                "skipped": count,
+                "requested": count,
+            }
+        )
+
+    usernames = [user.username for user in users]
+    existing = {
+        agent.user_username: agent
+        for agent in Agent.query.filter(
+            Agent.persona_mode == "fixed", Agent.user_username.in_(usernames)
+        ).all()
+    }
+    provider = LLMProvider.get_default()
+    api_url = str(
+        provider.api_url if provider else Config.get("OPENAI_API_URL") or ""
+    ).strip()
+    model = str(
+        provider.default_model
+        if provider and provider.default_model
+        else Config.get("OPENAI_MODEL", "llama3")
+    ).strip()
+    now = datetime.utcnow()
+    agents = []
+    created_count = 0
+    for username in usernames:
+        agent = existing.get(username)
+        if agent is None:
+            agent = Agent(
+                persona_mode="fixed",
+                user_username=username,
+                autonomy_tier="regular",
+                is_enabled=True,
+                status="idle",
+                config={
+                    "provider_id": provider.id if provider else None,
+                    "api_url": api_url,
+                    "model": model,
+                    "max_actions_per_run": 30,
+                    "max_run_seconds": 300,
+                    "min_delay": 60,
+                    "max_delay": 900,
+                },
+                state={},
+                next_run_at=now,
+                consecutive_failures=0,
+            )
+            db.session.add(agent)
+            created_count += 1
+        elif not agent.is_enabled or agent.next_run_at is None:
+            agent.is_enabled = True
+            agent.next_run_at = now
+        agents.append(agent)
+    db.session.commit()
+    _setup_status()
+    return jsonify(
+        {
+            "success": True,
+            "agents": [_agent_json(agent) for agent in agents],
+            "created": created_count,
+            "skipped": count - created_count,
+            "requested": count,
+        }
+    )
 
 
 @admin_bp.route("/api/setup/test-connection", methods=["POST"])
@@ -3369,7 +3603,10 @@ def setup_test_connection_api():
     payload = request.get_json(silent=True) or {}
     api_url = str(payload.get("api_url") or Config.get("OPENAI_API_URL") or "").strip()
     model = str(payload.get("model") or Config.get("OPENAI_MODEL") or "llama3").strip()
-    key = Config.get_api_key_for_endpoint(api_url)
+    typed_key = payload.get("openai_key") or payload.get("api_key")
+    key = str(typed_key or "").strip()
+    if not key or key == "••••••••••••••••":
+        key = Config.get_api_key_for_endpoint(api_url)
     try:
         capability = probe_endpoint(api_url, model, api_key=key)
         return jsonify(
@@ -3467,6 +3704,7 @@ def load_default_data_api():
 
         # Mark default data as loaded
         Config.set("DEFAULT_DATA_LOADED", "true")
+        _setup_status()
 
         return jsonify(
             {
@@ -5277,8 +5515,9 @@ def api_agents_bulk():
 @production_disabled
 @admin_required
 def api_generate_users():
-    """Generate human-like personas and optionally enroll them as autonomous agents."""
-    from deaddit.services.persona_generator import generate_personas
+    """Queue persona generation for the worker instead of blocking the web request."""
+    from deaddit.jobs import create_job
+    from deaddit.models import JobType
 
     payload = request.get_json(silent=True) or request.form.to_dict()
     count_raw = payload.get("count", 1)
@@ -5294,7 +5533,6 @@ def api_generate_users():
             ),
             400,
         )
-
     if count < 1 or count > 500:
         return (
             jsonify(
@@ -5305,6 +5543,7 @@ def api_generate_users():
             ),
             400,
         )
+
     tier = payload.get("tier", "regular")
     if tier not in _AGENTIC_TIERS:
         return jsonify({"success": False, "error": f"Unknown tier '{tier}'"}), 400
@@ -5324,38 +5563,28 @@ def api_generate_users():
 
     topic_hint = payload.get("topic_hint")
     if topic_hint is not None:
-        topic_hint = str(topic_hint).strip()
-        if not topic_hint:
-            topic_hint = None
-
-    api_url = payload.get("api_url")
-    model = payload.get("model")
+        topic_hint = str(topic_hint).strip() or None
 
     try:
-        result = generate_personas(
-            count=count,
-            topic_hint=topic_hint,
-            auto_create_agent=auto_create_agent,
-            tier=tier,
-            api_url=api_url,
-            model=model,
-            troll_mode=troll_mode,
+        job = create_job(
+            job_type=JobType.BATCH_OPERATION,
+            parameters={
+                "operation": "persona_generation",
+                "count": count,
+                "topic_hint": topic_hint,
+                "auto_create_agent": auto_create_agent,
+                "tier": tier,
+                "api_url": payload.get("api_url"),
+                "model": payload.get("model"),
+                "troll_mode": troll_mode,
+            },
+            priority=5,
+            total_items=1,
         )
-        return (
-            jsonify(
-                {
-                    "success": True,
-                    "users": result["users"],
-                    "agents": result["agents"],
-                    "skipped": result.get("skipped", 0),
-                }
-            ),
-            201,
-        )
-    except ValueError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": True, "job": job.to_dict()}), 202
     except Exception as exc:
-        logger.exception("Persona generation failed: %s", exc)
+        db.session.rollback()
+        logger.exception("Could not queue persona generation: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
 
 

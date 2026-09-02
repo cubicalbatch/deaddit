@@ -23,7 +23,7 @@
         <i class="bi bi-check-circle me-1"></i>Agent runtime enabled
     </div>
     <div id="agent-worker-offline" class="alert alert-danger mb-0">
-        <i class="bi bi-exclamation-triangle me-1"></i>No worker heartbeat — scheduled and queued runs will not execute. Start it with <code>uv run deaddit-worker</code> (or <code>make worker</code>).
+        <i class="bi bi-exclamation-triangle me-1"></i>No worker heartbeat — scheduled and queued runs will not execute. Start it with <code id="agent-worker-command">uv run deaddit-worker</code> (logs: <code id="agent-worker-logs">make worker-logs</code>).
     </div>
     <div id="agent-worker-online" class="alert alert-success mb-0" hidden>
         <i class="bi bi-heart-pulse me-1"></i>Worker alive (last seen <span id="agent-worker-age">?</span>s ago)
@@ -335,6 +335,21 @@
         }
         return data;
     }
+
+    async function waitForJob(jobId, onPending) {
+        const jobUrl = "{{ url_for('admin.api_job_status', job_id=0) }}".replace(/0$/, String(jobId));
+        while (true) {
+            const data = await api(jobUrl);
+            const job = data.job;
+            if (!job) throw new Error("Generation job not found");
+            if (job.status === "completed") return job.result || {};
+            if (job.status === "failed" || job.status === "cancelled") {
+                throw new Error(job.error_message || ("Generation " + job.status));
+            }
+            if (onPending) onPending(job);
+            await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        }
+    }
     let estimateBaseline = null;
 
     function estimateMetric(key, minDelay, maxDelay, tokenMetric) {
@@ -431,7 +446,11 @@
         const workerOnline = document.getElementById("agent-worker-online");
         const workerAge = workerAgeSeconds(status.worker_last_seen_iso);
         workerOffline.hidden = workerAlive;
-        workerOnline.hidden = !workerAlive;
+        workerOnline.hidden = workerAlive;
+        const workerCommand = document.getElementById("agent-worker-command");
+        if (workerCommand && status.worker_start_command) workerCommand.textContent = status.worker_start_command;
+        const workerLogs = document.getElementById("agent-worker-logs");
+        if (workerLogs && status.worker_logs_command) workerLogs.textContent = status.worker_logs_command;
         document.getElementById("agent-worker-age").textContent = workerAge === null ? "?" : workerAge;
     }
 
@@ -1066,11 +1085,16 @@
         }
 
         try {
-            const data = await api("{{ url_for('admin.api_generate_users') }}", {
+            const queued = await api("{{ url_for('admin.api_generate_users') }}", {
                 method: "POST",
                 body: JSON.stringify(payload),
             });
-
+            if (!queued.job) throw new Error("Generation job was not queued");
+            const data = await waitForJob(queued.job.id, (job) => {
+                alertContainer.innerHTML = '<div class="alert alert-info mb-0 py-2">Persona generation ' +
+                    esc(job.status) + ' on the worker…</div>';
+                alertContainer.style.display = "block";
+            });
             const usersCount = (data.users || []).length;
             const agentsCount = (data.agents || []).length;
             let html = '<div class="alert alert-success alert-dismissible fade show mb-0" role="alert">';

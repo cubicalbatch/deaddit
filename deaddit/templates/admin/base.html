@@ -58,6 +58,13 @@
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'admin.setup_page' %}active{% endif %}"
+                       href="{{ url_for('admin.setup_page') }}">
+                        <i class="bi bi-rocket-takeoff"></i>
+                        <span class="nav-text">Setup</span>
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a class="nav-link {% if request.endpoint in ['admin.agents_dashboard', 'admin.agent_detail'] %}active{% endif %}"
                        href="{{ url_for('admin.agents_dashboard') }}">
                         <i class="bi bi-robot"></i>

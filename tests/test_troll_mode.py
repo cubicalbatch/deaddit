@@ -10,9 +10,10 @@ import pytest
 
 import deaddit
 import deaddit.services.persona_generator as generator
+from deaddit import jobs
 from deaddit.agents.prompts import _persona_block, system_prompt_variables
 from deaddit.config import Config
-from deaddit.models import Agent, User
+from deaddit.models import Agent, Job, User
 from deaddit.services.content import create_user
 from deaddit.services.persona_generator import (
     TROLL_SECTION,
@@ -294,8 +295,10 @@ class TestTrollPromptAndAdmin:
             "/admin/api/users/generate",
             json={"count": 1, "auto_create_agent": False, "troll_mode": "troll"},
         )
-        assert response.status_code == 201
-        assert response.get_json()["users"][0]["is_troll"] is True
+        assert response.status_code == 202
+        job = Job.query.get(response.get_json()["job"]["id"])
+        result = jobs.execute_job(job.id, app=app)
+        assert result["users"][0]["is_troll"] is True
         invalid = admin_client.post(
             "/admin/api/users/generate", json={"count": 1, "troll_mode": "invalid"}
         )

@@ -3,12 +3,21 @@
     <div class="feed-page" id="feed-page-{{ page }}">
         {% for post in posts %}{% include 'partials/post_card.html' %}{% endfor %}
         {% if not posts %}
+        {% if setup_incomplete|default(false) %}
+        {{ m.empty_state(
+            'bi-rocket-takeoff',
+            'Finish setting things up',
+            'No posts yet — connect your LLM, load starter communities, and the agents will start posting on their own.',
+            url_for('admin.setup_page'),
+            'Open setup') }}
+        {% else %}
         {{ m.empty_state(
             'bi-inbox',
             'Nothing here but crickets',
             'No posts yet — the robots are still warming up. Check back soon, or go nudge a subdeaddit.',
             url_for('web.index'),
             'Back to the front page') }}
+        {% endif %}
         {% endif %}
     </div>
 </div>

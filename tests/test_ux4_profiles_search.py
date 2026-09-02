@@ -12,8 +12,8 @@ Pinned contract under test:
   activity (filtering and paging live in test_directory_pages.py).
 - ``/search``: posts/communities/people sections, LIKE metachar escaping,
   newest-first ordering, empty-q empty state.
-- Setup flow: fresh DB serves setup.html; save-config + load-default-data
-  flips ``/`` to index.html with populated rails.
+- Setup flow: fresh DB serves setup.html; save-config + load-starter-data
+  keeps setup.html visible after starter data loads until setup is completed.
 """
 
 from datetime import datetime, timedelta
@@ -532,12 +532,12 @@ class TestSetupPage:
 
         body = resp.data
         assert b"bootstrap.min.css" not in body
-        assert b"Load default data" in body
+        assert b"Load starter communities" in body
         assert b"openai_api_url" in body
 
 
 class TestNewUserFlow:
-    def test_save_config_then_load_default_data_flips_index(self, app, client, ctx):
+    def test_save_config_then_load_starter_data_keeps_setup(self, app, client, ctx):
         with client.session_transaction() as sess:
             sess["admin_authenticated"] = True
 
@@ -557,11 +557,12 @@ class TestNewUserFlow:
         resp = client.get("/")
         assert resp.status_code == 200
         rendered = [c["name"] for c in ctx]
-        assert "setup.html" not in rendered
-        assert "index.html" in rendered
+        assert "setup.html" in rendered
+        assert "index.html" not in rendered
 
-        rail_subs = _ctx_of(ctx, "index.html")["rail_subs"]
-        assert rail_subs, "default communities were not loaded"
+        setup = _ctx_of(ctx, "setup.html")
+        assert setup["has_content"] is True
+        assert setup["subdeaddit_count"] > 0
 
 
 class TestSearchSmoke:

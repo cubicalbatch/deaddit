@@ -12,7 +12,7 @@ from deaddit.dynamics.ranking import (
     normalize_post_filter,
     post_filter_clause,
 )
-from deaddit.models import GeneratedWebsite, Post, PostImage, Subdeaddit, User
+from deaddit.models import GeneratedWebsite, Post, PostImage, Setting, Subdeaddit, User
 
 
 @pytest.fixture()
@@ -122,6 +122,7 @@ def filter_test_db(app):
         db.session.add(site)
 
     db.session.commit()
+    Setting.set_value("SETUP_COMPLETED_AT", "2026-01-01T00:00:00Z")
     return {
         "text_posts": posts[0:4],
         "picture_posts": posts[4:8],

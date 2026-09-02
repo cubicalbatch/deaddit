@@ -15,7 +15,7 @@ from datetime import datetime
 
 import pytest
 
-from deaddit.models import Ban, Comment, Post, Report, User
+from deaddit.models import Ban, Comment, Post, Report, Setting, User
 
 
 @pytest.fixture()
@@ -41,6 +41,7 @@ def admin_session(client, admin_user):
 @pytest.fixture()
 def removal_scenario(seeded_db, db_session):
     """Seed one removed post, one removed comment (with a surviving reply)."""
+    Setting.set_value("SETUP_COMPLETED_AT", "2026-01-01T00:00:00Z")
     post = seeded_db["posts"][0]  # "Hello World" by alice in testsub
 
     parent = Comment(

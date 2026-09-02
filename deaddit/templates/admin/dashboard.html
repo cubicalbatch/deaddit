@@ -44,10 +44,17 @@
                     <span class="badge bg-secondary checklist-state">Pending</span>
                 </span>
             </div>
+            <div class="list-group-item d-flex justify-content-between align-items-center px-0" data-checklist-item="voting_live">
+                <span>Turn on live voting</span>
+                <span class="d-flex align-items-center gap-2">
+                    <a href="{{ url_for('admin.voting') }}" class="btn btn-sm btn-outline-secondary">Voting</a>
+                    <span class="badge bg-secondary checklist-state">Pending</span>
+                </span>
+            </div>
             <div class="list-group-item d-flex justify-content-between align-items-center px-0" data-checklist-item="worker_alive">
                 <span>Start the worker</span>
                 <span class="d-flex align-items-center gap-2">
-                    <code>uv run deaddit-worker</code>
+                    <code data-worker-command>uv run deaddit-worker</code>
                     <span class="badge bg-secondary checklist-state">Pending</span>
                 </span>
             </div>
@@ -202,6 +209,7 @@
             has_content: Boolean(status.has_content),
             enabled_agent_count: Number(status.enabled_agent_count) > 0,
             runtime_enabled: Boolean(status.runtime_enabled),
+            voting_live: Boolean(status.voting_live),
             worker_alive: Boolean(status.worker_alive),
         };
         let allComplete = true;
@@ -215,6 +223,8 @@
             row.classList.toggle("text-muted", done);
             if (!done) allComplete = false;
         });
+        const workerCommand = checklist.querySelector("[data-worker-command]");
+        if (workerCommand && status.worker_start_command) workerCommand.textContent = status.worker_start_command;
         checklist.hidden = allComplete;
     }
 

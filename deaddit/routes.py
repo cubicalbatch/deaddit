@@ -2,7 +2,7 @@ import json
 from collections import namedtuple
 from datetime import UTC
 
-from flask import Blueprint, render_template, request
+from flask import Blueprint, redirect, render_template, request, session, url_for
 from sqlalchemy import and_, distinct, func, or_
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -21,7 +21,7 @@ from deaddit.dynamics.ranking import (
 from deaddit.extensions import db
 
 from .config import Config
-from .models import Comment, LLMProvider, Post, Subdeaddit, User
+from .models import Comment, Post, Subdeaddit, User
 from .utils import (
     format_content_html,
     get_comment_counts_bulk,
@@ -43,38 +43,34 @@ def _safe_json_list(raw):
 
 @bp.route("/")
 def index():
-    # Check if the application needs initial setup
-    needs_setup = False
+    from deaddit.admin import _setup_status
 
-    # Check if database has content and configuration is set
-    total_posts = Post.query.count()
-    total_users = User.query.count()
-    total_subdeaddits = Subdeaddit.query.count()
+    status = _setup_status()
+    total_posts = status["post_count"]
+    total_users = status["user_count"]
+    total_subdeaddits = status["subdeaddit_count"]
+    setup_incomplete = not status["setup_complete"]
+    production = str(Config.get("PRODUCTION", "false")).lower() == "true"
 
-    # Check if core configuration is set
-    openai_url = Config.get("OPENAI_API_URL")
-
-    is_configured = LLMProvider.query.count() > 0 or bool(
-        openai_url and openai_url != "http://localhost/v1"
-    )
-
-    # Keep the wizard visible until the database has starter content, even
-    # when the endpoint was configured in an earlier step.
-    needs_setup = total_posts == 0 and total_users == 0 and total_subdeaddits == 0
-
-    if needs_setup:
+    if setup_incomplete and not production:
+        if Config.get("API_TOKEN") and not session.get("admin_authenticated"):
+            return redirect(url_for("admin.login", next="/admin/setup"))
         return render_template(
             "setup.html",
             title="Setup Required - Deaddit",
             description="Welcome to Deaddit! Initial setup required.",
-            has_content=total_posts > 0 or total_users > 0 or total_subdeaddits > 0,
-            is_configured=is_configured,
-            api_url=openai_url,
-            model=Config.get("OPENAI_MODEL"),
-            key_set=bool((Config.get_api_key_for_endpoint(openai_url) or "").strip()),
-            subdeaddit_count=total_subdeaddits,
-            user_count=total_users,
-            post_count=total_posts,
+            setup_incomplete=True,
+            is_configured=status["configured"],
+            key_set=status["api_key_set"],
+            counts={
+                "subdeaddits": total_subdeaddits,
+                "users": total_users,
+                "posts": total_posts,
+                "agents": status["agent_count"],
+                "enabled_agents": status["enabled_agent_count"],
+            },
+            worker_last_seen=status["worker_last_seen_iso"],
+            **status,
         )
 
     page = request.args.get("page", default=1, type=int)
@@ -154,6 +150,7 @@ def index():
         active_filters=active_filters,
         rail_subs=rail_subs,
         rail_users=rail_users,
+        setup_incomplete=setup_incomplete and not production,
         description="Explore Deaddit, the AI-generated Reddit clone featuring diverse discussions and content created by artificial intelligence.",
     )
 

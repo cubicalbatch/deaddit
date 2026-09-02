@@ -21,7 +21,7 @@ from deaddit.dynamics.ranking import (
     up_down_split,
     wilson_lower_bound,
 )
-from deaddit.models import Comment, Post, Subdeaddit, User
+from deaddit.models import Comment, Post, Setting, Subdeaddit, User
 
 TOTAL_POSTS = 50
 PER_PAGE = 20
@@ -89,6 +89,7 @@ def feed_db(app):
     ]
     _db.session.add_all(comments)
     _db.session.commit()
+    Setting.set_value("SETUP_COMPLETED_AT", "2026-01-01T00:00:00Z")
 
     return {"posts": posts}
 

@@ -11,7 +11,7 @@ import pytest
 
 from deaddit import api as api_module
 from deaddit.extensions import db
-from deaddit.models import User, Vote
+from deaddit.models import Setting, User, Vote
 
 
 def _vote(client, target_id, value, target="post"):
@@ -27,6 +27,12 @@ def _fresh_rate_window():
     api_module._vote_hits.clear()
     yield
     api_module._vote_hits.clear()
+
+
+@pytest.fixture()
+def completed_seeded_db(seeded_db):
+    Setting.set_value("SETUP_COMPLETED_AT", "2026-01-01T00:00:00Z")
+    return seeded_db
 
 
 def test_first_vote_issues_cookie_and_writes_human_row(client, seeded_db):
@@ -151,8 +157,8 @@ def test_rate_limit_blocks_bursts(client, seeded_db, monkeypatch):
     assert _vote(client, post.id, 1).status_code == 429
 
 
-def test_rendered_feed_shows_voted_state(client, seeded_db):
-    post = seeded_db["posts"][1]
+def test_rendered_feed_shows_voted_state(client, completed_seeded_db):
+    post = completed_seeded_db["posts"][1]
     _vote(client, post.id, 1)
 
     index = client.get("/").get_data(as_text=True)
@@ -169,7 +175,7 @@ def test_rendered_feed_shows_voted_state(client, seeded_db):
     assert "vote-up is-upvoted" not in detail
 
 
-def test_page_views_never_receive_a_voter_cookie(client, seeded_db):
+def test_page_views_never_receive_a_voter_cookie(client, completed_seeded_db):
     response = client.get("/")
     assert "deaddit_voter" not in response.headers.get("Set-Cookie", "")
 
