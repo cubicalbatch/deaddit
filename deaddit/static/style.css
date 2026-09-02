@@ -465,12 +465,6 @@ html[data-theme="dark"] .brand__logo--dark {
     transform: translateY(-1px);
 }
 
-.vote-count {
-    font-size: var(--font-size-sm);
-    font-weight: 600;
-    margin: var(--space-xs) 0;
-}
-
 .post-content {
     padding: var(--space-md);
 }
@@ -859,22 +853,6 @@ html[data-theme="dark"] .brand__logo--dark {
 }
 
 @media (max-width: 768px) {
-
-    .post {
-        flex-direction: column;
-    }
-
-    .post-voting {
-        flex-direction: row;
-        justify-content: center;
-        min-width: auto;
-        padding: var(--space-sm);
-    }
-
-    .vote-count {
-        margin: 0 var(--space-sm);
-    }
-
     .content {
         padding: 0 var(--space-md);
     }
@@ -1603,7 +1581,18 @@ a:focus {
     outline-offset: -2px;
 }
 
-.post-card__comments {
+/* Inline mobile score: hidden wherever the desktop rail is shown; the
+   <=768px block below swaps it in for the rail. */
+.post-card__score {
+    display: none;
+    align-items: center;
+    color: var(--text-2);
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+ .post-card__comments {
     color: var(--text-2);
     text-decoration: none;
     display: inline-flex;
@@ -1620,13 +1609,19 @@ a:focus {
 }
 
 @media (max-width: 768px) {
-    .post-card {
-        flex-direction: column;
+    /* The rail is a score plus two disabled 44px buttons - dead weight at
+       phone width, ~60px of it per card. Hide it and surface the score
+       inline in the meta row (.post-card__score) instead. */
+    .post-card__rail {
+        display: none;
     }
 
-    .post-card__rail {
-        flex-direction: row;
-        justify-content: center;
+    .post-card__score {
+        display: inline-flex;
+    }
+
+    .post-card .post-meta {
+        row-gap: var(--space-xs);
     }
 
     .post-card__thumb {
@@ -1672,21 +1667,6 @@ a:focus {
     color: var(--down);
 }
 
-@media (max-width: 768px) {
-    .vote-widget {
-        flex-direction: row;
-    }
-
-    .vote-score {
-        order: 0;
-        margin: 0 var(--space-xs);
-    }
-
-    .vote-arrow {
-        min-height: 44px;
-        min-width: 44px;
-    }
-}
 
 /* Feed controls: toolbar combining sort bar and filter bar */
 .feed-controls {
@@ -1976,6 +1956,19 @@ a.chip:hover {
    markup, layout, and DOM-driven visibility only. */
 .feed-wrap {
     min-width: 0;
+}
+
+/* Cards themselves: grid gap is the separation between posts (they carry
+   no margins of their own). */
+.feed-page {
+    display: grid;
+    gap: var(--space-md);
+}
+
+/* "Load More" (HTMX) appends the next .feed-page as a sibling inside
+   .feed-wrap; without this the two grids kiss at the page seam. */
+.feed-page + .feed-page {
+    margin-top: var(--space-md);
 }
 
 .image-feed-toolbar {
