@@ -70,6 +70,9 @@ def _drop_index_if_exists(table: str, name: str) -> None:
 
 
 def _drop_columns_if_exist(table: str, columns: tuple[str, ...]) -> None:
+    # A previously failed batch recreate can leave its temp table committed
+    # (the instance DB carried one); sweep it or the CREATE fails.
+    op.execute(f"DROP TABLE IF EXISTS _alembic_tmp_{table}")
     present = _columns(table) & set(columns)
     if not present:
         return
@@ -85,18 +88,9 @@ def _drop_table_if_exists(table: str) -> None:
 
 
 def upgrade():
-    _drop_index_if_exists("post", "ix_post_removed")
-    _drop_index_if_exists("comment", "ix_comment_removed")
-
-    _drop_columns_if_exist(
-        "post", ("removed", "removed_by", "removal_reason", "removed_at")
-    )
-    op.execute(_POST_HOT_EXPR_DDL)
-
-    _drop_columns_if_exist(
-        "comment", ("removed", "removed_by", "removal_reason", "removed_at")
-    )
-
+    # Moderation tables are pure children of user/post/comment: dropping
+    # them first cannot violate any FK and clears the rows that would
+    # otherwise trip the batch recreates below on a populated database.
     for table, indexes in (
         (
             "report",
@@ -116,6 +110,30 @@ def upgrade():
             op.drop_table(table)
 
     _drop_table_if_exists("subdeaddit_moderator")
+
+    _drop_index_if_exists("post", "ix_post_removed")
+    _drop_index_if_exists("comment", "ix_comment_removed")
+
+    # The batch recreates DROP the live post/comment tables. With FK
+    # enforcement on, SQLite's implicit DELETE on DROP TABLE rejects the
+    # drop while child rows (comments, votes, images, websites) reference
+    # them - and PRAGMA foreign_keys is a no-op inside a transaction, so
+    # flip it in an autocommit block. The rename back to the original
+    # table name leaves every child FK pointing where it did before.
+    with op.get_context().autocommit_block():
+        op.execute("PRAGMA foreign_keys=OFF")
+
+    _drop_columns_if_exist(
+        "post", ("removed", "removed_by", "removal_reason", "removed_at")
+    )
+    op.execute(_POST_HOT_EXPR_DDL)
+
+    _drop_columns_if_exist(
+        "comment", ("removed", "removed_by", "removal_reason", "removed_at")
+    )
+
+    with op.get_context().autocommit_block():
+        op.execute("PRAGMA foreign_keys=ON")
 
     if "platform_daily" in _tables() and "reports" in _columns("platform_daily"):
         with op.batch_alter_table("platform_daily") as batch_op:
