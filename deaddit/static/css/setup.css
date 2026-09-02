@@ -5,6 +5,12 @@
    (admin/base.html). Token-only colors.
    ============================================================ */
 
+/* JS and the template toggle visibility via the [hidden] attribute; author
+   display rules (e.g. .setup-step { display: flex }) would otherwise beat
+   the UA stylesheet and keep those elements visible. */
+[hidden] {
+    display: none !important;
+}
 .setup-wizard {
     display: flex;
     flex-direction: column;
