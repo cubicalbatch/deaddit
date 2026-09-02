@@ -6,6 +6,7 @@ import pytest
 
 from deaddit.config import Config
 from deaddit.models import Agent, LLMProvider, Setting, Subdeaddit, User
+from deaddit.settings.service import DeployFlagNotPersistable
 
 
 @pytest.fixture()
@@ -238,11 +239,39 @@ def test_setup_dismiss_is_idempotent(admin_client):
     assert second["setup_completed_at"] == first["setup_completed_at"]
 
 
-def test_production_empty_homepage_never_renders_wizard(client):
-    Config.set("PRODUCTION", "true")
+def test_production_empty_homepage_never_renders_wizard(client, monkeypatch):
+    # PRODUCTION is a deploy flag: the environment is the only way to set it,
+    # which is also the only way a real deployment can turn it on.
+    monkeypatch.setenv("PRODUCTION", "true")
 
     home = client.get("/")
     assert home.status_code == 200
     assert 'class="setup-wizard"' not in home.get_data(as_text=True)
     assert 'href="/admin/setup"' not in home.get_data(as_text=True)
     assert client.get("/admin/setup").status_code == 404
+
+
+def test_production_flag_is_refused_by_the_database(client):
+    with pytest.raises(DeployFlagNotPersistable):
+        Config.set("PRODUCTION", "true")
+    with pytest.raises(DeployFlagNotPersistable):
+        Config.set_many({"PRODUCTION": "true"})
+
+
+def test_production_row_cannot_shadow_the_environment(client, monkeypatch):
+    """The bug this guards: a seeded PRODUCTION=false row made the env inert."""
+    Setting.set_value("PRODUCTION", "false")
+    monkeypatch.setenv("PRODUCTION", "true")
+
+    assert Config.get("PRODUCTION") == "true"
+    assert client.get("/admin/setup").status_code == 404
+
+
+def test_initialize_defaults_seeds_no_production_row_and_prunes_stale_ones(
+    db_session,
+):
+    Setting.set_value("PRODUCTION", "false")
+
+    Config.initialize_defaults()
+
+    assert Setting.get_value("PRODUCTION") is None

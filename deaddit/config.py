@@ -7,6 +7,10 @@ cache in :mod:`deaddit.settings.service`.
 Secret keys (``API_TOKEN``, ``SECRET_KEY``, ``OPENAI_KEY`` and every
 ``API_KEY_*`` endpoint key) are environment-only: :meth:`Config.set` refuses to
 persist them, and they resolve strictly from the environment or defaults.
+
+Deploy keys (``PRODUCTION``) follow the same environment-only rule for a
+different reason: they are a property of the deployment, not of the site, and a
+database row that shadows them would make the flag silently inert.
 """
 
 import logging
@@ -14,11 +18,23 @@ import os
 from datetime import datetime
 
 from deaddit.models import Setting
-from deaddit.settings.service import SecretNotPersistable, cached, invalidate
+from deaddit.settings.service import (
+    DeployFlagNotPersistable,
+    SecretNotPersistable,
+    cached,
+    invalidate,
+)
 
 logger = logging.getLogger(__name__)
 
 SECRET_KEYS = frozenset({"API_TOKEN", "SECRET_KEY", "OPENAI_KEY"})
+
+# Deploy-time flags: decided by whoever starts the process, never by the admin
+# UI. They resolve from the environment only — a database row must not be able
+# to shadow them, or the flag silently does nothing where it matters most
+# (PRODUCTION locks down the whole admin surface, including the page that
+# would otherwise be used to turn it back off).
+DEPLOY_KEYS = frozenset({"PRODUCTION"})
 
 # Sentinel: no DB/env/DEFAULTS layer answered for a non-secret key.
 _UNSET = object()
@@ -27,6 +43,11 @@ _UNSET = object()
 def is_secret_key(key: str) -> bool:
     """True when the setting holds a credential and must never be persisted."""
     return key in SECRET_KEYS or key.startswith("API_KEY_")
+
+
+def is_deploy_key(key: str) -> bool:
+    """True when the setting is a deploy-time flag resolved from the environment."""
+    return key in DEPLOY_KEYS
 
 
 class Config:
@@ -63,7 +84,7 @@ class Config:
         "OPENAI_KEY": "API authentication key for AI service (environment-only)",
         "OPENAI_MODEL": "Default AI model to use for content generation",
         "SECRET_KEY": "Flask secret key for session management",
-        "PRODUCTION": "Production mode - disables admin interface and ingestion endpoints (true/false)",
+        "PRODUCTION": "Production mode - disables the entire admin interface (true/false); environment-only, set it before starting the process",
         "API_TOKEN": "Security token for admin access (minimum 3 characters; environment-only)",
         "AGENT_RUNTIME_ENABLED": "Whether the autonomous agent runtime is enabled (true/false); manual run-once is always allowed",
         "NIGHT_LULL_ENABLED": "Night-time lull for agent wakes (true/false); when enabled, wake delays are stretched during local night hours so agents sleep at night like humans (never zero wakes)",
@@ -94,9 +115,13 @@ class Config:
 
         Secrets — the environment is authoritative; a stale database row is
         served as a grace path with a once-per-process warning.
+
+        Deploy flags — the environment is the only source; see DEPLOY_KEYS.
         """
         if is_secret_key(key):
             return cls._get_secret(key, default)
+        if is_deploy_key(key):
+            return cls._get_deploy(key, default)
 
         def _resolve() -> object:
             try:
@@ -128,12 +153,33 @@ class Config:
         return default
 
     @classmethod
+    def _get_deploy(cls, key: str, default: str | None = None) -> str | None:
+        """Resolve a deploy flag: environment only, then built-in default.
+
+        Deliberately skips both the database and the TTL cache — the value is
+        fixed for the life of the process, so there is nothing to cache and no
+        row that may shadow it.
+        """
+        env_value = os.environ.get(key)
+        if env_value is not None:
+            return env_value
+        default_value = cls.DEFAULTS.get(key)
+        if default_value is not None:
+            return default_value
+        return default
+
+    @classmethod
     def set(cls, key: str, value: str) -> None:
         """Set a configuration value in the database (secrets are refused)."""
         if is_secret_key(key):
             raise SecretNotPersistable(
                 f"Refusing to store secret '{key}' in the database (env-only since A6). "
                 "Set it via the environment or .env."
+            )
+        if is_deploy_key(key):
+            raise DeployFlagNotPersistable(
+                f"Refusing to store deploy flag '{key}' in the database. "
+                "Set it via the environment or .env and restart."
             )
         description = cls.DESCRIPTIONS.get(key)
         Setting.set_value(key, value, description)
@@ -143,15 +189,20 @@ class Config:
     def set_many(cls, mapping: dict[str, str]) -> None:
         """Set multiple configuration values atomically in one transaction.
 
-        Validates that no secret keys are included, upserts all Setting rows,
-        commits the transaction, and invalidates cache entries only after
-        a successful commit.
+        Validates that no secret or deploy keys are included, upserts all
+        Setting rows, commits the transaction, and invalidates cache entries
+        only after a successful commit.
         """
         for key in mapping:
             if is_secret_key(key):
                 raise SecretNotPersistable(
                     f"Refusing to store secret '{key}' in the database (env-only since A6). "
                     "Set it via the environment or .env."
+                )
+            if is_deploy_key(key):
+                raise DeployFlagNotPersistable(
+                    f"Refusing to store deploy flag '{key}' in the database. "
+                    "Set it via the environment or .env and restart."
                 )
         from deaddit.extensions import db
 
@@ -200,7 +251,7 @@ class Config:
     @classmethod
     def _get_source(cls, key: str) -> str:
         """Determine the source of a configuration value."""
-        if is_secret_key(key):
+        if is_secret_key(key) or is_deploy_key(key):
             if os.environ.get(key) is not None:
                 return "environment"
             if cls.DEFAULTS.get(key) is not None:
@@ -234,10 +285,31 @@ class Config:
         """Initialize database with default values if not already set.
 
         Secret keys are skipped entirely: they are never written as rows.
+        Deploy keys are skipped and any pre-existing row is deleted — earlier
+        versions seeded ``PRODUCTION=false``, and that row shadowed the
+        environment variable it was supposed to fall back to.
         """
+        from deaddit.extensions import db
+
         try:
+            stale = (
+                Setting.query.filter(Setting.key.in_(sorted(DEPLOY_KEYS)))
+                .with_entities(Setting.key)
+                .all()
+            )
+            for (key,) in stale:
+                db.session.delete(db.session.get(Setting, key))
+                invalidate(key)
+                logger.info(
+                    "Removed stale '%s' setting row; the deploy flag is "
+                    "environment-only and was being shadowed by the database.",
+                    key,
+                )
+            if stale:
+                db.session.commit()
+
             for key, default_value in cls.DEFAULTS.items():
-                if is_secret_key(key):
+                if is_secret_key(key) or is_deploy_key(key):
                     continue
                 # Only set if not already in database
                 if Setting.get_value(key) is None:

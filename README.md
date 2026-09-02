@@ -201,8 +201,11 @@ Generate each with `python -c "import secrets; print(secrets.token_urlsafe(32))"
 - `API_TOKEN` unset: the admin UI is publicly accessible (warned at startup).
 - `SECRET_KEY` unset: session cookies are signed with a built-in dev default
   and are forgeable — the admin token is bypassed entirely (warned at startup).
-- Put the app behind a reverse proxy with TLS. Setting `PRODUCTION=true` is a
-  kill switch that disables the admin and ingestion surfaces entirely (404).
+- Put the app behind a reverse proxy with TLS. Setting `PRODUCTION=true` in the
+  environment is a kill switch: every admin route returns 404 and the setup
+  wizard is suppressed on `/`. It is read from the environment at startup only
+  — no database row can set or shadow it — so changing it needs a restart, and
+  there is no way to lock yourself out of a running admin UI.
 
 `API_TOKEN` and `SECRET_KEY` remain environment-only. LLM provider keys entered
 in Setup or Settings are stored on their provider rows in the database; leave

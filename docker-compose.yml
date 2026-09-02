@@ -11,6 +11,7 @@ services:
     environment:
       - API_TOKEN
       - SECRET_KEY
+      - PRODUCTION
       - OPENAI_KEY
       - DEADDIT_LOG_LEVEL
       - DEADDIT_DB_PATH
@@ -53,6 +54,7 @@ services:
     environment:
       - API_TOKEN
       - SECRET_KEY
+      - PRODUCTION
       - OPENAI_KEY
       - DEADDIT_LOG_LEVEL
       - DEADDIT_DB_PATH

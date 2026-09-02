@@ -26,6 +26,14 @@ class SecretNotPersistable(ValueError):
     """Raised when attempting to store a secret setting in the database."""
 
 
+class DeployFlagNotPersistable(ValueError):
+    """Raised when attempting to store a deploy-time flag in the database.
+
+    Deploy flags belong to whoever starts the process, not to the admin UI, and
+    are resolved from the environment only.
+    """
+
+
 class _Missing:
     """Private sentinel marking a cached negative lookup (distinct from None)."""
 

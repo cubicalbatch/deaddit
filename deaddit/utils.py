@@ -24,9 +24,10 @@ VOTER_COOKIE_MAX_AGE = 365 * 24 * 3600
 def production_disabled(f):
     """Decorator that returns 404 for endpoints that should be disabled in production.
 
-    This decorator checks the PRODUCTION configuration setting and returns a 404 error
-    if the application is running in production mode. This is used to disable admin
-    and ingestion endpoints in production deployments.
+    This decorator checks the PRODUCTION deploy flag (environment-only, see
+    Config.DEPLOY_KEYS) and returns a 404 error if the application is running in
+    production mode. This is used to disable every admin
+    routes in production deployments.
 
     Usage:
         @production_disabled
