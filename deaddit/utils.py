@@ -7,10 +7,8 @@ import hmac
 import html
 import re
 
-
 from flask import current_app, request
 from sqlalchemy import func
-
 
 from deaddit.extensions import cache, db
 

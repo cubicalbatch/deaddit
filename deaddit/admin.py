@@ -88,7 +88,6 @@ from deaddit.services.content import (
     create_user,
 )
 from deaddit.settings import SecretNotPersistable
-
 from deaddit.websites import service as website_service
 
 logger = logging.getLogger(__name__)
