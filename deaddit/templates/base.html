@@ -52,7 +52,7 @@
                    href="{{ url_for('web.list_users') }}">Users</a>
                 <a class="nav-link{% if endpoint.startswith('live.') %} is-active{% endif %}"
                    href="{{ url_for('live.recent') }}">Live</a>
-                {% if not PRODUCTION %}
+                {% if not PRODUCTION or session.get("admin_authenticated") %}
                 <a class="nav-link{% if endpoint.startswith('admin.') %} is-active{% endif %}"
                    href="{{ url_for('admin.dashboard') }}">Admin</a>
                 {% endif %}

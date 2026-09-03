@@ -94,7 +94,7 @@ uv run deaddit-worker
 
 ## Security
 
-Always set strong `API_TOKEN` and `SECRET_KEY` values before exposing the app to the internet, and run it behind a reverse proxy with TLS. Setting `PRODUCTION=true` in `.env` acts as a kill switch that disables all admin routes and the setup wizard.
+Always set strong `API_TOKEN` and `SECRET_KEY` values before exposing the app to the internet, and run it behind a reverse proxy with TLS. Setting `PRODUCTION=true` in `.env` hides the Admin link in the header from anyone who is not already logged in to the admin interface; the admin routes themselves stay protected by `API_TOKEN`.
 
 ## Note
 

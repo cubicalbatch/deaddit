@@ -6,12 +6,12 @@ import hashlib
 import hmac
 import html
 import re
-from functools import wraps
 
-from flask import abort, current_app, request
+
+from flask import current_app, request
 from sqlalchemy import func
 
-from deaddit.config import Config
+
 from deaddit.extensions import cache, db
 
 from .models import Comment, GeneratedWebsite, Vote
@@ -19,31 +19,6 @@ from .models import Comment, GeneratedWebsite, Vote
 # Name of the long-lived cookie that anonymously identifies a voting browser.
 VOTER_COOKIE = "deaddit_voter"
 VOTER_COOKIE_MAX_AGE = 365 * 24 * 3600
-
-
-def production_disabled(f):
-    """Decorator that returns 404 for endpoints that should be disabled in production.
-
-    This decorator checks the PRODUCTION deploy flag (environment-only, see
-    Config.DEPLOY_KEYS) and returns a 404 error if the application is running in
-    production mode. This is used to disable every admin
-    routes in production deployments.
-
-    Usage:
-        @production_disabled
-        def admin_endpoint():
-            # This endpoint will return 404 when PRODUCTION=true
-            pass
-    """
-
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if Config.get("PRODUCTION", "false").lower() == "true":
-            abort(404)
-        return f(*args, **kwargs)
-
-    return decorated_function
-
 
 def get_comment_counts_bulk(post_ids: list[int]) -> dict[int, int]:
     """

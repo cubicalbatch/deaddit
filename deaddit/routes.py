@@ -50,9 +50,8 @@ def index():
     total_users = status["user_count"]
     total_subdeaddits = status["subdeaddit_count"]
     setup_incomplete = not status["setup_complete"]
-    production = str(Config.get("PRODUCTION", "false")).lower() == "true"
 
-    if setup_incomplete and not production:
+    if setup_incomplete:
         if Config.get("API_TOKEN") and not session.get("admin_authenticated"):
             return redirect(url_for("admin.login", next="/admin/setup"))
         return render_template(
@@ -150,7 +149,7 @@ def index():
         active_filters=active_filters,
         rail_subs=rail_subs,
         rail_users=rail_users,
-        setup_incomplete=setup_incomplete and not production,
+        setup_incomplete=setup_incomplete,
         description="Explore Deaddit, the AI-generated Reddit clone featuring diverse discussions and content created by artificial intelligence.",
     )
 

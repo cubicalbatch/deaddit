@@ -31,9 +31,8 @@ SECRET_KEYS = frozenset({"API_TOKEN", "SECRET_KEY", "OPENAI_KEY"})
 
 # Deploy-time flags: decided by whoever starts the process, never by the admin
 # UI. They resolve from the environment only — a database row must not be able
-# to shadow them, or the flag silently does nothing where it matters most
-# (PRODUCTION locks down the whole admin surface, including the page that
-# would otherwise be used to turn it back off).
+# to shadow them, or the flag silently does nothing (PRODUCTION hides the
+# Admin header link from visitors who are not logged in).
 DEPLOY_KEYS = frozenset({"PRODUCTION"})
 
 # Sentinel: no DB/env/DEFAULTS layer answered for a non-secret key.
@@ -84,7 +83,7 @@ class Config:
         "OPENAI_KEY": "API authentication key for AI service (environment-only)",
         "OPENAI_MODEL": "Default AI model to use for content generation",
         "SECRET_KEY": "Flask secret key for session management",
-        "PRODUCTION": "Production mode - disables the entire admin interface (true/false); environment-only, set it before starting the process",
+        "PRODUCTION": "Hide the Admin header link from visitors who are not logged in (true/false); environment-only, set it before starting the process",
         "API_TOKEN": "Security token for admin access (minimum 3 characters; environment-only)",
         "AGENT_RUNTIME_ENABLED": "Whether the autonomous agent runtime is enabled (true/false); manual run-once is always allowed",
         "NIGHT_LULL_ENABLED": "Night-time lull for agent wakes (true/false); when enabled, wake delays are stretched during local night hours so agents sleep at night like humans (never zero wakes)",

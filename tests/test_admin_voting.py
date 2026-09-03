@@ -19,7 +19,7 @@ def admin_client(client):
     return client
 
 
-def test_voting_routes_require_authentication_and_are_disabled_in_production(
+def test_voting_routes_require_authentication_and_not_disabled_in_production(
     client, monkeypatch
 ):
     monkeypatch.setattr(
@@ -38,6 +38,7 @@ def test_voting_routes_require_authentication_and_are_disabled_in_production(
         response = getattr(client, method)(path, json={})
         assert response.status_code == 302
 
+    # PRODUCTION only hides the Admin nav link; the routes stay reachable.
     monkeypatch.setattr(
         admin_module.Config,
         "get",
@@ -47,13 +48,8 @@ def test_voting_routes_require_authentication_and_are_disabled_in_production(
     )
     with client.session_transaction() as sess:
         sess["admin_authenticated"] = True
-    assert client.get("/admin/voting").status_code == 404
-    assert client.get("/admin/api/voting").status_code == 404
-    assert client.put("/admin/api/voting/mode", json={"mode": "off"}).status_code == 404
-    assert (
-        client.post("/admin/api/voting/policies", json={"preset": "quiet"}).status_code
-        == 404
-    )
+    assert client.get("/admin/voting").status_code == 200
+    assert client.get("/admin/api/voting").status_code == 200
 
 
 def test_preset_save_is_server_owned_and_mode_requires_policy(seeded_db, admin_client):

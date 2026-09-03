@@ -88,7 +88,7 @@ from deaddit.services.content import (
     create_user,
 )
 from deaddit.settings import SecretNotPersistable
-from deaddit.utils import production_disabled
+
 from deaddit.websites import service as website_service
 
 logger = logging.getLogger(__name__)
@@ -743,7 +743,6 @@ def _voting_api_payload():
 
 
 @admin_bp.route("/voting")
-@production_disabled
 @admin_required
 def voting():
     """Dedicated simulated-voting controls and health page."""
@@ -751,7 +750,6 @@ def voting():
 
 
 @admin_bp.route("/api/voting")
-@production_disabled
 @admin_required
 def voting_api():
     """Return server-owned voting configuration and aggregate health."""
@@ -759,7 +757,6 @@ def voting_api():
 
 
 @admin_bp.route("/api/voting/mode", methods=["PUT"])
-@production_disabled
 @admin_required
 def voting_mode_api():
     payload = request.get_json(silent=True)
@@ -783,7 +780,6 @@ def voting_mode_api():
 
 
 @admin_bp.route("/api/voting/policies", methods=["POST"])
-@production_disabled
 @admin_required
 def voting_policy_api():
     payload = request.get_json(silent=True)
@@ -824,7 +820,6 @@ def voting_policy_api():
 
 
 @admin_bp.route("/login", methods=["GET", "POST"])
-@production_disabled
 def login():
     """Admin login page."""
     api_token = Config.get("API_TOKEN")
@@ -850,7 +845,6 @@ def login():
 
 
 @admin_bp.route("/logout")
-@production_disabled
 def logout():
     """Admin logout."""
     session.pop("admin_authenticated", None)
@@ -860,7 +854,6 @@ def logout():
 
 @admin_bp.route("/")
 @admin_bp.route("/dashboard")
-@production_disabled
 @admin_required
 def dashboard():
     """Agent-first admin dashboard: agents, platform pulse, LLM spend."""
@@ -958,7 +951,6 @@ def dashboard():
 
 
 @admin_bp.route("/content")
-@production_disabled
 @admin_required
 def content():
     """Content management page."""
@@ -1058,7 +1050,6 @@ def _user_payload(user):
 
 
 @admin_bp.route("/api/users")
-@production_disabled
 @admin_required
 def api_users():
     """Get users with pagination and search."""
@@ -1083,7 +1074,6 @@ def api_users():
 
 
 @admin_bp.route("/api/users/<username>", methods=["PUT"])
-@production_disabled
 @admin_required
 def api_update_user(username):
     """Update a user."""
@@ -1186,7 +1176,6 @@ def api_update_user(username):
 
 
 @admin_bp.route("/api/users/<username>", methods=["GET"])
-@production_disabled
 @admin_required
 def api_get_user(username):
     """Fetch one user by username (targeted single-row read for edit flows)."""
@@ -1195,7 +1184,6 @@ def api_get_user(username):
 
 
 @admin_bp.route("/api/users/<username>", methods=["DELETE"])
-@production_disabled
 @admin_required
 def api_delete_user(username):
     """Delete a user and all associated content."""
@@ -1224,7 +1212,6 @@ def api_delete_user(username):
 
 
 @admin_bp.route("/api/users/bulk-delete", methods=["POST"])
-@production_disabled
 @admin_required
 def api_bulk_delete_users():
     """Delete listed users, or every user matching the current filter."""
@@ -1278,7 +1265,6 @@ def _subdeaddit_payload(sub):
 
 
 @admin_bp.route("/api/subdeaddits")
-@production_disabled
 @admin_required
 def api_subdeaddits():
     """Get subdeaddits with pagination and search."""
@@ -1303,7 +1289,6 @@ def api_subdeaddits():
 
 
 @admin_bp.route("/api/subdeaddits/<name>", methods=["PUT"])
-@production_disabled
 @admin_required
 def api_update_subdeaddit(name):
     """Update a subdeaddit."""
@@ -1337,7 +1322,6 @@ def api_update_subdeaddit(name):
 
 
 @admin_bp.route("/api/subdeaddits/<name>", methods=["GET"])
-@production_disabled
 @admin_required
 def api_get_subdeaddit(name):
     """Fetch one subdeaddit by name (targeted single-row read for edit flows)."""
@@ -1346,7 +1330,6 @@ def api_get_subdeaddit(name):
 
 
 @admin_bp.route("/api/subdeaddits/<name>", methods=["DELETE"])
-@production_disabled
 @admin_required
 def api_delete_subdeaddit(name):
     """Delete a subdeaddit and all associated posts."""
@@ -1383,7 +1366,6 @@ def api_delete_subdeaddit(name):
 
 
 @admin_bp.route("/api/subdeaddits/bulk-delete", methods=["POST"])
-@production_disabled
 @admin_required
 def api_bulk_delete_subdeaddits():
     """Delete listed subdeaddits, or every subdeaddit matching the filter."""
@@ -1469,7 +1451,6 @@ def _post_payload(post):
 
 
 @admin_bp.route("/api/posts")
-@production_disabled
 @admin_required
 def api_posts():
     """Get posts with pagination, search, and filtering."""
@@ -1495,7 +1476,6 @@ def api_posts():
 
 
 @admin_bp.route("/api/posts/<int:post_id>", methods=["PUT"])
-@production_disabled
 @admin_required
 def api_update_post(post_id):
     """Update a post."""
@@ -1517,7 +1497,6 @@ def api_update_post(post_id):
 
 
 @admin_bp.route("/api/posts/<int:post_id>", methods=["GET"])
-@production_disabled
 @admin_required
 def api_get_post(post_id):
     """Fetch one post by id (targeted single-row read for edit flows)."""
@@ -1526,7 +1505,6 @@ def api_get_post(post_id):
 
 
 @admin_bp.route("/api/posts/<int:post_id>", methods=["DELETE"])
-@production_disabled
 @admin_required
 def api_delete_post(post_id):
     """Delete a post and all associated comments."""
@@ -1551,7 +1529,6 @@ def api_delete_post(post_id):
 
 
 @admin_bp.route("/api/posts/bulk-delete", methods=["POST"])
-@production_disabled
 @admin_required
 def api_bulk_delete_posts():
     """Delete listed posts, or every post matching the current filter."""
@@ -1617,7 +1594,6 @@ def _comment_payload(comment):
 
 
 @admin_bp.route("/api/comments")
-@production_disabled
 @admin_required
 def api_comments():
     """Get comments with pagination and search."""
@@ -1642,7 +1618,6 @@ def api_comments():
 
 
 @admin_bp.route("/api/comments/<int:comment_id>", methods=["PUT"])
-@production_disabled
 @admin_required
 def api_update_comment(comment_id):
     """Update a comment."""
@@ -1710,7 +1685,6 @@ def _prompt_origin(tool_names, result_key, row_id):
 
 
 @admin_bp.route("/api/posts/<int:post_id>/prompt")
-@production_disabled
 @admin_required
 def api_post_prompt(post_id):
     """The agent turn (verbatim prompts) that produced this post."""
@@ -1719,7 +1693,6 @@ def api_post_prompt(post_id):
 
 
 @admin_bp.route("/api/comments/<int:comment_id>/prompt")
-@production_disabled
 @admin_required
 def api_comment_prompt(comment_id):
     """The agent turn (verbatim prompts) that produced this comment."""
@@ -1728,7 +1701,6 @@ def api_comment_prompt(comment_id):
 
 
 @admin_bp.route("/api/comments/<int:comment_id>", methods=["GET"])
-@production_disabled
 @admin_required
 def api_get_comment(comment_id):
     """Fetch one comment by id (targeted single-row read for edit flows)."""
@@ -1737,7 +1709,6 @@ def api_get_comment(comment_id):
 
 
 @admin_bp.route("/api/comments/<int:comment_id>", methods=["DELETE"])
-@production_disabled
 @admin_required
 def api_delete_comment(comment_id):
     """Delete a comment and all child comments."""
@@ -1762,7 +1733,6 @@ def api_delete_comment(comment_id):
 
 
 @admin_bp.route("/api/comments/bulk-delete", methods=["POST"])
-@production_disabled
 @admin_required
 def api_bulk_delete_comments():
     """Delete listed comments, or every comment matching the current filter."""
@@ -1826,7 +1796,6 @@ def _sparkline(values: list[float | None], width: int = 120, height: int = 28) -
 
 
 @admin_bp.route("/analytics")
-@production_disabled
 @admin_required
 def analytics():
     """Platform-dynamics analytics tab (Phase D6): daily rollups + watchlist.
@@ -1862,7 +1831,6 @@ def analytics():
 
 
 @admin_bp.route("/settings")
-@production_disabled
 @admin_required
 def settings():
     """Settings and configuration page."""
@@ -1888,7 +1856,6 @@ def settings():
 
 
 @admin_bp.route("/capabilities")
-@production_disabled
 @admin_required
 def capabilities():
     """Capability verdicts per endpoint/model, with probe/override forms."""
@@ -1904,7 +1871,6 @@ def capabilities():
 
 
 @admin_bp.route("/capabilities/probe", methods=["POST"])
-@production_disabled
 @admin_required
 def capabilities_probe():
     """Run a tools probe for one endpoint/model and flash the verdict."""
@@ -1929,7 +1895,6 @@ def capabilities_probe():
 
 
 @admin_bp.route("/capabilities/override", methods=["POST"])
-@production_disabled
 @admin_required
 def capabilities_override():
     """Record a manual capability override for one endpoint/model."""
@@ -1949,7 +1914,6 @@ def capabilities_override():
 
 
 @admin_bp.route("/capabilities/probe-vision", methods=["POST"])
-@production_disabled
 @admin_required
 def capabilities_probe_vision():
     """Run a vision probe for one endpoint/model and flash the verdict."""
@@ -1974,7 +1938,6 @@ def capabilities_probe_vision():
 
 
 @admin_bp.route("/capabilities/override-vision", methods=["POST"])
-@production_disabled
 @admin_required
 def capabilities_override_vision():
     """Record a manual vision-capability override for one endpoint/model."""
@@ -1994,7 +1957,6 @@ def capabilities_override_vision():
 
 
 @admin_bp.route("/api/system-info")
-@production_disabled
 @admin_required
 def system_info_api():
     """API endpoint to get system information."""
@@ -2015,7 +1977,6 @@ def system_info_api():
 
 
 @admin_bp.route("/api/save-config", methods=["POST"])
-@production_disabled
 @admin_required
 def save_config_api():
     """Save setup configuration and make its endpoint the default provider."""
@@ -2116,7 +2077,6 @@ def save_config_api():
 
 
 @admin_bp.route("/api/save-deaddit-config", methods=["POST"])
-@production_disabled
 @admin_required
 def save_deaddit_config_api():
     """API endpoint to save Deaddit configuration to database."""
@@ -2161,7 +2121,6 @@ def save_deaddit_config_api():
 
 
 @admin_bp.route("/api/test-connection", methods=["POST"])
-@production_disabled
 @admin_required
 def test_connection_api():
     """API endpoint to test AI service connection with custom parameters."""
@@ -2247,7 +2206,6 @@ def test_connection_api():
 
 
 @admin_bp.route("/api/load-models", methods=["POST"])
-@production_disabled
 @admin_required
 def load_models_api():
     """API endpoint to load available models from AI service with comprehensive pagination support."""
@@ -2354,7 +2312,6 @@ def load_models_api():
 
 
 @admin_bp.route("/api/get-endpoint-key", methods=["POST"])
-@production_disabled
 @admin_required
 def get_endpoint_key_api():
     """API endpoint to get the API key for a specific endpoint."""
@@ -2386,7 +2343,6 @@ def get_endpoint_key_api():
 
 
 @admin_bp.route("/api/providers", methods=["GET"])
-@production_disabled
 @admin_required
 def api_list_providers():
     """List all saved LLM providers with cached model counts and details."""
@@ -2409,7 +2365,6 @@ def api_list_providers():
 
 
 @admin_bp.route("/api/providers", methods=["POST"])
-@production_disabled
 @admin_required
 def api_create_provider():
     """Create a new LLM provider."""
@@ -2466,7 +2421,6 @@ def api_create_provider():
 
 
 @admin_bp.route("/api/providers/<int:provider_id>", methods=["GET"])
-@production_disabled
 @admin_required
 def api_get_provider(provider_id):
     """Get single provider details including cached models."""
@@ -2482,7 +2436,6 @@ def api_get_provider(provider_id):
 
 
 @admin_bp.route("/api/providers/<int:provider_id>", methods=["PUT", "POST"])
-@production_disabled
 @admin_required
 def api_update_provider(provider_id):
     """Update an existing provider."""
@@ -2550,7 +2503,6 @@ def api_update_provider(provider_id):
 
 
 @admin_bp.route("/api/providers/<int:provider_id>", methods=["DELETE"])
-@production_disabled
 @admin_required
 def api_delete_provider(provider_id):
     """Delete a provider. If default, makes another provider default."""
@@ -2572,7 +2524,6 @@ def api_delete_provider(provider_id):
 
 
 @admin_bp.route("/api/providers/<int:provider_id>/set-default", methods=["POST"])
-@production_disabled
 @admin_required
 def api_set_default_provider(provider_id):
     """Set specified provider as default."""
@@ -2585,7 +2536,6 @@ def api_set_default_provider(provider_id):
 
 
 @admin_bp.route("/api/providers/<int:provider_id>/refresh-models", methods=["POST"])
-@production_disabled
 @admin_required
 def api_refresh_provider_models(provider_id):
     """Fetch live models for a provider using its endpoint and stored API key."""
@@ -2643,7 +2593,6 @@ def api_refresh_provider_models(provider_id):
 
 
 @admin_bp.route("/api/providers/<int:provider_id>/models", methods=["GET"])
-@production_disabled
 @admin_required
 def api_get_provider_models(provider_id):
     """Get active models for a provider."""
@@ -2741,7 +2690,6 @@ def _cache_image_model_options(provider, options):
 
 
 @admin_bp.route("/api/image-providers", methods=["GET"])
-@production_disabled
 @admin_required
 def api_list_image_providers():
     """List all configured image providers."""
@@ -2755,7 +2703,6 @@ def api_list_image_providers():
 
 
 @admin_bp.route("/api/image-providers", methods=["POST"])
-@production_disabled
 @admin_required
 def api_create_image_provider():
     """Create a new image provider.
@@ -2847,7 +2794,6 @@ def api_create_image_provider():
 
 
 @admin_bp.route("/api/image-providers/test-connection", methods=["POST"])
-@production_disabled
 @admin_required
 def api_test_image_provider_connection():
     """Authenticated catalog search only - never generation.
@@ -2919,7 +2865,6 @@ def api_test_image_provider_connection():
 
 
 @admin_bp.route("/api/image-providers/<int:provider_id>", methods=["GET"])
-@production_disabled
 @admin_required
 def api_get_image_provider(provider_id):
     """Get a single image provider."""
@@ -2930,7 +2875,6 @@ def api_get_image_provider(provider_id):
 
 
 @admin_bp.route("/api/image-providers/<int:provider_id>", methods=["PUT"])
-@production_disabled
 @admin_required
 def api_update_image_provider(provider_id):
     """Update an image provider.
@@ -3053,7 +2997,6 @@ def api_update_image_provider(provider_id):
 
 
 @admin_bp.route("/api/image-providers/<int:provider_id>", methods=["DELETE"])
-@production_disabled
 @admin_required
 def api_delete_image_provider(provider_id):
     """Delete an image provider, refusing while any agent config references it.
@@ -3096,7 +3039,6 @@ def api_delete_image_provider(provider_id):
 
 
 @admin_bp.route("/api/image-providers/<int:provider_id>/set-default", methods=["POST"])
-@production_disabled
 @admin_required
 def api_set_default_image_provider(provider_id):
     """Set specified image provider as default."""
@@ -3109,7 +3051,6 @@ def api_set_default_image_provider(provider_id):
 
 
 @admin_bp.route("/api/image-providers/<int:provider_id>/models", methods=["GET"])
-@production_disabled
 @admin_required
 def api_search_image_provider_models(provider_id):
     """Paginated/typeahead catalog search - never an unbounded catalog fetch.
@@ -3151,7 +3092,6 @@ def api_search_image_provider_models(provider_id):
 @admin_bp.route(
     "/api/image-providers/<int:provider_id>/models/validate", methods=["POST"]
 )
-@production_disabled
 @admin_required
 def api_validate_image_provider_model(provider_id):
     """Confirm a manually-typed model id before it may become a default_model."""
@@ -3179,7 +3119,6 @@ def api_validate_image_provider_model(provider_id):
 
 
 @admin_bp.route("/api/clear-jobs", methods=["POST"])
-@production_disabled
 @admin_required
 def clear_jobs_api():
     """API endpoint to clear all jobs history."""
@@ -3301,7 +3240,6 @@ def _setup_status():
 
 
 @admin_bp.route("/setup")
-@production_disabled
 @admin_required
 def setup_page():
     """Render the setup wizard on demand from any database state."""
@@ -3338,7 +3276,6 @@ def setup_page():
 
 
 @admin_bp.route("/api/setup/status")
-@production_disabled
 @admin_required
 def setup_status_api():
     """Return current setup progress without exposing any credentials."""
@@ -3346,7 +3283,6 @@ def setup_status_api():
 
 
 @admin_bp.route("/api/agents/runtime", methods=["POST"])
-@production_disabled
 @admin_required
 def agent_runtime_api():
     """Enable or disable autonomous agent scheduling."""
@@ -3365,7 +3301,6 @@ def agent_runtime_api():
 
 
 @admin_bp.route("/api/setup/dismiss", methods=["POST"])
-@production_disabled
 @admin_required
 def setup_dismiss_api():
     """Persist an explicit request to stop showing first-run setup."""
@@ -3383,7 +3318,6 @@ def setup_dismiss_api():
 
 
 @admin_bp.route("/api/setup/voting", methods=["POST"])
-@production_disabled
 @admin_required
 def setup_voting_api():
     """Enable the canonical natural simulated-voting policy and runtime."""
@@ -3430,7 +3364,6 @@ def setup_voting_api():
 
 
 @admin_bp.route("/api/setup/agents-from-personas", methods=["POST"])
-@production_disabled
 @admin_required
 def setup_agents_from_personas_api():
     """Enroll autonomous random-persona agents without touching the LLM."""
@@ -3520,7 +3453,6 @@ def setup_agents_from_personas_api():
 
 
 @admin_bp.route("/api/setup/test-connection", methods=["POST"])
-@production_disabled
 @admin_required
 def setup_test_connection_api():
     """Probe the configured endpoint for tool-calling support."""
@@ -3548,7 +3480,6 @@ def setup_test_connection_api():
 
 
 @admin_bp.route("/api/load-default-data", methods=["POST"])
-@production_disabled
 @admin_required
 def load_default_data_api():
     """API endpoint to load default subdeaddits and users from JSON files."""
@@ -3648,7 +3579,6 @@ def load_default_data_api():
 
 
 @admin_bp.route("/api/hide-default-data", methods=["POST"])
-@production_disabled
 @admin_required
 def hide_default_data_api():
     """API endpoint to hide the default data section permanently."""
@@ -3674,7 +3604,6 @@ def hide_default_data_api():
 
 
 @admin_bp.route("/api/usage/summary")
-@production_disabled
 @admin_required
 def usage_summary_api():
     """Aggregate LLM usage accounting (totals, by day, by action)."""
@@ -3740,7 +3669,6 @@ def usage_summary_api():
 
 
 @admin_bp.route("/api/routes")
-@production_disabled
 @admin_required
 def routes_api():
     """List model routing rows plus the currently resolved default."""
@@ -4100,7 +4028,6 @@ def _tool_content_card(result):
 
 
 @admin_bp.route("/api/agents")
-@production_disabled
 @admin_required
 def api_agents_list():
     """List every registered agent with run tallies."""
@@ -4122,7 +4049,6 @@ def api_agents_list():
 
 
 @admin_bp.route("/api/personas/candidates")
-@production_disabled
 @admin_required
 def api_persona_candidates():
     """Users that are not yet agents, ranked by activity (posts + comments)."""
@@ -4177,7 +4103,6 @@ def api_persona_candidates():
 
 
 @admin_bp.route("/api/agents/presets")
-@production_disabled
 @admin_required
 def api_agent_presets():
     """Named presets powering the create-agent form."""
@@ -4231,7 +4156,6 @@ def _cadence_sample(base_delay, scheduled_delay):
 
 
 @admin_bp.route("/api/agents/estimate-baseline")
-@production_disabled
 @admin_required
 def api_agent_estimate_baseline():
     """Return pooled all-time scheduled agent activity and cadence calibration."""
@@ -4402,7 +4326,6 @@ def api_agent_estimate_baseline():
 
 
 @admin_bp.route("/api/agents", methods=["POST"])
-@production_disabled
 @admin_required
 def api_create_agent():
     """Create an agent from an existing user persona (created disabled by default)."""
@@ -4616,7 +4539,6 @@ def api_create_agent():
 
 
 @admin_bp.route("/api/agents/<int:agent_id>", methods=["GET"])
-@production_disabled
 @admin_required
 def api_get_agent(agent_id):
     """Return one agent by id."""
@@ -4629,7 +4551,6 @@ def api_get_agent(agent_id):
 
 
 @admin_bp.route("/api/agents/<int:agent_id>", methods=["PUT", "POST"])
-@production_disabled
 @admin_required
 def api_update_agent(agent_id):
     """Update an agent's tier, enabled status, cadence, limits, model, or status reset."""
@@ -4945,7 +4866,6 @@ def api_update_agent(agent_id):
 
 
 @admin_bp.route("/api/agents/<int:agent_id>/toggle", methods=["POST"])
-@production_disabled
 @admin_required
 def api_toggle_agent(agent_id):
     """Enable/disable one agent. Enabling resets the failure strike count."""
@@ -5066,7 +4986,6 @@ def _enqueue_agent_run(agent, requested_intent):
 
 
 @admin_bp.route("/api/agents/<int:agent_id>/force-run", methods=["POST"])
-@production_disabled
 @admin_required
 def api_force_run(agent_id):
     """Queue one manual agent visit as a high-priority worker job.
@@ -5113,7 +5032,6 @@ def api_force_run(agent_id):
 
 
 @admin_bp.route("/api/jobs/<int:job_id>")
-@production_disabled
 @admin_required
 def api_job_status(job_id):
     """One queue job by ID (generic queue-status lookup).
@@ -5129,7 +5047,6 @@ def api_job_status(job_id):
 
 
 @admin_bp.route("/api/agents/<int:agent_id>/runs")
-@production_disabled
 @admin_required
 def api_agent_runs(agent_id):
     """Recent runs for one agent, newest first."""
@@ -5156,7 +5073,6 @@ def api_agent_runs(agent_id):
 
 
 @admin_bp.route("/api/runs/<int:run_id>/turns")
-@production_disabled
 @admin_required
 def api_run_turns(run_id):
     """Seq-ordered LLM turns with verbatim prompt chains (View Thoughts)."""
@@ -5183,7 +5099,6 @@ def api_run_turns(run_id):
 
 
 @admin_bp.route("/api/turns/<int:turn_id>/tool_calls")
-@production_disabled
 @admin_required
 def api_turn_tool_calls(turn_id):
     """Tool invocations recorded against one turn."""
@@ -5215,7 +5130,6 @@ def api_turn_tool_calls(turn_id):
 
 
 @admin_bp.route("/api/agents/start-all", methods=["POST"])
-@production_disabled
 @admin_required
 def api_agents_start_all():
     """Bulk enable with toggle semantics."""
@@ -5231,7 +5145,6 @@ def api_agents_start_all():
 
 
 @admin_bp.route("/api/agents/pause-all", methods=["POST"])
-@production_disabled
 @admin_required
 def api_agents_pause_all():
     """Bulk disable with toggle semantics."""
@@ -5292,7 +5205,6 @@ def _bulk_flag_posts(agent, key, enable, resolver):
 
 
 @admin_bp.route("/api/agents/bulk", methods=["POST"])
-@production_disabled
 @admin_required
 def api_agents_bulk():
     """Apply one action to a selected set of agents.
@@ -5425,7 +5337,6 @@ def api_agents_bulk():
 
 
 @admin_bp.route("/api/users/generate", methods=["POST"])
-@production_disabled
 @admin_required
 def api_generate_users():
     """Queue persona generation for the worker instead of blocking the web request."""
@@ -5502,7 +5413,6 @@ def api_generate_users():
 
 
 @admin_bp.route("/agents")
-@production_disabled
 @admin_required
 def agents_dashboard():
     """AgenticCore agent administration dashboard page."""
@@ -5511,7 +5421,6 @@ def agents_dashboard():
 
 
 @admin_bp.route("/agents/<int:agent_id>")
-@production_disabled
 @admin_required
 def agent_detail(agent_id):
     """Single-agent detail page addressed by numeric agent id."""
@@ -5520,8 +5429,8 @@ def agent_detail(agent_id):
 
 # --- LLM-5: prompt versioning (read-only visibility + version creation) ---
 # JSON contract for the UX lane: page/template work is UX-owned; these
-# endpoints are the data surface. All routes are @production_disabled +
-# @admin_required like the other admin APIs.
+# endpoints are the data surface. All routes are @admin_required like the
+# other admin APIs.
 
 
 def _version_dict(row):
@@ -5536,7 +5445,6 @@ def _version_dict(row):
 
 
 @admin_bp.route("/api/prompts")
-@production_disabled
 @admin_required
 def prompts_list_api():
     """List prompt templates with version summaries and active pins."""
@@ -5569,7 +5477,6 @@ def prompts_list_api():
 
 
 @admin_bp.route("/api/prompts/<name>")
-@production_disabled
 @admin_required
 def prompts_detail_api(name):
     """Full template detail: every immutable version plus its pins."""
@@ -5597,7 +5504,6 @@ def prompts_detail_api(name):
 
 
 @admin_bp.route("/api/prompts/<name>/versions", methods=["POST"])
-@production_disabled
 @admin_required
 def prompts_create_version_api(name):
     """Create version n+1; existing versions are immutable and queryable."""
@@ -5618,7 +5524,6 @@ def prompts_create_version_api(name):
 
 
 @admin_bp.route("/api/pins")
-@production_disabled
 @admin_required
 def pins_list_api():
     """List agent/cohort -> prompt-version pins."""
@@ -5644,7 +5549,6 @@ def pins_list_api():
 
 
 @admin_bp.route("/api/pins", methods=["POST"])
-@production_disabled
 @admin_required
 def pins_set_api():
     """Upsert one pin: {target_kind, target_key, template, version}."""
@@ -5672,7 +5576,6 @@ def pins_set_api():
 
 
 @admin_bp.route("/api/pins/<target_kind>/<target_key>", methods=["DELETE"])
-@production_disabled
 @admin_required
 def pins_clear_api(target_kind, target_key):
     from deaddit.llm.prompts import clear_pin
@@ -5683,7 +5586,6 @@ def pins_clear_api(target_kind, target_key):
 
 
 @admin_bp.route("/api/prompt-renders")
-@production_disabled
 @admin_required
 def prompt_renders_api():
     """Recent render-audit rows: which prompt version produced which run.
@@ -5820,7 +5722,6 @@ def _preview_warnings(plan, requested_intent):
 
 
 @admin_bp.route("/prompts")
-@production_disabled
 @admin_required
 def prompts_page():
     """Prompt profile administration: versions, pins/rollout, and preview."""
@@ -5828,7 +5729,6 @@ def prompts_page():
 
 
 @admin_bp.route("/api/prompts/<name>/validate", methods=["POST"])
-@production_disabled
 @admin_required
 def prompts_validate_api(name):
     """Dry-run visit-profile validation without storing anything."""
@@ -5858,7 +5758,6 @@ def prompts_validate_api(name):
 
 
 @admin_bp.route("/api/prompts/<name>/preview", methods=["POST"])
-@production_disabled
 @admin_required
 def prompts_preview_api(name):
     """Deterministic, side-effect-free visit preview through the runtime path.

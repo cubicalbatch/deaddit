@@ -264,16 +264,25 @@ def test_setup_dismiss_is_idempotent(admin_client):
     assert second["setup_completed_at"] == first["setup_completed_at"]
 
 
-def test_production_empty_homepage_never_renders_wizard(client, monkeypatch):
+def test_production_still_renders_wizard_on_empty_homepage(client, monkeypatch):
     # PRODUCTION is a deploy flag: the environment is the only way to set it,
-    # which is also the only way a real deployment can turn it on.
+    # which is also the only way a real deployment can turn it on. It no
+    # longer suppresses the wizard — it only hides the Admin nav link.
     monkeypatch.setenv("PRODUCTION", "true")
 
-    home = client.get("/")
-    assert home.status_code == 200
-    assert 'class="setup-wizard"' not in home.get_data(as_text=True)
-    assert 'href="/admin/setup"' not in home.get_data(as_text=True)
-    assert client.get("/admin/setup").status_code == 404
+    _assert_setup_wizard(client.get("/"))
+
+
+def test_production_hides_admin_nav_link_until_logged_in(client, monkeypatch):
+    monkeypatch.setenv("PRODUCTION", "true")
+
+    anon = client.get("/").get_data(as_text=True)
+    assert 'href="/admin/dashboard">Admin</a>' not in anon
+
+    with client.session_transaction() as session:
+        session["admin_authenticated"] = True
+    authed = client.get("/").get_data(as_text=True)
+    assert 'href="/admin/dashboard">Admin</a>' in authed
 
 
 def test_production_flag_is_refused_by_the_database(client):
@@ -286,10 +295,12 @@ def test_production_flag_is_refused_by_the_database(client):
 def test_production_row_cannot_shadow_the_environment(client, monkeypatch):
     """The bug this guards: a seeded PRODUCTION=false row made the env inert."""
     Setting.set_value("PRODUCTION", "false")
+    monkeypatch.setenv("API_TOKEN", "token")
     monkeypatch.setenv("PRODUCTION", "true")
 
     assert Config.get("PRODUCTION") == "true"
-    assert client.get("/admin/setup").status_code == 404
+    # Admin routes stay reachable in production; the token gate still applies.
+    assert client.get("/admin/setup").status_code == 302
 
 
 def test_initialize_defaults_seeds_no_production_row_and_prunes_stale_ones(
