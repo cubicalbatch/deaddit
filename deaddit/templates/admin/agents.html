@@ -438,7 +438,8 @@
         const runtimeEnabled = Boolean(status.runtime_enabled);
         const runtimePaused = document.getElementById("agent-runtime-paused");
         const runtimeEnabledLine = document.getElementById("agent-runtime-enabled");
-        runtimePaused.hidden = runtimeEnabled;
+        // d-flex (!important) defeats the [hidden] attribute; toggle d-none instead.
+        runtimePaused.classList.toggle("d-none", runtimeEnabled);
         runtimeEnabledLine.hidden = !runtimeEnabled;
 
         const workerAlive = Boolean(status.worker_alive);
