@@ -24,5 +24,5 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 5000
 
-# Production serving via gunicorn + tracked WSGI entrypoint (not the Flask dev server)
-CMD ["gunicorn", "-c", "gunicorn.conf.py", "deaddit.wsgi:app"]
+# Production serving: apply pending database migrations, seed defaults, then serve via gunicorn
+CMD ["sh", "-c", "flask --app deaddit.wsgi init-db && exec gunicorn -c gunicorn.conf.py deaddit.wsgi:app"]

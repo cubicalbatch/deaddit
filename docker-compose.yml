@@ -16,17 +16,6 @@ services:
       - DEADDIT_LOG_LEVEL
       - DEADDIT_DB_PATH
       - DEADDIT_CHROME_BINARY
-    command:
-      - sh
-      - -c
-      - |
-        python - <<'PY'
-        from deaddit.wsgi import app
-        from deaddit import init_db
-        with app.app_context():
-            init_db()
-        PY
-        exec gunicorn -c gunicorn.conf.py deaddit.wsgi:app
     healthcheck:
       test:
         [
