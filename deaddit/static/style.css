@@ -760,6 +760,10 @@ html[data-theme="dark"] .brand__logo--dark {
     border-radius: var(--radius-md);
 }
 
+.post-detail__media-link {
+    display: block;
+}
+
 .post-body {
     max-width: 68ch;
     margin-top: var(--space-lg);
@@ -3066,3 +3070,4 @@ a.chip:hover {
 .post-meta__copy.is-copied {
     color: var(--accent) !important;
 }
+

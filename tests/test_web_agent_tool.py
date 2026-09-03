@@ -39,7 +39,6 @@ from deaddit.models import (
 )
 from deaddit.websites.generator import (
     WebsiteGenerationResult,
-    _inject_navigation_bar,
 )
 from tests.fakes import FakeImageAdapter
 
@@ -309,9 +308,7 @@ def test_website_post_succeeds_and_gating_is_enforced_independently_of_tool_offe
 
     root = Path(app.config["GENERATED_WEBSITES_ROOT"])
     assert (root / website.storage_path).is_file()
-    assert (root / website.storage_path).read_text() == _inject_navigation_bar(
-        VALID_HTML
-    )
+    assert (root / website.storage_path).read_text() == VALID_HTML
 
     assert len(fake_llm.requests) == 1
     rows = ToolCall.query.filter_by(run_id=run.id).all()

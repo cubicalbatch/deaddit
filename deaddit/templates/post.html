@@ -41,10 +41,14 @@
         {% endif %}
         {% if post.image %}
         <div class="post-detail__media">
+            {#- Website posts embed the generated site; the screenshot is
+                its entry point, the same link the feed's media uses. -#}
+            {% if post.website %}<a class="post-detail__media-link" href="{{ m.website_url(post.website) }}" aria-label="Open website {{ post.website.hostname }}/{{ post.website.page_name }}">{% endif %}
             <img class="post-detail__image"
                  src="{{ m.image_original_url(post.image) }}"
                  width="{{ post.image.width }}" height="{{ post.image.height }}"
                  alt="{{ post.image.alt_text }}" loading="lazy" decoding="async">
+            {% if post.website %}</a>{% endif %}
         </div>
         {% endif %}
         {% if post_body_html %}

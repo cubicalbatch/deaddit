@@ -1,8 +1,10 @@
 """Guarded public serving for generated website pages.
 
-The route resolves a live ``GeneratedWebsite`` row before touching disk, then
-uses that row's opaque storage path. Unknown, traversal, and missing-file
-requests must all be ordinary 404 responses.
+The public ``/out/<hostname>/<page_name>`` route serves the generated
+document with the trusted context bar injected at serve time: a sticky bar
+linking back to the post's discussion, with the post title and model. The
+route resolves the GeneratedWebsite row first and 404s on anything off; the
+CSP sandbox remains the security boundary for the untrusted generated HTML.
 """
 
 from __future__ import annotations
@@ -27,6 +29,13 @@ _EXPECTED_X_CONTENT_TYPE_OPTIONS = "nosniff"
 _EXPECTED_REFERRER_POLICY = "no-referrer"
 _EXPECTED_PERMISSIONS_POLICY = (
     "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+)
+
+#: What old generation runs baked into the stored document; serving replaces
+#: it with the dynamic bar.
+_LEGACY_BAR = (
+    '<div data-deaddit-navigation="true" style="display:block;">'
+    '<a href="/">← Back to deaddit</a></div>'
 )
 
 
@@ -87,6 +96,7 @@ def _make_website_post(
         content="A generated website",
         subdeaddit_name="testsub",
         user="alice",
+        llm_model="website-test-model",
     )
     db_session.add(post)
     db_session.flush()
@@ -108,7 +118,9 @@ def _make_website_post(
     return _WebsitePaths(post.id, website.public_path, website.storage_path)
 
 
-def test_public_page_serves_exact_bytes_with_security_headers(app, client, db_session):
+def test_public_page_serves_document_with_context_bar_and_headers(
+    app, client, db_session
+):
     html = (
         "<html><body>snowman: ☃"
         "<script>document.body.dataset.ready = 'yes';</script></body></html>"
@@ -118,7 +130,6 @@ def test_public_page_serves_exact_bytes_with_security_headers(app, client, db_se
     response = client.get(f"/out/{paths.public_path}")
 
     assert response.status_code == 200
-    assert response.data == html.encode("utf-8")
     assert response.headers["Content-Type"] == "text/html; charset=utf-8"
     assert response.headers["Cache-Control"] == "public, max-age=300"
     assert (
@@ -145,6 +156,33 @@ def test_public_page_serves_exact_bytes_with_security_headers(app, client, db_se
         "allow-storage-access-by-user-activation",
     ):
         assert token not in csp
+
+    body = response.get_data(as_text=True)
+    assert body.count("data-deaddit-navigation") == 1
+    # The bar sits at the start of the body and the document is otherwise
+    # untouched.
+    assert body.startswith("<html><body>")
+    assert body.index("data-deaddit-navigation") < body.index("snowman")
+    assert "<script>document.body.dataset.ready = 'yes';</script></body></html>" in body
+    # Back link targets the discussion, not the home page; title and model
+    # come along; the bar sticks to the top.
+    assert f'href="/d/testsub/{paths.post_id}"' in body
+    assert "Back to post" in body
+    assert "Aurora map" in body
+    assert "website-test-model" in body
+    assert "position:sticky" in body
+
+
+def test_legacy_baked_home_link_bar_is_replaced(app, client, db_session):
+    html = f"<html><body>{_LEGACY_BAR}<p>site</p></body></html>"
+    paths = _make_website_post(app, db_session, html=html)
+
+    body = client.get(f"/out/{paths.public_path}").get_data(as_text=True)
+
+    assert body.count("data-deaddit-navigation") == 1
+    assert "Back to deaddit" not in body
+    assert 'href="/"' not in body
+    assert "<p>site</p>" in body
 
 
 def test_public_page_404_matrix_and_never_opens_request_path(app, client, db_session):

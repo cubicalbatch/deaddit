@@ -1,6 +1,6 @@
 services:
   web:
-    build: .
+    image: ghcr.io/cubicalbatch/deaddit:latest
     ports:
       - "${DEADDIT_WEB_PORT:-5000}:5000"
     # Loads .env (see .env.example) into the container; explicit passthrough
@@ -42,7 +42,7 @@ services:
     volumes:
       - deaddit_data:/app/instance
   worker:
-    build: .
+    image: ghcr.io/cubicalbatch/deaddit:latest
     depends_on:
       web:
         condition: service_healthy

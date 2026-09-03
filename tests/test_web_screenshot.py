@@ -535,6 +535,16 @@ class TestWebsitePostScreenshotIntegration:
             assert detail.status_code == 200
             assert f"/media/images/original/{original_name}" in detail_body
             assert 'class="post-detail__image"' in detail_body
+            # Clicking the screenshot opens the website, like the feed's
+            # media link.
+            media_marker = '<a class="post-detail__media-link"'
+            media_start = detail_body.index(media_marker)
+            media_open_end = detail_body.index(">", media_start)
+            media_opening = detail_body[media_start:media_open_end]
+            assert 'href="/out/www.example.test/page.html"' in media_opening
+            assert (
+                'aria-label="Open website www.example.test/page.html"' in media_opening
+            )
 
             for variant, filename in (
                 ("thumbnail", thumbnail_name),

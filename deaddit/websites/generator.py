@@ -328,29 +328,6 @@ class _WebsiteHTMLValidator(HTMLParser):
                     )
 
 
-_BODY_OPEN_TAG_RE = re.compile(
-    r"<body\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*>", re.IGNORECASE
-)
-_DEADDIT_NAVIGATION_BAR = (
-    '<div data-deaddit-navigation="true" style="display:block;'
-    "width:100%;box-sizing:border-box;margin:0 0 1rem;padding:0.5rem 1rem;"
-    "background:#1f2937;color:#f9fafb;font:500 0.875rem/1.4 "
-    'system-ui,sans-serif;">'
-    '<a href="/" style="color:#f9fafb;text-decoration:underline;">'
-    "← Back to deaddit</a></div>"
-)
-
-
-def _inject_navigation_bar(html: str) -> str:
-    """Insert the trusted Deaddit link at the start of the document body."""
-    match = _BODY_OPEN_TAG_RE.search(html)
-    if match is None:
-        raise WebsiteGenerationInvalidHTMLError(
-            "website generation did not return a document with a body element"
-        )
-    return html[: match.end()] + _DEADDIT_NAVIGATION_BAR + html[match.end() :]
-
-
 def _validate_html(content: str, settings: WebsiteGenerationSettings) -> str:
     """Validate *content* against the Generated HTML contract or raise.
 
@@ -403,6 +380,10 @@ def _validate_html(content: str, settings: WebsiteGenerationSettings) -> str:
         raise WebsiteGenerationInvalidHTMLError(
             "website generation did not return a complete document ending "
             "with </html> - it may have been cut off"
+        )
+    if "<body" not in lowered:
+        raise WebsiteGenerationInvalidHTMLError(
+            "website generation did not return a document with a body element"
         )
 
     parser = _WebsiteHTMLValidator()
@@ -510,7 +491,6 @@ def generate_website_html(
         )
 
     html = _validate_html(result.content, settings)
-    html = _inject_navigation_bar(html)
 
     usage = result.usage or {}
     return WebsiteGenerationResult(
