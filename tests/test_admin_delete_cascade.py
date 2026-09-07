@@ -454,6 +454,63 @@ def test_content_deletes_refresh_retained_author_karma(
     assert db_session.get(User, "bob").comment_karma == 0
     assert db_session.get(User, "alice").post_karma == 1
 
+def test_user_delete_refreshes_retained_content_aggregates(
+    seeded_db, admin_client, db_session
+):
+    """Deleting a voter repairs retained content counters and affected karma."""
+    carol = User(username="carol", bio="", interests="[]")
+    dave = User(username="dave", bio="", interests="[]")
+    db_session.add_all([carol, dave])
+    db_session.commit()
+
+    bob_post = seeded_db["posts"][1]
+    zero_post = Post(
+        title="Zero after delete",
+        content="",
+        user="bob",
+        subdeaddit_name=bob_post.subdeaddit_name,
+    )
+    db_session.add(zero_post)
+    db_session.commit()
+
+    bob_comment = Comment(
+        post_id=bob_post.id,
+        user="bob",
+        content="A comment with votes",
+    )
+    db_session.add(bob_comment)
+    db_session.commit()
+
+    dave.post_karma = 17
+    dave.comment_karma = 19
+    db_session.commit()
+
+    assert cast_vote("alice", "post", bob_post.id, 1)["status"] == "ok"
+    assert cast_vote("carol", "post", bob_post.id, -1)["status"] == "ok"
+    assert cast_vote("alice", "comment", bob_comment.id, -1)["status"] == "ok"
+    assert cast_vote("carol", "comment", bob_comment.id, 1)["status"] == "ok"
+    assert cast_vote("alice", "post", zero_post.id, 1)["status"] == "ok"
+    assert (bob_post.score, bob_post.vote_count) == (0, 2)
+    assert (bob_comment.score, bob_comment.vote_count) == (0, 2)
+    assert (zero_post.score, zero_post.vote_count) == (1, 1)
+
+    response = admin_client.delete("/admin/api/users/alice")
+    assert response.status_code == 200
+
+    db_session.expire_all()
+    bob_post = db_session.get(Post, bob_post.id)
+    bob_comment = db_session.get(Comment, bob_comment.id)
+    zero_post = db_session.get(Post, zero_post.id)
+    assert (bob_post.score, bob_post.vote_count) == (-1, 1)
+    assert (bob_comment.score, bob_comment.vote_count) == (1, 1)
+    assert (zero_post.score, zero_post.vote_count) == (0, 0)
+
+    bob = db_session.get(User, "bob")
+    assert (bob.post_karma, bob.comment_karma) == (-1, 1)
+    dave = db_session.get(User, "dave")
+    assert (dave.post_karma, dave.comment_karma) == (17, 19)
+
+
 def test_admin_score_edits_are_vote_authoritative(seeded_db, admin_client, db_session):
     post = seeded_db["posts"][1]
     comment = seeded_db["comments"][0]

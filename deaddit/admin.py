@@ -25,7 +25,7 @@ from flask import (
     session,
     url_for,
 )
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from deaddit import db
@@ -161,34 +161,53 @@ def _score_edit_response(data, current_score):
 
 
 def _authors_for_votes(voter_names):
-    """Return authors whose remaining content is affected by these votes."""
+    """Return affected content authors and target IDs for these voters."""
     post_ids = set()
     comment_ids = set()
-    for chunk in _chunked(voter_names):
-        for post_id, comment_id in db.session.query(
-            Vote.post_id, Vote.comment_id
-        ).filter(Vote.voter.in_(chunk)):
-            if post_id is not None:
-                post_ids.add(post_id)
-            if comment_id is not None:
-                comment_ids.add(comment_id)
     post_authors = set()
-    for chunk in _chunked(post_ids):
-        post_authors.update(
-            username
-            for (username,) in db.session.query(Post.user)
-            .filter(Post.id.in_(chunk))
-            .all()
-        )
     comment_authors = set()
-    for chunk in _chunked(comment_ids):
-        comment_authors.update(
-            username
-            for (username,) in db.session.query(Comment.user)
-            .filter(Comment.id.in_(chunk))
-            .all()
+    for chunk in _chunked(voter_names):
+        for post_id, username in (
+            db.session.query(Vote.post_id, Post.user)
+            .join(Post, Vote.post_id == Post.id)
+            .filter(Vote.voter.in_(chunk))
+            .distinct()
+        ):
+            post_ids.add(post_id)
+            post_authors.add(username)
+        for comment_id, username in (
+            db.session.query(Vote.comment_id, Comment.user)
+            .join(Comment, Vote.comment_id == Comment.id)
+            .filter(Vote.voter.in_(chunk))
+            .distinct()
+        ):
+            comment_ids.add(comment_id)
+            comment_authors.add(username)
+    return post_authors, comment_authors, post_ids, comment_ids
+
+
+def _refresh_content_aggregates(model, content_ids, vote_target):
+    """Refresh score and vote_count from Vote truth for affected content."""
+    content_ids = set(content_ids)
+    if not content_ids:
+        return
+    score = (
+        select(func.coalesce(func.sum(Vote.value), 0))
+        .where(vote_target == model.id)
+        .correlate(model)
+        .scalar_subquery()
+    )
+    vote_count = (
+        select(func.count(Vote.id))
+        .where(vote_target == model.id)
+        .correlate(model)
+        .scalar_subquery()
+    )
+    for chunk in _chunked(content_ids):
+        db.session.query(model).filter(model.id.in_(chunk)).update(
+            {model.score: score, model.vote_count: vote_count},
+            synchronize_session=False,
         )
-    return post_authors, comment_authors
 
 
 def _content_authors(model, content_ids):
@@ -318,7 +337,12 @@ def _delete_users_cascade(usernames):
     media_paths = media_service.media_paths_for_posts(post_ids)
     website_paths = website_service.website_paths_for_posts(post_ids)
     post_authors = _content_authors(Post, post_ids)
-    vote_post_authors, vote_comment_authors = _authors_for_votes(usernames)
+    (
+        vote_post_authors,
+        vote_comment_authors,
+        vote_post_ids,
+        vote_comment_ids,
+    ) = _authors_for_votes(usernames)
 
     # 1. Collect all comments authored by the user(s) AND all comments on the users' posts
     user_comment_ids = []
@@ -360,6 +384,8 @@ def _delete_users_cascade(usernames):
     for chunk in _chunked(usernames, 500):
         # 4. Clean up votes cast by the user(s) on ANY remaining posts/comments
         Vote.query.filter(Vote.voter.in_(chunk)).delete(synchronize_session=False)
+        _refresh_content_aggregates(Post, vote_post_ids, Vote.post_id)
+        _refresh_content_aggregates(Comment, vote_comment_ids, Vote.comment_id)
         _refresh_author_karma(
             post_authors=vote_post_authors,
             comment_authors=vote_comment_authors,
