@@ -42,7 +42,7 @@ from deaddit.images.storage import (
     media_root,
     store_variants,
 )
-from deaddit.images.types import Deadline, ImageProviderError
+from deaddit.images.types import Deadline, ImageProviderError, ImageTimeoutError
 from deaddit.models import (
     Comment,
     GeneratedWebsite,
@@ -82,9 +82,8 @@ from deaddit.websites.storage import (
     website_root,
 )
 
-#: Upper bound on how long a single image-generation attempt may run,
-#: independent of (and capped by) whatever remains of the run's overall
-#: deadline (ToolContext.deadline).
+# Upper bound for callers that do not provide a run deadline. A real agent
+# run always carries its absolute deadline through generation and download.
 _IMAGE_GENERATION_SECONDS = 90.0
 
 
@@ -237,17 +236,14 @@ def _create_image_post(ctx: ToolContext, params: CreateImagePostArgs) -> dict:
             "error": "no image model is configured for this agent's provider",
         }
 
-    if ctx.deadline is not None:
-        remaining = ctx.deadline.remaining()
-        if remaining <= 0:
-            return {
-                "ok": False,
-                "error": "not enough time remaining in this run to generate an image",
-            }
-        budget = min(remaining, _IMAGE_GENERATION_SECONDS)
-    else:
-        budget = _IMAGE_GENERATION_SECONDS
-    deadline = Deadline.after(budget)
+    deadline = ctx.deadline
+    if deadline is not None and deadline.expired():
+        return {
+            "ok": False,
+            "error": "not enough time remaining in this run to generate an image",
+        }
+    if deadline is None:
+        deadline = Deadline.after(_IMAGE_GENERATION_SECONDS)
 
     diversity_rng = (
         random.Random(ctx.run.id) if ctx.run is not None else random.Random()
@@ -269,9 +265,9 @@ def _create_image_post(ctx: ToolContext, params: CreateImagePostArgs) -> dict:
         if generation.image_bytes is not None:
             data = generation.image_bytes
         else:
-            data = download_image(generation.image_url).data
+            data = download_image(generation.image_url, deadline=deadline).data
         stored = store_variants(data, root)
-    except MediaStorageError as exc:
+    except (MediaStorageError, ImageTimeoutError) as exc:
         return {"ok": False, "error": f"image storage failed: {exc}"}
 
     pending = PendingPostImage(
@@ -468,16 +464,11 @@ def _create_website(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
             "error": "no LLM endpoint is configured for this agent",
         }
 
-    if ctx.deadline is not None:
-        remaining = ctx.deadline.remaining()
-        if remaining <= 0:
-            return {
-                "ok": False,
-                "error": "not enough time remaining in this run to generate a website",
-            }
-        run_deadline_remaining = remaining
-    else:
-        run_deadline_remaining = None
+    if ctx.deadline is not None and ctx.deadline.expired():
+        return {
+            "ok": False,
+            "error": "not enough time remaining in this run to generate a website",
+        }
 
     settings = resolve_website_settings(Config.get)
 
@@ -492,7 +483,7 @@ def _create_website(ctx: ToolContext, params: CreateWebsiteArgs) -> dict:
             agent=ctx.user_username,
             settings=settings,
             rng=random.Random(ctx.run.id) if ctx.run is not None else random.Random(),
-            run_deadline_remaining=run_deadline_remaining,
+            deadline=ctx.deadline,
             direction_id=_planned_media_direction(ctx, "website."),
         )
     except WebsiteGenerationTruncatedError:

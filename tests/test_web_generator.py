@@ -10,9 +10,15 @@ from __future__ import annotations
 
 import logging
 import random
+import time
+from types import SimpleNamespace
 
 import pytest
 
+import deaddit.llm.provider as llm_provider
+import deaddit.llm.transport as llm_transport
+
+from deaddit.images.types import Deadline
 from deaddit.llm.errors import PermanentLLMError, TransientLLMError
 from deaddit.models import LLMUsage
 from deaddit.websites.generator import (
@@ -128,10 +134,10 @@ class TestRequestShape:
             _generate(
                 fake_llm,
                 settings=_settings(generation_timeout_seconds=300.0),
-                run_deadline_remaining=45.0,
+                deadline=Deadline(expires_at=time.monotonic() + 45.0),
             )
 
-        assert fake_llm.requests[0]["read_timeout"] == 45.0
+        assert 0 < fake_llm.requests[0]["read_timeout"] <= 45.0
 
     def test_read_timeout_falls_back_to_website_timeout_when_deadline_larger(
         self, app, fake_llm
@@ -141,7 +147,7 @@ class TestRequestShape:
             _generate(
                 fake_llm,
                 settings=_settings(generation_timeout_seconds=120.0),
-                run_deadline_remaining=9000.0,
+                deadline=Deadline(expires_at=time.monotonic() + 9000.0),
             )
 
         assert fake_llm.requests[0]["read_timeout"] == 120.0
@@ -154,16 +160,69 @@ class TestRequestShape:
             _generate(
                 fake_llm,
                 settings=_settings(generation_timeout_seconds=77.0),
-                run_deadline_remaining=None,
             )
 
         assert fake_llm.requests[0]["read_timeout"] == 77.0
 
     def test_no_run_time_remaining_fails_before_any_request(self, app, fake_llm):
         with app.app_context(), pytest.raises(WebsiteGenerationError):
-            _generate(fake_llm, run_deadline_remaining=0.0)
+            _generate(
+                fake_llm,
+                deadline=Deadline(expires_at=time.monotonic() - 1.0),
+            )
 
         assert fake_llm.requests == []
+
+    def test_retries_share_one_absolute_deadline(self, app, monkeypatch):
+        clock = [100.0]
+
+        class Session:
+            def __init__(self):
+                self.calls = []
+
+            def post(self, url, **kwargs):
+                self.calls.append(kwargs)
+                clock[0] += 0.2
+                status = 503 if len(self.calls) < 3 else 200
+                return SimpleNamespace(
+                    status_code=status,
+                    text="busy",
+                    json=lambda: {
+                        "choices": [
+                            {
+                                "message": {
+                                    "role": "assistant",
+                                    "content": VALID_HTML,
+                                }
+                            }
+                        ]
+                    },
+                )
+
+        session = Session()
+        monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(llm_provider, "_provider", None)
+        monkeypatch.setattr(llm_transport, "_session", session)
+        monkeypatch.setattr(llm_transport.random, "uniform", lambda low, high: 0.1)
+        monkeypatch.setattr(
+            llm_transport.time,
+            "sleep",
+            lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+        )
+
+        with app.app_context():
+            result = _generate(
+                None,
+                settings=_settings(generation_timeout_seconds=300.0),
+                deadline=Deadline(expires_at=101.0),
+            )
+
+        assert result.html == VALID_HTML
+        assert [call["timeout"] for call in session.calls] == [
+            (1.0, 1.0),
+            pytest.approx((0.7, 0.7)),
+            pytest.approx((0.4, 0.4)),
+        ]
 
 
 class TestWebsiteDiversityPrompt:

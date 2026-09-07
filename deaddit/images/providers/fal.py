@@ -358,6 +358,18 @@ class FalAdapter:
             "Accept": "application/json",
         }
 
+    def _retry_sleep(self, deadline: Deadline | None, attempt: int) -> None:
+        delay = min(2 ** (attempt - 1), 4)
+        if deadline is None:
+            self._sleep(delay)
+            return
+        remaining = deadline.remaining()
+        if remaining <= 0:
+            raise ImageTimeoutError("fal request deadline elapsed")
+        self._sleep(min(delay, remaining))
+        if deadline.expired():
+            raise ImageTimeoutError("fal request deadline elapsed")
+
     def _call(
         self,
         method: str,
@@ -372,16 +384,21 @@ class FalAdapter:
 
         Validation, auth, and content-policy responses are returned as-is
         for the caller to interpret via ``_raise_for_status_error`` - only
-        transport exceptions and retryable statuses are retried here, since
+        transport exceptions and retryable statuses are retried, since
         fal's own queue already absorbs most other transient failures.
+        With a deadline, each attempt recomputes both inactivity timeouts and
+        caps retry sleep to the remaining monotonic budget; it is not a hard
+        wall-clock cancellation of a blocking request.
         """
         last_error: Exception | None = None
         for attempt in range(1, _MAX_TRANSPORT_ATTEMPTS + 1):
+            connect_timeout = _CONNECT_TIMEOUT
             read_timeout = _READ_TIMEOUT
             if deadline is not None:
                 remaining = deadline.remaining()
                 if remaining <= 0:
                     raise ImageTimeoutError("fal request deadline elapsed")
+                connect_timeout = min(_CONNECT_TIMEOUT, remaining)
                 read_timeout = min(_READ_TIMEOUT, remaining)
 
             try:
@@ -391,28 +408,29 @@ class FalAdapter:
                     headers=headers,
                     params=params,
                     json=json_body,
-                    timeout=(_CONNECT_TIMEOUT, read_timeout),
+                    timeout=(connect_timeout, read_timeout),
                 )
             except requests.RequestException as exc:
                 last_error = exc
-                if attempt >= _MAX_TRANSPORT_ATTEMPTS or (
-                    deadline is not None and deadline.expired()
-                ):
+                if deadline is not None and deadline.expired():
+                    raise ImageTimeoutError("fal request deadline elapsed") from exc
+                if attempt >= _MAX_TRANSPORT_ATTEMPTS:
                     raise ImageProviderTransientError(
                         f"fal request to {url} failed: {exc}"
                     ) from exc
-                self._sleep(min(2 ** (attempt - 1), 4))
+                self._retry_sleep(deadline, attempt)
                 continue
 
+            if deadline is not None and deadline.expired():
+                raise ImageTimeoutError("fal request deadline elapsed")
             if (
                 response.status_code in _RETRYABLE_STATUSES
                 and attempt < _MAX_TRANSPORT_ATTEMPTS
-                and not (deadline is not None and deadline.expired())
             ):
                 last_error = ImageProviderTransientError(
                     f"fal returned a retryable status: HTTP {response.status_code}"
                 )
-                self._sleep(min(2 ** (attempt - 1), 4))
+                self._retry_sleep(deadline, attempt)
                 continue
             return response
 

@@ -30,6 +30,7 @@ import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
+from deaddit.images.types import Deadline
 from deaddit.llm.client import ChatRequest, LLMClient, Sampling
 from deaddit.llm.errors import LLMError
 from deaddit.websites.diversity import (
@@ -415,7 +416,7 @@ def generate_website_html(
     model: str,
     agent: str | None,
     settings: WebsiteGenerationSettings,
-    run_deadline_remaining: float | None = None,
+    deadline: Deadline | None = None,
     rng: random.Random | None = None,
     direction_id: str | None = None,
 ) -> WebsiteGenerationResult:
@@ -430,10 +431,11 @@ def generate_website_html(
     ``max_tokens`` comes from *settings*
     (``resolve_website_settings()``'s 32,768-token floor already applied).
 
-    ``read_timeout`` is the smaller of ``settings.generation_timeout_seconds``
-    and *run_deadline_remaining* (seconds left in the caller's agent-run
-    budget; pass ``None`` outside a real run, e.g. ``ToolContext.deadline`` is
-    ``None``, and this falls back to the website timeout alone).
+    ``read_timeout`` is capped to *deadline*'s current remaining monotonic
+    budget for every retry attempt (and falls back to the website timeout when
+    no deadline is supplied). The HTTP transport also caps retry backoff to
+    the same absolute deadline; request read timeouts remain inactivity
+    timeouts rather than a strict wall-clock guarantee.
 
     Raises :class:`WebsiteGenerationTruncatedError` on a ``length`` finish
     reason, :class:`WebsiteGenerationInvalidHTMLError` on any Generated HTML
@@ -446,8 +448,8 @@ def generate_website_html(
     """
 
     read_timeout = settings.generation_timeout_seconds
-    if run_deadline_remaining is not None:
-        read_timeout = min(read_timeout, run_deadline_remaining)
+    if deadline is not None:
+        read_timeout = min(read_timeout, deadline.remaining())
     if read_timeout <= 0:
         raise WebsiteGenerationError(
             "not enough run time remaining to generate a website"
@@ -473,6 +475,7 @@ def generate_website_html(
         api_key=api_key,
         sampling=Sampling(max_tokens=settings.max_output_tokens),
         read_timeout=read_timeout,
+        deadline=deadline,
         action="create_website",
         agent=agent,
     )
@@ -483,7 +486,8 @@ def generate_website_html(
         raise WebsiteGenerationError(
             f"website generation request failed: {type(exc).__name__}"
         ) from exc
-
+    if deadline is not None and deadline.expired():
+        raise WebsiteGenerationError("website generation deadline elapsed")
     if result.finish_reason == "length":
         raise WebsiteGenerationTruncatedError(
             "website generation stopped at the output-token limit before "

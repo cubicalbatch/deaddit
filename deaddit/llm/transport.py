@@ -4,16 +4,22 @@ Holds the only `requests.post` call added by this phase, plus session pooling
 and the retry policy (3 attempts, full-jitter backoff).
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import random
 import threading
 import time
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import requests
 
 from deaddit.llm.errors import LLMError, PermanentLLMError, TransientLLMError
+
+if TYPE_CHECKING:
+    from deaddit.images.types import Deadline
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +68,33 @@ def _unwrap_envelope(data: object) -> dict:
     return data
 
 
+def _attempt_timeouts(
+    connect_timeout: float, read_timeout: float, deadline: Deadline | None
+) -> tuple[float, float]:
+    if deadline is None:
+        return connect_timeout, read_timeout
+    remaining = deadline.remaining()
+    if remaining <= 0:
+        raise TransientLLMError("LLM request deadline elapsed")
+    return min(connect_timeout, remaining), min(read_timeout, remaining)
+
+
+def _sleep_before_retry(deadline: Deadline | None, attempt: int) -> None:
+    delay = random.uniform(0, min(2 ** (attempt - 1), 8))
+    if deadline is None:
+        time.sleep(delay)
+        return
+    remaining = deadline.remaining()
+    if remaining <= 0:
+        raise TransientLLMError("LLM request deadline elapsed")
+    time.sleep(min(delay, remaining))
+
+
+def _raise_if_expired(deadline: Deadline | None) -> None:
+    if deadline is not None and deadline.expired():
+        raise TransientLLMError("LLM request deadline elapsed")
+
+
 def post_chat(
     api_url: str,
     payload: dict,
@@ -70,12 +103,19 @@ def post_chat(
     connect_timeout: float = _CONNECT_TIMEOUT,
     read_timeout: float = _READ_TIMEOUT,
     *,
+    deadline: Deadline | None = None,
     on_attempt=None,
 ) -> dict:
     """POST a chat completion request with retries; return parsed JSON of a 200.
 
+    When *deadline* is supplied, each attempt recomputes both request
+    timeouts from its remaining monotonic budget and retry backoff is capped
+    to that same budget. Requests timeouts are inactivity timeouts, not a
+    strict wall-clock bound; the deadline is checked before each attempt and
+    after each response.
+
     Raises PermanentLLMError immediately on non-retryable statuses;
-    TransientLLMError once the retry budget is exhausted.
+    TransientLLMError once the retry budget is exhausted or the deadline ends.
 
     ``on_attempt(attempt, scoped_id, outcome)`` fires once per loop
     iteration: outcome is the parsed response dict on success (just
@@ -89,6 +129,9 @@ def post_chat(
     last_error: Exception | None = None
 
     for attempt in range(1, _MAX_ATTEMPTS + 1):
+        connect_for_attempt, read_for_attempt = _attempt_timeouts(
+            connect_timeout, read_timeout, deadline
+        )
         scoped_id = f"{request_id}-{attempt}"
         attempt_headers = {**headers, "X-Request-Id": scoped_id}
         try:
@@ -96,7 +139,7 @@ def post_chat(
                 url,
                 json=payload,
                 headers=attempt_headers,
-                timeout=(connect_timeout, read_timeout),
+                timeout=(connect_for_attempt, read_for_attempt),
             )
         except requests.RequestException as exc:
             last_error = exc
@@ -109,9 +152,10 @@ def post_chat(
                 exc,
             )
             if attempt < _MAX_ATTEMPTS:
-                time.sleep(random.uniform(0, min(2 ** (attempt - 1), 8)))
+                _sleep_before_retry(deadline, attempt)
             continue
 
+        _raise_if_expired(deadline)
         if response.status_code == 200:
             try:
                 data = _unwrap_envelope(response.json())
@@ -141,7 +185,7 @@ def post_chat(
                 excerpt,
             )
             if attempt < _MAX_ATTEMPTS:
-                time.sleep(random.uniform(0, min(2 ** (attempt - 1), 8)))
+                _sleep_before_retry(deadline, attempt)
             continue
 
         permanent = PermanentLLMError(

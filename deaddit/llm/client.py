@@ -8,12 +8,16 @@ import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from deaddit.llm import accounting
 from deaddit.llm.errors import CapabilityError, PermanentLLMError
 from deaddit.llm.provider import get_provider, get_stream_provider
 from deaddit.llm.tools import ToolSpec
 from deaddit.llm.transport import _unwrap_envelope, last_attempts
+
+if TYPE_CHECKING:
+    from deaddit.images.types import Deadline
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +54,7 @@ class ChatRequest:
     sampling: Sampling | None = None
     extra_payload: dict | None = None
     read_timeout: float = 120.0
+    deadline: Deadline | None = None
     tools: list[ToolSpec] | None = None
     request_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     action: str | None = None
@@ -218,15 +223,18 @@ class LLMClient:
                 pending_success = (attempt, scoped_id)
 
         try:
+            provider_kwargs = {
+                "api_url": req.api_url,
+                "payload": payload,
+                "api_key": req.api_key,
+                "request_id": req.request_id,
+                "read_timeout": req.read_timeout,
+                "on_attempt": on_attempt,
+            }
+            if req.deadline is not None:
+                provider_kwargs["deadline"] = req.deadline
             rec.mark_invoked()
-            raw_data = get_provider()(
-                api_url=req.api_url,
-                payload=payload,
-                api_key=req.api_key,
-                request_id=req.request_id,
-                read_timeout=req.read_timeout,
-                on_attempt=on_attempt,
-            )
+            raw_data = get_provider()(**provider_kwargs)
             data = _unwrap_envelope(raw_data)
             content, tool_calls = _extract_response(data)
             finish_reason = _extract_finish_reason(data)
