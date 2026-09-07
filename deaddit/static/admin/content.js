@@ -612,7 +612,6 @@ class ContentManager {
             document.getElementById('editPostId').value = id;
             document.getElementById('editPostTitle').value = post.title;
             document.getElementById('editPostContent').value = post.content;
-            document.getElementById('editPostUpvotes').value = post.score;
             document.getElementById('editPostType').value = post.post_type || '';
 
             // Show modal
@@ -628,7 +627,6 @@ class ContentManager {
         const data = {
             title: document.getElementById('editPostTitle').value,
             content: document.getElementById('editPostContent').value,
-            score: parseInt(document.getElementById('editPostUpvotes').value) || 0,
             post_type: document.getElementById('editPostType').value
         };
 
@@ -695,7 +693,6 @@ class ContentManager {
             // Populate form
             document.getElementById('editCommentId').value = id;
             document.getElementById('editCommentContent').value = comment.content;
-            document.getElementById('editCommentUpvotes').value = comment.score;
 
             // Show modal
             new bootstrap.Modal(document.getElementById('editCommentModal')).show();
@@ -709,7 +706,6 @@ class ContentManager {
         const id = document.getElementById('editCommentId').value;
         const data = {
             content: document.getElementById('editCommentContent').value,
-            score: parseInt(document.getElementById('editCommentUpvotes').value) || 0
         };
 
         try {

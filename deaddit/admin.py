@@ -98,6 +98,110 @@ def _chunked(iterable, size=500):
     lst = list(iterable)
     for i in range(0, len(lst), size):
         yield lst[i : i + size]
+def _refresh_author_karma(*, post_authors=(), comment_authors=()):
+    """Refresh karma for authors affected by content or vote deletion."""
+    post_authors = set(post_authors)
+    comment_authors = set(comment_authors)
+    if post_authors:
+        totals = {}
+        for chunk in _chunked(post_authors):
+            rows = (
+                db.session.query(
+                    Post.user,
+                    func.coalesce(func.sum(Vote.value), 0),
+                )
+                .outerjoin(Vote, Vote.post_id == Post.id)
+                .filter(Post.user.in_(chunk))
+                .group_by(Post.user)
+                .all()
+            )
+            totals.update({username: int(total) for username, total in rows})
+        for chunk in _chunked(post_authors):
+            for user in User.query.filter(User.username.in_(chunk)).all():
+                user.post_karma = totals.get(user.username, 0)
+    if comment_authors:
+        totals = {}
+        for chunk in _chunked(comment_authors):
+            rows = (
+                db.session.query(
+                    Comment.user,
+                    func.coalesce(func.sum(Vote.value), 0),
+                )
+                .outerjoin(Vote, Vote.comment_id == Comment.id)
+                .filter(Comment.user.in_(chunk))
+                .group_by(Comment.user)
+                .all()
+            )
+            totals.update({username: int(total) for username, total in rows})
+        for chunk in _chunked(comment_authors):
+            for user in User.query.filter(User.username.in_(chunk)).all():
+                user.comment_karma = totals.get(user.username, 0)
+
+
+def _score_edit_error(raw_score, current_score):
+    """Reject score edits while allowing an unchanged value from old clients."""
+    if isinstance(raw_score, bool):
+        return "score is vote-authoritative and must not be changed"
+    try:
+        requested_score = int(raw_score)
+    except (TypeError, ValueError):
+        return "score is vote-authoritative and must match the existing score"
+    if isinstance(raw_score, float) and raw_score != requested_score:
+        return "score is vote-authoritative and must match the existing score"
+    if requested_score != current_score:
+        return "score is vote-authoritative and cannot be changed"
+    return None
+
+
+def _score_edit_response(data, current_score):
+    if "score" not in data:
+        return None
+    error = _score_edit_error(data["score"], current_score)
+    return (jsonify({"success": False, "error": error}), 400) if error else None
+
+
+def _authors_for_votes(voter_names):
+    """Return authors whose remaining content is affected by these votes."""
+    post_ids = set()
+    comment_ids = set()
+    for chunk in _chunked(voter_names):
+        for post_id, comment_id in db.session.query(
+            Vote.post_id, Vote.comment_id
+        ).filter(Vote.voter.in_(chunk)):
+            if post_id is not None:
+                post_ids.add(post_id)
+            if comment_id is not None:
+                comment_ids.add(comment_id)
+    post_authors = set()
+    for chunk in _chunked(post_ids):
+        post_authors.update(
+            username
+            for (username,) in db.session.query(Post.user)
+            .filter(Post.id.in_(chunk))
+            .all()
+        )
+    comment_authors = set()
+    for chunk in _chunked(comment_ids):
+        comment_authors.update(
+            username
+            for (username,) in db.session.query(Comment.user)
+            .filter(Comment.id.in_(chunk))
+            .all()
+        )
+    return post_authors, comment_authors
+
+
+def _content_authors(model, content_ids):
+    if not content_ids:
+        return set()
+    return {
+        username
+        for chunk in _chunked(content_ids)
+        for (username,) in db.session.query(model.user)
+        .filter(model.id.in_(chunk))
+        .all()
+    }
+
 
 
 def _delete_post_notifications(post_ids):
@@ -140,6 +244,7 @@ def _delete_comments(comment_ids):
     all_comment_ids = _get_comment_ids_with_descendants(comment_ids)
     if not all_comment_ids:
         return 0
+    comment_authors = _content_authors(Comment, all_comment_ids)
 
     for chunk in _chunked(all_comment_ids, 500):
         Vote.query.filter(Vote.comment_id.in_(chunk)).delete(synchronize_session=False)
@@ -154,14 +259,14 @@ def _delete_comments(comment_ids):
             {Comment.parent_id: None}, synchronize_session=False
         )
         Comment.query.filter(Comment.id.in_(chunk)).delete(synchronize_session=False)
+    _refresh_author_karma(comment_authors=comment_authors)
     return len(all_comment_ids)
-
-
 def _delete_posts_cascade(post_ids):
     """Delete posts and all associated comments, images, websites, votes, and notifications."""
     post_ids = list(post_ids)
     if not post_ids:
         return 0, 0
+    post_authors = _content_authors(Post, post_ids)
 
     post_comment_ids = []
     for chunk in _chunked(post_ids, 500):
@@ -185,8 +290,10 @@ def _delete_posts_cascade(post_ids):
         posts = Post.query.filter(Post.id.in_(chunk)).all()
         for p in posts:
             db.session.delete(p)
-
+    _refresh_author_karma(post_authors=post_authors)
     return len(post_ids), deleted_comments_count
+
+
 
 
 def _delete_users_cascade(usernames):
@@ -210,6 +317,8 @@ def _delete_users_cascade(usernames):
         )
     media_paths = media_service.media_paths_for_posts(post_ids)
     website_paths = website_service.website_paths_for_posts(post_ids)
+    post_authors = _content_authors(Post, post_ids)
+    vote_post_authors, vote_comment_authors = _authors_for_votes(usernames)
 
     # 1. Collect all comments authored by the user(s) AND all comments on the users' posts
     user_comment_ids = []
@@ -246,10 +355,15 @@ def _delete_users_cascade(usernames):
                 synchronize_session=False
             )
             Post.query.filter(Post.id.in_(chunk)).delete(synchronize_session=False)
+        _refresh_author_karma(post_authors=post_authors)
 
     for chunk in _chunked(usernames, 500):
         # 4. Clean up votes cast by the user(s) on ANY remaining posts/comments
         Vote.query.filter(Vote.voter.in_(chunk)).delete(synchronize_session=False)
+        _refresh_author_karma(
+            post_authors=vote_post_authors,
+            comment_authors=vote_comment_authors,
+        )
 
         # 5. Clean up notifications where the user is recipient or actor
         Notification.query.filter(Notification.recipient.in_(chunk)).delete(
@@ -1477,14 +1591,16 @@ def api_posts():
 @admin_bp.route("/api/posts/<int:post_id>", methods=["PUT"])
 @admin_required
 def api_update_post(post_id):
-    """Update a post."""
+    """Update a post without allowing score edits."""
     post = Post.query.get_or_404(post_id)
-    data = request.json
+    data = request.get_json(silent=True) or {}
+    score_error = _score_edit_response(data, post.score)
+    if score_error is not None:
+        return score_error
 
     try:
         post.title = data.get("title", post.title)
         post.content = data.get("content", post.content)
-        post.score = data.get("score", post.score)
         post.post_type = data.get("post_type", post.post_type)
 
         db.session.commit()
@@ -1619,13 +1735,15 @@ def api_comments():
 @admin_bp.route("/api/comments/<int:comment_id>", methods=["PUT"])
 @admin_required
 def api_update_comment(comment_id):
-    """Update a comment."""
+    """Update a comment without allowing score edits."""
     comment = Comment.query.get_or_404(comment_id)
-    data = request.json
+    data = request.get_json(silent=True) or {}
+    score_error = _score_edit_response(data, comment.score)
+    if score_error is not None:
+        return score_error
 
     try:
         comment.content = data.get("content", comment.content)
-        comment.score = data.get("score", comment.score)
 
         db.session.commit()
         return jsonify({"success": True})
