@@ -5,6 +5,8 @@ this package performs no I/O: database creation, settings seeding, and job
 restarts all happen inside :func:`create_app`.
 """
 
+import hashlib
+import hmac
 import logging
 import os
 from typing import Any
@@ -98,9 +100,21 @@ def create_app(config: Any = None) -> Flask:
         # Seed default settings; schema is owned by Alembic migrations
         # (see migrations/). Also available as `flask init-db`.
         Config.initialize_defaults()
-
-        # Set SECRET_KEY from config system
-        app.config["SECRET_KEY"] = Config.get("SECRET_KEY")
+        configured_secret = Config.get("SECRET_KEY")
+        api_token = Config.get("API_TOKEN")
+        if api_token and api_token.strip() and (
+            not configured_secret
+            or not configured_secret.strip()
+            or configured_secret == Config.DEFAULTS["SECRET_KEY"]
+        ):
+            # Keep API_TOKEN-only deployments stable across workers without
+            # reusing the token directly as the Flask signing key.
+            configured_secret = hmac.new(
+                api_token.encode("utf-8"),
+                b"deaddit:flask-session-signing:v1",
+                hashlib.sha256,
+            ).hexdigest()
+        app.config["SECRET_KEY"] = configured_secret
         # Session cookie posture: Lax keeps cross-site POSTs from carrying
         # the admin session (CSRF mitigation that does not depend on the
         # browser's default).
@@ -114,10 +128,12 @@ def create_app(config: Any = None) -> Flask:
                 "No API_TOKEN set in database or environment. Admin and API routes will be publicly accessible."
             )
 
-        # A session signed with the well-known dev default is forgeable: the
-        # admin_authenticated cookie can be minted offline, bypassing the
-        # token entirely. Warn as loudly as the missing-token case.
-        if app.config["SECRET_KEY"] == Config.DEFAULTS["SECRET_KEY"]:
+        # With no API_TOKEN, admin routes intentionally remain public. The
+        # built-in key is only unsafe once it protects an authenticated session.
+        if (
+            (not api_token or not api_token.strip())
+            and app.config["SECRET_KEY"] == Config.DEFAULTS["SECRET_KEY"]
+        ):
             logger.warning(
                 "SECRET_KEY is unset (built-in dev default). Admin session cookies are forgeable - set SECRET_KEY in the environment before exposing this app."
             )

@@ -4,10 +4,15 @@ Covers the audit fixes: constant-time token comparison on /admin/login, the
 /admin websocket namespace rejecting unauthenticated connects once API_TOKEN
 is set, and the explicit SameSite=Lax session-cookie posture.
 """
+import hashlib
+import hmac
 
 import pytest
 
+from deaddit import create_app, db
+from deaddit.config import Config
 from deaddit.extensions import socketio
+from flask.sessions import SecureCookieSessionInterface
 
 
 def _register_admin_handlers():
@@ -91,6 +96,80 @@ def test_admin_socket_open_when_no_token(app, monkeypatch):
 def test_session_cookie_samesite_is_lax(app):
     assert app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
 
+
+
+def _session_app(tmp_path, monkeypatch, *, secret=None):
+    monkeypatch.setenv("API_TOKEN", "api-token-for-session-tests")
+    if secret is None:
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+    else:
+        monkeypatch.setenv("SECRET_KEY", secret)
+    app = create_app(
+        {
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'session.db'}",
+            "TESTING": True,
+        }
+    )
+    with app.app_context():
+        db.create_all()
+    return app
+
+
+def test_api_token_derives_session_secret_and_rejects_legacy_cookie(
+    tmp_path, monkeypatch
+):
+    app = _session_app(tmp_path, monkeypatch)
+    assert app.config["SECRET_KEY"] != Config.DEFAULTS["SECRET_KEY"]
+
+    with app.app_context():
+        app.config["SECRET_KEY"] = Config.DEFAULTS["SECRET_KEY"]
+        legacy_cookie = SecureCookieSessionInterface().get_signing_serializer(
+            app
+        ).dumps({"admin_authenticated": True})
+        app.config["SECRET_KEY"] = hmac.new(
+            b"api-token-for-session-tests",
+            b"deaddit:flask-session-signing:v1",
+            hashlib.sha256,
+        ).hexdigest()
+
+    response = app.test_client().get(
+        "/admin/api/setup/status",
+        headers={"Cookie": f"session={legacy_cookie}"},
+    )
+    assert response.status_code == 302
+    assert "/admin/login" in response.headers["Location"]
+
+
+def test_api_token_session_works_across_app_instances_without_leaking_token(
+    tmp_path, monkeypatch
+):
+    app_one = _session_app(tmp_path, monkeypatch)
+    login_client = app_one.test_client()
+    token = "api-token-for-session-tests"
+    response = login_client.post("/admin/login", data={"api_token": token})
+    assert response.status_code == 302
+    assert token not in response.get_data(as_text=True)
+    assert token not in response.headers["Set-Cookie"]
+
+    cookie = login_client.get_cookie("session")
+    assert cookie is not None
+    assert token not in cookie.value
+    with login_client.session_transaction() as session:
+        assert session["admin_authenticated"] is True
+        assert token not in repr(dict(session))
+        assert "api_token" not in session
+
+    app_two = _session_app(tmp_path, monkeypatch)
+    second_client = app_two.test_client()
+    second_client.set_cookie("session", cookie.value)
+    response = second_client.get("/admin/api/setup/status")
+    assert response.status_code == 200
+
+
+def test_explicit_session_secret_is_honored(tmp_path, monkeypatch):
+    explicit_secret = "explicit-session-secret-for-tests"
+    app = _session_app(tmp_path, monkeypatch, secret=explicit_secret)
+    assert app.config["SECRET_KEY"] == explicit_secret
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__]))
