@@ -1373,11 +1373,61 @@ def test_empty_pool_scheduled_backs_off_without_strike(seeded_db, db_session):
     assert AgentRun.query.filter_by(agent_id=random_agent.id).count() == 0
 
 
-def test_reservation_retries_after_unique_conflict(seeded_db, db_session, monkeypatch):
+def test_reservation_rejects_second_run_for_same_agent(seeded_db, db_session, monkeypatch):
     random_agent = _make_random_agent(db_session)
+    winner = AgentRun(
+        agent_id=random_agent.id,
+        persona_username="alice",
+        trigger="manual",
+        status="running",
+        started_at=datetime.utcnow(),
+    )
+    db_session.add(winner)
+    db_session.commit()
+    _rig_selection(monkeypatch, "bob")
+
+    with pytest.raises(ValueError, match="already has a run"):
+        loop_module.reserve_persona_run(random_agent, trigger="manual")
+
+    db_session.refresh(random_agent)
+    assert random_agent.status == "idle"
+    assert AgentRun.query.filter_by(agent_id=random_agent.id).count() == 1
+
+
+def test_scheduled_reservation_collision_preserves_winner_state(
+    seeded_db, db_session, monkeypatch
+):
+    agent = _make_random_agent(db_session)
+    cadence = datetime.utcnow() + timedelta(minutes=7)
+    agent.status = "running"
+    agent.next_run_at = cadence
+    winner = AgentRun(
+        agent_id=agent.id,
+        persona_username="alice",
+        trigger="schedule",
+        status="running",
+        started_at=datetime.utcnow(),
+    )
+    db_session.add(winner)
+    db_session.commit()
+    monkeypatch.setattr(loop_module, "_recover_stale_runs", lambda _agent: False)
+
+    with pytest.raises(ValueError, match="already has a run"):
+        run_once(agent.id, trigger="schedule")
+
+    db_session.refresh(agent)
+    assert agent.status == "running"
+    assert agent.next_run_at == cadence
+
+
+def test_reservation_retries_after_persona_unique_conflict(
+    seeded_db, db_session, monkeypatch
+):
+    random_agent = _make_random_agent(db_session)
+    fixed = _make_agent(db_session, "alice")
     db_session.add(
         AgentRun(
-            agent_id=random_agent.id,
+            agent_id=fixed.id,
             persona_username="alice",
             trigger="manual",
             status="running",
@@ -1394,9 +1444,10 @@ def test_reservation_retries_after_unique_conflict(seeded_db, db_session, monkey
 
 def test_reservation_conflict_retries_exhausted(seeded_db, db_session, monkeypatch):
     random_agent = _make_random_agent(db_session)
+    fixed = _make_agent(db_session, "alice")
     db_session.add(
         AgentRun(
-            agent_id=random_agent.id,
+            agent_id=fixed.id,
             persona_username="alice",
             trigger="manual",
             status="running",

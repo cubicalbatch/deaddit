@@ -465,6 +465,12 @@ class AgentRun(db.Model):
             unique=True,
             sqlite_where=db.text("status = 'running'"),
         ),
+        db.Index(
+            "uq_agent_run_running_agent",
+            "agent_id",
+            unique=True,
+            sqlite_where=db.text("status = 'running'"),
+        ),
     )
 
 
