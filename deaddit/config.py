@@ -281,7 +281,7 @@ class Config:
 
     @classmethod
     def initialize_defaults(cls) -> None:
-        """Initialize database with default values if not already set.
+        """Initialize database defaults without shadowing environment values.
 
         Secret keys are skipped entirely: they are never written as rows.
         Deploy keys are skipped and any pre-existing row is deleted — earlier
@@ -310,10 +310,14 @@ class Config:
             for key, default_value in cls.DEFAULTS.items():
                 if is_secret_key(key) or is_deploy_key(key):
                     continue
-                # Only set if not already in database
-                if Setting.get_value(key) is None:
-                    description = cls.DESCRIPTIONS.get(key)
-                    Setting.set_value(key, default_value, description)
+                if db.session.get(Setting, key) is not None:
+                    continue
+                # Leave environment-configured values as live fallbacks.
+                if os.environ.get(key) is not None:
+                    continue
+                description = cls.DESCRIPTIONS.get(key)
+                Setting.set_value(key, default_value, description)
+                invalidate(key)
         except Exception:
             # Database might not be ready yet
             pass
