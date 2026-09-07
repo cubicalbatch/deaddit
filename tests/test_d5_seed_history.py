@@ -15,7 +15,7 @@ from deaddit import cli as cli_module
 from deaddit import create_app
 from deaddit import db as _db
 from deaddit.dynamics import ranking, seeding
-from deaddit.models import Comment, Post, Setting, User, Vote
+from deaddit.models import Comment, Post, Setting, Subdeaddit, User, Vote
 
 NOW = datetime(2026, 8, 25, 12, 0, 0)
 D5_REV = "b8e2f4a6c9d1"
@@ -112,6 +112,8 @@ def test_exact_sum_and_karma_invariants(app, pinned_now, db_session):
             checked += 1
     assert checked > 0
 
+
+
     def _effective_sums(model, owner_col):
         rows = (
             db_session.query(
@@ -138,6 +140,63 @@ def test_exact_sum_and_karma_invariants(app, pinned_now, db_session):
         for p in posts
     ]
     assert keys == sorted(keys, reverse=True)
+
+@pytest.mark.parametrize(("vote_max", "expected_score"), ((0, 0), (1, -1)))
+def test_negative_seed_vote_respects_capacity_and_attention(
+    app, db_session, monkeypatch, vote_max, expected_score
+):
+    db_session.add_all(
+        [
+            User(username="author"),
+            User(username="voter"),
+            Subdeaddit(name="seed-sub"),
+            Post(
+                title="Seeded",
+                content="content",
+                user="author",
+                subdeaddit_name="seed-sub",
+                created_at=NOW,
+            ),
+        ]
+    )
+    db_session.commit()
+    post = Post.query.one()
+
+    class FixedRandom:
+        def __init__(self, seed):
+            self.seed = seed
+
+        def random(self):
+            return 0.0
+
+        def randrange(self, stop):
+            return 0
+
+        def uniform(self, start, stop):
+            return start
+
+        def shuffle(self, values):
+            return None
+
+    monkeypatch.setattr(seeding.random, "Random", FixedRandom)
+
+    assert seeding._vote_pass(
+        seed=42,
+        p=1.0,
+        vote_max=vote_max,
+        post_ids=[post.id],
+        comment_ids=[],
+        batch_size=1,
+    ) == (0 if vote_max == 0 else 1)
+
+    db_session.expire_all()
+    post = db_session.get(Post, post.id)
+    votes = Vote.query.filter_by(post_id=post.id).all()
+    assert post.score == expected_score
+    assert post.vote_count == len(votes)
+    assert len(votes) <= 1  # one non-author user
+    assert len(votes) <= vote_max
+    assert sum(vote.value for vote in votes) == post.score
 
 
 # 4. Determinism --------------------------------------------------------------

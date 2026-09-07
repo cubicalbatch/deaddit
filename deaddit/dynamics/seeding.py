@@ -1260,7 +1260,7 @@ def _vote_pass(
             bound = min(vote_max, capacity)
             target = int(bound * votes_rng.random() ** 3)
             if votes_rng.random() < 0.08:
-                target = -(1 + int(4 * votes_rng.random()))
+                target = -min(bound, 1 + int(4 * votes_rng.random()))
             item.score = target
             votes_created += _backfill_item(
                 votes_rng,
