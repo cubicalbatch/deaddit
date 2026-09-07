@@ -308,6 +308,13 @@ class TestFailureLeavesNoPublishableResult:
             with pytest.raises(WebsiteGenerationError):
                 _generate(fake_llm)
 
+    def test_malformed_provider_response_fails_cleanly(self, app, fake_llm):
+        with app.app_context():
+            fake_llm.enqueue(["not", "an", "object"])
+            with pytest.raises(WebsiteGenerationError):
+                _generate(fake_llm)
+
+
     def test_empty_output_fails_cleanly(self, app, fake_llm):
         with app.app_context():
             fake_llm.enqueue_content("   ", finish_reason="stop")

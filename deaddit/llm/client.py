@@ -13,7 +13,7 @@ from deaddit.llm import accounting
 from deaddit.llm.errors import CapabilityError, PermanentLLMError
 from deaddit.llm.provider import get_provider, get_stream_provider
 from deaddit.llm.tools import ToolSpec
-from deaddit.llm.transport import last_attempts
+from deaddit.llm.transport import _unwrap_envelope, last_attempts
 
 logger = logging.getLogger(__name__)
 
@@ -138,21 +138,36 @@ def _extract_response(response: dict) -> tuple[str, list[dict] | None]:
     (with content possibly empty). No other parsing: no JSON salvage, no
     <think> stripping (Resolution 11).
     """
+    if not isinstance(response, dict):
+        raise PermanentLLMError(
+            f"Unexpected API response format: {str(response)[:200]}"
+        )
     try:
         message = response["choices"][0]["message"]
-        content = message.get("content") or ""
+        raw_content = message.get("content")
+        if raw_content is not None and not isinstance(raw_content, str):
+            raise PermanentLLMError(
+                f"Unexpected API response format: {str(response)[:200]}"
+            )
+        content = raw_content or ""
         tool_calls = message.get("tool_calls") or None
+        if tool_calls is not None and not isinstance(tool_calls, list):
+            raise PermanentLLMError(
+                f"Unexpected API response format: {str(response)[:200]}"
+            )
         if tool_calls is not None:
             return content, tool_calls
-        if not content and (
-            message.get("reasoning") or message.get("reasoning_content")
-        ):
-            # Some OpenAI-compatible servers (e.g. qwen deployments) name the
-            # hidden-reasoning field `reasoning_content` instead of `reasoning`.
-            logger.info("Using reasoning field as content")
-            return message.get("reasoning") or message.get("reasoning_content"), None
-        if content:
-            return content, None
+        if not content:
+            reasoning = message.get("reasoning") or message.get("reasoning_content")
+            if reasoning:
+                if not isinstance(reasoning, str):
+                    raise PermanentLLMError(
+                        f"Unexpected API response format: {str(response)[:200]}"
+                    )
+                # Some OpenAI-compatible servers (e.g. qwen deployments) name the
+                # hidden-reasoning field `reasoning_content` instead of `reasoning`.
+                logger.info("Using reasoning field as content")
+                return reasoning, None
     except (KeyError, IndexError, TypeError, AttributeError):
         pass
 
@@ -191,18 +206,40 @@ class LLMClient:
         rec = accounting.AttemptRecorder(req)
         data: dict | None = None
         failure: BaseException | None = None
+        pending_success: tuple[int, str] | None = None
+
+        def on_attempt(attempt: int, scoped_id: str, outcome) -> None:
+            nonlocal pending_success
+            if isinstance(outcome, BaseException):
+                rec.on_attempt(attempt, scoped_id, outcome)
+            else:
+                # Validate/extract the final response before accounting marks
+                # it successful. Retry failures still record immediately.
+                pending_success = (attempt, scoped_id)
+
         try:
             rec.mark_invoked()
-            data = get_provider()(
+            raw_data = get_provider()(
                 api_url=req.api_url,
                 payload=payload,
                 api_key=req.api_key,
                 request_id=req.request_id,
                 read_timeout=req.read_timeout,
-                on_attempt=rec.on_attempt,
+                on_attempt=on_attempt,
             )
+            data = _unwrap_envelope(raw_data)
+            content, tool_calls = _extract_response(data)
+            finish_reason = _extract_finish_reason(data)
+            usage = data.get("usage") or {}
+            if not isinstance(usage, dict):
+                raise PermanentLLMError(
+                    f"Unexpected API response format: {str(data)[:200]}"
+                )
         except PermanentLLMError as exc:
             failure = exc
+            if pending_success is not None:
+                rec.on_attempt(*pending_success, exc)
+                pending_success = None
             message = str(exc)
             if (
                 req.tools
@@ -222,16 +259,20 @@ class LLMClient:
             raise
         except Exception as exc:
             failure = exc
+            if pending_success is not None:
+                rec.on_attempt(*pending_success, exc)
+                pending_success = None
             raise
+        else:
+            if pending_success is not None:
+                rec.on_attempt(*pending_success, data)
+                pending_success = None
         finally:
             rec.finalize(
                 exc=failure,
                 data=data if failure is None else None,
             )
         latency_ms = (time.monotonic() - started) * 1000.0
-        content, tool_calls = _extract_response(data)
-        finish_reason = _extract_finish_reason(data)
-        usage = data.get("usage") or {}
         attempts = last_attempts()
 
         logger.info(
@@ -256,6 +297,7 @@ class LLMClient:
             template_version=req.template_version,
             finish_reason=finish_reason,
         )
+
 
     def _resolve_stream_support(self, req: ChatRequest) -> bool:
         """Decide whether real streaming may be attempted for this request.
@@ -411,6 +453,5 @@ class LLMClient:
         done = Done(result=result, synthesized=False)
         emit(done)
         yield done
-
 
 StreamEvent = TokenDelta | ReasoningDelta | ToolCallDelta | Done
