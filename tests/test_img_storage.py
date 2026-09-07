@@ -12,6 +12,7 @@ from PIL import Image
 
 from deaddit import create_app
 from deaddit.images import storage
+from deaddit.images.types import Deadline, ImageTimeoutError
 from deaddit.images.storage import (
     ImageTooLargeError,
     MalformedImageError,
@@ -220,6 +221,102 @@ def test_download_image_streams_payload_and_validates_each_redirect_hop(monkeypa
         {"allow_redirects": False, "stream": True, "timeout": (3.5, 3.5)},
     )
     assert all(response.closed for response in responses.values())
+
+
+def test_download_image_recomputes_timeout_and_stops_after_deadline(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr("deaddit.images.types.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr(storage, "_resolve_host", lambda host: ["8.8.8.8"])
+    responses = {
+        "https://images.example/1": FakeResponse(302, {"Location": "/2"}),
+        "https://images.example/2": FakeResponse(302, {"Location": "/3"}),
+    }
+    calls: list[dict] = []
+
+    def fetch(method: str, url: str, **kwargs):
+        calls.append(kwargs)
+        clock[0] += 0.6
+        return responses[url]
+
+    with pytest.raises(ImageTimeoutError):
+        download_image(
+            "https://images.example/1",
+            fetch=fetch,
+            timeout=20.0,
+            deadline=Deadline(expires_at=101.0),
+        )
+
+    assert len(calls) == 2
+    assert calls[0]["timeout"] == (1.0, 1.0)
+    assert calls[1]["timeout"] == pytest.approx((0.4, 0.4))
+
+
+def test_download_image_stops_when_deadline_expires_between_chunks(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr("deaddit.images.types.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr(storage, "_resolve_host", lambda host: ["8.8.8.8"])
+    response = FakeResponse(
+        200,
+        {"Content-Type": "image/jpeg"},
+        b"\xff\xd8\xff",
+        b"body-after-deadline",
+    )
+
+    def iter_content(chunk_size: int):
+        yield response.chunks[0]
+        clock[0] = 101.0
+        yield response.chunks[1]
+
+    response.iter_content = iter_content
+    with pytest.raises(ImageTimeoutError):
+        download_image(
+            "https://images.example/1",
+            fetch=lambda method, url, **kwargs: response,
+            deadline=Deadline(expires_at=101.0),
+        )
+
+    assert response.closed
+
+
+def test_download_image_checks_deadline_before_body_iteration(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr("deaddit.images.types.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr(storage, "_resolve_host", lambda host: ["8.8.8.8"])
+    response = FakeResponse(
+        200, {"Content-Type": "image/jpeg"}, b"\xff\xd8\xffbody"
+    )
+    started = []
+
+    def iter_content(chunk_size: int):
+        started.append(chunk_size)
+        yield response.chunks[0]
+
+    response.iter_content = iter_content
+
+    def fetch(method: str, url: str, **kwargs):
+        clock[0] = 101.0
+        return response
+
+    with pytest.raises(ImageTimeoutError):
+        download_image(
+            "https://images.example/1",
+            fetch=fetch,
+            deadline=Deadline(expires_at=101.0),
+        )
+
+    assert started == []
+    assert response.closed
+
+
+def test_download_image_expired_deadline_fails_before_fetch(monkeypatch):
+    monkeypatch.setattr("deaddit.images.types.time.monotonic", lambda: 100.0)
+    fetch = lambda *args, **kwargs: pytest.fail("expired download performed I/O")
+    with pytest.raises(ImageTimeoutError):
+        download_image(
+            "https://images.example/1",
+            fetch=fetch,
+            deadline=Deadline(expires_at=99.0),
+        )
 
 
 def test_download_image_rejects_unsafe_or_unusable_responses(monkeypatch):

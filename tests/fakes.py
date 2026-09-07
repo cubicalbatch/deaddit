@@ -92,6 +92,7 @@ class FakeProvider:
                 "api_key": api_key,
                 "request_id": request_id,
                 "read_timeout": kwargs.get("read_timeout"),
+                "deadline": kwargs.get("deadline"),
             }
         )
         item = self._next_item()

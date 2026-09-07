@@ -22,6 +22,8 @@ from urllib.parse import urljoin, urlparse
 import requests
 from PIL import Image
 
+from deaddit.images.types import Deadline, ImageTimeoutError
+
 
 class MediaStorageError(Exception):
     """Base class for local media storage failures."""
@@ -185,9 +187,17 @@ def download_image(
     max_bytes: int = 26_214_400,
     timeout: float = 20.0,
     max_redirects: int = 4,
+    deadline: Deadline | None = None,
     fetch: Callable[..., Any] | None = None,
 ) -> DownloadedImage:
-    """Fetch and validate an image without allowing SSRF or unbounded bodies."""
+    """Fetch and validate an image without allowing SSRF or unbounded bodies.
+
+    If *deadline* is supplied, every redirect/request uses its current
+    remaining monotonic budget and body iteration checks that budget before
+    each yielded chunk and after completion. Requests timeouts are inactivity
+    timeouts, not hard wall-clock cancellation; the chunk checks stop work
+    between reads without worker threads.
+    """
 
     if max_bytes < 0:
         raise ValueError("max_bytes must not be negative")
@@ -199,14 +209,28 @@ def download_image(
     transport = _default_fetch if fetch is None else fetch
 
     for redirect_count in range(max_redirects + 1):
+        if deadline is not None:
+            remaining = deadline.remaining()
+            if remaining <= 0:
+                raise ImageTimeoutError("image download deadline elapsed")
+            request_timeout = min(timeout, remaining)
+        else:
+            request_timeout = timeout
         _validate_image_url(current_url)
-        response = transport(
-            "GET",
-            current_url,
-            allow_redirects=False,
-            stream=True,
-            timeout=(timeout, timeout),
-        )
+        if deadline is not None and deadline.expired():
+            raise ImageTimeoutError("image download deadline elapsed")
+        try:
+            response = transport(
+                "GET",
+                current_url,
+                allow_redirects=False,
+                stream=True,
+                timeout=(request_timeout, request_timeout),
+            )
+        except requests.RequestException as exc:
+            if deadline is not None and deadline.expired():
+                raise ImageTimeoutError("image download deadline elapsed") from exc
+            raise
         try:
             status_code = int(getattr(response, "status_code", 0))
             if status_code in _REDIRECT_STATUSES:
@@ -227,16 +251,27 @@ def download_image(
                     f"unsupported image MIME type: {declared or '<missing>'}"
                 )
 
+            if deadline is not None and deadline.expired():
+                raise ImageTimeoutError("image download deadline elapsed")
             chunks: list[bytes] = []
             total = 0
-            for chunk in response.iter_content(chunk_size=64 * 1024):
-                if not chunk:
-                    continue
-                chunk_bytes = bytes(chunk)
-                total += len(chunk_bytes)
-                if total > max_bytes:
-                    raise ImageTooLargeError("downloaded image exceeds byte limit")
-                chunks.append(chunk_bytes)
+            try:
+                for chunk in response.iter_content(chunk_size=64 * 1024):
+                    if deadline is not None and deadline.expired():
+                        raise ImageTimeoutError("image download deadline elapsed")
+                    if not chunk:
+                        continue
+                    chunk_bytes = bytes(chunk)
+                    total += len(chunk_bytes)
+                    if total > max_bytes:
+                        raise ImageTooLargeError("downloaded image exceeds byte limit")
+                    chunks.append(chunk_bytes)
+            except requests.RequestException as exc:
+                if deadline is not None and deadline.expired():
+                    raise ImageTimeoutError("image download deadline elapsed") from exc
+                raise
+            if deadline is not None and deadline.expired():
+                raise ImageTimeoutError("image download deadline elapsed")
             data = b"".join(chunks)
             if not _magic_matches(mime_type, data):
                 raise MalformedImageError("image magic bytes do not match MIME type")
