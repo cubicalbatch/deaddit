@@ -50,12 +50,12 @@ def get_session() -> requests.Session:
     return _session
 
 
-def _unwrap_envelope(data: dict) -> dict:
-    """Unwrap proxies that nest the OpenAI response under ``data``.
-
-    e.g. cline returns ``{"success": true, "data": {choices: [...]}}``;
-    every OpenAI-shaped consumer reads ``choices`` off the top level.
-    """
+def _unwrap_envelope(data: object) -> dict:
+    """Normalize an OpenAI response or a supported proxy envelope."""
+    if not isinstance(data, dict):
+        raise PermanentLLMError(
+            f"Unexpected API response format: {str(data)[:200]}"
+        )
     inner = data.get("data")
     if not data.get("choices") and isinstance(inner, dict) and inner.get("choices"):
         return inner
@@ -113,7 +113,17 @@ def post_chat(
             continue
 
         if response.status_code == 200:
-            data = _unwrap_envelope(response.json())
+            try:
+                data = _unwrap_envelope(response.json())
+            except PermanentLLMError as exc:
+                _notify(on_attempt, attempt, scoped_id, exc)
+                raise
+            except (TypeError, ValueError) as exc:
+                permanent = PermanentLLMError(
+                    f"Invalid JSON response from {url}: {exc}"
+                )
+                _notify(on_attempt, attempt, scoped_id, permanent)
+                raise permanent from exc
             _notify(on_attempt, attempt, scoped_id, data)
             _last_attempts.value = attempt
             return data

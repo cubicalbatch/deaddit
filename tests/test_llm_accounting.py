@@ -17,7 +17,7 @@ import pytest
 from deaddit.llm import accounting, transport
 from deaddit.llm.capabilities import EchoArgs, set_manual_override
 from deaddit.llm.client import ChatRequest, LLMClient
-from deaddit.llm.errors import CapabilityError, TransientLLMError
+from deaddit.llm.errors import CapabilityError, PermanentLLMError, TransientLLMError
 from deaddit.llm.tools import ToolSpec
 from deaddit.models import LLMUsage, ModelPrice
 
@@ -113,12 +113,15 @@ def test_preflight_capability_error_records_nothing(app, db_session, fake_llm):
 
 
 class _FakeResponse:
-    def __init__(self, status_code, payload=None, text=""):
+    def __init__(self, status_code, payload=None, text="", json_error=None):
         self.status_code = status_code
-        self._payload = payload or {}
+        self._payload = {} if payload is None else payload
+        self._json_error = json_error
         self.text = text
 
     def json(self):
+        if self._json_error is not None:
+            raise self._json_error
         return self._payload
 
 
@@ -139,6 +142,32 @@ _OK_PAYLOAD = {
     "choices": [{"message": {"role": "assistant", "content": "recovered"}}],
     "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
 }
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        _FakeResponse(200, json_error=ValueError("not json")),
+        _FakeResponse(200, payload=["not", "an", "object"]),
+        _FakeResponse(200, payload={"choices": [{"message": {}}]}),
+    ],
+)
+def test_malformed_200_response_is_permanent_and_failed(
+    app, db_session, monkeypatch, response
+):
+    session = _FakeSession([response])
+    monkeypatch.setattr(transport, "get_session", lambda: session)
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    monkeypatch.setattr("deaddit.llm.client.get_provider", lambda: transport.post_chat)
+
+    with pytest.raises(PermanentLLMError):
+        LLMClient().complete(_req())
+
+    rows = _rows(db_session)
+    assert len(rows) == 1
+    assert rows[0].status == "failed"
+    assert rows[0].error_type == "PermanentLLMError"
+    assert len(session.calls) == 1
 
 
 def test_retry_500_500_200_records_fail_fail_ok_rows(app, db_session, monkeypatch):
