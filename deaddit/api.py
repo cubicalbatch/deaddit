@@ -84,10 +84,20 @@ def api_posts():
     post_type = request.args.get("post_type")
     days = request.args.get("days", type=int)
     max_comments = request.args.get("max_comments", type=int)
-    limit = request.args.get("limit", default=50, type=int)
+    limit = max(1, min(request.args.get("limit", default=50, type=int), 100))
     title = request.args.get("title")  # New parameter for title filtering
 
     query = Post.query
+
+    comment_counts = (
+        Comment.query.with_entities(
+            Comment.post_id.label("post_id"),
+            func.count(Comment.id).label("comment_count"),
+        )
+        .group_by(Comment.post_id)
+        .subquery()
+    )
+    comment_count = func.coalesce(comment_counts.c.comment_count, 0)
 
     # Filter by Subdeaddit if provided
     if subdeaddit_name:
@@ -111,32 +121,33 @@ def api_posts():
     if title:
         query = query.filter(func.lower(Post.title) == func.lower(title))
 
+    query = query.outerjoin(
+        comment_counts, comment_counts.c.post_id == Post.id
+    ).add_columns(comment_count.label("comment_count"))
+
+    # Apply max_comments before limiting so older eligible posts are not hidden.
+    if max_comments is not None:
+        query = query.filter(comment_count <= max_comments)
+
     # Add sorting
     query = query.order_by(Post.created_at.desc())
 
     # Execute query and limit results
-    posts = query.limit(limit).all()
+    post_rows = query.limit(limit).all()
+    post_ids = [post.id for post, _comment_count in post_rows]
 
     # One bulk lookup for every post's image instead of a per-post query
     # (PostImage.post_id is its primary key, so this is a single IN query).
     images_by_post_id = {
         image.post_id: image
-        for image in PostImage.query.filter(
-            PostImage.post_id.in_([post.id for post in posts])
-        ).all()
+        for image in PostImage.query.filter(PostImage.post_id.in_(post_ids)).all()
     }
 
-    websites_by_post_id = get_websites_bulk([post.id for post in posts])
+    websites_by_post_id = get_websites_bulk(post_ids)
 
-    # Build response data, filtering by comment count if required
+    # Build response data.
     post_data = []
-    for post in posts:
-        comment_count = Comment.query.filter_by(post_id=post.id).count()
-
-        # Apply max_comments filter if provided
-        if max_comments is not None and comment_count > max_comments:
-            continue
-
+    for post, comment_count in post_rows:
         post_info = {
             "id": post.id,
             "subdeaddit": post.subdeaddit.name,
