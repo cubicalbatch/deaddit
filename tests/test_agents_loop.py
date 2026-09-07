@@ -358,6 +358,72 @@ def test_max_actions_per_run_budget_stops_the_loop(seeded_db, db_session, fake_l
     assert len(fake_llm.requests) == 1  # second response left unconsumed
 
 
+def test_max_actions_cap_applies_within_one_tool_batch(
+    seeded_db, db_session, fake_llm
+):
+    agent = _make_agent(db_session, "alice", config={"max_actions_per_run": 1})
+    target = seeded_db["posts"][1]
+    before = Comment.query.filter_by(post_id=target.id).count()
+    fake_llm.enqueue(
+        _tool_response(
+            [
+                _tool_call(
+                    "comment_1",
+                    "create_comment",
+                    {"post_id": target.id, "content": "The first reply."},
+                ),
+                _tool_call(
+                    "comment_2",
+                    "create_comment",
+                    {"post_id": target.id, "content": "The second reply."},
+                ),
+            ]
+        )
+    )
+
+    run = run_once(agent.id)
+
+    assert run.status == "completed"
+    assert run.action_count == 1
+    assert Comment.query.filter_by(post_id=target.id).count() == before + 1
+    assert ToolCall.query.filter_by(run_id=run.id).count() == 1
+
+
+def test_slow_llm_response_cannot_dispatch_after_run_deadline(
+    seeded_db, db_session, fake_llm, monkeypatch
+):
+    agent = _make_agent(db_session, "alice", config={"max_run_seconds": 1})
+    target = seeded_db["posts"][1]
+    before = Comment.query.filter_by(post_id=target.id).count()
+    fake_llm.enqueue(
+        _tool_response(
+            [
+                _tool_call(
+                    "comment_1",
+                    "create_comment",
+                    {"post_id": target.id, "content": "This must not be posted."},
+                )
+            ]
+        )
+    )
+
+    clock = {"now": 100.0}
+    monkeypatch.setattr(loop_module.time, "monotonic", lambda: clock["now"])
+    complete = loop_module.LLMClient.complete
+
+    def slow_complete(self, *args, **kwargs):
+        result = complete(self, *args, **kwargs)
+        clock["now"] += 2.0
+        return result
+
+    monkeypatch.setattr(loop_module.LLMClient, "complete", slow_complete)
+
+    run = run_once(agent.id)
+
+    assert run.status == "completed"
+    assert run.action_count == 0
+    assert Comment.query.filter_by(post_id=target.id).count() == before
+
 # ---------------------------------------------------------------------------
 # Scheduling hint
 

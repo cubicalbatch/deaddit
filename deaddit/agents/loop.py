@@ -329,6 +329,8 @@ def run_once(
         raise ValueError(f"Agent {agent.id} already has a run in progress")
 
     config = _effective_config(agent)
+    max_actions = _int_budget(config, "max_actions_per_run")
+    max_run_seconds = max(1, _int_budget(config, "max_run_seconds"))
     provider, api_url, model = resolve_agent_llm(agent)
     api_key = (
         provider.api_key.strip()
@@ -349,7 +351,7 @@ def run_once(
         ):
             _backoff_without_strike(agent)
         raise
-
+    run_deadline = Deadline(expires_at=time.monotonic() + max_run_seconds)
     usage: dict[str, int] = dict.fromkeys(USAGE_KEYS, 0)
     try:
         user = db.session.get(User, run.persona_username)
@@ -400,8 +402,6 @@ def run_once(
     action_count = 0
     nudged = False
     rejected_streak = 0
-    started = time.monotonic()
-    run_deadline = Deadline.after(max(1, _int_budget(config, "max_run_seconds")))
     ctx = ToolContext(
         agent=agent,
         run=run,
@@ -422,7 +422,7 @@ def run_once(
 
     try:
         while True:
-            if time.monotonic() - started >= _int_budget(config, "max_run_seconds"):
+            if run_deadline.expired():
                 break
 
             request_messages = [dict(message) for message in messages]
@@ -461,6 +461,8 @@ def run_once(
             db.session.commit()
             turn_count += 1
             messages.append(assistant)
+            if run_deadline.expired():
+                break
 
             if not tool_calls:
                 if nudged:
@@ -472,6 +474,8 @@ def run_once(
 
             ended = False
             for tool_call in tool_calls:
+                if action_count >= max_actions or run_deadline.expired():
+                    break
                 function = tool_call.get("function") or {}
                 name = function.get("name") or ""
                 raw_arguments = function.get("arguments", "{}")
@@ -502,9 +506,7 @@ def run_once(
                         break
                 else:
                     rejected_streak = 0
-            if ended:
-                break
-            if action_count >= _int_budget(config, "max_actions_per_run"):
+            if ended or action_count >= max_actions or run_deadline.expired():
                 break
     except PermanentLLMError as exc:
         return _fail(agent, run, turn_count, action_count, usage, str(exc), strike=True)
