@@ -6,8 +6,8 @@ Nightly recompute per the D1 contract:
   from the Vote rows (drift is logged). Items without votes have score 0 and
   vote_count 0.
 - Karma = sum of effective scores over a user's posts/comments, where
-  effective_score = item.score. Only users who own at least one post or
-  comment are updated.
+  effective_score = item.score. All users are updated, including users with no
+  remaining content, so stale karma is cleared.
 """
 
 from __future__ import annotations
@@ -84,9 +84,9 @@ def recompute_scores_and_karma() -> dict[str, int]:
             if eff is None:
                 continue
             totals[item.user] = totals.get(item.user, 0) + eff
-        for username, total in totals.items():
-            user = db.session.get(User, username)
-            if user is not None and getattr(user, attr) != total:
+        for user in db.session.query(User).all():
+            total = totals.get(user.username, 0)
+            if getattr(user, attr) != total:
                 setattr(user, attr, total)
                 karma_updates += 1
 

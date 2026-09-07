@@ -133,8 +133,8 @@ def test_recompute_is_idempotent(seeded_db, db_session):
     }
 
 
-def test_users_without_content_are_not_reset(seeded_db, db_session):
-    """Only users owning posts/comments are touched by the karma pass."""
+def test_users_without_content_are_reset(seeded_db, db_session):
+    """A full rebuild clears stale karma for users without content."""
     outsider = _make_user(db_session, "outsider")
     outsider.post_karma = 42
     outsider.comment_karma = 43
@@ -143,7 +143,7 @@ def test_users_without_content_are_not_reset(seeded_db, db_session):
     recompute_scores_and_karma()
 
     outsider = _refresh(db_session, User, "outsider")
-    assert (outsider.post_karma, outsider.comment_karma) == (42, 43)
+    assert (outsider.post_karma, outsider.comment_karma) == (0, 0)
 
 
 def test_summary_keys_exact(seeded_db):

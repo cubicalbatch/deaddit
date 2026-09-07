@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import func, select
+from deaddit.dynamics.votes import cast_vote
 
 from deaddit.models import (
     Agent,
@@ -425,3 +426,55 @@ def test_bulk_delete_all_users_with_thread_over_500_comments(
     assert Comment.query.count() == 0
     assert Post.query.count() == 0
     assert User.query.count() == 0
+
+def test_content_deletes_refresh_retained_author_karma(
+    seeded_db, admin_client, db_session
+):
+    """Deleting voted content clears only the affected author's karma."""
+    bob_post = seeded_db["posts"][1]
+    bob_comment = seeded_db["comments"][0]
+    alice_post = seeded_db["posts"][0]
+    assert cast_vote("alice", "post", bob_post.id, 1)["status"] == "ok"
+    assert cast_vote("alice", "comment", bob_comment.id, 1)["status"] == "ok"
+    assert cast_vote("bob", "post", alice_post.id, 1)["status"] == "ok"
+    assert db_session.get(User, "bob").post_karma == 1
+    assert db_session.get(User, "bob").comment_karma == 1
+    assert db_session.get(User, "alice").post_karma == 1
+
+    response = admin_client.delete(f"/admin/api/posts/{bob_post.id}")
+    assert response.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(User, "bob").post_karma == 0
+    assert db_session.get(User, "bob").comment_karma == 1
+    assert db_session.get(User, "alice").post_karma == 1
+
+    response = admin_client.delete(f"/admin/api/comments/{bob_comment.id}")
+    assert response.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(User, "bob").comment_karma == 0
+    assert db_session.get(User, "alice").post_karma == 1
+
+def test_admin_score_edits_are_vote_authoritative(seeded_db, admin_client, db_session):
+    post = seeded_db["posts"][1]
+    comment = seeded_db["comments"][0]
+
+    response = admin_client.put(
+        f"/admin/api/posts/{post.id}", json={"score": 5, "title": "edited"}
+    )
+    assert response.status_code == 400
+    assert db_session.get(Post, post.id).score == 0
+
+    response = admin_client.put(
+        f"/admin/api/comments/{comment.id}", json={"score": 5, "content": "edited"}
+    )
+    assert response.status_code == 400
+    assert db_session.get(Comment, comment.id).score == 0
+
+    assert (
+        admin_client.put(f"/admin/api/posts/{post.id}", json={"score": 0}).status_code
+        == 200
+    )
+    assert (
+        admin_client.put(f"/admin/api/comments/{comment.id}", json={"score": 0}).status_code
+        == 200
+    )
