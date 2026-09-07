@@ -115,8 +115,8 @@ def create_app(config: Any = None) -> Flask:
             )
 
         # A session signed with the well-known dev default is forgeable: the
-        # admin_authenticated cookie can be minted offline, bypassing the
-        # token entirely. Warn as loudly as the missing-token case.
+        # admin session containing a token fingerprint can be minted offline,
+        # bypassing the token entirely. Warn as loudly as the missing-token case.
         if app.config["SECRET_KEY"] == Config.DEFAULTS["SECRET_KEY"]:
             logger.warning(
                 "SECRET_KEY is unset (built-in dev default). Admin session cookies are forgeable - set SECRET_KEY in the environment before exposing this app."
@@ -139,8 +139,9 @@ def create_app(config: Any = None) -> Flask:
     return app
 
 
-# Template context processor to make config available in templates
 def inject_config():
+    from .admin_auth import is_admin_authenticated
+
     return {
         "config": {
             "api_token_set": Config.is_api_token_set(),
@@ -148,6 +149,7 @@ def inject_config():
             "openai_model": Config.get("OPENAI_MODEL"),
             "openai_key_set": bool(Config.get("OPENAI_KEY")),
         },
+        "admin_authenticated": is_admin_authenticated(),
         "PRODUCTION": Config.get("PRODUCTION", "false").lower() == "true",
     }
 

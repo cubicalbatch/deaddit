@@ -26,11 +26,9 @@ def _setting_value(db_session, key: str) -> str | None:
 
 
 @pytest.fixture()
-def admin_client(client):
-    """Client that passes admin_required even after API_TOKEN is stored."""
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
-    return client
+def admin_client(client, env_secrets, admin_login):
+    """Authenticate through the real login route with the test token."""
+    return admin_login(client, env_secrets["API_TOKEN"])
 
 
 @pytest.fixture()
@@ -177,7 +175,7 @@ def test_save_deaddit_config_response_has_no_secret_echo(admin_client, db_sessio
 
 def test_get_endpoint_key_never_returns_full_key(admin_client, db_session, monkeypatch):
     """Env-provided keys surface only as has_key/last4, never plaintext."""
-    monkeypatch.setenv("OPENAI_KEY", ENDPOINT_KEY)
+    monkeypatch.setenv("API_KEY_GROQ", ENDPOINT_KEY)
 
     resp = admin_client.post(
         "/admin/api/get-endpoint-key", json={"endpoint_url": ENDPOINT}

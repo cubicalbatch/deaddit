@@ -220,8 +220,7 @@ def test_endpoints_require_admin_when_token_set(app, client, monkeypatch):
         assert resp.status_code == 302
         assert "/admin/login" in resp.headers["Location"]
 
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
+    assert client.post("/admin/login", data={"api_token": "s3cret"}).status_code == 302
 
     for path in ("/admin/api/usage/summary", "/admin/api/routes"):
         assert client.get(path).status_code == 200

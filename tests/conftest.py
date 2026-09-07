@@ -48,6 +48,17 @@ def fake_llm():
 
 
 @pytest.fixture()
+def admin_login(monkeypatch):
+    """Authenticate a test client through the real admin login route."""
+    def _login(client, token="test-admin-token"):
+        monkeypatch.setenv("API_TOKEN", token)
+        response = client.post("/admin/login", data={"api_token": token})
+        assert response.status_code == 302
+        return client
+
+    return _login
+
+@pytest.fixture()
 def seeded_db(app, db_session):
     """2 users, 2 subdeaddits, 3 posts and a few comments via the ORM."""
     users = [

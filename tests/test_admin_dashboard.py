@@ -22,11 +22,8 @@ from deaddit.models import (
 
 
 @pytest.fixture()
-def admin_client(client):
-    """Client that passes the admin_required gate (ACP2 convention)."""
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
-    return client
+def admin_client(client, admin_login):
+    return admin_login(client)
 
 
 def _stat_value(n) -> str:

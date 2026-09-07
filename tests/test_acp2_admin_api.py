@@ -38,11 +38,8 @@ from deaddit.models import (
 
 
 @pytest.fixture()
-def admin_client(client):
-    """Client that passes the admin_required gate even if API_TOKEN is set."""
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
-    return client
+def admin_client(client, admin_login):
+    return admin_login(client)
 
 
 def _make_agent(db_session, username, *, enabled=False, config=None):
@@ -1343,8 +1340,10 @@ def test_admin_gate_redirects_anonymous_visitors(app, client, monkeypatch):
     assert client.get("/admin/api/jobs/1").status_code == 302
     assert client.get("/admin/api/agents/estimate-baseline").status_code == 302
 
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
+    assert (
+        client.post("/admin/login", data={"api_token": "sekrit-token"}).status_code
+        == 302
+    )
     assert client.get("/admin/api/agents").status_code == 200
     assert client.get("/admin/api/jobs/1").status_code == 404
     assert client.get("/admin/api/agents/estimate-baseline").status_code == 200

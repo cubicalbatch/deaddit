@@ -2,7 +2,7 @@ import json
 from collections import namedtuple
 from datetime import UTC
 
-from flask import Blueprint, redirect, render_template, request, session, url_for
+from flask import Blueprint, redirect, render_template, request, url_for
 from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -22,6 +22,7 @@ from deaddit.extensions import db
 
 from .config import Config
 from .models import Comment, Post, Subdeaddit, User
+from .admin_auth import is_admin_authenticated
 from .utils import (
     format_content_html,
     get_comment_counts_bulk,
@@ -52,7 +53,7 @@ def index():
     setup_incomplete = not status["setup_complete"]
 
     if setup_incomplete:
-        if Config.get("API_TOKEN") and not session.get("admin_authenticated"):
+        if Config.get("API_TOKEN") and not is_admin_authenticated():
             return redirect(url_for("admin.login", next="/admin/setup"))
         return render_template(
             "setup.html",

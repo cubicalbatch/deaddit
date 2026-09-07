@@ -13,11 +13,8 @@ from deaddit.models import Agent, AgentRun
 
 
 @pytest.fixture()
-def admin_client(client):
-    """Client that passes the admin_required gate even if API_TOKEN is set."""
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
-    return client
+def admin_client(client, admin_login):
+    return admin_login(client)
 
 
 def _make_agent(
@@ -313,8 +310,10 @@ def test_update_agent_auth_gating(app, client, seeded_db, db_session, monkeypatc
     assert resp.status_code == 302
     assert "/admin/login" in resp.headers["Location"]
 
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
+    assert (
+        client.post("/admin/login", data={"api_token": "sekrit-token"}).status_code
+        == 302
+    )
     resp2 = client.put(
         f"/admin/api/agents/{agent.id}", json={"autonomy_tier": "lurker"}
     )

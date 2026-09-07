@@ -18,10 +18,8 @@ PINS = "/admin/api/pins"
 
 
 @pytest.fixture()
-def authed_client(client):
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
-    return client
+def authed_client(client, admin_login):
+    return admin_login(client)
 
 
 def _seed_templates(app):
