@@ -8,8 +8,9 @@ default). Environment-variable changes are picked up on restart only —
 documented and normal.
 
 Writes invalidate eagerly: an ``after_flush`` event on the ORM Session class
-invalidates cached keys whenever ``Setting`` rows change, so same-process
-readers never observe stale values across a flush.
+invalidates cached keys whenever ``Setting`` rows change, while transaction
+boundary events invalidate them again after commit or rollback. This prevents
+values read during an uncommitted flush from remaining cached after it ends.
 """
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ MISSING = _Missing()
 _lock = threading.Lock()
 _cache: dict[str, tuple[float, object]] = {}
 _hook_registered = False
+_PENDING_KEYS = "deaddit.settings.pending_keys"
 
 
 def ttl_seconds() -> float:
@@ -94,7 +96,7 @@ def clear() -> None:
 
 
 def register_invalidation_hook() -> None:
-    """Invalidate cached keys whenever a session flush touches Setting rows.
+    """Invalidate cached keys when Setting rows flush or transactions end.
 
     Idempotent: safe to call repeatedly (multiple create_app calls must not
     stack listeners).
@@ -115,10 +117,29 @@ def register_invalidation_hook() -> None:
             for obj in list(session.new) + list(session.dirty) + list(session.deleted)
             if isinstance(obj, Setting)
         }
-        for key in touched:
+        if touched:
+            session.info.setdefault(_PENDING_KEYS, set()).update(touched)
+            for key in touched:
+                invalidate(key)
+
+    def _invalidate_pending(session, clear=False):
+        for key in session.info.get(_PENDING_KEYS, ()):
             invalidate(key)
+        if clear:
+            session.info.pop(_PENDING_KEYS, None)
+
+    def _after_commit(session):
+        # A reader can refill the cache after after_flush and before commit.
+        _invalidate_pending(session, clear=True)
+
+    def _after_soft_rollback(session, previous_transaction):
+        # This includes SAVEPOINT rollbacks. Keep outer transaction keys so a
+        # later outer rollback also invalidates values read before the savepoint.
+        _invalidate_pending(session, clear=previous_transaction.parent is None)
 
     event.listen(Session, "after_flush", _after_flush)
+    event.listen(Session, "after_commit", _after_commit)
+    event.listen(Session, "after_soft_rollback", _after_soft_rollback)
 
 
 register_invalidation_hook()
