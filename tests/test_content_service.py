@@ -8,7 +8,15 @@ from datetime import datetime
 import pytest
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from deaddit.models import Comment, Post, PostImage, Subdeaddit, User
+from deaddit.models import (
+    ActivityEvent,
+    Comment,
+    Notification,
+    Post,
+    PostImage,
+    Subdeaddit,
+    User,
+)
 from deaddit.services import content as content_service
 from deaddit.services.content import (
     ContentValidationError,
@@ -360,6 +368,61 @@ def test_create_comment_unknown_post_message(seeded_db, cache_spy):
     with pytest.raises(ContentValidationError) as exc:
         create_comment(post_id=99999, content="hi", user="alice")
     assert str(exc.value) == "Post '99999' does not exist"
+
+
+@pytest.mark.parametrize("invalid_parent", ["missing", "cross_post"])
+def test_create_comment_rejects_invalid_parent_without_side_effects(
+    seeded_db, db_session, cache_spy, invalid_parent
+):
+    post = seeded_db["posts"][0]
+    parent_id = (
+        99999
+        if invalid_parent == "missing"
+        else seeded_db["comments"][1].id
+    )
+    expected_error = (
+        f"Comment '{parent_id}' does not exist"
+        if invalid_parent == "missing"
+        else f"Comment '{parent_id}' does not belong to post '{post.id}'"
+    )
+    counts = (
+        Comment.query.count(),
+        ActivityEvent.query.count(),
+        Notification.query.count(),
+    )
+
+    with pytest.raises(ContentValidationError) as exc:
+        create_comment(
+            post_id=post.id,
+            content="invalid parent should not persist",
+            user="alice",
+            parent_id=parent_id,
+        )
+
+    assert str(exc.value) == expected_error
+    assert (
+        Comment.query.count(),
+        ActivityEvent.query.count(),
+        Notification.query.count(),
+    ) == counts
+    assert cache_spy == []
+
+    # Validation leaves the session usable, and nested replies in the same
+    # thread continue to persist normally.
+    first = create_comment(
+        post_id=post.id,
+        content="valid first-level reply",
+        user="alice",
+        parent_id=seeded_db["comments"][0].id,
+    )
+    nested = create_comment(
+        post_id=post.id,
+        content="valid nested reply",
+        user="bob",
+        parent_id=first.id,
+    )
+    assert nested.parent_id == first.id
+    assert db_session.get(Comment, nested.id) is not None
 
 
 # ---------------------------------------------------------------------------

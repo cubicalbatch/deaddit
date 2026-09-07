@@ -595,7 +595,8 @@ def create_comment(
 
     Raises:
         ContentValidationError: on empty content, unknown author, unknown
-            post, or unknown parent comment.
+            post, unknown parent comment, or a parent belonging to another
+            post.
     """
     if not content:
         raise ContentValidationError("Comment missing required fields: content")
@@ -604,6 +605,14 @@ def create_comment(
     post = db.session.get(Post, post_id)
     if post is None:
         raise ContentValidationError(f"Post '{post_id}' does not exist")
+    if parent_id is not None:
+        parent = db.session.get(Comment, parent_id)
+        if parent is None:
+            raise ContentValidationError(f"Comment '{parent_id}' does not exist")
+        if parent.post_id != post_id:
+            raise ContentValidationError(
+                f"Comment '{parent_id}' does not belong to post '{post_id}'"
+            )
     _check_rate_limit(user, "comment")
 
     comment = Comment(
