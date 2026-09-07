@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from deaddit.dynamics.metrics import (
+    _comment_depths,
     daily_metric_row,
     gini_coefficient,
     health_snapshot,
@@ -245,6 +246,45 @@ def rollup_fixtures(app, db_session):
     )
     db_session.commit()
     return {"p_agent": p_agent, "p_seed": p_seed}
+class TestCommentDepths:
+    def test_depths_are_order_independent_and_health_uses_root_zero(
+        self, app, db_session
+    ):
+        from deaddit.models import Subdeaddit, User
+
+        db_session.add_all(
+            [User(username="depth-user"), Subdeaddit(name="depth", description="d")]
+        )
+        db_session.commit()
+        post = Post(
+            title="depth order",
+            content="x",
+            user="depth-user",
+            subdeaddit_name="depth",
+            created_at=_dt(),
+        )
+        db_session.add(post)
+        db_session.commit()
+
+        # Insert deepest first; parent links are valid once assigned below.
+        grandchild = Comment(
+            post_id=post.id, user="depth-user", content="grandchild", created_at=_dt()
+        )
+        child = Comment(
+            post_id=post.id, user="depth-user", content="child", created_at=_dt()
+        )
+        root = Comment(
+            post_id=post.id, user="depth-user", content="root", created_at=_dt()
+        )
+        db_session.add_all([grandchild, child, root])
+        db_session.commit()
+        grandchild.parent_id = child.id
+        child.parent_id = root.id
+        db_session.commit()
+
+        depths = _comment_depths([post.id])
+        assert depths == {root.id: 0, child.id: 1, grandchild.id: 2}
+        assert rollup_day(_DAY).median_thread_depth == 1
 
 
 class TestGini:

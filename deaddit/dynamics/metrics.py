@@ -276,22 +276,19 @@ def _comment_depths(post_ids: list[int]) -> dict[int, int]:
     parents: dict[int, int | None] = dict(rows)
 
     def _depth(cid: int) -> int:
-        seen: list[int] = []
-        depth = 0
+        path: list[int] = []
+        seen: set[int] = set()
         current: int | None = cid
-        while True:
-            if current in depths:
-                depth += depths[current]
-                break
-            seen.append(current)
-            parent = parents.get(current)
-            if parent is None:
-                break
-            depth += 1
-            current = parent
-        for node in seen:
+        while current not in depths and current in parents and current not in seen:
+            seen.add(current)
+            path.append(current)
+            current = parents[current]
+
+        depth = depths.get(current, 0)
+        for node in reversed(path):
             depths[node] = depth
-        return depth
+            depth += 1
+        return depths[cid]
 
     return {cid: _depth(cid) for cid in parents}
 
