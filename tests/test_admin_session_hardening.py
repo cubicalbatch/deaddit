@@ -194,7 +194,7 @@ def test_api_token_session_works_across_app_instances_without_leaking_token(
     assert cookie is not None
     assert token not in cookie.value
     with login_client.session_transaction() as session:
-        assert session["admin_authenticated"] is True
+        assert isinstance(session["admin_token_fingerprint"], str)
         assert token not in repr(dict(session))
         assert "api_token" not in session
 

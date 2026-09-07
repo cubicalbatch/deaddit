@@ -19,6 +19,19 @@ branch_labels = None
 depends_on = None
 
 
+def _has_index(name: str) -> bool:
+    row = (
+        op.get_bind()
+        .exec_driver_sql(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?", (name,)
+        )
+        .scalar()
+    )
+    return row is not None
+
+
+
+
 def upgrade():
     bind = op.get_bind()
     duplicate_ids = bind.execute(
@@ -49,13 +62,14 @@ def upgrade():
             ),
             {"run_id": run_id},
         )
-    op.create_index(
-        "uq_agent_run_running_agent",
-        "agent_run",
-        ["agent_id"],
-        unique=True,
-        sqlite_where=sa.text("status = 'running'"),
-    )
+    if not _has_index("uq_agent_run_running_agent"):
+        op.create_index(
+            "uq_agent_run_running_agent",
+            "agent_run",
+            ["agent_id"],
+            unique=True,
+            sqlite_where=sa.text("status = 'running'"),
+        )
 
 
 def downgrade():

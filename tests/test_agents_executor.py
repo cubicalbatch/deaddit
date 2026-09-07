@@ -283,6 +283,9 @@ def test_per_run_post_limit_rejects_second_post_in_same_run(ctx, db_session):
 
 def _persona_ctx(db_session, agent, username):
     """A fresh run for *username* under an existing agent row."""
+    for prev in AgentRun.query.filter_by(agent_id=agent.id, status="running").all():
+        prev.status = "completed"
+    db_session.commit()
     run = AgentRun(
         agent_id=agent.id,
         persona_username=username,
