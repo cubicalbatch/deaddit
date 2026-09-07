@@ -11,6 +11,7 @@ from typing import Any
 
 from flask import Flask, jsonify
 from flask_migrate import upgrade as db_upgrade
+from werkzeug.exceptions import HTTPException
 
 # Import config after extensions are defined to avoid circular imports
 from .config import Config  # noqa: E402
@@ -165,6 +166,9 @@ def internal_error(error):
 
 
 def handle_exception(e):
+    if isinstance(e, HTTPException):
+        return e
+
     db.session.rollback()
     logger = logging.getLogger(__name__)
     logger.error(f"Unhandled exception: {str(e)}")
