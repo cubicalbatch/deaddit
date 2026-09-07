@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+from deaddit import create_app
+from deaddit import db as _db
 from deaddit.dynamics import votes as votes_module
 from deaddit.dynamics.votes import _downvotes_allowed, cast_vote
-from deaddit.models import ActivityEvent, Post, Setting, User, Vote
+from deaddit.models import ActivityEvent, Post, Setting, Subdeaddit, User, Vote
 
 
 def _refresh(db_session, model, pk):
@@ -431,3 +433,67 @@ def test_insert_only_collision_preserves_vote_and_source(seeded_db, db_session):
     assert (post.score, post.vote_count) == (1, 1)
     assert db_session.get(User, "bob").post_karma == 1
     assert db_session.query(ActivityEvent).count() == 1
+
+
+def test_file_sessions_keep_vote_aggregates_atomic_with_stale_targets(tmp_path):
+    """Independent stale ORM snapshots must not lose aggregate increments."""
+    database = tmp_path / "votes.sqlite"
+    file_app = create_app(
+        {
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{database}",
+            "TESTING": True,
+        }
+    )
+    with file_app.app_context():
+        _db.create_all()
+        _db.session.add_all(
+            [
+                User(username="author"),
+                User(username="alice"),
+                User(username="carol"),
+            ]
+        )
+
+        _db.session.add(
+            Subdeaddit(name="votes", description="vote atomicity test")
+        )
+        post = Post(
+            title="Atomic counters",
+            content="content",
+            user="author",
+            subdeaddit_name="votes",
+        )
+        _db.session.add(post)
+        _db.session.commit()
+        post_id = post.id
+        session_factory = _db.session.session_factory
+        first_session = session_factory()
+        second_session = session_factory()
+        try:
+            # Both sessions establish stale snapshots before either cast.
+            first_target = first_session.get(Post, post_id)
+            second_target = second_session.get(Post, post_id)
+            assert first_target.score == second_target.score == 0
+
+            # A flushed unrelated write is already in the transaction; the
+            # vote must not roll it back while acquiring its target lock.
+            unrelated = User(username="flushed")
+            first_session.add(unrelated)
+            first_session.flush()
+
+            _db.session.registry.set(first_session)
+            assert cast_vote("alice", "post", post_id, 1)["status"] == "ok"
+            _db.session.registry.set(second_session)
+            assert cast_vote("carol", "post", post_id, 1)["status"] == "ok"
+            assert first_session.get(User, "flushed") is not None
+
+            votes = second_session.query(Vote).filter_by(post_id=post_id).all()
+            target = second_session.get(Post, post_id)
+            author = second_session.get(User, "author")
+            assert target.score == sum(vote.value for vote in votes) == 2
+            assert target.vote_count == len(votes) == 2
+            assert author.post_karma == target.score == 2
+        finally:
+            _db.session.remove()
+            first_session.close()
+            second_session.close()
