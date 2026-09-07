@@ -224,9 +224,14 @@ def reserve_persona_run(agent: Agent, *, trigger: str) -> AgentRun:
 
     Admin, CLI, and worker callers must reach persona selection only through
     ``run_once`` and this helper. IntegrityError retries handle conflicts from
-    the partial unique index ``uq_agent_run_running_persona``.
+    the partial unique indexes on running personas and agents.
     """
     for _ in range(RESERVATION_ATTEMPTS):
+        if (
+            AgentRun.query.filter_by(agent_id=agent.id, status="running").first()
+            is not None
+        ):
+            raise ValueError(f"Agent {agent.id} already has a run in progress")
         persona = _select_persona(agent)
         run = AgentRun(
             agent_id=agent.id,
@@ -244,6 +249,11 @@ def reserve_persona_run(agent: Agent, *, trigger: str) -> AgentRun:
             db.session.commit()
         except IntegrityError:
             db.session.rollback()
+            if (
+                AgentRun.query.filter_by(agent_id=agent.id, status="running").first()
+                is not None
+            ):
+                raise ValueError(f"Agent {agent.id} already has a run in progress")
             continue
         logger.info(
             "Agent %s reserved persona '%s' (run %s)",
@@ -329,7 +339,14 @@ def run_once(
     try:
         run = reserve_persona_run(agent, trigger=trigger)
     except ValueError:
-        if trigger == "schedule":
+        # A concurrent reservation may have won the per-agent index after the
+        # preflight check. Never let that loser overwrite the winner's status
+        # or cadence; only genuine persona-pool exhaustion backs off.
+        if (
+            trigger == "schedule"
+            and AgentRun.query.filter_by(agent_id=agent.id, status="running").first()
+            is None
+        ):
             _backoff_without_strike(agent)
         raise
 
@@ -348,8 +365,6 @@ def run_once(
                 "ref": visit.plan.profile_ref,
                 "resolution_source": visit.plan.resolution_source,
                 "body": serialize_visit_profile(
-                    # The immutable profile body is carried in render metadata.
-                    # ``prepare_agent_visit`` keeps this source on the plan.
                     visit.plan.profile,
                 ),
             },

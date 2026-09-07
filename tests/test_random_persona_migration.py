@@ -581,10 +581,10 @@ def test_model_constraints_and_persona_run_indexes(app, db_session, seeded_db):
         started_at=datetime(2026, 1, 1, 12),
     )
     db_session.add(first)
-    db_session.flush()
+    db_session.commit()
     duplicate = AgentRun(
         agent_id=fixed.id,
-        persona_username=alice.username,
+        persona_username=seeded_db["users"][1].username,
         trigger="schedule",
         status="running",
         started_at=datetime(2026, 1, 1, 13),
@@ -593,6 +593,10 @@ def test_model_constraints_and_persona_run_indexes(app, db_session, seeded_db):
     with pytest.raises(IntegrityError):
         db_session.flush()
     db_session.rollback()
+    first = db_session.get(AgentRun, first.id)
+    first.status = "completed"
+    first.finished_at = datetime(2026, 1, 1, 13)
+    db_session.commit()
 
     completed = AgentRun(
         agent_id=fixed.id,
