@@ -70,7 +70,9 @@ def _register_live_handlers():
 
     socketio.on("join_activity", namespace="/live")(ws_mod.join_activity)
     socketio.on("leave_activity", namespace="/live")(ws_mod.leave_activity)
+    socketio.on("disconnect", namespace="/live")(ws_mod.live_disconnect)
     socketio.on("activity_loaded", namespace="/live")(ws_mod.activity_loaded)
+
 
 
 # ---------------------------------------------------------------------------
@@ -811,6 +813,59 @@ def test_leave_stops_emissions_and_idle_thread_exits(app, monkeypatch):
             assert get_live_pump().running is False
         finally:
             client.disconnect(namespace="/live")
+
+
+def test_room_membership_preserves_state_until_final_leave(app):
+    """A departing client must not reset the shared room watermark."""
+    from deaddit.extensions import socketio
+
+    _register_live_handlers()
+    with app.app_context():
+        _db.session.add_all(
+            [
+                User(username="alice"),
+                User(username="bob"),
+                User(username="carol"),
+                Subdeaddit(name="testsub", description="membership seed"),
+            ]
+        )
+        _seed_post(_db.session, "seed", minutes=0)
+        _db.session.commit()
+
+        first = socketio.test_client(app, namespace="/live")
+        second = socketio.test_client(app, namespace="/live")
+        later = None
+        try:
+            _join(first)
+            _join(second)
+
+            first.emit("leave_activity", {}, namespace="/live")
+            left = [
+                message
+                for message in first.get_received(namespace="/live")
+                if message["name"] == "left"
+            ]
+            assert left
+
+            _seed_post(_db.session, "after-first-leaves", minutes=1, user="bob")
+            _db.session.commit()
+            assert get_live_pump().tick() is True
+            assert _counts(second) == [1]
+
+            # A real disconnect is the final departure and must clear state.
+            second.disconnect(namespace="/live")
+            assert get_live_pump().tick() is False
+
+            later = socketio.test_client(app, namespace="/live")
+            _join(later)
+            _seed_post(_db.session, "after-rejoin", minutes=2, user="carol")
+            _db.session.commit()
+            assert get_live_pump().tick() is True
+            assert _counts(later) == [1]
+        finally:
+            first.disconnect(namespace="/live")
+            if later is not None:
+                later.disconnect(namespace="/live")
 
 
 # ---------------------------------------------------------------------------

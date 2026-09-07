@@ -119,8 +119,13 @@ class ActivityPump:
         self.ensure_started()
 
     def note_leave(self, room: str = ROOM) -> None:
-        """Drop room state so a later join re-initialises its watermark."""
+        """Drop room state only after the final client leaves."""
+        # leave_room() runs before this callback. Check the manager while
+        # holding the state lock so a concurrent join cannot observe stale
+        # state between its room join and note_join().
         with self._lock:
+            if _participants(room):
+                return
             self._watermarks.pop(room, None)
             self._pending.pop(room, None)
 

@@ -114,6 +114,18 @@ def leave_activity(data=None):
     emit("left", {"room": ACTIVITY_ROOM})
 
 
+@socketio.on("disconnect", namespace="/live")
+def live_disconnect(*args):
+    """Drop activity membership state when a socket disconnects."""
+    from deaddit.runtime.live_pump import ROOM as ACTIVITY_ROOM
+    from deaddit.runtime.live_pump import get_live_pump
+
+    # Flask-SocketIO normally removes rooms before dispatching disconnect;
+    # leave_room also covers servers that dispatch the callback first.
+    leave_room(ACTIVITY_ROOM)
+    get_live_pump().note_leave(ACTIVITY_ROOM)
+
+
 @socketio.on("activity_loaded", namespace="/live")
 @handle_socket_errors
 def activity_loaded(data):
