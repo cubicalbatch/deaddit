@@ -65,6 +65,25 @@ def test_unknown_tool_is_rejected_and_persisted(ctx, db_session):
     assert "unknown tool" in row.error
 
 
+
+def test_interrupted_run_cannot_dispatch_tools(ctx, db_session):
+    post = Post.query.filter_by(subdeaddit_name="testsub").first()
+    ctx.run.status = "interrupted"
+    db_session.commit()
+    before_calls = ToolCall.query.count()
+    before_comments = Comment.query.count()
+
+    result = execute(
+        "create_comment",
+        {"post_id": post.id, "content": "must not land"},
+        ctx,
+    )
+
+    assert result["ok"] is False
+    assert result["force_finish"] is True
+    assert ToolCall.query.count() == before_calls
+    assert Comment.query.count() == before_comments
+
 def test_retired_vote_is_rejected_without_audit_row(ctx, db_session):
     before = ToolCall.query.count()
 

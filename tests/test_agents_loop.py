@@ -140,9 +140,33 @@ def _pin_text_post_intent(monkeypatch):
     monkeypatch.setattr(random, "choice", lambda population: population[0])
 
 
+
+
 def _finish(summary="done"):
     return _tool_response([_tool_call("finish", "finish", {"summary": summary})])
 
+
+def _recover_and_reserve_replacement(db_session, app, run):
+    """Exercise recovery through the real DB path, then claim the agent again."""
+    run.started_at = datetime.utcnow() - timedelta(seconds=400)
+    db_session.commit()
+    db_session.expire_all()
+
+    from deaddit.runtime.wakes import WakeScheduler
+
+    assert WakeScheduler(app)._interrupt_stale_runs(datetime.utcnow()) == 1
+    db_session.expire_all()
+    agent = db_session.get(Agent, run.agent_id)
+    replacement = AgentRun(
+        agent_id=agent.id,
+        persona_username=run.persona_username,
+        trigger="schedule",
+        status="running",
+    )
+    agent.status = "running"
+    db_session.add(replacement)
+    db_session.commit()
+    return replacement
 
 # ---------------------------------------------------------------------------
 # Happy path
@@ -219,6 +243,77 @@ def test_happy_path_tool_calls_audited_and_summary_persisted(
     stored = _stored(finish_row)
     assert stored["summary"] == "done"
     assert stored["mood"] == "calm"
+
+
+def test_recovered_run_does_not_dispatch_late_comment(
+    seeded_db, db_session, app, fake_llm, monkeypatch
+):
+    agent = _make_agent(db_session, "bob")
+    post_id = seeded_db["posts"][0].id
+    fake_llm.enqueue(
+        _tool_response(
+            [_tool_call("late_comment", "create_comment", {"post_id": post_id, "content": "late"})]
+        )
+    )
+    fired = False
+    original_post_chat = fake_llm.post_chat
+
+    def post_chat(*args, **kwargs):
+        nonlocal fired
+        response = original_post_chat(*args, **kwargs)
+        if not fired and any(
+            str(message.get("content", "")).startswith("You are")
+            for message in kwargs["payload"].get("messages", [])
+        ):
+            fired = True
+            _recover_and_reserve_replacement(db_session, app, AgentRun.query.filter_by(
+                agent_id=agent.id, status="running"
+            ).one())
+        return response
+
+    monkeypatch.setattr(fake_llm, "post_chat", post_chat)
+    run = run_once(agent.id)
+
+    assert run.status == "interrupted"
+    assert Comment.query.filter_by(user="bob", content="late").count() == 0
+    replacement = AgentRun.query.filter(
+        AgentRun.agent_id == agent.id,
+        AgentRun.status == "running",
+        AgentRun.id != run.id,
+    ).one()
+    db_session.refresh(agent)
+    assert agent.status == "running"
+    assert agent.consecutive_failures == 0
+    assert replacement.status == "running"
+
+
+def test_late_exception_does_not_fail_replacement_run(
+    seeded_db, db_session, app, fake_llm, monkeypatch
+):
+    agent = _make_agent(db_session, "bob")
+    fired = False
+
+    def post_chat(*args, **kwargs):
+        nonlocal fired
+        if not fired and any(
+            str(message.get("content", "")).startswith("You are")
+            for message in kwargs["payload"].get("messages", [])
+        ):
+            fired = True
+            _recover_and_reserve_replacement(db_session, app, AgentRun.query.filter_by(
+                agent_id=agent.id, status="running"
+            ).one())
+            raise RuntimeError("late provider failure")
+        raise AssertionError("unexpected provider call")
+
+    monkeypatch.setattr(fake_llm, "post_chat", post_chat)
+    run = run_once(agent.id)
+
+    assert run.status == "interrupted"
+    db_session.refresh(agent)
+    assert agent.status == "running"
+    assert agent.consecutive_failures == 0
+    assert AgentRun.query.filter_by(agent_id=agent.id, status="failed").count() == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1648,7 +1743,7 @@ def test_duplicate_suppression_scoped_to_persona(seeded_db, db_session):
         agent_id=agent.id,
         persona_username="alice",
         trigger="manual",
-        status="completed",
+        status="running",
         started_at=datetime.utcnow(),
     )
     db_session.add(run_one)
@@ -1664,12 +1759,14 @@ def test_duplicate_suppression_scoped_to_persona(seeded_db, db_session):
         ctx_one,
     )
     assert first["ok"] is True
+    run_one.status = "completed"
+    db_session.commit()
 
     run_two = AgentRun(
         agent_id=agent.id,
         persona_username="alice",
         trigger="manual",
-        status="completed",
+        status="running",
         started_at=datetime.utcnow(),
     )
     db_session.add(run_two)
@@ -1685,13 +1782,15 @@ def test_duplicate_suppression_scoped_to_persona(seeded_db, db_session):
         ctx_two,
     )
     assert duplicate["ok"] is False
+    run_two.status = "completed"
+    db_session.commit()
     assert "similar" in duplicate["error"].lower()
 
     run_three = AgentRun(
         agent_id=agent.id,
         persona_username="bob",
         trigger="manual",
-        status="completed",
+        status="running",
         started_at=datetime.utcnow(),
     )
     db_session.add(run_three)
@@ -1707,6 +1806,8 @@ def test_duplicate_suppression_scoped_to_persona(seeded_db, db_session):
         ctx_three,
     )
     assert separate["ok"] is True
+    run_three.status = "completed"
+    db_session.commit()
 
 
 def test_subscriptions_stored_on_selected_user_agent_state(seeded_db, db_session):
@@ -1715,7 +1816,7 @@ def test_subscriptions_stored_on_selected_user_agent_state(seeded_db, db_session
         agent_id=agent.id,
         persona_username="alice",
         trigger="manual",
-        status="completed",
+        status="running",
         started_at=datetime.utcnow(),
     )
     db_session.add(run)
@@ -1742,6 +1843,8 @@ def test_subscriptions_stored_on_selected_user_agent_state(seeded_db, db_session
     assert unsubscribed["ok"] is True
     db_session.refresh(alice)
     assert alice.agent_state["subscriptions"] == []
+    run.status = "completed"
+    db_session.commit()
 
 
 def test_image_post_provenance_uses_selected_persona(
@@ -1764,7 +1867,7 @@ def test_image_post_provenance_uses_selected_persona(
         agent_id=agent.id,
         persona_username="alice",
         trigger="manual",
-        status="completed",
+        status="running",
         started_at=datetime.utcnow(),
     )
     db_session.add(run)
@@ -1812,3 +1915,5 @@ def test_image_post_provenance_uses_selected_persona(
     assert post.user == "alice"
     assert post.model == "agent:alice"
     assert post.image is not None
+    run.status = "completed"
+    db_session.commit()

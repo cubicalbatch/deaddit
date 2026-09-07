@@ -70,30 +70,69 @@ def _int_budget(config: dict[str, Any], key: str) -> int:
         return int(DEFAULT_CONFIG[key])
 
 
+def _current_run(run_id: int) -> AgentRun | None:
+    """Load run ownership from the database, not this worker's identity map."""
+    db.session.expire_all()
+    return (
+        db.session.query(AgentRun)
+        .populate_existing()
+        .filter(AgentRun.id == run_id)
+        .one_or_none()
+    )
+
+
+def _run_is_active(run_id: int) -> bool:
+    return (
+        db.session.query(AgentRun.status).filter(AgentRun.id == run_id).scalar()
+        == "running"
+    )
+
+
 def _recover_stale_runs(agent: Agent) -> bool:
     """Mark runs stuck past max_run_seconds + 60s grace as 'interrupted'.
-
-    Returns True when a genuinely live run still exists (agent must be
-    refused). Stale-running recovery runs per-agent in this loop and per-tick
-    in the wake scheduler.
+    Returns True when a genuinely live run still exists (agent must be refused).
+    Stale-running recovery runs per-agent in this loop and per-tick in the wake
+    scheduler.
     """
     now = datetime.utcnow()
     grace = timedelta(
         seconds=_int_budget(_effective_config(agent), "max_run_seconds") + 60
     )
-    stuck = (
-        AgentRun.query.filter_by(agent_id=agent.id, status="running")
-        .filter(AgentRun.started_at < now - grace)
-        .all()
-    )
-    for run in stuck:
-        run.status = "interrupted"
-        run.finished_at = now
-        run.error_message = "Recovered: run exceeded wall-clock budget plus grace."
-    if stuck:
+    stuck_ids = [
+        run_id
+        for (run_id,) in (
+            db.session.query(AgentRun.id)
+            .filter_by(agent_id=agent.id, status="running")
+            .filter(AgentRun.started_at < now - grace)
+            .all()
+        )
+    ]
+    interrupted = 0
+    for run_id in stuck_ids:
+        updated = db.session.query(AgentRun).filter(
+            AgentRun.id == run_id,
+            AgentRun.status == "running",
+        ).update(
+            {
+                AgentRun.status: "interrupted",
+                AgentRun.finished_at: now,
+                AgentRun.error_message: (
+                    "Recovered: run exceeded wall-clock budget plus grace."
+                ),
+            },
+            synchronize_session=False,
+        )
+        interrupted += updated
+        if updated:
+            db.session.query(Agent).filter(
+                Agent.id == agent.id, Agent.status == "running"
+            ).update({Agent.status: "idle"}, synchronize_session=False)
+    if interrupted:
         db.session.commit()
     return (
-        AgentRun.query.filter_by(agent_id=agent.id, status="running").first()
+        db.session.query(AgentRun)
+        .filter_by(agent_id=agent.id, status="running")
+        .first()
         is not None
     )
 
@@ -288,29 +327,53 @@ def _fail(
     *,
     strike: bool,
 ) -> AgentRun:
-    """Close a failed run and apply backoff bookkeeping."""
+    """Close a failed run without stealing a replacement's ownership."""
     now = datetime.utcnow()
-    run.status = "failed"
-    run.finished_at = now
-    run.turn_count = turn_count
-    run.action_count = action_count
-    run.token_usage = usage
-    run.error_message = message[:2000]
-    agent.status = "error"
-    agent.last_run_at = now
-    if agent.is_enabled:
-        # A failed run must never leave next_run_at in the past, or the
-        # scheduler re-fires immediately against a possibly-dead endpoint.
-        # (The strike-disable path below overrides this with NULL.)
-        agent.next_run_at = now + timedelta(seconds=FAILURE_BACKOFF_SECONDS)
-    if strike:
-        agent.consecutive_failures = (agent.consecutive_failures or 0) + 1
-        if agent.consecutive_failures >= CONSECUTIVE_FAILURE_DISABLE_THRESHOLD:
-            agent.is_enabled = False
-            agent.status = "disabled"
-            agent.next_run_at = None
+    db.session.rollback()
+    updated = db.session.query(AgentRun).filter(
+        AgentRun.id == run.id,
+        AgentRun.status == "running",
+    ).update(
+        {
+            AgentRun.status: "failed",
+            AgentRun.finished_at: now,
+            AgentRun.turn_count: turn_count,
+            AgentRun.action_count: action_count,
+            AgentRun.token_usage: usage,
+            AgentRun.error_message: message[:2000],
+        },
+        synchronize_session=False,
+    )
+    if not updated:
+        db.session.rollback()
+        return _current_run(run.id) or run
+
+    current_agent = (
+        db.session.query(Agent)
+        .populate_existing()
+        .filter(Agent.id == agent.id)
+        .one_or_none()
+    )
+    if current_agent is not None and current_agent.status == "running":
+        current_agent.status = "error"
+        current_agent.last_run_at = now
+        if current_agent.is_enabled:
+            # A failed run must never leave next_run_at in the past, or the
+            # scheduler re-fires immediately against a possibly-dead endpoint.
+            current_agent.next_run_at = now + timedelta(seconds=FAILURE_BACKOFF_SECONDS)
+        if strike:
+            current_agent.consecutive_failures = (
+                current_agent.consecutive_failures or 0
+            ) + 1
+            if (
+                current_agent.consecutive_failures
+                >= CONSECUTIVE_FAILURE_DISABLE_THRESHOLD
+            ):
+                current_agent.is_enabled = False
+                current_agent.status = "disabled"
+                current_agent.next_run_at = None
     db.session.commit()
-    return run
+    return _current_run(run.id) or run
 
 
 def run_once(
@@ -397,6 +460,8 @@ def run_once(
             f"{type(exc).__name__}: {exc}",
             strike=False,
         )
+    if not _run_is_active(run.id):
+        return _current_run(run.id) or run
 
     turn_count = 0
     action_count = 0
@@ -422,6 +487,8 @@ def run_once(
 
     try:
         while True:
+            if not _run_is_active(run.id):
+                return _current_run(run.id) or run
             if run_deadline.expired():
                 break
 
@@ -440,6 +507,8 @@ def run_once(
                 )
             )
             accumulate(result.usage)
+            if not _run_is_active(run.id):
+                return _current_run(run.id) or run
 
             assistant: dict[str, Any] = {
                 "role": "assistant",
@@ -475,6 +544,8 @@ def run_once(
 
             ended = False
             for tool_call in tool_calls:
+                if not _run_is_active(run.id):
+                    return _current_run(run.id) or run
                 if action_count >= max_actions or run_deadline.expired():
                     break
                 function = tool_call.get("function") or {}
@@ -486,6 +557,8 @@ def run_once(
                     outcome = execute(name, raw_arguments, ctx)
                 except Exception as exc:  # keep the run alive on executor blowups
                     outcome = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+                if not _run_is_active(run.id):
+                    return _current_run(run.id) or run
                 action_count += 1
                 messages.append(
                     {
@@ -522,32 +595,66 @@ def run_once(
             strike=False,
         )
 
+    db.session.rollback()
+    current_run = _current_run(run.id)
+    if current_run is None or current_run.status != "running":
+        return current_run or run
+    current_agent = (
+        db.session.query(Agent)
+        .populate_existing()
+        .filter(Agent.id == agent.id)
+        .one_or_none()
+    )
     now = datetime.utcnow()
-    run.status = "completed"
-    run.finished_at = now
-    run.turn_count = turn_count
-    run.action_count = action_count
-    run.token_usage = usage
-    agent.consecutive_failures = 0
-    agent.status = "idle"
-    agent.last_run_at = now
-    if agent.is_enabled:
+    metadata = (
+        dict(current_run.prompt_metadata)
+        if isinstance(current_run.prompt_metadata, dict)
+        else {}
+    )
+    values = {
+        AgentRun.status: "completed",
+        AgentRun.finished_at: now,
+        AgentRun.turn_count: turn_count,
+        AgentRun.action_count: action_count,
+        AgentRun.token_usage: usage,
+    }
+    if (
+        current_agent is not None
+        and current_agent.status == "running"
+        and current_agent.is_enabled
+    ):
         min_delay = _int_budget(config, "min_delay")
         max_delay = max(min_delay, _int_budget(config, "max_delay"))
         base_delay = float(random.uniform(min_delay, max_delay))
         scheduled_delay = float(scaled_wake_delay(base_delay, now))
-        agent.next_run_at = now + timedelta(seconds=scheduled_delay)
-        metadata = (
-            dict(run.prompt_metadata) if isinstance(run.prompt_metadata, dict) else {}
-        )
+        current_agent.next_run_at = now + timedelta(seconds=scheduled_delay)
         metadata["cadence_sample"] = {
             "base_delay_seconds": base_delay,
             "scheduled_delay_seconds": scheduled_delay,
         }
-        run.prompt_metadata = metadata
+        values[AgentRun.prompt_metadata] = metadata
+    elif current_agent is not None:
+        values[AgentRun.prompt_metadata] = metadata
+
+    updated = db.session.query(AgentRun).filter(
+        AgentRun.id == run.id,
+        AgentRun.status == "running",
+    ).update(values, synchronize_session=False)
+    if not updated:
+        db.session.rollback()
+        return _current_run(run.id) or run
+
+    if current_agent is not None and current_agent.status == "running":
+        current_agent.consecutive_failures = 0
+        current_agent.status = "idle"
+        current_agent.last_run_at = now
+        if not current_agent.is_enabled:
+            current_agent.next_run_at = None
+    db.session.commit()
+    finished = _current_run(run.id) or run
     try:
-        summarize_run(agent, run)
+        summarize_run(current_agent or agent, finished)
     except Exception:
         logger.exception("summarize_run failed; ignoring.")
     db.session.commit()
-    return run
+    return finished
