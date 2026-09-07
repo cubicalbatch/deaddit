@@ -16,6 +16,7 @@ database row that shadows them would make the flag silently inert.
 import logging
 import os
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from deaddit.models import Setting
 from deaddit.settings.service import (
@@ -319,49 +320,51 @@ class Config:
             pass
 
     @classmethod
-    def get_api_key_for_endpoint(cls, endpoint_url: str) -> str | None:
-        """Get API key for a specific endpoint URL, checking LLMProvider first."""
+    def get_api_key_for_endpoint(cls, endpoint_url: str | None) -> str | None:
+        """Get the key scoped to an endpoint, or the default key when blank."""
         try:
             from deaddit.models import LLMProvider
 
-            if endpoint_url:
-                norm_url = endpoint_url.rstrip("/")
-                provider = LLMProvider.query.filter(
-                    (LLMProvider.api_url == norm_url)
-                    | (LLMProvider.api_url == endpoint_url)
-                ).first()
-                if provider and provider.api_key and provider.api_key.strip():
-                    return provider.api_key.strip()
-            else:
+            if not endpoint_url:
                 default_p = LLMProvider.get_default()
                 if default_p and default_p.api_key and default_p.api_key.strip():
                     return default_p.api_key.strip()
+            else:
+                normalized_url = cls._normalize_endpoint(endpoint_url)
+                provider = next(
+                    (
+                        candidate
+                        for candidate in LLMProvider.query.all()
+                        if cls._normalize_endpoint(candidate.api_url) == normalized_url
+                    ),
+                    None,
+                )
+                if provider and provider.api_key and provider.api_key.strip():
+                    return provider.api_key.strip()
         except Exception:
             pass
 
         if not endpoint_url:
             return cls.get("OPENAI_KEY")
 
-        # Create a key based on the endpoint
-        key = cls._endpoint_to_key(endpoint_url)
-
-        # Try to get endpoint-specific key first
+        normalized_url = cls._normalize_endpoint(endpoint_url)
+        key = cls._endpoint_to_key(normalized_url)
         endpoint_key = cls.get(f"API_KEY_{key}")
-        if endpoint_key:
-            return endpoint_key
+        if endpoint_key and endpoint_key.strip():
+            return endpoint_key.strip()
 
-        # Check default provider's key if available
-        try:
-            from deaddit.models import LLMProvider
+        configured_url = cls.get("OPENAI_API_URL")
+        if (
+            configured_url
+            and normalized_url == cls._normalize_endpoint(configured_url)
+        ):
+            return cls.get("OPENAI_KEY")
+        return None
 
-            default_p = LLMProvider.get_default()
-            if default_p and default_p.api_key and default_p.api_key.strip():
-                return default_p.api_key.strip()
-        except Exception:
-            pass
-
-        # Fall back to default OPENAI_KEY
-        return cls.get("OPENAI_KEY")
+    @staticmethod
+    def _normalize_endpoint(endpoint_url: str | None) -> str:
+        """Normalize harmless endpoint formatting differences."""
+        return str(endpoint_url or "").strip().rstrip("/")
 
     @classmethod
     def set_api_key_for_endpoint(cls, endpoint_url: str, api_key: str) -> None:
@@ -389,18 +392,21 @@ class Config:
         """Convert endpoint URL to a safe key name."""
         import re
 
-        # Extract the domain from the URL
-        if "openai.com" in endpoint_url:
-            return "OPENAI"
-        elif "groq.com" in endpoint_url:
-            return "GROQ"
-        elif "openrouter.ai" in endpoint_url:
-            return "OPENROUTER"
-        else:
-            # For custom endpoints, create a safe key from the URL
-            safe_key = re.sub(
-                r"[^a-zA-Z0-9]",
-                "_",
-                endpoint_url.replace("https://", "").replace("http://", ""),
-            )
-            return safe_key.upper()[:50]  # Limit length
+        endpoint = cls._normalize_endpoint(endpoint_url)
+        try:
+            host = (urlsplit(endpoint).hostname or "").lower().rstrip(".")
+        except ValueError:
+            host = ""
+
+        for domain, key in (
+            ("openai.com", "OPENAI"),
+            ("groq.com", "GROQ"),
+            ("openrouter.ai", "OPENROUTER"),
+        ):
+            if host == domain or host.endswith(f".{domain}"):
+                return key
+
+        # For custom endpoints, create a safe key from the URL.
+        safe_endpoint = re.sub(r"^https?://", "", endpoint, flags=re.IGNORECASE)
+        safe_key = re.sub(r"[^a-zA-Z0-9]", "_", safe_endpoint)
+        return safe_key.upper()[:50]  # Limit length
