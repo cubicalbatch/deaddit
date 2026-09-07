@@ -94,10 +94,8 @@ def _prompt(request_record) -> str:
 
 
 @pytest.fixture()
-def admin_client(client):
-    with client.session_transaction() as session:
-        session["admin_authenticated"] = True
-    return client
+def admin_client(client, admin_login):
+    return admin_login(client)
 
 
 class TestPersonaGeneratorTrollMode:

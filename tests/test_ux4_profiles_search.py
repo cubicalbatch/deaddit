@@ -537,9 +537,10 @@ class TestSetupPage:
 
 
 class TestNewUserFlow:
-    def test_save_config_then_load_starter_data_keeps_setup(self, app, client, ctx):
-        with client.session_transaction() as sess:
-            sess["admin_authenticated"] = True
+    def test_save_config_then_load_starter_data_keeps_setup(
+        self, app, client, ctx, admin_login
+    ):
+        admin_login(client)
 
         # A6: secrets are environment-only, so the setup flow posts just the
         # endpoint URL; a non-empty openai_key payload is refused outright.

@@ -1,8 +1,9 @@
-"""Admin session hardening: login token compare, /admin socket gate, cookie posture.
+"""Admin session hardening: token binding, socket gate, and cookie posture.
 
-Covers the audit fixes: constant-time token comparison on /admin/login, the
-/admin websocket namespace rejecting unauthenticated connects once API_TOKEN
-is set, and the explicit SameSite=Lax session-cookie posture.
+Covers the audit fixes: constant-time token comparison on /admin/login, token
+rotation invalidating old sessions, the /admin websocket namespace rejecting
+unauthenticated connects once API_TOKEN is set, and explicit SameSite=Lax
+session-cookie posture.
 """
 import hashlib
 import hmac
@@ -37,7 +38,7 @@ def test_login_rejects_wrong_token(client, monkeypatch):
     resp = client.post("/admin/login", data={"api_token": "wrong"})
     assert resp.status_code == 200  # re-renders the login form
     with client.session_transaction() as sess:
-        assert not sess.get("admin_authenticated")
+        assert not sess.get("admin_token_fingerprint")
 
 
 def test_login_accepts_correct_token(client, monkeypatch):
@@ -46,7 +47,38 @@ def test_login_accepts_correct_token(client, monkeypatch):
     assert resp.status_code == 302
     assert "/admin/dashboard" in resp.headers["Location"]
     with client.session_transaction() as sess:
-        assert sess["admin_authenticated"] is True
+        assert isinstance(sess["admin_token_fingerprint"], str)
+        assert "right-token" not in sess.values()
+        assert "admin_authenticated" not in sess
+
+def test_token_rotation_revokes_existing_session(app, client, monkeypatch):
+    app.config["SECRET_KEY"] = "strong-test-secret"
+    monkeypatch.setenv("API_TOKEN", "token-a")
+    assert client.post("/admin/login", data={"api_token": "token-a"}).status_code == 302
+    assert client.get("/admin/dashboard").status_code == 200
+
+    monkeypatch.setenv("API_TOKEN", "token-b")
+    assert client.get("/admin/dashboard").status_code == 302
+    assert (
+        client.post("/admin/login", data={"api_token": "token-b"}).status_code == 302
+    )
+    assert client.get("/admin/dashboard").status_code == 200
+
+    with client.session_transaction() as sess:
+        assert "token-a" not in sess.values()
+        assert "token-b" not in sess.values()
+        assert "admin_authenticated" not in sess
+
+
+def test_logout_clears_token_binding(client, monkeypatch):
+    monkeypatch.setenv("API_TOKEN", "logout-token")
+    assert client.post("/admin/login", data={"api_token": "logout-token"}).status_code == 302
+    assert client.get("/admin/dashboard").status_code == 200
+
+    assert client.get("/admin/logout").status_code == 302
+    assert client.get("/admin/dashboard").status_code == 302
+    with client.session_transaction() as sess:
+        assert "admin_token_fingerprint" not in sess
 
 
 def test_login_with_missing_form_field_rejected(client, monkeypatch):
@@ -54,7 +86,14 @@ def test_login_with_missing_form_field_rejected(client, monkeypatch):
     resp = client.post("/admin/login", data={})
     assert resp.status_code == 200
     with client.session_transaction() as sess:
-        assert not sess.get("admin_authenticated")
+        assert not sess.get("admin_token_fingerprint")
+
+
+def test_legacy_boolean_session_is_denied(client, monkeypatch):
+    monkeypatch.setenv("API_TOKEN", "current-token")
+    with client.session_transaction() as sess:
+        sess["admin_authenticated"] = True
+    assert client.get("/admin/dashboard").status_code == 302
 
 
 # ---------------------------------------------------------------------------
@@ -73,8 +112,8 @@ def test_admin_socket_accepts_authenticated_session_when_token_set(app, monkeypa
     monkeypatch.setenv("API_TOKEN", "sekrit")
     _register_admin_handlers()
     http_client = app.test_client()
-    with http_client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
+    response = http_client.post("/admin/login", data={"api_token": "sekrit"})
+    assert response.status_code == 302
     ws_client = socketio.test_client(
         app, namespace="/admin", flask_test_client=http_client
     )

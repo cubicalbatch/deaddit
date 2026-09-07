@@ -32,7 +32,7 @@
                     <i class="bi bi-house-door"></i> Back to Site
                 </a>
             </li>
-            {% if session.admin_authenticated %}
+            {% if admin_authenticated %}
             <li class="nav-item text-nowrap">
                 <a class="nav-link" href="{{ url_for('admin.logout') }}">
                     <i class="bi bi-box-arrow-right"></i> Logout
@@ -49,7 +49,7 @@
 
     {#- Menu only for authenticated admins; the login page shows just the
         token form. Unprotected instances (no API_TOKEN) keep the menu. -#}
-    {% if not config.api_token_set or session.admin_authenticated %}
+    {% if not config.api_token_set or admin_authenticated %}
     <nav class="admin-nav">
         <div class="container-fluid">
             <ul class="nav nav-pills">

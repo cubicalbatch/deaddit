@@ -27,8 +27,8 @@ from flask import (
 )
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import SQLAlchemyError
-
 from deaddit import db
+from deaddit.admin_auth import is_admin_authenticated, token_fingerprint
 from deaddit.agents.executor import normalize_persona_rate_caps
 from deaddit.agents.loop import resolve_agent_llm
 from deaddit.agents.registry import POST_TOOL_NAMES
@@ -638,7 +638,7 @@ def admin_required(f):
         api_token = Config.get("API_TOKEN")
         if not api_token:
             return f(*args, **kwargs)
-        if not session.get("admin_authenticated"):
+        if not is_admin_authenticated():
             return redirect(url_for("admin.login", next=request.full_path))
         return f(*args, **kwargs)
 
@@ -970,7 +970,8 @@ def login():
     if request.method == "POST":
         provided_token = request.form.get("api_token")
         if hmac.compare_digest((provided_token or "").encode(), api_token.encode()):
-            session["admin_authenticated"] = True
+            session["admin_token_fingerprint"] = token_fingerprint(api_token)
+            session.pop("admin_authenticated", None)
             session.permanent = True
             flash("Successfully authenticated!", "success")
             return redirect(next_path or url_for("admin.dashboard"))
@@ -987,6 +988,7 @@ def login():
 def logout():
     """Admin logout."""
     session.pop("admin_authenticated", None)
+    session.pop("admin_token_fingerprint", None)
     flash("You have been logged out.", "info")
     return redirect(url_for("admin.login"))
 

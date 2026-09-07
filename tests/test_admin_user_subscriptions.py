@@ -7,11 +7,8 @@ from deaddit.models import User
 
 
 @pytest.fixture()
-def admin_client(client):
-    """Client authenticated as admin."""
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
-    return client
+def admin_client(client, admin_login):
+    return admin_login(client)
 
 
 def test_user_subscriptions_round_trip_and_clear(admin_client, app, seeded_db):

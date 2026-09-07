@@ -21,10 +21,8 @@ PROVIDERS = "/admin/api/image-providers"
 
 
 @pytest.fixture()
-def admin_client(client):
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
-    return client
+def admin_client(client, admin_login):
+    return admin_login(client)
 
 
 @pytest.fixture(autouse=True)

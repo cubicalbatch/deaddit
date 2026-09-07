@@ -10,11 +10,9 @@ from deaddit.settings.service import DeployFlagNotPersistable
 
 
 @pytest.fixture()
-def admin_client(client):
+def admin_client(client, admin_login):
     """Authenticate the test client for admin routes."""
-    with client.session_transaction() as session:
-        session["admin_authenticated"] = True
-    return client
+    return admin_login(client)
 
 
 def _assert_setup_wizard(response):
@@ -273,14 +271,15 @@ def test_production_still_renders_wizard_on_empty_homepage(client, monkeypatch):
     _assert_setup_wizard(client.get("/"))
 
 
-def test_production_hides_admin_nav_link_until_logged_in(client, monkeypatch):
+def test_production_hides_admin_nav_link_until_logged_in(
+    client, monkeypatch, admin_login
+):
     monkeypatch.setenv("PRODUCTION", "true")
 
     anon = client.get("/").get_data(as_text=True)
     assert 'href="/admin/dashboard">Admin</a>' not in anon
 
-    with client.session_transaction() as session:
-        session["admin_authenticated"] = True
+    admin_login(client)
     authed = client.get("/").get_data(as_text=True)
     assert 'href="/admin/dashboard">Admin</a>' in authed
 

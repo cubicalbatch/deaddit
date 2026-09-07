@@ -20,11 +20,8 @@ from deaddit.services.persona_options import PersonaAssignment
 
 
 @pytest.fixture()
-def admin_client(client):
-    """Client authenticated for admin endpoints."""
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
-    return client
+def admin_client(client, admin_login):
+    return admin_login(client)
 
 
 #: Rich, well-formed rows echoing assignment IDs a1/a2. Demographics are

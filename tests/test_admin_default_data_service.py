@@ -19,11 +19,8 @@ ROUTE = "/admin/api/load-default-data"
 
 
 @pytest.fixture()
-def admin_client(client):
-    """Client that passes the admin_required gate even if API_TOKEN is set."""
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
-    return client
+def admin_client(client, admin_login):
+    return admin_login(client)
 
 
 @pytest.fixture()

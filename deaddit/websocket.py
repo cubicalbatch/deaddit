@@ -7,9 +7,9 @@ import functools
 import logging
 from datetime import datetime
 
-from flask import session
 from flask_socketio import disconnect, emit, join_room, leave_room
 
+from deaddit.admin_auth import is_admin_authenticated
 from deaddit.extensions import socketio
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ def admin_connect(*args):
     """
     from deaddit.config import Config
 
-    if Config.get("API_TOKEN") and not session.get("admin_authenticated"):
+    if Config.get("API_TOKEN") and not is_admin_authenticated():
         return False
     logger.info("Admin client connected to WebSocket")
     emit("connected", {"status": "Connected to admin WebSocket"})

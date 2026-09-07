@@ -557,7 +557,7 @@ class TestMigrationAndAdminSurface:
         assert {"activity_event", "platform_daily", "degeneracy_flag"} <= tables
         conn.close()
 
-    def test_analytics_page_shows_seven_day_series(self, app, client):
+    def test_analytics_page_shows_seven_day_series(self, app, client, monkeypatch):
         """Acceptance: analytics page renders the rollup series + watchlist."""
 
         from deaddit.models import DegeneracyFlag
@@ -597,10 +597,11 @@ class TestMigrationAndAdminSurface:
                 created_at=datetime.utcnow(),
             )
         )
-        db.commit()
-
-        with client.session_transaction() as sess:
-            sess["admin_authenticated"] = True
+        monkeypatch.setenv("API_TOKEN", "test-admin-token")
+        assert (
+            client.post("/admin/login", data={"api_token": "test-admin-token"}).status_code
+            == 302
+        )
         resp = client.get("/admin/analytics")
         assert resp.status_code == 200
         html = resp.get_data(as_text=True)

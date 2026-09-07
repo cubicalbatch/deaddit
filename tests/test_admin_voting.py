@@ -13,10 +13,8 @@ from deaddit.models import Setting, VoteCadencePolicy, VoteSimulationHourly
 
 
 @pytest.fixture()
-def admin_client(client):
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
-    return client
+def admin_client(client, admin_login):
+    return admin_login(client)
 
 
 def test_voting_routes_require_authentication_and_not_disabled_in_production(
@@ -46,8 +44,7 @@ def test_voting_routes_require_authentication_and_not_disabled_in_production(
             lambda cls, key, default=None: "true" if key == "PRODUCTION" else default
         ),
     )
-    with client.session_transaction() as sess:
-        sess["admin_authenticated"] = True
+    assert client.post("/admin/login", data={"api_token": "true"}).status_code == 302
     assert client.get("/admin/voting").status_code == 200
     assert client.get("/admin/api/voting").status_code == 200
 

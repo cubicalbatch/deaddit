@@ -129,12 +129,12 @@ def create_app(config: Any = None) -> Flask:
                 "No API_TOKEN set in database or environment. Admin and API routes will be publicly accessible."
             )
 
-        # With no API_TOKEN, admin routes intentionally remain public. The
-        # built-in key is only unsafe once it protects an authenticated session.
+        # With no API_TOKEN, admin routes intentionally remain public; the
+        # built-in key only matters once it protects an authenticated session.
         if (
-            (not api_token or not api_token.strip())
-            and app.config["SECRET_KEY"] == Config.DEFAULTS["SECRET_KEY"]
-        ):
+            not api_token
+            or not api_token.strip()
+        ) and app.config["SECRET_KEY"] == Config.DEFAULTS["SECRET_KEY"]:
             logger.warning(
                 "SECRET_KEY is unset (built-in dev default). Admin session cookies are forgeable - set SECRET_KEY in the environment before exposing this app."
             )
@@ -156,8 +156,9 @@ def create_app(config: Any = None) -> Flask:
     return app
 
 
-# Template context processor to make config available in templates
 def inject_config():
+    from .admin_auth import is_admin_authenticated
+
     return {
         "config": {
             "api_token_set": Config.is_api_token_set(),
@@ -165,6 +166,7 @@ def inject_config():
             "openai_model": Config.get("OPENAI_MODEL"),
             "openai_key_set": bool(Config.get("OPENAI_KEY")),
         },
+        "admin_authenticated": is_admin_authenticated(),
         "PRODUCTION": Config.get("PRODUCTION", "false").lower() == "true",
     }
 
