@@ -159,35 +159,49 @@ class ContentManager {
 
     renderPagination(type, data) {
         const pagination = document.getElementById(`${type}Pagination`);
-        pagination.innerHTML = '';
+        pagination.replaceChildren();
 
         if (data.pages <= 1) return;
 
-        // Previous button
+        const addPageLink = (label, page) => {
+            const li = document.createElement('li');
+            li.className = 'page-item';
+            const link = document.createElement('a');
+            link.className = 'page-link';
+            link.href = '#';
+            link.textContent = label;
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.goToPage(page);
+            });
+            li.appendChild(link);
+            pagination.appendChild(li);
+        };
+
         if (data.current_page > 1) {
-            const prevLi = document.createElement('li');
-            prevLi.className = 'page-item';
-            prevLi.innerHTML = `<a class="page-link" href="#" onclick="contentManager.goToPage(${data.current_page - 1})">Previous</a>`;
-            pagination.appendChild(prevLi);
+            addPageLink('Previous', data.current_page - 1);
         }
 
-        // Page numbers
         const startPage = Math.max(1, data.current_page - 2);
         const endPage = Math.min(data.pages, data.current_page + 2);
 
         for (let i = startPage; i <= endPage; i++) {
             const li = document.createElement('li');
             li.className = `page-item ${i === data.current_page ? 'active' : ''}`;
-            li.innerHTML = `<a class="page-link" href="#" onclick="contentManager.goToPage(${i})">${i}</a>`;
+            const link = document.createElement('a');
+            link.className = 'page-link';
+            link.href = '#';
+            link.textContent = String(i);
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.goToPage(i);
+            });
+            li.appendChild(link);
             pagination.appendChild(li);
         }
 
-        // Next button
         if (data.current_page < data.pages) {
-            const nextLi = document.createElement('li');
-            nextLi.className = 'page-item';
-            nextLi.innerHTML = `<a class="page-link" href="#" onclick="contentManager.goToPage(${data.current_page + 1})">Next</a>`;
-            pagination.appendChild(nextLi);
+            addPageLink('Next', data.current_page + 1);
         }
     }
 
@@ -269,89 +283,137 @@ class ContentManager {
         }
 
         banner.style.display = 'flex';
-        if (this.selectAllPages) {
-            const filteredNote = this.searchTerm ? ' matching the current search' : '';
-            banner.innerHTML = `
-                <span>All <strong>${total.toLocaleString()}</strong> ${type}${filteredNote} are selected (every page).</span>
-                <a href="#" class="banner-clear">Clear selection</a>
-            `;
-            banner.querySelector('.banner-clear').addEventListener('click', (e) => {
-                e.preventDefault();
+        banner.replaceChildren();
+        const span = document.createElement('span');
+        const strong = document.createElement('strong');
+        strong.textContent = total.toLocaleString();
+        span.append('All ', strong, ` ${type}`);
+        if (this.selectAllPages && this.searchTerm) span.append(' matching the current search');
+        span.append(this.selectAllPages ? ' are selected (every page).' : ' on this page are selected.');
+        banner.appendChild(span);
+
+        const link = document.createElement('a');
+        link.href = '#';
+        link.className = this.selectAllPages ? 'banner-clear' : 'banner-all-pages';
+        link.textContent = this.selectAllPages
+            ? 'Clear selection'
+            : `Select all ${total.toLocaleString()} ${type} across all pages`;
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (this.selectAllPages) {
                 this.resetSelection();
-            });
-        } else {
-            banner.innerHTML = `
-                <span>All ${this.selectedItems.size} ${type} on this page are selected.</span>
-                <a href="#" class="banner-all-pages">Select all ${total.toLocaleString()} ${type} across all pages</a>
-            `;
-            banner.querySelector('.banner-all-pages').addEventListener('click', (e) => {
-                e.preventDefault();
+            } else {
                 this.selectAllPages = true;
                 this.renderSelectAllBanner(type);
-            });
-        }
+            }
+        });
+        banner.appendChild(link);
     }
 
     truncate(text, length) {
         if (!text) return '';
-        return text.length > length ? text.substring(0, length) + '...' : text;
+        const value = String(text);
+        return value.length > length ? value.substring(0, length) + '...' : value;
+    }
+
+    createTextCell(row, value, className = '') {
+        const cell = document.createElement('td');
+        if (className) cell.className = className;
+        cell.textContent = value == null ? '' : String(value);
+        row.appendChild(cell);
+        return cell;
+    }
+
+    createCheckboxCell(row, id, label) {
+        const cell = document.createElement('td');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'item-checkbox';
+        checkbox.dataset.id = String(id);
+        checkbox.setAttribute('aria-label', label);
+        cell.appendChild(checkbox);
+        row.appendChild(cell);
+    }
+
+    createActionCell(row, editCall, deleteCall, viewAttrs = null, promptCall = null) {
+        const cell = document.createElement('td');
+        cell.appendChild(this.actionButtons(editCall, deleteCall, viewAttrs, promptCall));
+        row.appendChild(cell);
     }
 
     actionButtons(editCall, deleteCall, viewAttrs = null, promptCall = null) {
-        const viewBtn = viewAttrs
-            ? `<a href="${viewAttrs.href}" class="btn btn-sm btn-info" target="_blank" title="${viewAttrs.title}">
-                    <i class="bi bi-eye"></i>
-                    <span class="d-none d-sm-inline ms-1">View</span>
-                </a>`
-            : '';
-        const promptBtn = promptCall
-            ? `<button class="btn btn-sm btn-secondary" onclick="${promptCall}" title="Originating prompt">
-                    <i class="bi bi-magic"></i>
-                    <span class="d-none d-lg-inline ms-1">Prompt</span>
-                </button>`
-            : '';
-        return `
-            <div class="action-buttons">
-                <button class="btn btn-sm btn-primary" onclick="${editCall}" title="Edit">
-                    <i class="bi bi-pencil"></i>
-                    <span class="d-none d-sm-inline ms-1">Edit</span>
-                </button>
-                <button class="btn btn-sm btn-danger" onclick="${deleteCall}" title="Delete">
-                    <i class="bi bi-trash"></i>
-                    <span class="d-none d-sm-inline ms-1">Delete</span>
-                </button>
-                ${viewBtn}
-                ${promptBtn}
-            </div>
-        `;
+        const container = document.createElement('div');
+        container.className = 'action-buttons';
+        const makeButton = (className, title, iconClass, label, handler, responsiveClass = '') => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = `btn btn-sm ${className}`;
+            button.title = title;
+            button.addEventListener('click', handler);
+            const icon = document.createElement('i');
+            icon.className = iconClass;
+            button.appendChild(icon);
+            const text = document.createElement('span');
+            text.className = `${responsiveClass} ms-1`.trim();
+            text.textContent = label;
+            button.appendChild(text);
+            return button;
+        };
+
+        container.appendChild(makeButton('btn-primary', 'Edit', 'bi bi-pencil', 'Edit', editCall, 'd-none d-sm-inline'));
+        container.appendChild(makeButton('btn-danger', 'Delete', 'bi bi-trash', 'Delete', deleteCall, 'd-none d-sm-inline'));
+        if (viewAttrs) {
+            const view = document.createElement('a');
+            view.href = viewAttrs.href;
+            view.className = 'btn btn-sm btn-info';
+            view.target = '_blank';
+            view.rel = 'noopener';
+            view.title = viewAttrs.title;
+            const icon = document.createElement('i');
+            icon.className = 'bi bi-eye';
+            view.appendChild(icon);
+            const text = document.createElement('span');
+            text.className = 'd-none d-sm-inline ms-1';
+            text.textContent = 'View';
+            view.appendChild(text);
+            container.appendChild(view);
+        }
+        if (promptCall) {
+            container.appendChild(makeButton('btn-secondary', 'Originating prompt', 'bi bi-magic', 'Prompt', promptCall, 'd-none d-lg-inline'));
+        }
+        return container;
     }
 
     // ---------------- Users ----------------
     renderUsers(data) {
         const tbody = document.querySelector('#usersTable tbody');
-        tbody.innerHTML = '';
+        tbody.replaceChildren();
 
         data.users.forEach(user => {
             const row = document.createElement('tr');
-            row.innerHTML = `
-                <td><input type="checkbox" class="item-checkbox" data-id="${user.username}" aria-label="Select user ${user.username}"></td>
-                <td>${user.is_troll ? `${user.username} <span class="badge bg-danger">troll</span>` : user.username}</td>
-                <td class="d-none d-md-table-cell">${user.age || ''}</td>
-                <td class="d-none d-lg-table-cell">${user.gender || ''}</td>
-                <td class="d-none d-lg-table-cell">${user.occupation || ''}</td>
-                <td class="d-none d-sm-table-cell">${user.posts_count}</td>
-                <td class="d-none d-sm-table-cell">${user.comments_count}</td>
-                <td>${this.actionButtons(
-                    `contentManager.editUser('${user.username}')`,
-                    `contentManager.deleteUser('${user.username}')`
-                )}</td>
-            `;
+            this.createCheckboxCell(row, user.username, `Select user ${user.username}`);
+            const usernameCell = this.createTextCell(row, user.username);
+            if (user.is_troll) {
+                const badge = document.createElement('span');
+                badge.className = 'badge bg-danger';
+                badge.textContent = 'troll';
+                usernameCell.append(' ', badge);
+            }
+            this.createTextCell(row, user.age, 'd-none d-md-table-cell');
+            this.createTextCell(row, user.gender, 'd-none d-lg-table-cell');
+            this.createTextCell(row, user.occupation, 'd-none d-lg-table-cell');
+            this.createTextCell(row, user.posts_count, 'd-none d-sm-table-cell');
+            this.createTextCell(row, user.comments_count, 'd-none d-sm-table-cell');
+            this.createActionCell(
+                row,
+                () => this.editUser(user.username),
+                () => this.deleteUser(user.username)
+            );
             tbody.appendChild(row);
         });
 
         this.setupItemCheckboxes();
     }
-
     async editUser(username) {
         try {
             // One targeted call for exactly this row.
@@ -439,21 +501,20 @@ class ContentManager {
     // ---------------- Subdeaddits ----------------
     renderSubdeaddits(data) {
         const tbody = document.querySelector('#subdeadditsTable tbody');
-        tbody.innerHTML = '';
+        tbody.replaceChildren();
 
         data.subdeaddits.forEach(sub => {
             const row = document.createElement('tr');
-            row.innerHTML = `
-                <td><input type="checkbox" class="item-checkbox" data-id="${sub.name}" aria-label="Select subdeaddit ${sub.name}"></td>
-                <td>${sub.name}</td>
-                <td class="d-none d-md-table-cell">${this.truncate(sub.description, 100)}</td>
-                <td class="d-none d-sm-table-cell">${sub.posts_count}</td>
-                <td class="d-none d-lg-table-cell">-</td>
-                <td>${this.actionButtons(
-                    `contentManager.editSubdeaddit('${sub.name}')`,
-                    `contentManager.deleteSubdeaddit('${sub.name}')`
-                )}</td>
-            `;
+            this.createCheckboxCell(row, sub.name, `Select subdeaddit ${sub.name}`);
+            this.createTextCell(row, sub.name);
+            this.createTextCell(row, this.truncate(sub.description, 100), 'd-none d-md-table-cell');
+            this.createTextCell(row, sub.posts_count, 'd-none d-sm-table-cell');
+            this.createTextCell(row, '-', 'd-none d-lg-table-cell');
+            this.createActionCell(
+                row,
+                () => this.editSubdeaddit(sub.name),
+                () => this.deleteSubdeaddit(sub.name)
+            );
             tbody.appendChild(row);
         });
 
@@ -516,36 +577,34 @@ class ContentManager {
     // ---------------- Posts ----------------
     renderPosts(data) {
         const tbody = document.querySelector('#postsTable tbody');
-        tbody.innerHTML = '';
+        tbody.replaceChildren();
 
         data.posts.forEach(post => {
             const row = document.createElement('tr');
             const createdDate = new Date(post.created_at).toLocaleDateString();
-            row.innerHTML = `
-                <td><input type="checkbox" class="item-checkbox" data-id="${post.id}" aria-label="Select post ${post.id}"></td>
-                <td>${this.truncate(post.title, 50)}</td>
-                <td class="d-none d-sm-table-cell">${post.username}</td>
-                <td class="d-none d-md-table-cell">${post.subdeaddit_name}</td>
-                <td class="d-none d-sm-table-cell">${post.score}</td>
-                <td class="d-none d-lg-table-cell">${post.comments_count}</td>
-                <td class="d-none d-lg-table-cell">${createdDate}</td>
-                <td>${this.actionButtons(
-                    `contentManager.editPost(${post.id})`,
-                    `contentManager.deletePost(${post.id})`,
-                    {href: `/d/${post.subdeaddit_name}/${post.id}`, title: 'View'},
-                    `contentManager.viewPostPrompt(${post.id})`
-                )}</td>
-            `;
+            this.createCheckboxCell(row, post.id, `Select post ${post.id}`);
+            this.createTextCell(row, this.truncate(post.title, 50));
+            this.createTextCell(row, post.username, 'd-none d-sm-table-cell');
+            this.createTextCell(row, post.subdeaddit_name, 'd-none d-md-table-cell');
+            this.createTextCell(row, post.score, 'd-none d-sm-table-cell');
+            this.createTextCell(row, post.comments_count, 'd-none d-lg-table-cell');
+            this.createTextCell(row, createdDate, 'd-none d-lg-table-cell');
+            this.createActionCell(
+                row,
+                () => this.editPost(post.id),
+                () => this.deletePost(post.id),
+                {href: `/d/${encodeURIComponent(post.subdeaddit_name)}/${encodeURIComponent(post.id)}`, title: 'View'},
+                () => this.viewPostPrompt(post.id)
+            );
             tbody.appendChild(row);
         });
 
         this.setupItemCheckboxes();
     }
-
     async editPost(id) {
         try {
             // One targeted call for exactly this row.
-            const response = await fetch(`/admin/api/posts/${id}`);
+            const response = await fetch(`/admin/api/posts/${encodeURIComponent(id)}`);
             if (!response.ok) return;
             const post = await response.json();
 
@@ -574,7 +633,7 @@ class ContentManager {
         };
 
         try {
-            const response = await fetch(`/admin/api/posts/${id}`, {
+            const response = await fetch(`/admin/api/posts/${encodeURIComponent(id)}`, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(data)
@@ -601,26 +660,25 @@ class ContentManager {
     // ---------------- Comments ----------------
     renderComments(data) {
         const tbody = document.querySelector('#commentsTable tbody');
-        tbody.innerHTML = '';
+        tbody.replaceChildren();
 
         data.comments.forEach(comment => {
             const row = document.createElement('tr');
             const createdDate = new Date(comment.created_at).toLocaleDateString();
-            row.innerHTML = `
-                <td><input type="checkbox" class="item-checkbox" data-id="${comment.id}" aria-label="Select comment ${comment.id}"></td>
-                <td>${this.truncate(comment.content, 80)}</td>
-                <td class="d-none d-sm-table-cell">${comment.username}</td>
-                <td class="d-none d-md-table-cell">${this.truncate(comment.post_title, 30)}</td>
-                <td class="d-none d-lg-table-cell">${comment.parent_id ? 'Reply' : 'Root'}</td>
-                <td class="d-none d-sm-table-cell">${comment.score}</td>
-                <td class="d-none d-lg-table-cell">${createdDate}</td>
-                <td>${this.actionButtons(
-                    `contentManager.editComment(${comment.id})`,
-                    `contentManager.deleteComment(${comment.id})`,
-                    {href: `/d/${comment.subdeaddit_name}/${comment.post_id}`, title: 'View Post'},
-                    `contentManager.viewCommentPrompt(${comment.id})`
-                )}</td>
-            `;
+            this.createCheckboxCell(row, comment.id, `Select comment ${comment.id}`);
+            this.createTextCell(row, this.truncate(comment.content, 80));
+            this.createTextCell(row, comment.username, 'd-none d-sm-table-cell');
+            this.createTextCell(row, this.truncate(comment.post_title, 30), 'd-none d-md-table-cell');
+            this.createTextCell(row, comment.parent_id ? 'Reply' : 'Root', 'd-none d-lg-table-cell');
+            this.createTextCell(row, comment.score, 'd-none d-sm-table-cell');
+            this.createTextCell(row, createdDate, 'd-none d-lg-table-cell');
+            this.createActionCell(
+                row,
+                () => this.editComment(comment.id),
+                () => this.deleteComment(comment.id),
+                {href: `/d/${encodeURIComponent(comment.subdeaddit_name)}/${encodeURIComponent(comment.post_id)}`, title: 'View Post'},
+                () => this.viewCommentPrompt(comment.id)
+            );
             tbody.appendChild(row);
         });
 
@@ -630,7 +688,7 @@ class ContentManager {
     async editComment(id) {
         try {
             // One targeted call for exactly this row.
-            const response = await fetch(`/admin/api/comments/${id}`);
+            const response = await fetch(`/admin/api/comments/${encodeURIComponent(id)}`);
             if (!response.ok) return;
             const comment = await response.json();
 
@@ -655,7 +713,7 @@ class ContentManager {
         };
 
         try {
-            const response = await fetch(`/admin/api/comments/${id}`, {
+            const response = await fetch(`/admin/api/comments/${encodeURIComponent(id)}`, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(data)
@@ -686,20 +744,26 @@ class ContentManager {
 
     async viewContentPrompt(kind, id) {
         const body = document.getElementById('viewPromptBody');
-        body.innerHTML = '<div class="text-muted">Loading…</div>';
+        const loading = document.createElement('div');
+        loading.className = 'text-muted';
+        loading.textContent = 'Loading…';
+        body.replaceChildren(loading);
         new bootstrap.Modal(document.getElementById('viewPromptModal')).show();
         try {
-            const response = await fetch(`/admin/api/${kind}/${id}/prompt`);
+            const response = await fetch(`/admin/api/${encodeURIComponent(kind)}/${encodeURIComponent(id)}/prompt`);
             const data = await response.json();
             this.renderPromptOrigin(body, data);
         } catch (error) {
             console.error('Error loading prompt:', error);
-            body.innerHTML = '<div class="text-danger">Error loading prompt.</div>';
+            const failure = document.createElement('div');
+            failure.className = 'text-danger';
+            failure.textContent = 'Error loading prompt.';
+            body.replaceChildren(failure);
         }
     }
 
     renderPromptOrigin(body, data) {
-        body.innerHTML = '';
+        body.replaceChildren();
         if (!data.found) {
             body.textContent = 'No originating agent prompt — this content was seeded or created outside the agent runtime.';
             return;
@@ -840,10 +904,10 @@ class ContentManager {
                 });
             } else {
                 let endpoint;
-                if (type === 'user') endpoint = `/admin/api/users/${id}`;
-                else if (type === 'subdeaddit') endpoint = `/admin/api/subdeaddits/${id}`;
-                else if (type === 'post') endpoint = `/admin/api/posts/${id}`;
-                else if (type === 'comment') endpoint = `/admin/api/comments/${id}`;
+                if (type === 'user') endpoint = `/admin/api/users/${encodeURIComponent(id)}`;
+                else if (type === 'subdeaddit') endpoint = `/admin/api/subdeaddits/${encodeURIComponent(id)}`;
+                else if (type === 'post') endpoint = `/admin/api/posts/${encodeURIComponent(id)}`;
+                else if (type === 'comment') endpoint = `/admin/api/comments/${encodeURIComponent(id)}`;
 
                 response = await fetch(endpoint, { method: 'DELETE' });
             }
@@ -870,14 +934,15 @@ class ContentManager {
     }
 
     showAlert(message, type) {
-        // Create alert element
         const alert = document.createElement('div');
         alert.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
         alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-        alert.innerHTML = `
-            ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        `;
+        alert.appendChild(document.createTextNode(String(message ?? '')));
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'btn-close';
+        close.dataset.bsDismiss = 'alert';
+        alert.appendChild(close);
 
         document.body.appendChild(alert);
 
