@@ -338,10 +338,11 @@ def _participation_by_user(sub: str, cutoff: datetime) -> dict[str, int]:
         .group_by(Post.user)
     )
     comment_rows = (
-        db.session.query(Post.user, func.count(Comment.id))
-        .join(Comment, Comment.post_id == Post.id)
+        db.session.query(Comment.user, func.count(Comment.id))
+        .select_from(Comment)
+        .join(Post, Comment.post_id == Post.id)
         .filter(Post.subdeaddit_name == sub, Comment.created_at >= cutoff)
-        .group_by(Post.user)
+        .group_by(Comment.user)
     )
     counts: dict[str, int] = {}
     for user, n in post_rows:

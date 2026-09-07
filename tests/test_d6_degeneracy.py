@@ -16,6 +16,7 @@ from deaddit.dynamics.degeneracy import (
 from deaddit.dynamics.ranking import post_order_by
 from deaddit.models import (
     ActivityEvent,
+    Comment,
     DegeneracyFlag,
     Post,
     Setting,
@@ -323,6 +324,82 @@ class TestActivityEventsAndNightly:
         assert set(registered) == ids
         assert set(sched.added) == ids
 
+
+    def test_participation_counts_commenters_and_filters_scope(
+        self, app, db_session, seeded_db
+    ):
+        names = ("post_author", "commenter_a", "commenter_b", "commenter_c")
+        for name in names:
+            _ensure_user(db_session, name)
+        _ensure_sub(db_session, "authors")
+        _ensure_sub(db_session, "outside")
+        db_session.commit()
+        now = datetime.utcnow()
+        community_post = Post(
+            title="community",
+            content="c",
+            user="post_author",
+            subdeaddit_name="authors",
+            created_at=now,
+        )
+        outside_post = Post(
+            title="outside",
+            content="c",
+            user="post_author",
+            subdeaddit_name="outside",
+            created_at=now,
+        )
+        db_session.add_all([community_post, outside_post])
+        db_session.commit()
+        db_session.add_all(
+            [
+                Comment(
+                    post_id=community_post.id,
+                    user="commenter_a",
+                    content=f"comment {i}",
+                    created_at=now,
+                )
+                for i in range(100)
+            ]
+            + [
+                Comment(
+                    post_id=community_post.id,
+                    user=user,
+                    content="community comment",
+                    created_at=now,
+                )
+                for user in ("commenter_b", "commenter_c")
+            ]
+            + [
+                Comment(
+                    post_id=community_post.id,
+                    user="commenter_b",
+                    content="old comment",
+                    created_at=now - timedelta(days=30),
+                ),
+                Comment(
+                    post_id=outside_post.id,
+                    user="commenter_a",
+                    content="outside comment",
+                    created_at=now,
+                ),
+            ]
+        )
+        db_session.commit()
+
+        counts = degeneracy._participation_by_user(
+            "authors", now - timedelta(days=7)
+        )
+        assert counts == {
+            "post_author": 1,
+            "commenter_a": 100,
+            "commenter_b": 1,
+            "commenter_c": 1,
+        }
+        assert degeneracy.scan_echo_chambers(now=now) == 1
+        assert DegeneracyFlag.query.filter_by(
+            kind="echo_chamber", subdeaddit_name="authors"
+        ).count() == 1
 
 class TestCommunityScans:
     def test_echo_chamber_scan_fires_and_is_idempotent_daily(
