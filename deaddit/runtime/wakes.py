@@ -165,17 +165,28 @@ class WakeScheduler:
                 _int_config(agent.config, "max_run_seconds", FALLBACK_MAX_RUN_SECONDS)
                 + RUN_GRACE_SECONDS
             )
-            if run.started_at is not None and run.started_at < now - timedelta(
-                seconds=budget
-            ):
-                run.status = "interrupted"
-                run.finished_at = now
-                run.error_message = (
-                    "Recovered: run exceeded wall-clock budget plus grace."
-                )
-                if agent.status == "running":
-                    agent.status = "idle"
-                interrupted += 1
+            cutoff = now - timedelta(seconds=budget)
+            if run.started_at is None or run.started_at >= cutoff:
+                continue
+            updated = db.session.query(AgentRun).filter(
+                AgentRun.id == run.id,
+                AgentRun.status == "running",
+                AgentRun.started_at < cutoff,
+            ).update(
+                {
+                    AgentRun.status: "interrupted",
+                    AgentRun.finished_at: now,
+                    AgentRun.error_message: (
+                        "Recovered: run exceeded wall-clock budget plus grace."
+                    ),
+                },
+                synchronize_session=False,
+            )
+            interrupted += updated
+            if updated:
+                db.session.query(Agent).filter(
+                    Agent.id == agent.id, Agent.status == "running"
+                ).update({Agent.status: "idle"}, synchronize_session=False)
         if interrupted:
             db.session.commit()
             logger.info("Interrupted %d stale agent run(s)", interrupted)

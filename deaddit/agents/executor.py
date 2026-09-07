@@ -13,9 +13,13 @@ import hashlib
 import json
 import re
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
+from typing import Iterator
 
 from pydantic import BaseModel, ValidationError
+from sqlalchemy import event
+from sqlalchemy.exc import SQLAlchemyError
 
 from deaddit.agents.registry import (
     BACKSTAGE_SUBDEADDIT_NAME,
@@ -26,18 +30,61 @@ from deaddit.agents.registry import (
     offered_post_tool_names,
     parse_tier,
 )
-from deaddit.agents.registry import (
-    get as get_tool,
-)
+from deaddit.agents.registry import get as get_tool
 from deaddit.extensions import db
 from deaddit.llm import SchemaValidationError, ToolSpec, validate_tool_args
-from deaddit.models import AgentRun, AgentTurn, Comment, Post, ToolCall, User
+from deaddit.models import Agent, AgentRun, AgentTurn, Comment, Post, ToolCall, User
 
 __all__ = ["ExecutorError", "execute", "normalize_persona_rate_caps"]
 
 
 class ExecutorError(Exception):
     """Infrastructure failure only; guardrail rejections are results."""
+
+
+class _RunOwnershipLost(SQLAlchemyError):
+    """The run stopped owning its writes before a handler could commit."""
+
+
+@contextmanager
+def _run_write_fence(ctx: ToolContext) -> Iterator[None]:
+    """Fence handler flushes against recovery without holding a network lock."""
+    run_id = getattr(ctx.run, "id", None)
+    if run_id is None:
+        yield
+        return
+
+    session = db.session()
+    ownership_lost = False
+
+    def before_flush(session, flush_context, instances) -> None:
+        nonlocal ownership_lost
+        del flush_context, instances
+        touched = tuple(session.new) + tuple(session.dirty) + tuple(session.deleted)
+        # Recovery may update the old run and insert its replacement while a
+        # handler is blocked. Those rows are not handler publication writes.
+        if not touched or all(isinstance(row, (AgentRun, Agent)) for row in touched):
+            return
+        acquired = session.query(AgentRun).filter(
+            AgentRun.id == run_id,
+            AgentRun.status == "running",
+        ).update(
+            {AgentRun.id: AgentRun.id},
+            synchronize_session=False,
+        )
+        if not acquired:
+            ownership_lost = True
+            raise _RunOwnershipLost("run is no longer active")
+
+    event.listen(session, "before_flush", before_flush)
+    try:
+        yield
+    finally:
+        try:
+            if ownership_lost:
+                session.rollback()
+        finally:
+            event.remove(session, "before_flush", before_flush)
 
 
 RATE_CAPS: dict[str, tuple[int, timedelta]] = {
@@ -389,6 +436,25 @@ def _check_loop(
     return warning, force_finish
 
 
+def _inactive_run_result() -> dict:
+    return {
+        "ok": False,
+        "error": "run is no longer active",
+        "kind": "rejected",
+        "force_finish": True,
+    }
+
+
+def _run_is_active(ctx: ToolContext) -> bool:
+    run_id = getattr(ctx.run, "id", None)
+    if run_id is None:
+        return True
+    return (
+        db.session.query(AgentRun.status).filter(AgentRun.id == run_id).scalar()
+        == "running"
+    )
+
+
 def _latest_turn_id(run_id: int) -> int | None:
     row = (
         db.session.query(AgentTurn.id)
@@ -428,7 +494,6 @@ def _truncate_result(result: dict) -> dict:
     serialized = json.dumps(result, default=str)
     return {"truncated": True, "preview": serialized[: _MAX_RESULT_CHARS - 96]}
 
-
 def _persist_and_return(
     ctx: ToolContext,
     name: str,
@@ -436,6 +501,9 @@ def _persist_and_return(
     result: dict,
     started_monotonic: float,
 ) -> dict:
+    """Audit a tool result only while this run still owns the agent."""
+    if not _run_is_active(ctx):
+        return _inactive_run_result()
     duration_ms = int((time.monotonic() - started_monotonic) * 1000)
     stored = _truncate_result(result)
     db.session.add(
@@ -451,12 +519,17 @@ def _persist_and_return(
             created_at=datetime.utcnow(),
         )
     )
+    if not _run_is_active(ctx):
+        db.session.rollback()
+        return _inactive_run_result()
     db.session.commit()
     return result
 
 
 def execute(name: str, raw_arguments: dict | str, ctx: ToolContext) -> dict:
     """Run one tool call under all guardrails. See module docstring."""
+    if not _run_is_active(ctx):
+        return _inactive_run_result()
     started = time.monotonic()
 
     try:
@@ -602,8 +675,14 @@ def execute(name: str, raw_arguments: dict | str, ctx: ToolContext) -> dict:
 
     # Dispatch to the handler with a validated params instance.
     params_instance: BaseModel = tool.parameters.model_validate(validated)
+    if not _run_is_active(ctx):
+        return _inactive_run_result()
     try:
-        result = tool.handler(ctx, params_instance)
+        with _run_write_fence(ctx):
+            result = tool.handler(ctx, params_instance)
+    except _RunOwnershipLost:
+        db.session.rollback()
+        result = _inactive_run_result()
     except ValueError as exc:
         result = {"ok": False, "error": str(exc)}
 
