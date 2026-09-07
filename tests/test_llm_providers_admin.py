@@ -242,6 +242,53 @@ def test_config_api_key_resolution_with_providers(app):
         assert Config.get_api_key_for_endpoint("") == "secret-key-abc"
 
 
+
+def test_config_api_key_resolution_does_not_leak_default_key(app, monkeypatch):
+    with app.app_context():
+        db.session.add(
+            LLMProvider(
+                name="Private Provider",
+                api_url="https://private.example/v1",
+                api_key="private-provider-secret",
+                is_default=True,
+            )
+        )
+        db.session.commit()
+        monkeypatch.setenv("OPENAI_KEY", "global-openai-secret")
+
+        assert (
+            Config.get_api_key_for_endpoint("https://unrelated.example/v1") is None
+        )
+
+
+def test_config_api_key_resolution_uses_scoped_env_and_configured_openai_key(
+    app, monkeypatch
+):
+    with app.app_context():
+        monkeypatch.setenv("API_KEY_CUSTOM_EXAMPLE_V1", "endpoint-env-secret")
+        assert (
+            Config.get_api_key_for_endpoint("https://custom.example/v1/")
+            == "endpoint-env-secret"
+        )
+
+        Config.set("OPENAI_API_URL", "https://configured.example/v1")
+        monkeypatch.setenv("OPENAI_KEY", "configured-openai-secret")
+        assert (
+            Config.get_api_key_for_endpoint("https://configured.example/v1/")
+            == "configured-openai-secret"
+        )
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    ["https://evilopenai.com/v1", "https://evil.example/openai.com/v1"],
+)
+def test_endpoint_key_mapping_rejects_openai_lookalikes(app, monkeypatch, endpoint):
+    with app.app_context():
+        monkeypatch.setenv("API_KEY_OPENAI", "openai-secret")
+        monkeypatch.delenv("OPENAI_KEY", raising=False)
+        assert Config.get_api_key_for_endpoint(endpoint) is None
+
 def test_routing_resolve_with_default_provider(app):
     """Test that routing.resolve uses default provider settings."""
     with app.app_context():
