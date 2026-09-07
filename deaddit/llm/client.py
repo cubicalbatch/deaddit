@@ -155,7 +155,7 @@ def _extract_response(response: dict) -> tuple[str, list[dict] | None]:
             raise PermanentLLMError(
                 f"Unexpected API response format: {str(response)[:200]}"
             )
-        if tool_calls is not None:
+        if content or tool_calls is not None:
             return content, tool_calls
         if not content:
             reasoning = message.get("reasoning") or message.get("reasoning_content")
