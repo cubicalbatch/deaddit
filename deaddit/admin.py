@@ -4575,6 +4575,21 @@ def api_create_agent():
             jsonify({"success": False, "error": "max_delay must be >= min_delay >= 0"}),
             400,
         )
+    try:
+        seconds_between_turns = int(
+            payload.get(
+                "seconds_between_turns", DEFAULT_CONFIG["seconds_between_turns"]
+            )
+        )
+    except (TypeError, ValueError):
+        return jsonify(
+            {"success": False, "error": "seconds_between_turns must be an integer"}
+        ), 400
+    if seconds_between_turns < 0:
+        return (
+            jsonify({"success": False, "error": "seconds_between_turns must be >= 0"}),
+            400,
+        )
 
     config = {
         "provider_id": provider.id if provider else None,
@@ -4584,6 +4599,7 @@ def api_create_agent():
         "max_delay": max_delay,
         "max_actions_per_run": DEFAULT_CONFIG["max_actions_per_run"],
         "max_run_seconds": DEFAULT_CONFIG["max_run_seconds"],
+        "seconds_between_turns": seconds_between_turns,
     }
     if persona_mode == "random" and payload.get("backfill_memory", True):
         config["backfill_memory"] = True
@@ -4835,6 +4851,31 @@ def api_update_agent(agent_id):
                 400,
             )
         config["max_run_seconds"] = run_sec_val
+    # seconds_between_turns
+    turn_gap_val = payload.get(
+        "seconds_between_turns", cfg_in.get("seconds_between_turns")
+    )
+    if turn_gap_val is not None:
+        try:
+            turn_gap_val = int(turn_gap_val)
+        except (TypeError, ValueError):
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "seconds_between_turns must be an integer",
+                    }
+                ),
+                400,
+            )
+        if turn_gap_val < 0:
+            return (
+                jsonify(
+                    {"success": False, "error": "seconds_between_turns must be >= 0"}
+                ),
+                400,
+            )
+        config["seconds_between_turns"] = turn_gap_val
 
     # daily_request_ceiling
     if "daily_request_ceiling" in payload or "daily_request_ceiling" in cfg_in:

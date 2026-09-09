@@ -132,17 +132,22 @@
                     </div>
 
                     <div class="row g-2 mb-2">
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label for="edit-ceiling" class="form-label small mb-1 fw-bold">Daily Ceiling</label>
                             <input type="number" id="edit-ceiling" class="form-control form-control-sm" min="1" placeholder="(unlimited)">
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label for="edit-max-actions" class="form-label small mb-1 fw-bold">Max Actions / Run</label>
                             <input type="number" id="edit-max-actions" class="form-control form-control-sm" min="1" placeholder="30">
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label for="edit-max-seconds" class="form-label small mb-1 fw-bold">Max Run Secs</label>
                             <input type="number" id="edit-max-seconds" class="form-control form-control-sm" min="1" placeholder="300">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="edit-turn-interval" class="form-label small mb-1 fw-bold">Secs Between Turns</label>
+                            <input type="number" id="edit-turn-interval" class="form-control form-control-sm" min="0" placeholder="0" title="Rate-limit pacing: minimum seconds between LLM calls within one visit (0 = off)">
+                            <div class="form-text">Rate-limit pacing between LLM calls (0 = off)</div>
                         </div>
                     </div>
 
@@ -468,6 +473,7 @@
         document.getElementById("edit-ceiling").value = (agent.config && agent.config.daily_request_ceiling != null) ? agent.config.daily_request_ceiling : "";
         document.getElementById("edit-max-actions").value = (agent.config && agent.config.max_actions_per_run != null) ? agent.config.max_actions_per_run : 30;
         document.getElementById("edit-max-seconds").value = (agent.config && agent.config.max_run_seconds != null) ? agent.config.max_run_seconds : 300;
+        document.getElementById("edit-turn-interval").value = (agent.config && agent.config.seconds_between_turns != null) ? agent.config.seconds_between_turns : 0;
         updateEditEstimates();
 
         const imgCfg = (agent.config && agent.config.image_posts) || {};
@@ -1556,6 +1562,7 @@
         const maxDelay = document.getElementById("edit-max-delay").value;
         const maxActions = document.getElementById("edit-max-actions").value;
         const maxSeconds = document.getElementById("edit-max-seconds").value;
+        const turnInterval = document.getElementById("edit-turn-interval").value;
         const ceilingVal = document.getElementById("edit-ceiling").value.trim();
         const providerId = document.getElementById("edit-provider-select").value;
         const provider = providersList.find(p => p.id === Number(providerId));
@@ -1569,6 +1576,7 @@
             min_delay: minDelay !== "" ? Number(minDelay) : 60,
             max_delay: maxDelay !== "" ? Number(maxDelay) : 900,
             max_actions_per_run: maxActions !== "" ? Number(maxActions) : 30,
+            seconds_between_turns: turnInterval !== "" ? Number(turnInterval) : 0,
             max_run_seconds: maxSeconds !== "" ? Number(maxSeconds) : 300,
             daily_request_ceiling: ceilingVal !== "" ? Number(ceilingVal) : null,
         };

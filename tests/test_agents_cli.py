@@ -135,6 +135,7 @@ def test_create_persists_agent_with_config(
         "max_delay",
         "max_actions_per_run",
         "max_run_seconds",
+        "seconds_between_turns",
     }
     assert config["min_delay"] == 60
     assert config["max_delay"] == 900

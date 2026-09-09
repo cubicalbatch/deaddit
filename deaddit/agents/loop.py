@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG: dict[str, Any] = {
     "max_actions_per_run": 30,
     "max_run_seconds": 300,
+    "seconds_between_turns": 0,
     "min_delay": 60,
     "max_delay": 900,
 }
@@ -292,7 +293,9 @@ def reserve_persona_run(agent: Agent, *, trigger: str) -> AgentRun:
                 AgentRun.query.filter_by(agent_id=agent.id, status="running").first()
                 is not None
             ):
-                raise ValueError(f"Agent {agent.id} already has a run in progress")
+                raise ValueError(
+                    f"Agent {agent.id} already has a run in progress"
+                ) from None
             continue
         logger.info(
             "Agent %s reserved persona '%s' (run %s)",
@@ -393,6 +396,7 @@ def run_once(
 
     config = _effective_config(agent)
     max_actions = _int_budget(config, "max_actions_per_run")
+    turn_interval = max(0, _int_budget(config, "seconds_between_turns"))
     max_run_seconds = max(1, _int_budget(config, "max_run_seconds"))
     provider, api_url, model = resolve_agent_llm(agent)
     api_key = (
@@ -464,6 +468,7 @@ def run_once(
         return _current_run(run.id) or run
 
     turn_count = 0
+    last_call_at: float | None = None
     action_count = 0
     nudged = False
     rejected_streak = 0
@@ -491,6 +496,21 @@ def run_once(
                 return _current_run(run.id) or run
             if run_deadline.expired():
                 break
+            if last_call_at is not None and turn_interval > 0:
+                now = time.monotonic()
+                wait_seconds = turn_interval - (now - last_call_at)
+                if wait_seconds > 0:
+                    wait_seconds = min(
+                        wait_seconds,
+                        max(0.0, run_deadline.expires_at - now),
+                    )
+                    if wait_seconds <= 0:
+                        break
+                    time.sleep(wait_seconds)
+                    if not _run_is_active(run.id):
+                        return _current_run(run.id) or run
+                    if run_deadline.expired():
+                        break
 
             request_messages = [dict(message) for message in messages]
             result = client.complete(
@@ -506,6 +526,7 @@ def run_once(
                     tools=specs,
                 )
             )
+            last_call_at = time.monotonic()
             accumulate(result.usage)
             if not _run_is_active(run.id):
                 return _current_run(run.id) or run

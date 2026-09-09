@@ -521,3 +521,37 @@ def test_admin_agents_page_defaults_to_random_persona(seeded_db, admin_client):
     assert "12-hour" not in html
     assert "12 hour" not in html
     assert "last 12 hours" not in html
+
+
+def test_update_agent_seconds_between_turns(seeded_db, admin_client, db_session):
+    agent = _make_agent(db_session, "alice")
+
+    resp = admin_client.put(
+        f"/admin/api/agents/{agent.id}",
+        json={"seconds_between_turns": 30},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["agent"]["config"]["seconds_between_turns"] == 30
+
+    resp_zero = admin_client.put(
+        f"/admin/api/agents/{agent.id}",
+        json={"seconds_between_turns": 0},
+    )
+    assert resp_zero.status_code == 200
+    db.session.refresh(agent)
+    assert agent.config["seconds_between_turns"] == 0
+
+    resp_negative = admin_client.put(
+        f"/admin/api/agents/{agent.id}",
+        json={"seconds_between_turns": -5},
+    )
+    assert resp_negative.status_code == 400
+    assert "seconds_between_turns" in resp_negative.get_json()["error"]
+
+    resp_string = admin_client.put(
+        f"/admin/api/agents/{agent.id}",
+        json={"seconds_between_turns": "abc"},
+    )
+    assert resp_string.status_code == 400
+    assert "seconds_between_turns" in resp_string.get_json()["error"]

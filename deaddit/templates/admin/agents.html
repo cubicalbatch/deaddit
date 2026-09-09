@@ -133,6 +133,7 @@
                 <div class="d-flex gap-2">
                     <input type="number" id="min-delay-input" class="form-control form-control-sm" min="0" value="60" placeholder="min delay">
                     <input type="number" id="max-delay-input" class="form-control form-control-sm" min="0" value="900" placeholder="max delay">
+                    <input type="number" id="turn-interval-input" class="form-control form-control-sm" min="0" value="0" placeholder="secs between turns" title="Rate-limit pacing: minimum seconds between LLM calls within one visit (0 = off)">
                 </div>
                 <div id="create-estimate-panel" class="mt-2 p-2 border rounded bg-body-tertiary small" role="status" aria-live="polite" aria-atomic="true" aria-label="24-hour agent estimates">
                     <div class="fw-semibold mb-1">24-hour estimates</div>
@@ -983,10 +984,12 @@
         const model = document.getElementById("model-input").value.trim();
         if (model) payload.model = model;
         const minDelay = document.getElementById("min-delay-input").value;
+        const turnInterval = document.getElementById("turn-interval-input").value;
         const maxDelay = document.getElementById("max-delay-input").value;
         const ceiling = document.getElementById("ceiling-input").value;
         if (minDelay !== "") payload.min_delay = Number(minDelay);
         if (maxDelay !== "") payload.max_delay = Number(maxDelay);
+        if (turnInterval !== "") payload.seconds_between_turns = Number(turnInterval);
         if (ceiling !== "") payload.daily_request_ceiling = Number(ceiling);
 
         const imageEnabled = document.getElementById("image-enabled-check").checked;

@@ -145,6 +145,7 @@ def _agent_config(
         "max_delay": max_delay,
         "max_actions_per_run": DEFAULT_CONFIG["max_actions_per_run"],
         "max_run_seconds": DEFAULT_CONFIG["max_run_seconds"],
+        "seconds_between_turns": DEFAULT_CONFIG["seconds_between_turns"],
     }
     if extra_config:
         config.update(extra_config)

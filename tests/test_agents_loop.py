@@ -1917,3 +1917,70 @@ def test_image_post_provenance_uses_selected_persona(
     assert post.image is not None
     run.status = "completed"
     db_session.commit()
+
+
+def test_seconds_between_turns_paces_llm_calls(
+    seeded_db, db_session, fake_llm, monkeypatch
+):
+    agent = _make_agent(
+        db_session,
+        "alice",
+        config={"seconds_between_turns": 30, "min_delay": 0, "max_delay": 0},
+    )
+    fake_llm.enqueue_content("Just looking around.")
+    fake_llm.enqueue_content("Done, finishing.")
+    sleeps = []
+    monkeypatch.setattr(loop_module.time, "sleep", sleeps.append)
+
+    run = run_once(agent.id)
+
+    assert run.status == "completed"
+    assert run.turn_count == 2
+    assert len(sleeps) == 1
+    assert 0 < sleeps[0] <= 30
+
+
+def test_seconds_between_turns_defaults_off(seeded_db, db_session, fake_llm, monkeypatch):
+    agent = _make_agent(db_session, "alice", config={"min_delay": 0, "max_delay": 0})
+    fake_llm.enqueue_content("Just looking around.")
+    fake_llm.enqueue_content("Done, finishing.")
+    sleeps = []
+    monkeypatch.setattr(loop_module.time, "sleep", sleeps.append)
+
+    run = run_once(agent.id)
+
+    assert run.status == "completed"
+    assert run.turn_count == 2
+    assert sleeps == []
+
+
+def test_seconds_between_turns_wait_is_clamped_to_deadline(
+    seeded_db, db_session, fake_llm, monkeypatch
+):
+    agent = _make_agent(
+        db_session,
+        "alice",
+        config={
+            "seconds_between_turns": 60,
+            "max_run_seconds": 45,
+            "min_delay": 0,
+            "max_delay": 0,
+        },
+    )
+    fake_llm.enqueue(_tool_response([_tool_call("call_1", "view_profile", {})]))
+    fake_llm.enqueue(_finish())
+    clock = {"now": 0.0}
+    sleeps = []
+    monkeypatch.setattr(loop_module.time, "monotonic", lambda: clock["now"])
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock["now"] += seconds
+
+    monkeypatch.setattr(loop_module.time, "sleep", sleep)
+
+    run = run_once(agent.id)
+
+    assert run.status == "completed"
+    assert run.turn_count == 1
+    assert sleeps == [45]
