@@ -8,7 +8,6 @@ from pathlib import Path
 
 from PIL import Image
 
-from deaddit import db
 from deaddit.agents.executor import execute
 from deaddit.agents.registry import ToolContext
 from deaddit.images.types import ImageGenerationResult
@@ -22,7 +21,6 @@ from deaddit.models import (
 )
 from deaddit.runtime.wakes import WakeScheduler
 from deaddit.websites.generator import WebsiteGenerationResult
-
 
 _VALID_WEBSITE_HTML = "<!doctype html><html><body><h1>hi</h1></body></html>"
 

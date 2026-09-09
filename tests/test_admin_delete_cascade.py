@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import func, select
-from deaddit.dynamics.votes import cast_vote
 
+from deaddit.dynamics.votes import cast_vote
 from deaddit.models import (
     Agent,
     AgentMemory,

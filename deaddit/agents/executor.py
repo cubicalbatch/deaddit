@@ -13,9 +13,9 @@ import hashlib
 import json
 import re
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import Iterator
 
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import event
@@ -63,7 +63,7 @@ def _run_write_fence(ctx: ToolContext) -> Iterator[None]:
         touched = tuple(session.new) + tuple(session.dirty) + tuple(session.deleted)
         # Recovery may update the old run and insert its replacement while a
         # handler is blocked. Those rows are not handler publication writes.
-        if not touched or all(isinstance(row, (AgentRun, Agent)) for row in touched):
+        if not touched or all(isinstance(row, AgentRun | Agent) for row in touched):
             return
         acquired = session.query(AgentRun).filter(
             AgentRun.id == run_id,

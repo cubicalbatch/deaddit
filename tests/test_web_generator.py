@@ -17,7 +17,6 @@ import pytest
 
 import deaddit.llm.provider as llm_provider
 import deaddit.llm.transport as llm_transport
-
 from deaddit.images.types import Deadline
 from deaddit.llm.errors import PermanentLLMError, TransientLLMError
 from deaddit.models import LLMUsage

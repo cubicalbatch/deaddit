@@ -9,11 +9,11 @@ import hashlib
 import hmac
 
 import pytest
+from flask.sessions import SecureCookieSessionInterface
 
 from deaddit import create_app, db
 from deaddit.config import Config
 from deaddit.extensions import socketio
-from flask.sessions import SecureCookieSessionInterface
 
 
 def _register_admin_handlers():

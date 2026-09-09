@@ -20,9 +20,9 @@ from deaddit.dynamics.ranking import (
 )
 from deaddit.extensions import db
 
+from .admin_auth import is_admin_authenticated
 from .config import Config
 from .models import Comment, Post, Subdeaddit, User
-from .admin_auth import is_admin_authenticated
 from .utils import (
     format_content_html,
     get_comment_counts_bulk,

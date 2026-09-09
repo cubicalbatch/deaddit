@@ -12,7 +12,6 @@ from PIL import Image
 
 from deaddit import create_app
 from deaddit.images import storage
-from deaddit.images.types import Deadline, ImageTimeoutError
 from deaddit.images.storage import (
     ImageTooLargeError,
     MalformedImageError,
@@ -27,6 +26,7 @@ from deaddit.images.storage import (
     resolve_media_path,
     store_variants,
 )
+from deaddit.images.types import Deadline, ImageTimeoutError
 
 
 class FakeResponse:
@@ -310,7 +310,8 @@ def test_download_image_checks_deadline_before_body_iteration(monkeypatch):
 
 def test_download_image_expired_deadline_fails_before_fetch(monkeypatch):
     monkeypatch.setattr("deaddit.images.types.time.monotonic", lambda: 100.0)
-    fetch = lambda *args, **kwargs: pytest.fail("expired download performed I/O")
+    def fetch(*args, **kwargs):
+        pytest.fail("expired download performed I/O")
     with pytest.raises(ImageTimeoutError):
         download_image(
             "https://images.example/1",
