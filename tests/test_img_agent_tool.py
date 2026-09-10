@@ -541,3 +541,43 @@ def test_image_post_failures_leave_no_post_no_files_and_share_the_post_budget(
     assert second["ok"] is True
     assert third["ok"] is False and "recently" in third["error"]
     assert Post.query.count() == 2
+
+
+def test_image_post_refuses_banned_paper_word_before_generation(app, db_session, fake_adapter):
+    """IMAGE_BANNED_WORDS nudge: paper/logbook cliché prompts are refused
+    before any generation, and a different subject retries free, same run."""
+    provider = _make_provider(db_session)
+    agent = _image_agent(db_session, provider)
+    run = _new_run(db_session, agent)
+
+    refused = execute(
+        "create_image_post",
+        {**IMAGE_ARGS, "image_prompt": "A leather-bound logbook open on a desk"},
+        _ctx(agent, run, deadline=Deadline.after(60)),
+    )
+    assert refused["ok"] is False and "banned word 'logbook'" in refused["error"]
+    assert "create_image_post again" in refused["hint"]
+    assert fake_adapter.generate_calls == []
+    assert Post.query.count() == 0
+
+    # alt_text alone still names the banned picture; word-start, case-insensitive.
+    by_alt = execute(
+        "create_image_post",
+        {**IMAGE_ARGS, "alt_text": "Receipts spread on a counter"},
+        _ctx(agent, run, deadline=Deadline.after(60)),
+    )
+    assert by_alt["ok"] is False and "banned word 'receipt'" in by_alt["error"]
+    assert fake_adapter.generate_calls == []
+
+    # Retrying with a genuinely different subject in the same run succeeds.
+    fake_adapter.enqueue_generate(_generation())
+    retried = execute(
+        "create_image_post",
+        {
+            **IMAGE_ARGS,
+            "image_prompt": "A rusted bicycle chained to a fence at dusk",
+        },
+        _ctx(agent, run, deadline=Deadline.after(60)),
+    )
+    assert retried["ok"] is True
+    assert len(fake_adapter.generate_calls) == 1

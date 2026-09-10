@@ -210,6 +210,23 @@ def _create_image_post(ctx: ToolContext, params: CreateImagePostArgs) -> dict:
             "hint": "use search with type='subdeaddit' to find existing communities",
         }
 
+    # Paper-cliché refusal: rejected before generation, so the agent can
+    # retry in this same visit with a different subject for free.
+    banned = _banned_image_word(params)
+    if banned is not None:
+        return {
+            "ok": False,
+            "error": (
+                f"your image idea uses the banned word '{banned}' and cannot "
+                "be published - the feed already has too many paper, logbook, "
+                "and receipt shots"
+            ),
+            "hint": (
+                "picture something completely different - a place, an object, "
+                "a person, a moment - and call create_image_post again"
+            ),
+        }
+
     try:
         preflight_image_post(
             user=ctx.user_username, subdeaddit=params.community, title=params.title
@@ -392,6 +409,26 @@ def _banned_website_word(params: CreateWebsiteArgs) -> str | None:
             params.page_name_hint,
         )
     ).lower()
+    for word in words:
+        if re.search(rf"(?<!\w){re.escape(word)}", text):
+            return word
+    return None
+
+
+def _banned_image_word(params: CreateImagePostArgs) -> str | None:
+    """Return the first banned word in the image prompt or alt text.
+
+    Image posts kept collapsing into paper/logbook shots (receipts, ledgers,
+    notebooks), so this mirrors :func:`_banned_website_word`: case-insensitive
+    word-start match, refused before any generation. ``alt_text`` is checked
+    too because it describes the same picture - a clean prompt behind
+    ``alt_text="a handwritten ledger page"`` is still the banned idea.
+    """
+    raw = Config.get("IMAGE_BANNED_WORDS", "") or ""
+    words = [w for w in re.split(r"[,\s]+", raw.lower()) if w]
+    if not words:
+        return None
+    text = f"{params.image_prompt} {params.alt_text}".lower()
     for word in words:
         if re.search(rf"(?<!\w){re.escape(word)}", text):
             return word

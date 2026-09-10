@@ -75,6 +75,11 @@ class Config:
         "WEBSITE_GENERATION_TIMEOUT_SECONDS": "300",
         "WEBSITE_MAX_HTML_BYTES": "1048576",
         "WEBSITE_BANNED_WORDS": "ledger",
+        "IMAGE_BANNED_WORDS": (
+            "paper, logbook, notebook, notepad, journal, diary, receipt, "
+            "ledger, document, paperwork, clipboard, flyer, pamphlet, leaflet, "
+            "printout, invoice, manuscript, parchment, note, handwritten"
+        ),
         "TROLL_USER_CHANCE": "0.1",
     }
 
@@ -98,6 +103,7 @@ class Config:
         "WEBSITE_GENERATION_TIMEOUT_SECONDS": "Read timeout in seconds for the nested create_website HTML-generation request",
         "WEBSITE_MAX_HTML_BYTES": "Byte ceiling for one stored generated-website HTML document",
         "WEBSITE_BANNED_WORDS": "Words banned from create_website proposals: if the title, body, site brief, or hostname/page hints contain one (word-prefix match, case-insensitive), the tool refuses before any HTML generation and the agent must propose a different idea",
+        "IMAGE_BANNED_WORDS": "Words banned from create_image_post prompts: if the image_prompt or alt_text contains one (word-prefix match, case-insensitive), the tool refuses before any image generation and the agent must picture a different subject; defaults target the paper/logbook/receipt cliché",
         "TROLL_USER_CHANCE": "Probability (0-1) that a newly generated persona is a troll; applies only when troll_mode is 'chance'",
     }
 
