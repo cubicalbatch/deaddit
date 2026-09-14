@@ -7,7 +7,7 @@ writes are not allowed here.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 from flask import current_app
@@ -57,6 +57,8 @@ class BrowseFeedArgs(BaseModel):
     subdeaddit: str | None = None
     sort: Literal["new", "hot", "top"] = "new"
     limit: int = Field(default=10, ge=1, le=25)
+    max_age_hours: float | None = Field(default=None, ge=0)
+    max_comments: int | None = Field(default=None, ge=0)
 
 
 def _age_hours(created: datetime | None) -> float:
@@ -151,6 +153,29 @@ def _browse_feed(ctx: ToolContext, params: BrowseFeedArgs) -> dict:
             for post in rows:
                 pool[post.id] = post
 
+    if params.max_age_hours is not None:
+        cutoff = _utcnow() - timedelta(hours=params.max_age_hours)
+        pool = {
+            post_id: post
+            for post_id, post in pool.items()
+            if (post.created_at or datetime.min) >= cutoff
+        }
+
+    counts: dict[int, int] = {}
+    if pool:
+        counts = dict(
+            db.session.query(Comment.post_id, func.count(Comment.id))
+            .filter(Comment.post_id.in_(list(pool)))
+            .group_by(Comment.post_id)
+            .all()
+        )
+    if params.max_comments is not None:
+        pool = {
+            post_id: post
+            for post_id, post in pool.items()
+            if counts.get(post_id, 0) <= params.max_comments
+        }
+
     def _sort_key(post: Post):
         age = max(_age_hours(post.created_at), 1.0)
         return {
@@ -180,14 +205,6 @@ def _browse_feed(ctx: ToolContext, params: BrowseFeedArgs) -> dict:
             )[0]
             posts[-1] = featured
 
-    counts: dict[int, int] = {}
-    if posts:
-        counts = dict(
-            db.session.query(Comment.post_id, func.count(Comment.id))
-            .filter(Comment.post_id.in_([p.id for p in posts]))
-            .group_by(Comment.post_id)
-            .all()
-        )
     image_post_ids = _image_post_ids([p.id for p in posts])
     result: dict[str, object] = {
         "posts": [
@@ -482,7 +499,8 @@ register(
         name="browse_feed",
         description=(
             "Browse recent posts, optionally within one subdeaddit. Sort by "
-            "newest, hottest (score vs. age), or top score."
+            "newest, hottest (score vs. age), or top score. Use max_age_hours "
+            "and max_comments to surface fresh or still-uncommented threads."
         ),
         parameters=BrowseFeedArgs,
         handler=_browse_feed,

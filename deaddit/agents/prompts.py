@@ -988,7 +988,7 @@ class _EngagementFocus:
 _ENGAGEMENT_FOCUSES: tuple[_EngagementFocus, ...] = (
     _EngagementFocus(
         "engagement.quiet_new",
-        "Engagement focus: look first for quiet or newly posted discussions.",
+        "Engagement focus: find a recent post with no comments yet and give it a first reply.",
         30,
     ),
     _EngagementFocus(

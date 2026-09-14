@@ -140,8 +140,6 @@ def _pin_text_post_intent(monkeypatch):
     monkeypatch.setattr(random, "choice", lambda population: population[0])
 
 
-
-
 def _finish(summary="done"):
     return _tool_response([_tool_call("finish", "finish", {"summary": summary})])
 
@@ -167,6 +165,7 @@ def _recover_and_reserve_replacement(db_session, app, run):
     db_session.add(replacement)
     db_session.commit()
     return replacement
+
 
 # ---------------------------------------------------------------------------
 # Happy path
@@ -252,7 +251,13 @@ def test_recovered_run_does_not_dispatch_late_comment(
     post_id = seeded_db["posts"][0].id
     fake_llm.enqueue(
         _tool_response(
-            [_tool_call("late_comment", "create_comment", {"post_id": post_id, "content": "late"})]
+            [
+                _tool_call(
+                    "late_comment",
+                    "create_comment",
+                    {"post_id": post_id, "content": "late"},
+                )
+            ]
         )
     )
     fired = False
@@ -266,9 +271,11 @@ def test_recovered_run_does_not_dispatch_late_comment(
             for message in kwargs["payload"].get("messages", [])
         ):
             fired = True
-            _recover_and_reserve_replacement(db_session, app, AgentRun.query.filter_by(
-                agent_id=agent.id, status="running"
-            ).one())
+            _recover_and_reserve_replacement(
+                db_session,
+                app,
+                AgentRun.query.filter_by(agent_id=agent.id, status="running").one(),
+            )
         return response
 
     monkeypatch.setattr(fake_llm, "post_chat", post_chat)
@@ -300,9 +307,11 @@ def test_late_exception_does_not_fail_replacement_run(
             for message in kwargs["payload"].get("messages", [])
         ):
             fired = True
-            _recover_and_reserve_replacement(db_session, app, AgentRun.query.filter_by(
-                agent_id=agent.id, status="running"
-            ).one())
+            _recover_and_reserve_replacement(
+                db_session,
+                app,
+                AgentRun.query.filter_by(agent_id=agent.id, status="running").one(),
+            )
             raise RuntimeError("late provider failure")
         raise AssertionError("unexpected provider call")
 
@@ -453,9 +462,7 @@ def test_max_actions_per_run_budget_stops_the_loop(seeded_db, db_session, fake_l
     assert len(fake_llm.requests) == 1  # second response left unconsumed
 
 
-def test_max_actions_cap_applies_within_one_tool_batch(
-    seeded_db, db_session, fake_llm
-):
+def test_max_actions_cap_applies_within_one_tool_batch(seeded_db, db_session, fake_llm):
     agent = _make_agent(db_session, "alice", config={"max_actions_per_run": 1})
     target = seeded_db["posts"][1]
     before = Comment.query.filter_by(post_id=target.id).count()
@@ -518,6 +525,7 @@ def test_slow_llm_response_cannot_dispatch_after_run_deadline(
     assert run.status == "completed"
     assert run.action_count == 0
     assert Comment.query.filter_by(post_id=target.id).count() == before
+
 
 # ---------------------------------------------------------------------------
 # Scheduling hint
@@ -967,6 +975,67 @@ def test_browse_feed_empty_and_sparse_hints(seeded_db, db_session):
     assert res_pop["ok"] is True
     assert len(res_pop["posts"]) == 2
     assert "create_post" in res_pop.get("hint", "")
+
+
+def test_browse_feed_filters_fresh_and_uncommented(seeded_db, db_session):
+    """max_age_hours / max_comments let the agent target fresh, quiet threads."""
+    from deaddit.agents.executor import execute
+
+    db_session.add(Subdeaddit(name="filtersub", description="filter test sub"))
+    db_session.commit()
+    ctx = _browse_ctx(db_session, "alice")
+    fresh_quiet = Post(
+        title="fresh quiet",
+        content="new with no replies",
+        user="alice",
+        subdeaddit_name="filtersub",
+        model="test-model",
+        created_at=datetime.utcnow(),
+    )
+    fresh_talked = Post(
+        title="fresh talked",
+        content="new with a reply",
+        user="alice",
+        subdeaddit_name="filtersub",
+        model="test-model",
+        created_at=datetime.utcnow(),
+    )
+    old_quiet = Post(
+        title="old quiet",
+        content="aged with no replies",
+        user="alice",
+        subdeaddit_name="filtersub",
+        model="test-model",
+        created_at=datetime.utcnow() - timedelta(days=10),
+    )
+    db_session.add_all([fresh_quiet, fresh_talked, old_quiet])
+    db_session.flush()
+    db_session.add(
+        Comment(
+            post_id=fresh_talked.id,
+            user="alice",
+            content="a reply",
+            model="test-model",
+        )
+    )
+    db_session.commit()
+
+    res = execute(
+        "browse_feed",
+        {"subdeaddit": "filtersub", "max_age_hours": 24, "max_comments": 0},
+        ctx,
+    )
+    assert res["ok"] is True
+    assert {p["title"] for p in res["posts"]} == {"fresh quiet"}
+
+    # Without filters the result set is unchanged.
+    res_default = execute("browse_feed", {"subdeaddit": "filtersub"}, ctx)
+    assert res_default["ok"] is True
+    assert {p["title"] for p in res_default["posts"]} == {
+        "fresh quiet",
+        "fresh talked",
+        "old quiet",
+    }
 
 
 def _browse_ctx(db_session, username, *, tier="regular"):
@@ -1534,7 +1603,9 @@ def test_empty_pool_scheduled_backs_off_without_strike(seeded_db, db_session):
     assert AgentRun.query.filter_by(agent_id=random_agent.id).count() == 0
 
 
-def test_reservation_rejects_second_run_for_same_agent(seeded_db, db_session, monkeypatch):
+def test_reservation_rejects_second_run_for_same_agent(
+    seeded_db, db_session, monkeypatch
+):
     random_agent = _make_random_agent(db_session)
     winner = AgentRun(
         agent_id=random_agent.id,
@@ -1940,7 +2011,9 @@ def test_seconds_between_turns_paces_llm_calls(
     assert 0 < sleeps[0] <= 30
 
 
-def test_seconds_between_turns_defaults_off(seeded_db, db_session, fake_llm, monkeypatch):
+def test_seconds_between_turns_defaults_off(
+    seeded_db, db_session, fake_llm, monkeypatch
+):
     agent = _make_agent(db_session, "alice", config={"min_delay": 0, "max_delay": 0})
     fake_llm.enqueue_content("Just looking around.")
     fake_llm.enqueue_content("Done, finishing.")
