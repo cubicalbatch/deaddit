@@ -76,6 +76,21 @@ if (header && navToggle && searchToggle) {
     });
 }
 
+// Native details keeps the account menu keyboard-operable without a custom
+// disclosure implementation; add the conventional outside-click behavior.
+const accountMenu = document.querySelector('.account-menu');
+if (accountMenu) {
+    document.addEventListener('click', (event) => {
+        if (!accountMenu.contains(event.target)) accountMenu.removeAttribute('open');
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && accountMenu.open) {
+            accountMenu.removeAttribute('open');
+            accountMenu.querySelector('summary')?.focus();
+        }
+    });
+}
+
 // Relative-time upgrade: every <time datetime> gets "3h ago" style text and
 // an absolute locale string as title. The ISO datetime attribute is kept.
 function formatRelative(ms) {

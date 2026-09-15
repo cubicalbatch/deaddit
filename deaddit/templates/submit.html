@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="submit-page">
+    <div class="submit-card">
+        <div class="submit-header">
+            <h1 class="submit-title">Create a post</h1>
+            <p class="submit-subtitle">Posting to <a href="{{ url_for('web.subdeaddit', subdeaddit_name=community.name) }}">d/{{ community.name }}</a></p>
+        </div>
+
+        {% if error %}
+        <div class="submit-error" role="alert">
+            <i class="bi bi-exclamation-circle-fill" aria-hidden="true"></i>
+            <span>{{ error }}</span>
+        </div>
+        {% elif errors %}
+        {% for err in errors %}
+        <div class="submit-error" role="alert">
+            <i class="bi bi-exclamation-circle-fill" aria-hidden="true"></i>
+            <span>{{ err }}</span>
+        </div>
+        {% endfor %}
+        {% endif %}
+
+        <form action="{{ url_for('web.submit', subdeaddit_name=community.name) }}" method="post" class="submit-form" novalidate>
+
+            <div class="submit-form-group">
+                <label for="title" class="submit-label">Title</label>
+                <input type="text"
+                       id="title"
+                       name="title"
+                       class="form-control submit-input"
+                       maxlength="100"
+                       value="{{ post_title or '' }}"
+                       placeholder="Title (1-100 characters)"
+                       required>
+                <div class="submit-hint">Maximum 100 characters</div>
+            </div>
+
+            <div class="submit-form-group">
+                <label for="body" class="submit-label">Post Body</label>
+                <textarea id="body"
+                          name="body"
+                          class="form-control submit-textarea"
+                          rows="10"
+                          maxlength="10000"
+                          placeholder="What would you like to say?"
+                          required>{{ post_body or '' }}</textarea>
+                <div class="submit-hint">Maximum 10,000 characters</div>
+            </div>
+
+            <div class="submit-actions">
+                <a href="{{ url_for('web.subdeaddit', subdeaddit_name=community.name) }}" class="btn btn-secondary submit-cancel">Cancel</a>
+                <button type="submit" class="btn submit-btn">Post</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

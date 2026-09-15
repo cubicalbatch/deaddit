@@ -2,11 +2,12 @@ import json
 from collections import namedtuple
 from datetime import UTC
 
-from flask import Blueprint, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import joinedload, selectinload
 
 from deaddit.dynamics import degeneracy
+from deaddit.dynamics.inbox import get_inbox, mark_inbox_read
 from deaddit.dynamics.ranking import (
     controversy,
     normalize_comment_sort,
@@ -19,6 +20,14 @@ from deaddit.dynamics.ranking import (
     wilson_lower_bound,
 )
 from deaddit.extensions import db
+from deaddit.human_auth import (
+    authenticate_human,
+    current_human,
+    human_accounts_enabled,
+    logout_human,
+    register_human,
+)
+from deaddit.services import content as content_service
 
 from .admin_auth import is_admin_authenticated
 from .config import Config
@@ -27,6 +36,7 @@ from .utils import (
     format_content_html,
     get_comment_counts_bulk,
     get_websites_bulk,
+    safe_local_next,
     visitor_vote_map,
 )
 
@@ -231,6 +241,11 @@ def post(subdeaddit_name, post_id):
     # Comment sort: "top" default plus new/best/controversial; garbage falls back.
     sort = normalize_comment_sort(request.args.get("sort"))
 
+    reply_target_comment = None
+    reply_to = request.args.get("reply_to", type=int)
+    if reply_to:
+        reply_target_comment = Comment.query.filter_by(id=reply_to, post_id=post_id).first()
+
     comments = Comment.query.filter_by(post_id=post_id).all()
 
     def comment_rank_key(node):
@@ -363,6 +378,7 @@ def post(subdeaddit_name, post_id):
         sort=sort,
         post_body_html=format_content_html(post.content),
         subdeaddit_name=subdeaddit_name,
+        reply_target_comment=reply_target_comment,
         visitor_votes=visitor_vote_map([post.id]),
         comment_visitor_votes=visitor_vote_map(
             [comment.id for comment in comments], target="comment"
@@ -456,6 +472,7 @@ def list_subdeaddit():
     )
 
 
+@bp.route("/u/<username>")
 @bp.route("/user/<username>")
 def user_profile(username):
     user = User.query.get_or_404(username)
@@ -711,3 +728,318 @@ def search():
         title=f"Deaddit - Search: {q}" if q else "Deaddit - Search",
         description="Search Deaddit posts, communities, and people.",
     )
+
+
+@bp.route("/register", methods=["GET", "POST"])
+def register():
+    if not human_accounts_enabled():
+        abort(404)
+    if current_human():
+        return redirect(url_for("web.index"))
+
+    error = None
+    username = ""
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        password_confirm = request.form.get("password_confirm", "")
+        user, error = register_human(username, password, password_confirm)
+        if not error:
+            next_target = safe_local_next(
+                request.args.get("next") or request.form.get("next")
+            )
+            return redirect(next_target or url_for("web.index"))
+
+    return render_template(
+        "account_form.html",
+        mode="register",
+        title="Create Account",
+        description="Register a new Deaddit account",
+        error=error,
+        username=username,
+    )
+
+
+@bp.route("/login", methods=["GET", "POST"])
+def login():
+    if not human_accounts_enabled():
+        abort(404)
+    if current_human():
+        return redirect(url_for("web.index"))
+
+    error = None
+    username = ""
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        user, error = authenticate_human(username, password)
+        if not error:
+            next_target = safe_local_next(
+                request.args.get("next") or request.form.get("next")
+            )
+            return redirect(next_target or url_for("web.index"))
+
+    return render_template(
+        "account_form.html",
+        mode="login",
+        title="Sign In",
+        description="Sign in to your Deaddit account",
+        error=error,
+        username=username,
+    )
+
+
+@bp.route("/logout", methods=["POST"])
+def logout():
+    logout_human()
+    return redirect(url_for("web.index"))
+
+
+@bp.route("/d/<subdeaddit_name>/submit", methods=["GET", "POST"])
+def submit(subdeaddit_name):
+    if not human_accounts_enabled():
+        abort(404)
+    human = current_human()
+    if not human:
+        target = (
+            request.full_path.rstrip("?")
+            if request.full_path.endswith("?")
+            else request.full_path
+        )
+        safe_next = safe_local_next(target)
+        return redirect(
+            url_for("web.login", next=safe_next) if safe_next else url_for("web.login")
+        )
+
+    community = Subdeaddit.query.filter_by(name=subdeaddit_name).first_or_404()
+
+    if request.method == "GET":
+        return render_template(
+            "submit.html",
+            community=community,
+            post_title="",
+            post_body="",
+            error=None,
+            errors=None,
+            title=f"Create a post in d/{community.name} - Deaddit",
+            subdeaddit_name=community.name,
+        )
+
+    post_title = request.form.get("title", "")
+    post_body = request.form.get("body") or request.form.get("content") or ""
+    title_clean = post_title.strip()
+    body_clean = post_body.strip()
+
+    error_msg = None
+    if not title_clean or len(title_clean) > 100:
+        error_msg = "Title must be between 1 and 100 characters."
+    elif not body_clean or len(post_body) > 10000:
+        error_msg = "Body must be between 1 and 10,000 characters."
+
+    if error_msg:
+        return render_template(
+            "submit.html",
+            community=community,
+            post_title=post_title,
+            post_body=post_body,
+            error=error_msg,
+            errors=[error_msg],
+            title=f"Create a post in d/{community.name} - Deaddit",
+            subdeaddit_name=community.name,
+        )
+
+    try:
+        new_post = content_service.create_post(
+            title=title_clean,
+            content=post_body,
+            user=human.username,
+            subdeaddit=community.name,
+            model="human",
+            llm_model=None,
+            post_type="text",
+        )
+    except content_service.ContentValidationError as exc:
+        error_msg = (
+            "Rate limit exceeded. You are posting too frequently. Please try again later."
+            if str(exc) == "rate_limited"
+            else str(exc)
+        )
+        return render_template(
+            "submit.html",
+            community=community,
+            post_title=post_title,
+            post_body=post_body,
+            error=error_msg,
+            errors=[error_msg],
+            title=f"Create a post in d/{community.name} - Deaddit",
+            subdeaddit_name=community.name,
+        )
+
+    return redirect(
+        url_for(
+            "web.post",
+            subdeaddit_name=new_post.subdeaddit_name,
+            post_id=new_post.id,
+        )
+    )
+
+
+@bp.route("/d/<subdeaddit_name>/<int:post_id>/comments", methods=["POST"])
+def create_comment(subdeaddit_name, post_id):
+    if not human_accounts_enabled():
+        abort(404)
+    human = current_human()
+    if not human:
+        return redirect(
+            url_for(
+                "web.login",
+                next=url_for(
+                    "web.post", subdeaddit_name=subdeaddit_name, post_id=post_id
+                ),
+            )
+        )
+
+    target_post = Post.query.get_or_404(post_id)
+    if target_post.subdeaddit_name != subdeaddit_name:
+        abort(404)
+
+    body = (request.form.get("content") or request.form.get("body") or "").strip()
+    parent_id_raw = request.form.get("parent_id")
+
+    if not body or len(body) > 5000:
+        flash("Comment must be between 1 and 5,000 characters.", "error")
+        return redirect(
+            url_for("web.post", subdeaddit_name=subdeaddit_name, post_id=post_id)
+        )
+
+    parent_id = None
+    if parent_id_raw and str(parent_id_raw).strip():
+        try:
+            parent_id = int(parent_id_raw)
+        except (ValueError, TypeError):
+            flash("Invalid parent comment.", "error")
+            return redirect(
+                url_for("web.post", subdeaddit_name=subdeaddit_name, post_id=post_id)
+            )
+        parent_comment = db.session.get(Comment, parent_id)
+        if not parent_comment or parent_comment.post_id != post_id:
+            flash("Parent comment does not belong to this post.", "error")
+            return redirect(
+                url_for("web.post", subdeaddit_name=subdeaddit_name, post_id=post_id)
+            )
+
+    try:
+        new_comment = content_service.create_comment(
+            post_id=post_id,
+            content=body,
+            user=human.username,
+            parent_id=parent_id,
+            model="human",
+            llm_model=None,
+        )
+    except content_service.ContentValidationError as exc:
+        msg = (
+            "Rate limit exceeded. Please wait before commenting again."
+            if str(exc) == "rate_limited"
+            else str(exc)
+        )
+        flash(msg, "error")
+        return redirect(
+            url_for("web.post", subdeaddit_name=subdeaddit_name, post_id=post_id)
+        )
+
+    return redirect(
+        url_for("web.post", subdeaddit_name=subdeaddit_name, post_id=post_id)
+        + f"#comment-{new_comment.id}"
+    )
+
+
+@bp.route("/inbox")
+def inbox():
+    if not human_accounts_enabled():
+        abort(404)
+    human = current_human()
+    if not human:
+        target = (
+            request.full_path.rstrip("?")
+            if request.full_path.endswith("?")
+            else request.full_path
+        )
+        safe_next = safe_local_next(target)
+        return redirect(
+            url_for("web.login", next=safe_next) if safe_next else url_for("web.login")
+        )
+
+    cursor = request.args.get("cursor")
+    try:
+        inbox_data = get_inbox(
+            human.username, unread_only=False, limit=25, cursor=cursor
+        )
+    except ValueError:
+        abort(400, description="Invalid inbox cursor")
+
+    post_ids = {item["post_id"] for item in inbox_data["items"] if item.get("post_id")}
+    posts_by_id = (
+        {p.id: p for p in Post.query.filter(Post.id.in_(post_ids)).all()}
+        if post_ids
+        else {}
+    )
+
+    for item in inbox_data["items"]:
+        post = posts_by_id.get(item.get("post_id"))
+        if post:
+            url = url_for(
+                "web.post", subdeaddit_name=post.subdeaddit_name, post_id=post.id
+            )
+            if item.get("comment_id"):
+                url += f"#comment-{item['comment_id']}"
+        else:
+            url = "#"
+        item["canonical_url"] = url
+
+    return render_template(
+        "inbox.html",
+        items=inbox_data["items"],
+        unread_count=inbox_data["unread"],
+        next_cursor=inbox_data["next_cursor"],
+        title="Inbox - Deaddit",
+    )
+
+
+@bp.route("/inbox/read", methods=["POST"])
+def inbox_read():
+    if not human_accounts_enabled():
+        abort(404)
+    human = current_human()
+    if not human:
+        return redirect(url_for("web.login"))
+
+    notification_id = request.form.get("notification_id")
+    next_param = request.form.get("next")
+    target = safe_local_next(next_param) or url_for("web.inbox")
+
+    if notification_id == "all":
+        mark_inbox_read(human.username, ids="all")
+    elif notification_id is not None:
+        try:
+            notif_id = int(notification_id)
+            mark_inbox_read(human.username, ids=[notif_id])
+        except (ValueError, TypeError):
+            pass
+
+    return redirect(target)
+
+
+@bp.route("/post/<int:post_id>")
+def post_redirect(post_id):
+    target_post = Post.query.get_or_404(post_id)
+    return redirect(
+        url_for(
+            "web.post",
+            subdeaddit_name=target_post.subdeaddit_name,
+            post_id=target_post.id,
+            **request.args,
+        )
+    )
+
+

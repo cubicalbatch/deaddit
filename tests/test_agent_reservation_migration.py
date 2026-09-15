@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from deaddit.extensions import db
-from deaddit.models import Agent, AgentRun, User
+from deaddit.models import Agent, AgentRun
 from tests.test_random_persona_migration import _downgrade, _runner, _upgrade
 
 PREVIOUS_HEAD = "a9b8c7d6e5f4"
@@ -16,7 +16,7 @@ def test_upgrade_interrupts_duplicate_runs_and_downgrade_removes_constraint(tmp_
     _, app, runner = _runner(tmp_path)
     _upgrade(runner, PREVIOUS_HEAD)
     with app.app_context():
-        db.session.add_all([User(username="older"), User(username="newer")])
+        db.session.execute(db.text("INSERT INTO user (username) VALUES ('older'), ('newer')"))
         agent = Agent(persona_mode="random", status="running")
         db.session.add(agent)
         db.session.flush()

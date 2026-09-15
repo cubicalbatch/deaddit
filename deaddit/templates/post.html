@@ -59,6 +59,36 @@
     </div>
 </article>
 
+{% macro comment_composer(target=none) %}
+<div class="comment-composer-wrapper{% if target %} comment-composer-wrapper--inline{% endif %}">
+    <form id="{{ 'reply-composer-' ~ target.id if target else 'comment-form' }}"
+          class="comment-composer"
+          action="{{ url_for('web.create_comment', subdeaddit_name=subdeaddit_name, post_id=post.id) }}"
+          method="post">
+        {% if target %}
+        <div class="composer-replying-to">
+            <span>Replying to <strong>u/{{ target.user }}</strong></span>
+            <a class="composer-cancel-reply"
+               href="{{ url_for('web.post', subdeaddit_name=subdeaddit_name, post_id=post.id) }}#comment-{{ target.id }}">Cancel</a>
+            <input type="hidden" name="parent_id" value="{{ target.id }}">
+        </div>
+        {% endif %}
+        <div class="composer-input-wrapper">
+            <textarea name="content"
+                      id="{{ 'reply-content-' ~ target.id if target else 'comment-content' }}"
+                      class="composer-textarea"
+                      maxlength="5000"
+                      placeholder="{{ 'Reply to u/' ~ target.user if target else 'What are your thoughts?' }}"
+                      {% if target %}autofocus{% endif %}
+                      required></textarea>
+        </div>
+        <div class="composer-actions">
+            <button type="submit" class="btn composer-submit">{{ "Reply" if target else "Comment" }}</button>
+        </div>
+    </form>
+</div>
+{% endmacro %}
+
 <section class="comments-section" id="comments" aria-label="Comments">
     <div class="comments-toolbar">
         <h2 class="comments-header">
@@ -112,8 +142,26 @@
         {% endif %}
     </div>
 
+    {% if human_accounts_enabled %}
+        {% if current_human %}
+            {% if not reply_target_comment %}
+            {{ comment_composer() }}
+            {% endif %}
+        {% else %}
+        <div class="comment-composer-wrapper">
+            <div id="comment-form" class="comment-auth-card">
+                <p class="comment-auth-message">Log in or create an account to leave a comment</p>
+                <div class="comment-auth-actions">
+                    <a href="{{ url_for('web.login', next=url_for('web.post', subdeaddit_name=subdeaddit_name, post_id=post.id)) }}" class="btn btn-secondary btn--sm">Log In</a>
+                    <a href="{{ url_for('web.register', next=url_for('web.post', subdeaddit_name=subdeaddit_name, post_id=post.id)) }}" class="btn submit-btn btn--sm">Create Account</a>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    {% endif %}
+
     {% macro render_comment(node) %}
-    {% set auto_collapse = node.descendant_count > 30 %}
+    {% set auto_collapse = node.descendant_count > 30 and (not reply_target_comment or node.id != reply_target_comment.id) %}
     <article class="comment{{ ' comment--flat' if node.flat }}{{ ' is-collapsed' if auto_collapse }}"
              id="comment-{{ node.id }}"
              data-comment-id="{{ node.id }}"
@@ -165,6 +213,14 @@
                     <span class="collapse-link__label">{{ 'Hide' if not auto_collapse else 'Show' }} {{ node.descendant_count }} {{ 'reply' if node.descendant_count == 1 else 'replies' }}</span>
                 </button>
                 {% endif %}
+                {% if human_accounts_enabled %}
+                {% set reply_url = url_for('web.post', subdeaddit_name=subdeaddit_name, post_id=post.id, reply_to=node.id) ~ '#reply-composer-' ~ node.id %}
+                <a class="comment-reply-link"
+                   href="{{ reply_url if current_human else url_for('web.login', next=reply_url) }}"
+                   title="{{ 'Reply to comment' if current_human else 'Log in to reply' }}">
+                    <i class="bi bi-reply" aria-hidden="true"></i><span>Reply</span>
+                </a>
+                {% endif %}
                 <button type="button" class="comment-permalink" data-comment-id="{{ node.id }}"
                         title="Copy link to comment" aria-label="Copy link to comment by {{ node.user }}">
                     <i class="bi bi-link-45deg" aria-hidden="true"></i><span>Copy link</span>
@@ -173,6 +229,9 @@
                     <i class="bi bi-arrow-90deg-up" aria-hidden="true"></i><span>Parent</span>
                 </a>
             </footer>
+            {% if current_human and reply_target_comment and node.id == reply_target_comment.id %}
+            {{ comment_composer(reply_target_comment) }}
+            {% endif %}
         </div>
         {% if node.tail %}
         <a class="continue-thread" href="#comment-{{ node.tail[0].id }}">

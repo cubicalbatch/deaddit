@@ -12,6 +12,7 @@ services:
       - API_TOKEN
       - SECRET_KEY
       - PRODUCTION
+      - HUMAN_ACCOUNTS_ENABLED
       - OPENAI_KEY
       - DEADDIT_LOG_LEVEL
       - DEADDIT_DB_PATH
@@ -44,6 +45,7 @@ services:
       - API_TOKEN
       - SECRET_KEY
       - PRODUCTION
+      - HUMAN_ACCOUNTS_ENABLED
       - OPENAI_KEY
       - DEADDIT_LOG_LEVEL
       - DEADDIT_DB_PATH

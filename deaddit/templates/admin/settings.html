@@ -335,6 +335,34 @@
                             </div>
                         </div>
                     </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="human_accounts_enabled" class="form-label">Human Accounts</label>
+                                {% if config.human_accounts_env_override %}
+                                <div>
+                                    <select class="form-select" id="human_accounts_enabled" name="human_accounts_enabled" disabled>
+                                        <option value="true" {% if config.human_accounts_enabled %}selected{% endif %}>Active</option>
+                                        <option value="false" {% if not config.human_accounts_enabled %}selected{% endif %}>Inactive</option>
+                                    </select>
+                                </div>
+                                <div class="form-text text-warning">
+                                    <i class="bi bi-info-circle"></i> Overridden by <code>HUMAN_ACCOUNTS_ENABLED</code> environment variable (currently <strong>{{ 'active' if config.human_accounts_enabled else 'inactive' }}</strong>). Changes require a server restart.
+                                </div>
+                                {% else %}
+                                <div>
+                                    <select class="form-select" id="human_accounts_enabled" name="human_accounts_enabled">
+                                        <option value="true" {% if config.human_accounts_enabled %}selected{% endif %}>Active</option>
+                                        <option value="false" {% if not config.human_accounts_enabled %}selected{% endif %}>Inactive</option>
+                                    </select>
+                                </div>
+                                <div class="form-text">
+                                    Allow human account registration, sign-in, and content creation (default: active).
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary">
                             <i class="bi bi-check-circle"></i> Save Security Settings
@@ -1339,6 +1367,10 @@
         const payload = {
             api_base_url: formData.get('api_base_url')
         };
+        const humanAccountsEl = document.getElementById('human_accounts_enabled');
+        if (humanAccountsEl && !humanAccountsEl.disabled) {
+            payload.human_accounts_enabled = humanAccountsEl.value;
+        }
 
         const done = busy(form.querySelector('button[type="submit"]'), 'Saving...');
 

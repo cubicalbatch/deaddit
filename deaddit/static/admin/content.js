@@ -54,7 +54,7 @@ class ContentManager {
         });
 
         // Search inputs
-        ['users', 'subdeaddits', 'posts', 'comments'].forEach(type => {
+        ['users', 'humans', 'subdeaddits', 'posts', 'comments'].forEach(type => {
             const searchInput = document.getElementById(`${type}Search`);
             if (searchInput) {
                 searchInput.addEventListener('input', (e) => {
@@ -66,7 +66,7 @@ class ContentManager {
         });
 
         // Select all checkboxes
-        ['users', 'subdeaddits', 'posts', 'comments'].forEach(type => {
+        ['users', 'humans', 'subdeaddits', 'posts', 'comments'].forEach(type => {
             const selectAllCheckbox = document.getElementById(`selectAll${this.capitalize(type)}`);
             if (selectAllCheckbox) {
                 selectAllCheckbox.addEventListener('change', (e) => {
@@ -76,7 +76,7 @@ class ContentManager {
         });
 
         // Bulk delete buttons
-        ['users', 'subdeaddits', 'posts', 'comments'].forEach(type => {
+        ['users', 'humans', 'subdeaddits', 'posts', 'comments'].forEach(type => {
             const deleteButton = document.getElementById(`deleteSelected${this.capitalize(type)}`);
             if (deleteButton) {
                 deleteButton.addEventListener('click', () => {
@@ -99,6 +99,7 @@ class ContentManager {
         document.getElementById('saveSubdeadditChanges')?.addEventListener('click', () => this.saveSubdeaddit());
         document.getElementById('savePostChanges')?.addEventListener('click', () => this.savePost());
         document.getElementById('saveCommentChanges')?.addEventListener('click', () => this.saveComment());
+        document.getElementById('savePasswordChanges')?.addEventListener('click', () => this.savePassword());
 
         // Delete confirmation
         document.getElementById('confirmDeleteBtn')?.addEventListener('click', () => this.executeDelete());
@@ -119,12 +120,17 @@ class ContentManager {
     }
 
     async loadContent(type) {
-        const url = new URL(`/admin/api/${type}`, window.location.origin);
+        const apiType = type === 'humans' ? 'users' : type;
+        const url = new URL(`/admin/api/${apiType}`, window.location.origin);
         url.searchParams.set('page', this.currentPage);
         url.searchParams.set('per_page', this.perPage);
 
         if (this.searchTerm) {
             url.searchParams.set('search', this.searchTerm);
+        }
+
+        if (type === 'humans') {
+            url.searchParams.set('human', '1');
         }
 
         if (type === 'posts') {
@@ -140,6 +146,8 @@ class ContentManager {
 
             if (type === 'users') {
                 this.renderUsers(data);
+            } else if (type === 'humans') {
+                this.renderHumans(data);
             } else if (type === 'subdeaddits') {
                 this.renderSubdeaddits(data);
             } else if (type === 'posts') {
@@ -147,7 +155,6 @@ class ContentManager {
             } else if (type === 'comments') {
                 this.renderComments(data);
             }
-
             this.renderPagination(type, data);
             this.currentTotals[type] = data.total || 0;
             this.renderSelectAllBanner(type);
@@ -341,24 +348,26 @@ class ContentManager {
         row.appendChild(cell);
     }
 
+    iconButton(className, title, iconClass, label, handler, responsiveClass = '') {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `btn btn-sm ${className}`;
+        button.title = title;
+        button.addEventListener('click', handler);
+        const icon = document.createElement('i');
+        icon.className = iconClass;
+        button.appendChild(icon);
+        const text = document.createElement('span');
+        text.className = `${responsiveClass} ms-1`.trim();
+        text.textContent = label;
+        button.appendChild(text);
+        return button;
+    }
+
     actionButtons(editCall, deleteCall, viewAttrs = null, promptCall = null) {
         const container = document.createElement('div');
         container.className = 'action-buttons';
-        const makeButton = (className, title, iconClass, label, handler, responsiveClass = '') => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = `btn btn-sm ${className}`;
-            button.title = title;
-            button.addEventListener('click', handler);
-            const icon = document.createElement('i');
-            icon.className = iconClass;
-            button.appendChild(icon);
-            const text = document.createElement('span');
-            text.className = `${responsiveClass} ms-1`.trim();
-            text.textContent = label;
-            button.appendChild(text);
-            return button;
-        };
+        const makeButton = (...args) => this.iconButton(...args);
 
         container.appendChild(makeButton('btn-primary', 'Edit', 'bi bi-pencil', 'Edit', editCall, 'd-none d-sm-inline'));
         container.appendChild(makeButton('btn-danger', 'Delete', 'bi bi-trash', 'Delete', deleteCall, 'd-none d-sm-inline'));
@@ -493,9 +502,74 @@ class ContentManager {
         const parsed = parseInt(raw, 10);
         return (Number.isNaN(parsed) || parsed < 0) ? null : parsed;
     }
-
     deleteUser(username) {
         this.showDeleteConfirmation('user', username, `Are you sure you want to delete user "${username}"?`);
+    }
+
+    // ---------------- Humans ----------------
+    renderHumans(data) {
+        const tbody = document.querySelector('#humansTable tbody');
+        tbody.replaceChildren();
+
+        data.users.forEach(user => {
+            const row = document.createElement('tr');
+            this.createCheckboxCell(row, user.username, `Select user ${user.username}`);
+            this.createTextCell(row, user.username);
+            this.createTextCell(row, user.posts_count, 'd-none d-sm-table-cell');
+            this.createTextCell(row, user.comments_count, 'd-none d-sm-table-cell');
+            const cell = document.createElement('td');
+            const container = document.createElement('div');
+            container.className = 'action-buttons';
+            container.appendChild(this.iconButton('btn-secondary', 'Change password', 'bi bi-key', 'Password', () => this.openPasswordModal(user.username)));
+            container.appendChild(this.iconButton('btn-danger', 'Delete', 'bi bi-trash', 'Delete', () => this.deleteUser(user.username)));
+            cell.appendChild(container);
+            row.appendChild(cell);
+            tbody.appendChild(row);
+        });
+
+        this.setupItemCheckboxes();
+    }
+
+    openPasswordModal(username) {
+        document.getElementById('passwordUserId').value = username;
+        document.getElementById('passwordUsername').value = username;
+        document.getElementById('passwordNew').value = '';
+        document.getElementById('passwordConfirm').value = '';
+        new bootstrap.Modal(document.getElementById('passwordModal')).show();
+    }
+
+    async savePassword() {
+        const username = document.getElementById('passwordUserId').value;
+        const password = document.getElementById('passwordNew').value;
+        const confirm = document.getElementById('passwordConfirm').value;
+
+        if (password.length < 8 || password.length > 256) {
+            this.showAlert('Password must be between 8 and 256 characters.', 'warning');
+            return;
+        }
+        if (password !== confirm) {
+            this.showAlert('Passwords do not match.', 'warning');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/admin/api/users/${encodeURIComponent(username)}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({password: password})
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                bootstrap.Modal.getInstance(document.getElementById('passwordModal')).hide();
+                this.showAlert('Password updated successfully', 'success');
+            } else {
+                this.showAlert('Error updating password: ' + result.error, 'danger');
+            }
+        } catch (error) {
+            console.error('Error saving password:', error);
+            this.showAlert('Error saving password', 'danger');
+        }
     }
 
     // ---------------- Subdeaddits ----------------
@@ -818,6 +892,7 @@ class ContentManager {
             const message = `Are you sure you want to delete ALL ${total} ${type} across every page?`;
             const impacts = {
                 users: 'This will permanently delete every matching user, plus ALL their posts, comments, votes, and agent history.',
+                humans: 'This will permanently delete every matching user, plus ALL their posts, comments, votes, and agent history.',
                 subdeaddits: 'This will permanently delete every matching subdeaddit, plus ALL their posts and comments.',
                 posts: 'This will permanently delete every matching post, plus ALL its comments, images, and websites.',
                 comments: 'This will permanently delete every matching comment, plus ALL replies to them.'
@@ -873,9 +948,11 @@ class ContentManager {
             if (type.startsWith('bulk-all-')) {
                 // Server-side resolution of the full filtered set.
                 const bulkType = type.replace('bulk-all-', '');
-                const endpoint = `/admin/api/${bulkType}/bulk-delete`;
+                const apiType = bulkType === 'humans' ? 'users' : bulkType;
+                const endpoint = `/admin/api/${apiType}/bulk-delete`;
                 const body = {all: true};
                 if (this.searchTerm) body.search = this.searchTerm;
+                if (bulkType === 'humans') body.human = true;
                 if (bulkType === 'posts') {
                     const subdeadditFilter = document.getElementById('postsSubdeadditFilter')?.value;
                     if (subdeadditFilter) body.subdeaddit = subdeadditFilter;
@@ -888,10 +965,11 @@ class ContentManager {
                 });
             } else if (type.startsWith('bulk-')) {
                 const bulkType = type.replace('bulk-', '');
-                const endpoint = `/admin/api/${bulkType}/bulk-delete`;
-                const bodyKey = bulkType === 'users' ? 'usernames' :
-                               bulkType === 'subdeaddits' ? 'names' :
-                               bulkType === 'posts' ? 'post_ids' : 'comment_ids';
+                const apiType = bulkType === 'humans' ? 'users' : bulkType;
+                const endpoint = `/admin/api/${apiType}/bulk-delete`;
+                const bodyKey = apiType === 'users' ? 'usernames' :
+                               apiType === 'subdeaddits' ? 'names' :
+                               apiType === 'posts' ? 'post_ids' : 'comment_ids';
 
                 response = await fetch(endpoint, {
                     method: 'POST',

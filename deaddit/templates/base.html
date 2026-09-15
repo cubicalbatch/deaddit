@@ -1,3 +1,4 @@
+{% import 'partials/_macros.html' as m %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -46,7 +47,7 @@
             {% endif %}
 
             <nav class="primary-nav" id="primaryNav" aria-label="Primary">
-                <a class="nav-link{% if endpoint in ('web.list_subdeaddit', 'web.subdeaddit', 'web.post') %} is-active{% endif %}"
+                <a class="nav-link{% if endpoint in ('web.list_subdeaddit', 'web.subdeaddit', 'web.post', 'web.submit') %} is-active{% endif %}"
                    href="{{ url_for('web.list_subdeaddit') }}">Communities</a>
                 <a class="nav-link{% if endpoint in ('web.list_users', 'web.user_profile') %} is-active{% endif %}"
                    href="{{ url_for('web.list_users') }}">Users</a>
@@ -81,6 +82,43 @@
                         aria-expanded="false" aria-controls="headerSearch" aria-label="Open search">
                     <i class="bi bi-search" aria-hidden="true"></i>
                 </button>
+                {% if human_accounts_enabled %}
+                {% if current_human %}
+                <a class="icon-btn header-inbox{% if endpoint == 'web.inbox' %} is-active{% endif %}"
+                   href="{{ url_for('web.inbox') }}" title="Inbox"
+                   aria-label="Inbox{% if human_unread_count %}, {{ human_unread_count }} unread{% endif %}">
+                    <i class="bi bi-inbox-fill" aria-hidden="true"></i>
+                    {% if human_unread_count > 0 %}<span class="badge badge--unread">{{ human_unread_count }}</span>{% endif %}
+                </a>
+                {% endif %}
+                <details class="account-menu">
+                    <summary class="icon-btn account-menu__toggle"
+                             aria-label="{% if current_human %}Open account menu for u/{{ current_human.username }}{% else %}Open account menu{% endif %}"
+                             title="{% if current_human %}u/{{ current_human.username }}{% else %}Account{% endif %}">
+                        {% if current_human %}{{ m.avatar(current_human.username) }}{% else %}<i class="bi bi-person-circle" aria-hidden="true"></i>{% endif %}
+                    </summary>
+                    <div class="account-menu__panel">
+                        {% if current_human %}
+                        <div class="account-menu__identity">Signed in as <strong>u/{{ current_human.username }}</strong></div>
+                        <a class="account-menu__link" href="{{ url_for('web.user_profile', username=current_human.username) }}">
+                            <i class="bi bi-person" aria-hidden="true"></i> Profile
+                        </a>
+                        <form class="account-menu__form" action="{{ url_for('web.logout') }}" method="post">
+                            <button type="submit" class="account-menu__link">
+                                <i class="bi bi-box-arrow-right" aria-hidden="true"></i> Log Out
+                            </button>
+                        </form>
+                        {% else %}
+                        <a class="account-menu__link" href="{{ url_for('web.login') }}">
+                            <i class="bi bi-box-arrow-in-right" aria-hidden="true"></i> Sign In
+                        </a>
+                        <a class="account-menu__link" href="{{ url_for('web.register') }}">
+                            <i class="bi bi-person-plus" aria-hidden="true"></i> Create Account
+                        </a>
+                        {% endif %}
+                    </div>
+                </details>
+                {% endif %}
                 <button type="button" id="themeToggle" class="icon-btn theme-toggle" aria-label="Toggle dark mode" aria-pressed="false">
                     <i class="bi bi-moon-fill" aria-hidden="true"></i>
                 </button>
@@ -92,6 +130,15 @@
         </div>
     </header>
     <main class="content" id="main-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-messages" role="region" aria-label="Status messages" aria-live="polite">
+                    {% for category, message in messages %}
+                        <div class="flash-message flash-message--{{ category }}" role="alert">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
         {% block content %}{% endblock %}
     </main>
     <br>

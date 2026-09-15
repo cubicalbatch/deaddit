@@ -39,6 +39,7 @@ from deaddit.dynamics.engagement import (
     preset_config,
     validate_policy,
 )
+from deaddit.human_auth import generate_password_hash, human_accounts_enabled
 from deaddit.images import client as image_client
 from deaddit.images import service as media_service
 from deaddit.images import verification as image_verification
@@ -89,6 +90,7 @@ from deaddit.services.content import (
     create_user,
 )
 from deaddit.settings import SecretNotPersistable
+from deaddit.utils import safe_local_next
 from deaddit.websites import service as website_service
 
 logger = logging.getLogger(__name__)
@@ -622,13 +624,7 @@ def check_has_more_pages(models_data, page_models, per_page):
     return len(page_models) == per_page
 
 
-def _safe_local_next(value):
-    """Return a local redirect path, never an absolute or protocol-relative URL."""
-    if not isinstance(value, str) or not value.startswith("/"):
-        return None
-    if value.startswith("//") or "\\" in value or "://" in value:
-        return None
-    return value
+_safe_local_next = safe_local_next
 
 
 def admin_required(f):
@@ -1127,9 +1123,12 @@ def content():
 # CRUD API endpoints for content management
 
 
-def _users_query(search=""):
+def _users_query(search="", human=False):
     """User filter shared by the list API and all-pages bulk delete."""
     query = User.query
+    if human:
+        # Human accounts are exactly the rows carrying a password hash.
+        query = query.filter(User.password_hash.is_not(None))
     if search:
         query = query.filter(
             User.username.contains(search)
@@ -1198,9 +1197,10 @@ def api_users():
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("per_page", 25, type=int)
     search = request.args.get("search", "")
+    human = request.args.get("human") == "1"
 
     users = (
-        _users_query(search)
+        _users_query(search, human=human)
         .order_by(User.username)
         .paginate(page=page, per_page=per_page, error_out=False)
     )
@@ -1230,6 +1230,21 @@ def api_update_user(username):
             rate_caps = normalize_persona_rate_caps(data["rate_caps"], strict=True)
         except ValueError as exc:
             return jsonify({"success": False, "error": str(exc)}), 400
+
+    # Optional human-account password change (same limits as registration).
+    new_password = data.get("password")
+    if new_password is not None and (
+        not isinstance(new_password, str) or not 8 <= len(new_password) <= 256
+    ):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Password must be between 8 and 256 characters.",
+                }
+            ),
+            400,
+        )
 
     resolved_subs = None
     if "subscriptions" in data:
@@ -1306,6 +1321,9 @@ def api_update_user(username):
                 state.pop("subscriptions", None)
             state_modified = True
 
+        if new_password is not None:
+            user.password_hash = generate_password_hash(new_password)
+
         if state_modified:
             user.agent_state = state
 
@@ -1361,7 +1379,9 @@ def api_bulk_delete_users():
     if data.get("all"):
         existing_usernames = [
             row.username
-            for row in _users_query(data.get("search", "")).with_entities(User.username)
+            for row in _users_query(
+                data.get("search", ""), human=bool(data.get("human"))
+            ).with_entities(User.username)
         ]
     else:
         usernames = data.get("usernames") or []
@@ -1996,6 +2016,8 @@ def settings():
         != "***not set***",
         "all_settings": all_settings,
         "default_provider": default_provider.to_dict() if default_provider else None,
+        "human_accounts_enabled": human_accounts_enabled(),
+        "human_accounts_env_override": "HUMAN_ACCOUNTS_ENABLED" in os.environ,
     }
 
     return render_template("admin/settings.html", config=config, providers=providers)
@@ -2255,6 +2277,37 @@ def save_deaddit_config_api():
                     "message": "API_TOKEN is environment-only since refactor A6 — set it in your environment/.env.",
                 }
             )
+
+        ha_val = None
+        if "human_accounts_enabled" in data:
+            ha_val = data["human_accounts_enabled"]
+        elif "HUMAN_ACCOUNTS_ENABLED" in data:
+            ha_val = data["HUMAN_ACCOUNTS_ENABLED"]
+
+        if ha_val is not None:
+            if isinstance(ha_val, bool):
+                val_str = "true" if ha_val else "false"
+            elif isinstance(ha_val, str):
+                val_clean = ha_val.strip().lower()
+                if val_clean in ("true", "1", "yes", "on"):
+                    val_str = "true"
+                elif val_clean in ("false", "0", "no", "off"):
+                    val_str = "false"
+                else:
+                    return jsonify(
+                        {
+                            "success": False,
+                            "message": "Invalid value for human_accounts_enabled; must be true or false",
+                        }
+                    ), 400
+            else:
+                return jsonify(
+                    {
+                        "success": False,
+                        "message": "Invalid value for human_accounts_enabled; must be true or false",
+                    }
+                ), 400
+            Config.set("HUMAN_ACCOUNTS_ENABLED", val_str)
 
         return jsonify(
             {"success": True, "message": "Deaddit configuration saved successfully"}
@@ -4223,6 +4276,7 @@ def api_persona_candidates():
         db.session.query(User, posts_sq.c.n, comments_sq.c.n)
         .outerjoin(posts_sq, User.username == posts_sq.c.username)
         .outerjoin(comments_sq, User.username == comments_sq.c.username)
+        .filter(User.password_hash.is_(None))
     )
     if taken:
         rows = rows.filter(~User.username.in_(taken))
@@ -4493,10 +4547,21 @@ def api_create_agent():
     if persona_mode == "fixed":
         if not username:
             return jsonify({"success": False, "error": "username is required"}), 400
-        if db.session.get(User, username) is None:
+        user = db.session.get(User, username)
+        if user is None:
             return (
                 jsonify(
                     {"success": False, "error": f"User '{username}' does not exist"}
+                ),
+                400,
+            )
+        if user.password_hash is not None:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Cannot attach an agent to human account '{username}'",
+                    }
                 ),
                 400,
             )

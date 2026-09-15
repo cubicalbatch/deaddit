@@ -81,6 +81,7 @@ class Config:
             "printout, invoice, manuscript, parchment, note, handwritten"
         ),
         "TROLL_USER_CHANCE": "0.1",
+        "HUMAN_ACCOUNTS_ENABLED": "true",
     }
 
     # Descriptions for each setting
@@ -91,6 +92,7 @@ class Config:
         "SECRET_KEY": "Flask secret key for session management",
         "PRODUCTION": "Hide the Admin header link from visitors who are not logged in (true/false); environment-only, set it before starting the process",
         "API_TOKEN": "Security token for admin access (minimum 3 characters; environment-only)",
+        "HUMAN_ACCOUNTS_ENABLED": "Allow human account registration, sign-in, and content creation (true/false); default true",
         "AGENT_RUNTIME_ENABLED": "Whether the autonomous agent runtime is enabled (true/false); manual run-once is always allowed",
         "NIGHT_LULL_ENABLED": "Night-time lull for agent wakes (true/false); when enabled, wake delays are stretched during local night hours so agents sleep at night like humans (never zero wakes)",
         "NIGHT_LULL_START_HOUR": "Local hour (0-23, server timezone) the night lull begins; full wake rate resumes after NIGHT_LULL_END_HOUR",

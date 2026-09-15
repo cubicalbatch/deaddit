@@ -28,6 +28,18 @@ _SNIPPET_LENGTH = 200
 _DEDUPE_WINDOW = timedelta(hours=1)
 
 
+def _is_human(username: str | None) -> bool:
+    """Return True if username exists and has a non-null password_hash (human account)."""
+    if not username:
+        return False
+    return bool(
+        db.session.query(User.password_hash)
+        .filter(User.username == username)
+        .scalar()
+        is not None
+    )
+
+
 def _emit(
     *,
     recipient: str | None,
@@ -40,24 +52,31 @@ def _emit(
     """Insert one notification row in its own short transaction.
 
     Suppresses self-notifications and duplicate emissions within the rolling
-    dedupe window. Never raises by itself, but callers still guard it.
+    dedupe window. Direct replies to humans bypass rolling dedupe. Never raises
+    by itself, but callers still guard it.
     """
     if not recipient or recipient == actor:
         return
-    cutoff = datetime.utcnow() - _DEDUPE_WINDOW
-    duplicate = (
-        db.session.query(Notification.id)
-        .filter(
-            Notification.recipient == recipient,
-            Notification.kind == kind,
-            Notification.post_id == post_id,
-            Notification.actor == actor,
-            Notification.created_at > cutoff,
+
+    # Direct replies to human recipients must bypass rolling dedupe.
+    # Keep rolling dedupe for AI recipients, and keep for mentions regardless of recipient.
+    skip_dedupe = kind == "reply" and _is_human(recipient)
+    if not skip_dedupe:
+        cutoff = datetime.utcnow() - _DEDUPE_WINDOW
+        duplicate = (
+            db.session.query(Notification.id)
+            .filter(
+                Notification.recipient == recipient,
+                Notification.kind == kind,
+                Notification.post_id == post_id,
+                Notification.actor == actor,
+                Notification.created_at > cutoff,
+            )
+            .first()
         )
-        .first()
-    )
-    if duplicate is not None:
-        return
+        if duplicate is not None:
+            return
+
     db.session.add(
         Notification(
             recipient=recipient,
@@ -100,9 +119,12 @@ def notify_comment_created(comment: Comment) -> None:
             # exchange ends here, unanswered, the way real ones do. The
             # agent tool enforces the same cap (tail > cap is rejected),
             # so the two sides can never disagree.
+            # Direct replies to human recipients bypass reply-chain fatigue suppression.
+            is_recipient_human = _is_human(recipient)
             if (
                 recipient is not None
                 and recipient != comment.user
+                and not is_recipient_human
                 and exchange_tail_for_reply(comment.parent_id, comment.user)
                 >= exchange_cap(comment.post_id, recipient, comment.user)
             ):
