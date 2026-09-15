@@ -39,7 +39,7 @@ from deaddit.dynamics.engagement import (
     preset_config,
     validate_policy,
 )
-from deaddit.human_auth import human_accounts_enabled
+from deaddit.human_auth import generate_password_hash, human_accounts_enabled
 from deaddit.images import client as image_client
 from deaddit.images import service as media_service
 from deaddit.images import verification as image_verification
@@ -1123,9 +1123,12 @@ def content():
 # CRUD API endpoints for content management
 
 
-def _users_query(search=""):
+def _users_query(search="", human=False):
     """User filter shared by the list API and all-pages bulk delete."""
     query = User.query
+    if human:
+        # Human accounts are exactly the rows carrying a password hash.
+        query = query.filter(User.password_hash.is_not(None))
     if search:
         query = query.filter(
             User.username.contains(search)
@@ -1194,9 +1197,10 @@ def api_users():
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("per_page", 25, type=int)
     search = request.args.get("search", "")
+    human = request.args.get("human") == "1"
 
     users = (
-        _users_query(search)
+        _users_query(search, human=human)
         .order_by(User.username)
         .paginate(page=page, per_page=per_page, error_out=False)
     )
@@ -1226,6 +1230,21 @@ def api_update_user(username):
             rate_caps = normalize_persona_rate_caps(data["rate_caps"], strict=True)
         except ValueError as exc:
             return jsonify({"success": False, "error": str(exc)}), 400
+
+    # Optional human-account password change (same limits as registration).
+    new_password = data.get("password")
+    if new_password is not None and (
+        not isinstance(new_password, str) or not 8 <= len(new_password) <= 256
+    ):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Password must be between 8 and 256 characters.",
+                }
+            ),
+            400,
+        )
 
     resolved_subs = None
     if "subscriptions" in data:
@@ -1302,6 +1321,9 @@ def api_update_user(username):
                 state.pop("subscriptions", None)
             state_modified = True
 
+        if new_password is not None:
+            user.password_hash = generate_password_hash(new_password)
+
         if state_modified:
             user.agent_state = state
 
@@ -1357,7 +1379,9 @@ def api_bulk_delete_users():
     if data.get("all"):
         existing_usernames = [
             row.username
-            for row in _users_query(data.get("search", "")).with_entities(User.username)
+            for row in _users_query(
+                data.get("search", ""), human=bool(data.get("human"))
+            ).with_entities(User.username)
         ]
     else:
         usernames = data.get("usernames") or []

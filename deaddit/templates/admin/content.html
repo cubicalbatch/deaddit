@@ -145,6 +145,12 @@
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
+                    <button class="nav-link d-flex align-items-center justify-content-center" id="humans-tab" data-bs-toggle="tab" data-bs-target="#humans" type="button" role="tab">
+                        <i class="bi bi-person-check me-1 d-none d-sm-inline"></i>
+                        <span>Humans</span>
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
                     <button class="nav-link d-flex align-items-center justify-content-center" id="subdeaddits-tab" data-bs-toggle="tab" data-bs-target="#subdeaddits" type="button" role="tab">
                         <i class="bi bi-collection me-1 d-none d-sm-inline"></i>
                         <span class="d-none d-sm-inline">Subdeaddits</span>
@@ -210,6 +216,52 @@
                             </div>
                             <nav>
                                 <ul class="pagination" id="usersPagination"></ul>
+                            </nav>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Humans Tab -->
+                <div class="tab-pane fade" id="humans" role="tabpanel">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h5 class="mb-0">Human Users Management</h5>
+                                <button class="btn btn-outline-secondary btn-sm d-md-none" type="button" data-bs-toggle="collapse" data-bs-target="#humansControls">
+                                    <i class="bi bi-funnel"></i>
+                                </button>
+                            </div>
+                            <div class="collapse d-md-block" id="humansControls">
+                                <div class="d-flex flex-column flex-md-row gap-2">
+                                    <input type="text" class="form-control flex-grow-1" id="humansSearch" placeholder="Search human users...">
+                                    <button class="btn btn-danger" id="deleteSelectedHumans">
+                                        <i class="bi bi-trash me-1"></i>
+                                        <span class="d-none d-sm-inline">Delete Selected</span>
+                                        <span class="d-sm-none">Delete</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="select-all-pages-banner" id="humansSelectAllBanner" style="display: none;"></div>
+                            <div class="table-responsive">
+                                <table class="table dt" id="humansTable">
+                                    <thead>
+                                        <tr>
+                                            <th><input type="checkbox" id="selectAllHumans" aria-label="Select all human users"></th>
+                                            <th>Username</th>
+                                            <th class="d-none d-sm-table-cell">Posts</th>
+                                            <th class="d-none d-sm-table-cell">Comments</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Data loaded via JavaScript -->
+                                    </tbody>
+                                </table>
+                            </div>
+                            <nav>
+                                <ul class="pagination" id="humansPagination"></ul>
                             </nav>
                         </div>
                     </div>
@@ -595,6 +647,40 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body" id="viewPromptBody"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Change Password Modal -->
+<div class="modal fade" id="passwordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Change Password</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="passwordForm">
+                    <input type="hidden" id="passwordUserId">
+                    <div class="mb-3">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-control" id="passwordUsername" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">New Password</label>
+                        <input type="password" class="form-control" id="passwordNew" autocomplete="new-password">
+                        <div class="form-text">Between 8 and 256 characters.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Confirm Password</label>
+                        <input type="password" class="form-control" id="passwordConfirm" autocomplete="new-password">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="savePasswordChanges">Change Password</button>
+            </div>
         </div>
     </div>
 </div>
