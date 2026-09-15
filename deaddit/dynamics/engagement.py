@@ -972,6 +972,7 @@ def _ordered_users() -> list[_VoterSnapshot]:
     return [
         _VoterSnapshot(username=username, agent_state=agent_state)
         for username, agent_state in db.session.query(User.username, User.agent_state)
+        .filter(User.password_hash.is_(None))
         .order_by(User.username.asc())
         .all()
     ]

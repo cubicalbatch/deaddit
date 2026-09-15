@@ -171,8 +171,8 @@ def register_human(
         db.session.rollback()
         return None, "Username is already taken"
 
-    session["human_username"] = user.username
     if has_request_context():
+        session["human_username"] = user.username
         g._current_human = user
     return user, None
 

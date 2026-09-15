@@ -205,7 +205,9 @@ def _eligible_personas(agent: Agent) -> list[str]:
     }
     pool = [
         row[0]
-        for row in db.session.query(User.username).order_by(User.username)
+        for row in db.session.query(User.username)
+        .filter(User.password_hash.is_(None))
+        .order_by(User.username)
         if row[0] not in fixed and row[0] not in running
     ]
     previous = _previous_persona(agent)
@@ -220,6 +222,10 @@ def _select_persona(agent: Agent) -> str:
         if user is None:
             raise ValueError(
                 f"Fixed agent {agent.id} has no user '{agent.user_username}'"
+            )
+        if user.password_hash is not None:
+            raise ValueError(
+                f"Fixed agent {agent.id} cannot use human user '{agent.user_username}'"
             )
         return agent.user_username
     pool = _eligible_personas(agent)

@@ -20,7 +20,17 @@ from deaddit.human_auth import (
     human_accounts_enabled,
     register_human,
 )
-from deaddit.models import Comment, Notification, Post, Setting, Subdeaddit, User
+from sqlalchemy import func
+from deaddit.models import (
+    Agent,
+    Comment,
+    Notification,
+    Post,
+    Setting,
+    Subdeaddit,
+    User,
+    Vote,
+)
 from deaddit.services.content import (
     ContentValidationError,
     create_comment,
@@ -1698,4 +1708,315 @@ def test_post_convenience_redirect(app, client, db_session):
 
     # Non-existent post returns 404
     assert client.get("/post/999999").status_code == 404
+
+
+# ============================================================================
+# 12. Phase 4: Automation Isolation and Shared Participation
+# ============================================================================
+
+
+def test_eligible_personas_excludes_human_accounts(app, db_session, monkeypatch):
+    """Test that _eligible_personas excludes human accounts whether feature is enabled or disabled."""
+    from deaddit.agents.loop import _eligible_personas
+
+    with app.app_context():
+        synthetic_user = _create_synthetic_user(db_session, "ai_eligible_persona")
+        human_user, err = register_human(
+            "human_ineligible", "password123", "password123"
+        )
+        assert err is None
+        assert human_user.password_hash is not None
+
+        agent = Agent(persona_mode="random", is_enabled=True, status="idle")
+        db_session.add(agent)
+        db_session.commit()
+
+        # 1. Feature enabled (default)
+        eligible = _eligible_personas(agent)
+        assert synthetic_user.username in eligible
+        assert human_user.username not in eligible
+
+        # 2. Feature disabled
+        monkeypatch.setenv("HUMAN_ACCOUNTS_ENABLED", "false")
+        eligible_disabled = _eligible_personas(agent)
+        assert synthetic_user.username in eligible_disabled
+        assert human_user.username not in eligible_disabled
+
+
+def test_fixed_agent_rejects_human_account(
+    app, client, db_session, admin_login, monkeypatch
+):
+    """Fixed agent validation rejects attaching to human account in runtime and admin API."""
+    from deaddit.agents.loop import _select_persona
+    import deaddit.llm.capabilities as capabilities
+
+    monkeypatch.setattr(capabilities, "ensure_tools_allowed", lambda *a, **kw: None)
+
+    with app.app_context():
+        synthetic_user = _create_synthetic_user(db_session, "ai_fixed_target")
+        human_user, err = register_human(
+            "human_fixed_target", "password123", "password123"
+        )
+        assert err is None
+        human_name = human_user.username
+        synth_name = synthetic_user.username
+
+        # 1. Runtime validation in _select_persona
+        fixed_agent = Agent(
+            persona_mode="fixed",
+            user_username=human_name,
+            is_enabled=True,
+            status="idle",
+        )
+        db_session.add(fixed_agent)
+        db_session.commit()
+
+        with pytest.raises(
+            ValueError,
+            match=f"Fixed agent {fixed_agent.id} cannot use human user '{human_name}'",
+        ):
+            _select_persona(fixed_agent)
+
+        # Synthetic fixed agent succeeds in runtime
+        ai_agent = Agent(
+            persona_mode="fixed",
+            user_username=synth_name,
+            is_enabled=True,
+            status="idle",
+        )
+        db_session.add(ai_agent)
+        db_session.commit()
+        assert _select_persona(ai_agent) == synth_name
+
+    # 2. Admin API validation in api_create_agent
+    admin_client = admin_login(client)
+
+    # Reject human account with 400
+    resp_human = admin_client.post(
+        "/admin/api/agents",
+        json={"persona_mode": "fixed", "username": human_name},
+    )
+    assert resp_human.status_code == 400
+    data_human = resp_human.get_json()
+    assert data_human["success"] is False
+    assert (
+        data_human["error"]
+        == f"Cannot attach an agent to human account '{human_name}'"
+    )
+
+    # Accept synthetic account with 201
+    with app.app_context():
+        synth_fresh = _create_synthetic_user(db_session, "ai_synth_fresh")
+        fresh_name = synth_fresh.username
+    resp_synth = admin_client.post(
+        "/admin/api/agents",
+        json={"persona_mode": "fixed", "username": fresh_name, "backfill_memory": False},
+    )
+    assert resp_synth.status_code == 201
+    assert resp_synth.get_json()["agent"]["user_username"] == fresh_name
+
+
+def test_api_persona_candidates_excludes_human_accounts(
+    app, client, db_session, admin_login
+):
+    """api_persona_candidates excludes human accounts even when they have activity."""
+    with app.app_context():
+        sub = Subdeaddit(name="candidates_sub", description="Candidates Sub")
+        db_session.add(sub)
+        db_session.commit()
+
+        synth = _create_synthetic_user(db_session, "active_synthetic")
+        create_post(
+            title="Synth Post",
+            content="Content",
+            user=synth.username,
+            subdeaddit="candidates_sub",
+            model="agent:test",
+        )
+
+        human, err = register_human("active_human", "password123", "password123")
+        assert err is None
+        create_post(
+            title="Human Post",
+            content="Content",
+            user=human.username,
+            subdeaddit="candidates_sub",
+            model="human",
+        )
+        synth_name = synth.username
+        human_name = human.username
+
+    admin_client = admin_login(client)
+    resp = admin_client.get("/admin/api/personas/candidates")
+    assert resp.status_code == 200
+    candidates = resp.get_json()["candidates"]
+    candidate_names = [c["username"] for c in candidates]
+
+    assert synth_name in candidate_names
+    assert human_name not in candidate_names
+
+
+def test_simulated_voting_ordered_users_excludes_human_accounts(app, db_session):
+    """Simulated voting _ordered_users excludes human accounts."""
+    from deaddit.dynamics.engagement import _ordered_users
+
+    with app.app_context():
+        synth = _create_synthetic_user(db_session, "voter_synth")
+        human, err = register_human("voter_human", "password123", "password123")
+        assert err is None
+        synth_name = synth.username
+        human_name = human.username
+
+        snapshots = _ordered_users()
+        snapshot_names = [s.username for s in snapshots]
+
+        assert synth_name in snapshot_names
+        assert human_name not in snapshot_names
+
+
+def test_seeding_excludes_human_accounts_and_fresh_install_behavior(app, db_session):
+    """Seeding history ignores humans in author/voter pools and fresh_install checks synthetic users."""
+    from deaddit.dynamics.seeding import _activity_weights
+
+    with app.app_context():
+        # 1. _activity_weights excludes human accounts
+        sub = Subdeaddit(name="seeding_sub", description="Seeding Sub")
+        db_session.add(sub)
+        db_session.commit()
+
+        synth = _create_synthetic_user(db_session, "seed_synth")
+        create_post(
+            title="Seed Synth Post",
+            content="Content",
+            user=synth.username,
+            subdeaddit="seeding_sub",
+            model="agent:test",
+        )
+        human, err = register_human("seed_human", "password123", "password123")
+        assert err is None
+        create_post(
+            title="Seed Human Post",
+            content="Content",
+            user=human.username,
+            subdeaddit="seeding_sub",
+            model="human",
+        )
+        synth_name = synth.username
+        human_name = human.username
+
+        usernames, weights = _activity_weights()
+        assert synth_name in usernames
+        assert human_name not in usernames
+
+
+def test_seeding_fresh_install_with_only_human_accounts(app, db_session):
+    """fresh_install evaluates to True when only human accounts exist, seeding synthetic personas without collision."""
+    from deaddit.dynamics.seeding import seed_history
+
+    with app.app_context():
+        # Clean DB with ONLY human accounts, no synthetic users
+        # Pre-register a human account whose username collides with the first planned persona: "ava00"
+        colliding_human, err = register_human("ava00", "password123", "password123")
+        assert err is None
+
+        # Verify database state
+        total_users = db.session.query(func.count(User.username)).scalar()
+        synthetic_count = (
+            db.session.query(func.count(User.username))
+            .filter(User.password_hash.is_(None))
+            .scalar()
+        )
+        assert total_users == 1
+        assert synthetic_count == 0
+
+        # Run seed_history in dry_run mode
+        report = seed_history(days=1, seed=42, dry_run=True, allow_production=True)
+
+        # fresh_install must evaluate to True even though human accounts exist!
+        assert report["users_created"] > 0
+        # The colliding user ava00 should have been skipped!
+        assert report["skipped_existing_users"] >= 1
+
+
+def test_humans_remain_visible_in_shared_participation(app, client, db_session):
+    """Humans remain visible in public search, feed queries, profile queries, mentions, and karma."""
+    from deaddit.dynamics.karma import recompute_scores_and_karma
+    from deaddit.dynamics.notifications import _mentioned_usernames
+
+    with app.app_context():
+        Setting.set_value("SETUP_COMPLETED_AT", datetime.utcnow().isoformat())
+        sub = Subdeaddit(name="community", description="Community subdeaddit")
+        db_session.add(sub)
+        synth = _create_synthetic_user(db_session, "fellow_bot")
+        human, err = register_human("active_citizen", "password123", "password123")
+        assert err is None
+        human.bio = "A friendly human citizen"
+        db_session.commit()
+
+        # Create human post
+        post = create_post(
+            title="Human Greetings Everyone",
+            content="Hello from a human!",
+            user=human.username,
+            subdeaddit="community",
+            model="human",
+        )
+        human_name = human.username
+        post_id = post.id
+
+    # 1. Public feed queries
+    resp_front = client.get("/")
+    assert resp_front.status_code == 200
+    assert "Human Greetings Everyone" in resp_front.text
+    assert human_name in resp_front.text
+
+    resp_newest = client.get("/?sort=newest")
+    assert resp_newest.status_code == 200
+    assert "Human Greetings Everyone" in resp_newest.text
+
+    resp_sub = client.get("/d/community")
+    assert resp_sub.status_code == 200
+    assert "Human Greetings Everyone" in resp_sub.text
+
+    # 2. User profile query
+    resp_profile = client.get(f"/user/{human_name}")
+    assert resp_profile.status_code == 200
+    assert human_name in resp_profile.text
+    assert "A friendly human citizen" in resp_profile.text
+
+    # 3. Public search
+    resp_search = client.get("/search?q=citizen")
+    assert resp_search.status_code == 200
+    assert human_name in resp_search.text
+
+    # 4. Mention resolution & notifications
+    with app.app_context():
+        mentioned = _mentioned_usernames(f"Hey @{human_name}, check this out!")
+        assert human_name in mentioned
+
+        # Notification emitted on comment with mention
+        comment = create_comment(
+            post_id=post_id,
+            content=f"Calling @{human_name} here",
+            user="fellow_bot",
+        )
+        notif = Notification.query.filter_by(
+            recipient=human_name,
+            kind="mention",
+            comment_id=comment.id,
+        ).first()
+        assert notif is not None
+
+    # 5. Karma updates
+    with app.app_context():
+        # Vote on human post
+        vote = Vote(post_id=post_id, voter="fellow_bot", value=1, source="simulated")
+        db_session.add(vote)
+        db_session.commit()
+
+        summary = recompute_scores_and_karma()
+        assert summary["karma_updates"] > 0
+        refreshed_human = db.session.get(User, human_name)
+        assert refreshed_human.post_karma == 1
+
 

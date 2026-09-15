@@ -39,7 +39,12 @@ def _activity_weights() -> tuple[list[str], list[int]]:
     ).group_by(Comment.user):
         activity[username] = activity.get(username, 0) + count
 
-    usernames = [row[0] for row in db.session.query(User.username).all()]
+    usernames = [
+        row[0]
+        for row in db.session.query(User.username)
+        .filter(User.password_hash.is_(None))
+        .all()
+    ]
     weights = [max(activity.get(name, 0), 0) for name in usernames]
     return usernames, weights
 
@@ -1238,7 +1243,12 @@ def _vote_pass(
     batch_size: int,
 ) -> int:
     """Bernoulli(p) per seeded item; synthesize votes via _backfill_item."""
-    user_count = db.session.query(func.count(User.username)).scalar() or 0
+    user_count = (
+        db.session.query(func.count(User.username))
+        .filter(User.password_hash.is_(None))
+        .scalar()
+        or 0
+    )
     capacity = user_count - 1
     if capacity <= 0:
         return 0
@@ -1335,12 +1345,23 @@ def seed_history(
             "SEED_VOTE_PROBABILITY decayed to 0; no fabricated votes written"
         )
 
-    fresh_install = (db.session.query(func.count(User.username)).scalar() or 0) == 0
-    existing_usernames = {row[0] for row in db.session.query(User.username).all()}
+    fresh_install = (
+        db.session.query(func.count(User.username))
+        .filter(User.password_hash.is_(None))
+        .scalar()
+        or 0
+    ) == 0
+    existing_synthetic = {
+        row[0]
+        for row in db.session.query(User.username)
+        .filter(User.password_hash.is_(None))
+        .all()
+    }
+    all_usernames = {row[0] for row in db.session.query(User.username).all()}
     existing_subs = {row[0] for row in db.session.query(Subdeaddit.name).all()}
 
     planned_users, skipped_users = (
-        _plan_community(seed, existing_usernames, window_start, now)
+        _plan_community(seed, all_usernames, window_start, now)
         if fresh_install
         else ([], 0)
     )
@@ -1348,7 +1369,7 @@ def seed_history(
         seed, existing_subs, window_start, now
     )
 
-    author_pool = sorted(existing_usernames | {u["username"] for u in planned_users})
+    author_pool = sorted(existing_synthetic | {u["username"] for u in planned_users})
     sub_pool = sorted(existing_subs | {s["name"] for s in planned_subs})
     planned_posts = (
         _plan_timeline(seed, days, window_start, now, author_pool, sub_pool)

@@ -4252,6 +4252,7 @@ def api_persona_candidates():
         db.session.query(User, posts_sq.c.n, comments_sq.c.n)
         .outerjoin(posts_sq, User.username == posts_sq.c.username)
         .outerjoin(comments_sq, User.username == comments_sq.c.username)
+        .filter(User.password_hash.is_(None))
     )
     if taken:
         rows = rows.filter(~User.username.in_(taken))
@@ -4522,10 +4523,21 @@ def api_create_agent():
     if persona_mode == "fixed":
         if not username:
             return jsonify({"success": False, "error": "username is required"}), 400
-        if db.session.get(User, username) is None:
+        user = db.session.get(User, username)
+        if user is None:
             return (
                 jsonify(
                     {"success": False, "error": f"User '{username}' does not exist"}
+                ),
+                400,
+            )
+        if user.password_hash is not None:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Cannot attach an agent to human account '{username}'",
+                    }
                 ),
                 400,
             )
