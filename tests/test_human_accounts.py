@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 import sqlite3
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 import deaddit
 from deaddit.config import Config
-from deaddit.dynamics.inbox import get_inbox, mark_inbox_read
+from deaddit.dynamics.inbox import mark_inbox_read
 from deaddit.extensions import db
 from deaddit.human_auth import (
     _DUMMY_PASSWORD_HASH,
@@ -20,7 +21,6 @@ from deaddit.human_auth import (
     human_accounts_enabled,
     register_human,
 )
-from sqlalchemy import func
 from deaddit.models import (
     Agent,
     Comment,
@@ -1522,7 +1522,7 @@ def test_human_recipient_bypasses_dedupe_and_reply_fatigue(app, db_session):
 
         # 1. Rolling dedupe bypass: bot replies twice to human in same post within 1 hour
         c1 = create_comment(post_id=post_id, content="Reply 1", user="bot_buddy")
-        c2 = create_comment(post_id=post_id, content="Reply 2", user="bot_buddy")
+        create_comment(post_id=post_id, content="Reply 2", user="bot_buddy")
 
         notifs = Notification.query.filter_by(
             recipient="human_hero", kind="reply"
@@ -1585,7 +1585,7 @@ def test_synthetic_recipient_respects_dedupe_and_reply_fatigue(app, db_session):
 
         # 1. Rolling dedupe: bot_actor comments twice on same post within 1 hour
         c1 = create_comment(post_id=post_id, content="Bot reply 1", user="ai_actor")
-        c2 = create_comment(post_id=post_id, content="Bot reply 2", user="ai_actor")
+        create_comment(post_id=post_id, content="Bot reply 2", user="ai_actor")
 
         notifs = Notification.query.filter_by(
             recipient="ai_target", kind="reply"
@@ -1719,8 +1719,8 @@ def test_fixed_agent_rejects_human_account(
     app, client, db_session, admin_login, monkeypatch
 ):
     """Fixed agent validation rejects attaching to human account in runtime and admin API."""
-    from deaddit.agents.loop import _select_persona
     import deaddit.llm.capabilities as capabilities
+    from deaddit.agents.loop import _select_persona
 
     monkeypatch.setattr(capabilities, "ensure_tools_allowed", lambda *a, **kw: None)
 
@@ -1919,7 +1919,7 @@ def test_humans_remain_visible_in_shared_participation(app, client, db_session):
         Setting.set_value("SETUP_COMPLETED_AT", datetime.utcnow().isoformat())
         sub = Subdeaddit(name="community", description="Community subdeaddit")
         db_session.add(sub)
-        synth = _create_synthetic_user(db_session, "fellow_bot")
+        _create_synthetic_user(db_session, "fellow_bot")
         human, err = register_human("active_citizen", "password123", "password123")
         assert err is None
         human.bio = "A friendly human citizen"
