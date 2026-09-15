@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import sqlite3
 from unittest.mock import patch
 
@@ -10,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 import deaddit
 from deaddit.config import Config
+from deaddit.dynamics.inbox import get_inbox, mark_inbox_read
 from deaddit.extensions import db
 from deaddit.human_auth import (
     _DUMMY_PASSWORD_HASH,
@@ -18,8 +20,12 @@ from deaddit.human_auth import (
     human_accounts_enabled,
     register_human,
 )
-from deaddit.models import Comment, Notification, Post, Subdeaddit, User
-from deaddit.services.content import ContentValidationError
+from deaddit.models import Comment, Notification, Post, Setting, Subdeaddit, User
+from deaddit.services.content import (
+    ContentValidationError,
+    create_comment,
+    create_post,
+)
 from deaddit.utils import safe_local_next
 
 PREVIOUS_HEAD = "a6b8c0d2e4f6"
@@ -1070,4 +1076,626 @@ def test_nav_create_post_link(app, client, monkeypatch):
     resp = client.get("/")
     assert resp.status_code == 200
     assert "Create Post" not in resp.text
+
+
+# ============================================================================
+# 8. Phase 3: Human Inbox, Navigation, and Dynamics
+# ============================================================================
+
+
+def test_inbox_get_returns_items_newest_first(app, client, db_session):
+    """Verify GET /inbox returns user's notifications in newest-first order with canonical links."""
+    _register_and_login(client, "inbox_tester")
+
+    with app.app_context():
+        _create_synthetic_user(db_session, "bot_author")
+        sub = Subdeaddit(name="general", description="General")
+        db_session.add(sub)
+        post = Post(
+            title="Notification Target Post",
+            content="Content",
+            user="inbox_tester",
+            subdeaddit_name="general",
+            model="human",
+        )
+        db_session.add(post)
+        db_session.commit()
+        post_id = post.id
+
+        c1 = Comment(
+            post_id=post_id,
+            user="bot_author",
+            content="First reply snippet",
+            model="agent:test",
+        )
+        c2 = Comment(
+            post_id=post_id,
+            user="bot_author",
+            content="Second mention snippet",
+            model="agent:test",
+        )
+        c3 = Comment(
+            post_id=post_id,
+            user="bot_author",
+            content="Third reply snippet (newest)",
+            model="agent:test",
+        )
+        db_session.add_all([c1, c2, c3])
+        db_session.flush()
+
+        now = datetime.utcnow()
+        n1 = Notification(
+            recipient="inbox_tester",
+            kind="reply",
+            actor="bot_author",
+            post_id=post_id,
+            comment_id=c1.id,
+            snippet="First reply snippet",
+            created_at=now - timedelta(minutes=30),
+        )
+        n2 = Notification(
+            recipient="inbox_tester",
+            kind="mention",
+            actor="bot_author",
+            post_id=post_id,
+            comment_id=c2.id,
+            snippet="Second mention snippet",
+            created_at=now - timedelta(minutes=15),
+        )
+        n3 = Notification(
+            recipient="inbox_tester",
+            kind="reply",
+            actor="bot_author",
+            post_id=post_id,
+            comment_id=c3.id,
+            snippet="Third reply snippet (newest)",
+            created_at=now,
+        )
+        db_session.add_all([n1, n2, n3])
+        db_session.commit()
+        c3_id = c3.id
+
+    resp = client.get("/inbox")
+    assert resp.status_code == 200
+    assert "Inbox" in resp.text
+    # Check newest-first order in rendered HTML
+    pos_newest = resp.text.find("Third reply snippet (newest)")
+    pos_middle = resp.text.find("Second mention snippet")
+    pos_oldest = resp.text.find("First reply snippet")
+    assert pos_newest != -1 and pos_middle != -1 and pos_oldest != -1
+    assert pos_newest < pos_middle < pos_oldest
+
+    # Check badges and canonical links
+    assert "inbox-badge--reply" in resp.text
+    assert "inbox-badge--mention" in resp.text
+    assert f"/d/general/{post_id}#comment-{c3_id}" in resp.text
+    assert "u/bot_author" in resp.text
+
+
+def test_inbox_keyset_pagination_and_invalid_cursor(app, client, db_session):
+    """Test keyset pagination over 25 items and 400 response on malformed cursor."""
+    import re
+
+    _register_and_login(client, "page_user")
+
+    with app.app_context():
+        _create_synthetic_user(db_session, "pager_bot")
+        sub = Subdeaddit(name="general", description="General")
+        db_session.add(sub)
+        post = Post(
+            title="Pagination Post",
+            content="Content",
+            user="page_user",
+            subdeaddit_name="general",
+            model="human",
+        )
+        db_session.add(post)
+        db_session.commit()
+        post_id = post.id
+
+        now = datetime.utcnow()
+        # Insert 30 notifications: limit is 25, so page 1 has 25 and next_cursor
+        for i in range(30):
+            db_session.add(
+                Notification(
+                    recipient="page_user",
+                    kind="reply",
+                    actor="pager_bot",
+                    post_id=post_id,
+                    comment_id=None,
+                    snippet=f"Snippet item {i:02d}",
+                    created_at=now - timedelta(minutes=30 - i),
+                )
+            )
+        db_session.commit()
+
+    # Page 1
+    resp = client.get("/inbox")
+    assert resp.status_code == 200
+    assert "Older notifications" in resp.text
+    assert "Snippet item 29" in resp.text  # Newest on page 1
+    assert "Snippet item 05" in resp.text  # 25th item on page 1
+    assert "Snippet item 04" not in resp.text  # Belongs to page 2
+
+    # Extract cursor from Older notifications link
+    cursor_match = re.search(r'href="/inbox\?cursor=([^"]+)"', resp.text)
+    assert cursor_match is not None
+    next_cursor = cursor_match.group(1)
+
+    # Page 2 using valid cursor
+    resp_page2 = client.get(f"/inbox?cursor={next_cursor}")
+    assert resp_page2.status_code == 200
+    assert "Snippet item 04" in resp_page2.text
+    assert "Snippet item 00" in resp_page2.text
+    assert "Older notifications" not in resp_page2.text  # Exhausted
+
+    # Invalid cursor formats -> 400 Bad Request
+    assert client.get("/inbox?cursor=malformed").status_code == 400
+    assert client.get("/inbox?cursor=not-a-date|123").status_code == 400
+    assert client.get("/inbox?cursor=2026-01-01T00:00:00|not-an-int").status_code == 400
+
+
+def test_inbox_unread_count_badge_in_navigation(app, client, db_session):
+    """Test unread badge in base navigation reflects current unread count."""
+    _register_and_login(client, "nav_badge_user")
+
+    # 1. No notifications -> Inbox link present, but no badge
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "Inbox" in resp.text
+    assert "badge--unread" not in resp.text
+
+    # 2. Add 3 unread notifications
+    with app.app_context():
+        _create_synthetic_user(db_session, "badge_bot")
+        for i in range(3):
+            db_session.add(
+                Notification(
+                    recipient="nav_badge_user",
+                    kind="reply",
+                    actor="badge_bot",
+                    snippet=f"Unread snippet {i}",
+                )
+            )
+        db_session.commit()
+
+    resp2 = client.get("/")
+    assert resp2.status_code == 200
+    assert '<span class="badge badge--unread">3</span>' in resp2.text
+
+    # 3. Mark 1 notification read
+    with app.app_context():
+        notif = Notification.query.filter_by(recipient="nav_badge_user").first()
+        mark_inbox_read("nav_badge_user", ids=[notif.id])
+
+    resp3 = client.get("/")
+    assert resp3.status_code == 200
+    assert '<span class="badge badge--unread">2</span>' in resp3.text
+
+
+def test_inbox_read_single_id_redirects_safely(app, client, db_session):
+    """Test POST /inbox/read with single id marks read and redirects to safe next target."""
+    _register_and_login(client, "single_reader")
+
+    with app.app_context():
+        _create_synthetic_user(db_session, "bot")
+        sub = Subdeaddit(name="general", description="General")
+        db_session.add(sub)
+        post = Post(
+            title="Post",
+            content="Content",
+            user="single_reader",
+            subdeaddit_name="general",
+            model="human",
+        )
+        db_session.add(post)
+        db_session.flush()
+
+        comment = Comment(
+            post_id=post.id,
+            user="bot",
+            content="Test reply",
+            model="agent:test",
+        )
+        db_session.add(comment)
+        db_session.flush()
+
+        notif = Notification(
+            recipient="single_reader",
+            kind="reply",
+            actor="bot",
+            post_id=post.id,
+            comment_id=comment.id,
+            snippet="Test reply",
+        )
+        db_session.add(notif)
+        db_session.commit()
+        notif_id = notif.id
+        post_id = post.id
+        comment_id = comment.id
+
+    # 1. POST /inbox/read with valid next
+    resp = client.post(
+        "/inbox/read",
+        data={
+            "notification_id": str(notif_id),
+            "next": f"/d/general/{post_id}#comment-{comment_id}",
+        },
+    )
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == f"/d/general/{post_id}#comment-{comment_id}"
+
+    with app.app_context():
+        updated = db.session.get(Notification, notif_id)
+        assert updated.read_at is not None
+
+    # 2. POST /inbox/read with unsafe external next falls back to /inbox
+    resp_unsafe = client.post(
+        "/inbox/read",
+        data={
+            "notification_id": str(notif_id),
+            "next": "https://evil.com/phish",
+        },
+    )
+    assert resp_unsafe.status_code == 302
+    assert resp_unsafe.headers["Location"] == "/inbox"
+
+
+def test_inbox_read_all(app, client, db_session):
+    """Test POST /inbox/read with notification_id='all' marks all unread items read."""
+    _register_and_login(client, "read_all_user")
+
+    with app.app_context():
+        _create_synthetic_user(db_session, "bot")
+        for i in range(3):
+            db_session.add(
+                Notification(
+                    recipient="read_all_user",
+                    kind="reply",
+                    actor="bot",
+                    snippet=f"Snippet {i}",
+                )
+            )
+        db_session.commit()
+
+        assert (
+            Notification.query.filter_by(
+                recipient="read_all_user", read_at=None
+            ).count()
+            == 3
+        )
+
+    resp = client.post(
+        "/inbox/read",
+        data={"notification_id": "all", "next": "/inbox"},
+    )
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/inbox"
+
+    with app.app_context():
+        assert (
+            Notification.query.filter_by(
+                recipient="read_all_user", read_at=None
+            ).count()
+            == 0
+        )
+
+
+def test_inbox_cross_user_isolation(app, client, db_session):
+    """Test User A cannot view or mark User B's notifications."""
+    _register_and_login(client, "user_a")
+
+    with app.app_context():
+        _create_synthetic_user(db_session, "bot")
+        # Create user_b directly
+        user_b = User(
+            username="user_b",
+            password_hash="pbkdf2:sha256:dummy",
+            model="human",
+        )
+        db_session.add(user_b)
+        db_session.flush()
+
+        notif_b = Notification(
+            recipient="user_b",
+            kind="reply",
+            actor="bot",
+            snippet="Secret notification for User B",
+        )
+        db_session.add(notif_b)
+        db_session.commit()
+        notif_b_id = notif_b.id
+
+    # 1. User A visits /inbox -> User B's notification is not present
+    resp = client.get("/inbox")
+    assert resp.status_code == 200
+    assert "Secret notification for User B" not in resp.text
+
+    # 2. User A attempts to mark User B's notification read
+    resp_mark = client.post(
+        "/inbox/read",
+        data={"notification_id": str(notif_b_id), "next": "/inbox"},
+    )
+    assert resp_mark.status_code == 302
+
+    with app.app_context():
+        # User B's notification remains unread!
+        b_row = db.session.get(Notification, notif_b_id)
+        assert b_row.read_at is None
+
+
+def test_ai_comment_on_human_post_emits_notification_with_working_link(
+    app, client, db_session
+):
+    """Test AI comment on human post creates notification with working canonical URL."""
+    _register_and_login(client, "human_op")
+
+    with app.app_context():
+        _create_synthetic_user(db_session, "bot_commenter")
+        sub = Subdeaddit(name="general", description="General")
+        db_session.add(sub)
+        post = Post(
+            title="Post by OP",
+            content="Content",
+            user="human_op",
+            subdeaddit_name="general",
+            model="human",
+        )
+        db_session.add(post)
+        db_session.commit()
+        post_id = post.id
+
+        # AI creates top-level comment
+        comment = create_comment(
+            post_id=post_id,
+            content="AI insight on your post",
+            user="bot_commenter",
+        )
+        comment_id = comment.id
+
+        notifs = Notification.query.filter_by(recipient="human_op").all()
+        assert len(notifs) == 1
+        assert notifs[0].kind == "reply"
+        assert notifs[0].post_id == post_id
+        assert notifs[0].comment_id == comment_id
+        assert notifs[0].snippet == "AI insight on your post"
+
+    resp = client.get("/inbox")
+    assert resp.status_code == 200
+    assert f"/d/general/{post_id}#comment-{comment_id}" in resp.text
+    assert "AI insight on your post" in resp.text
+
+
+def test_ai_reply_to_human_comment_emits_notification_with_working_link(
+    app, client, db_session
+):
+    """Test AI reply to human comment creates notification with working canonical URL."""
+    _register_and_login(client, "human_commenter")
+
+    with app.app_context():
+        _create_synthetic_user(db_session, "bot_author")
+        _create_synthetic_user(db_session, "bot_replier")
+        sub = Subdeaddit(name="general", description="General")
+        db_session.add(sub)
+        post = Post(
+            title="Post by bot",
+            content="Content",
+            user="bot_author",
+            subdeaddit_name="general",
+            model="agent:test",
+        )
+        db_session.add(post)
+        db_session.commit()
+        post_id = post.id
+
+        human_comment = create_comment(
+            post_id=post_id,
+            content="Human comment on thread",
+            user="human_commenter",
+        )
+
+        ai_reply = create_comment(
+            post_id=post_id,
+            content="AI response to human comment",
+            user="bot_replier",
+            parent_id=human_comment.id,
+        )
+        reply_id = ai_reply.id
+
+        notifs = Notification.query.filter_by(recipient="human_commenter").all()
+        assert len(notifs) == 1
+        assert notifs[0].kind == "reply"
+        assert notifs[0].post_id == post_id
+        assert notifs[0].comment_id == reply_id
+        assert notifs[0].snippet == "AI response to human comment"
+
+    resp = client.get("/inbox")
+    assert resp.status_code == 200
+    assert f"/d/general/{post_id}#comment-{reply_id}" in resp.text
+
+
+def test_human_recipient_bypasses_dedupe_and_reply_fatigue(app, db_session):
+    """Test human recipient bypasses rolling dedupe and reply-chain fatigue suppression."""
+    with app.app_context():
+        human = User(
+            username="human_hero",
+            password_hash="pbkdf2:sha256:dummy",
+            model="human",
+        )
+        bot = User(username="bot_buddy", model="agent:test")
+        sub = Subdeaddit(name="general", description="General")
+        db_session.add_all([human, bot, sub])
+        db_session.flush()
+
+        post = Post(
+            title="Hero Post",
+            content="Content",
+            user="human_hero",
+            subdeaddit_name="general",
+            model="human",
+        )
+        db_session.add(post)
+        db_session.commit()
+        post_id = post.id
+
+        # 1. Rolling dedupe bypass: bot replies twice to human in same post within 1 hour
+        c1 = create_comment(post_id=post_id, content="Reply 1", user="bot_buddy")
+        c2 = create_comment(post_id=post_id, content="Reply 2", user="bot_buddy")
+
+        notifs = Notification.query.filter_by(
+            recipient="human_hero", kind="reply"
+        ).all()
+        assert len(notifs) == 2  # Dedupe bypassed for human recipient
+
+        # 2. Reply-chain fatigue bypass:
+        Setting.set_value("reply_exchange_cap_min", "2")
+        Setting.set_value("reply_exchange_cap_max", "2")
+
+        # Build alternating chain: c1 (bot) -> c3 (human) -> c4 (bot) -> c5 (human) -> c6 (bot)
+        c3 = create_comment(
+            post_id=post_id,
+            content="Human reply 1",
+            user="human_hero",
+            parent_id=c1.id,
+        )
+        c4 = create_comment(
+            post_id=post_id, content="Bot reply 2", user="bot_buddy", parent_id=c3.id
+        )
+        c5 = create_comment(
+            post_id=post_id,
+            content="Human reply 3",
+            user="human_hero",
+            parent_id=c4.id,
+        )
+        # exchange_tail is >= cap=2.
+        c6 = create_comment(
+            post_id=post_id,
+            content="Bot reply 4 capping exchange",
+            user="bot_buddy",
+            parent_id=c5.id,
+        )
+
+        c6_notifs = Notification.query.filter_by(
+            recipient="human_hero", comment_id=c6.id
+        ).all()
+        assert len(c6_notifs) == 1  # Fatigue bypassed for human recipient
+
+
+def test_synthetic_recipient_respects_dedupe_and_reply_fatigue(app, db_session):
+    """Test AI recipient respects rolling dedupe and reply-chain fatigue cap."""
+    with app.app_context():
+        bot_target = User(username="ai_target", model="agent:test")
+        bot_actor = User(username="ai_actor", model="agent:test")
+        sub = Subdeaddit(name="general", description="General")
+        db_session.add_all([bot_target, bot_actor, sub])
+        db_session.flush()
+
+        post = Post(
+            title="AI Post",
+            content="Content",
+            user="ai_target",
+            subdeaddit_name="general",
+            model="agent:test",
+        )
+        db_session.add(post)
+        db_session.commit()
+        post_id = post.id
+
+        # 1. Rolling dedupe: bot_actor comments twice on same post within 1 hour
+        c1 = create_comment(post_id=post_id, content="Bot reply 1", user="ai_actor")
+        c2 = create_comment(post_id=post_id, content="Bot reply 2", user="ai_actor")
+
+        notifs = Notification.query.filter_by(
+            recipient="ai_target", kind="reply"
+        ).all()
+        assert len(notifs) == 1
+        assert notifs[0].comment_id == c1.id
+
+        # 2. Reply-chain fatigue:
+        Setting.set_value("reply_exchange_cap_min", "2")
+        Setting.set_value("reply_exchange_cap_max", "2")
+
+        Notification.query.delete()
+        db_session.commit()
+
+        c_root = create_comment(
+            post_id=post_id, content="Root by target", user="ai_target"
+        )
+        r1 = create_comment(
+            post_id=post_id,
+            content="Reply 1 by actor",
+            user="ai_actor",
+            parent_id=c_root.id,
+        )
+        r2 = create_comment(
+            post_id=post_id,
+            content="Reply 2 by target",
+            user="ai_target",
+            parent_id=r1.id,
+        )
+        # Tail >= cap=2. Fatigue suppresses notification for synthetic ai_target!
+        r3 = create_comment(
+            post_id=post_id,
+            content="Reply 3 by actor capping exchange",
+            user="ai_actor",
+            parent_id=r2.id,
+        )
+
+        r3_notifs = Notification.query.filter_by(
+            recipient="ai_target", comment_id=r3.id
+        ).all()
+        assert len(r3_notifs) == 0
+
+
+def test_inbox_anonymous_and_disabled_access(app, client, db_session, monkeypatch):
+    """Test anonymous access redirects to login and disabled feature returns 404."""
+    # 1. Anonymous GET /inbox redirects to login with next=/inbox
+    resp = client.get("/inbox")
+    assert resp.status_code == 302
+    assert (
+        "/login?next=%2Finbox" in resp.headers["Location"]
+        or "/login?next=/inbox" in resp.headers["Location"]
+    )
+
+    # 2. Anonymous POST /inbox/read redirects to login
+    resp_read = client.post("/inbox/read", data={"notification_id": "all"})
+    assert resp_read.status_code == 302
+    assert "/login" in resp_read.headers["Location"]
+
+    # 3. Signed in, but feature disabled -> 404
+    _register_and_login(client, "gated_inbox_user")
+    monkeypatch.setenv("HUMAN_ACCOUNTS_ENABLED", "false")
+
+    assert client.get("/inbox").status_code == 404
+    assert client.post("/inbox/read", data={"notification_id": "all"}).status_code == 404
+
+    # Nav does not show Inbox when disabled
+    resp_nav = client.get("/")
+    assert resp_nav.status_code == 200
+    assert "Inbox" not in resp_nav.text
+
+
+def test_post_convenience_redirect(app, client, db_session):
+    """Test /post/<id> convenience route redirects to /d/<subdeaddit>/<id>."""
+    with app.app_context():
+        _create_synthetic_user(db_session, "poster")
+        sub = Subdeaddit(name="technology", description="Tech")
+        db_session.add(sub)
+        post = Post(
+            title="Tech Post",
+            content="Content",
+            user="poster",
+            subdeaddit_name="technology",
+            model="agent:test",
+        )
+        db_session.add(post)
+        db_session.commit()
+        post_id = post.id
+
+    resp = client.get(f"/post/{post_id}")
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == f"/d/technology/{post_id}"
+
+    # Non-existent post returns 404
+    assert client.get("/post/999999").status_code == 404
 

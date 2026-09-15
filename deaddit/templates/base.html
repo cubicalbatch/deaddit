@@ -60,6 +60,8 @@
                     {% if current_human %}
                     <a class="nav-link{% if endpoint in ('web.submit', 'main.submit') %} is-active{% endif %}"
                        href="{{ url_for('web.submit') }}">Create Post</a>
+                    <a class="nav-link{% if endpoint in ('web.inbox',) %} is-active{% endif %}"
+                       href="{{ url_for('web.inbox') }}">Inbox{% if human_unread_count > 0 %} <span class="badge badge--unread">{{ human_unread_count }}</span>{% endif %}</a>
                     <a class="nav-link{% if endpoint in ('web.user_profile',) and request.view_args and request.view_args.get('username') == current_human.username %} is-active{% endif %}"
                        href="/u/{{ current_human.username }}">u/{{ current_human.username }}</a>
                     <form class="nav-logout-form" action="{{ url_for('web.logout') }}" method="post" style="display: inline;">
@@ -110,7 +112,7 @@
     <main class="content" id="main-content">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                <div class="flash-messages">
+                <div class="flash-messages" role="region" aria-label="Status messages" aria-live="polite">
                     {% for category, message in messages %}
                         <div class="flash-message flash-message--{{ category }}" role="alert">{{ message }}</div>
                     {% endfor %}

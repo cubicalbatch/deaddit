@@ -7,6 +7,7 @@ from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import joinedload, selectinload
 
 from deaddit.dynamics import degeneracy
+from deaddit.dynamics.inbox import get_inbox, mark_inbox_read
 from deaddit.dynamics.ranking import (
     controversy,
     normalize_comment_sort,
@@ -969,6 +970,95 @@ def create_comment(subdeaddit_name, post_id):
     return redirect(
         url_for("web.post", subdeaddit_name=subdeaddit_name, post_id=post_id)
         + f"#comment-{new_comment.id}"
+    )
+
+
+@bp.route("/inbox")
+def inbox():
+    if not human_accounts_enabled():
+        abort(404)
+    human = current_human()
+    if not human:
+        target = (
+            request.full_path.rstrip("?")
+            if request.full_path.endswith("?")
+            else request.full_path
+        )
+        safe_next = safe_local_next(target)
+        return redirect(
+            url_for("web.login", next=safe_next) if safe_next else url_for("web.login")
+        )
+
+    cursor = request.args.get("cursor")
+    try:
+        inbox_data = get_inbox(
+            human.username, unread_only=False, limit=25, cursor=cursor
+        )
+    except ValueError:
+        abort(400, description="Invalid inbox cursor")
+
+    post_ids = {item["post_id"] for item in inbox_data["items"] if item.get("post_id")}
+    posts_by_id = (
+        {p.id: p for p in Post.query.filter(Post.id.in_(post_ids)).all()}
+        if post_ids
+        else {}
+    )
+
+    for item in inbox_data["items"]:
+        post = posts_by_id.get(item.get("post_id"))
+        if post:
+            url = url_for(
+                "web.post", subdeaddit_name=post.subdeaddit_name, post_id=post.id
+            )
+            if item.get("comment_id"):
+                url += f"#comment-{item['comment_id']}"
+        else:
+            url = "#"
+        item["canonical_url"] = url
+
+    return render_template(
+        "inbox.html",
+        items=inbox_data["items"],
+        unread_count=inbox_data["unread"],
+        next_cursor=inbox_data["next_cursor"],
+        title="Inbox - Deaddit",
+    )
+
+
+@bp.route("/inbox/read", methods=["POST"])
+def inbox_read():
+    if not human_accounts_enabled():
+        abort(404)
+    human = current_human()
+    if not human:
+        return redirect(url_for("web.login"))
+
+    notification_id = request.form.get("notification_id")
+    next_param = request.form.get("next")
+    target = safe_local_next(next_param) or url_for("web.inbox")
+
+    if notification_id == "all":
+        mark_inbox_read(human.username, ids="all")
+    elif notification_id is not None:
+        try:
+            notif_id = int(notification_id)
+            mark_inbox_read(human.username, ids=[notif_id])
+        except (ValueError, TypeError):
+            pass
+
+    return redirect(target)
+
+
+@bp.route("/post/<int:post_id>")
+def post_redirect(post_id):
+    target_post = Post.query.get_or_404(post_id)
+    return redirect(
+        url_for(
+            "web.post",
+            subdeaddit_name=target_post.subdeaddit_name,
+            post_id=target_post.id,
+            **request.args,
+        )
     )
 
 

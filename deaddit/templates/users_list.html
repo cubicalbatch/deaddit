@@ -7,9 +7,9 @@
         <h1 class="dir-header__title">Users</h1>
         <p class="dir-header__count">
             {%- if q -%}
-            {{ match_count }} of {{ total_users }} {{ 'persona' if total_users == 1 else 'personas' }} match “{{ q }}”
+            {{ match_count }} of {{ total_users }} {{ 'user' if total_users == 1 else 'users' }} match “{{ q }}”
             {%- else -%}
-            {{ total_users }} synthetic {{ 'persona' if total_users == 1 else 'personas' }}, none of them human
+            {{ total_users }} {{ 'user' if total_users == 1 else 'users' }}
             {%- endif -%}
         </p>
     </div>

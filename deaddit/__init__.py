@@ -175,11 +175,11 @@ def inject_config():
 
     ch = current_human()
     is_enabled = human_accounts_enabled()
-    unread_count = 0
+    unread_cnt = 0
     if ch and is_enabled:
-        unread_count = Notification.query.filter_by(
-            recipient=ch.username, is_read=False
-        ).count()
+        from .dynamics.inbox import unread_count as get_unread_count
+
+        unread_cnt = get_unread_count(ch.username)
 
     return {
         "config": {
@@ -191,7 +191,7 @@ def inject_config():
         "admin_authenticated": is_admin_authenticated(),
         "PRODUCTION": Config.get("PRODUCTION", "false").lower() == "true",
         "current_human": ch,
-        "human_unread_count": unread_count,
+        "human_unread_count": unread_cnt,
         "human_accounts_enabled": is_enabled,
     }
 

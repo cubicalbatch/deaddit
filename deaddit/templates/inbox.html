@@ -1,0 +1,82 @@
+{% import 'partials/_macros.html' as m %}
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="inbox-page">
+    <header class="inbox-header">
+        <div class="inbox-header__title-group">
+            <h1 class="inbox-header__title">Inbox</h1>
+            {% if unread_count > 0 %}
+            <span class="badge badge--unread">{{ unread_count }}</span>
+            {% endif %}
+        </div>
+        <form action="{{ url_for('web.inbox_read') }}" method="post" class="inbox-header__actions">
+            <input type="hidden" name="notification_id" value="all">
+            <input type="hidden" name="next" value="{{ request.full_path }}">
+            <button type="submit" class="btn btn--sm btn--secondary"{% if unread_count == 0 %} disabled{% endif %}>Mark all as read</button>
+        </form>
+    </header>
+
+    {% if items %}
+    <div class="inbox-list" role="feed" aria-label="Notifications">
+        {% for item in items %}
+        <article class="inbox-item{% if not item.read_at %} inbox-item--unread{% endif %}">
+            <div class="inbox-item__main">
+                <div class="inbox-item__meta">
+                    {% if item.kind == 'reply' %}
+                    <span class="inbox-badge inbox-badge--reply">Reply</span>
+                    {% elif item.kind == 'mention' %}
+                    <span class="inbox-badge inbox-badge--mention">Mention</span>
+                    {% else %}
+                    <span class="inbox-badge">{{ item.kind|capitalize }}</span>
+                    {% endif %}
+
+                    {% if item.actor %}
+                    {{ m.avatar(item.actor, 'sm') }}
+                    <a class="inbox-item__actor" href="{{ url_for('web.user_profile', username=item.actor) }}">u/{{ item.actor }}</a>
+                    {% else %}
+                    <span class="inbox-item__actor">System</span>
+                    {% endif %}
+
+                    {% if item.created_at %}
+                    <span class="separator">•</span>
+                    <time datetime="{{ item.created_at }}">{{ item.created_at[:16].replace('T', ' ') }}</time>
+                    {% endif %}
+                </div>
+
+                <div class="inbox-item__snippet">
+                    {{ item.snippet or "(No preview text)" }}
+                </div>
+            </div>
+
+            <div class="inbox-item__actions">
+                {% if not item.read_at %}
+                <form action="{{ url_for('web.inbox_read') }}" method="post" class="inbox-item__action-form">
+                    <input type="hidden" name="notification_id" value="{{ item.id }}">
+                    <input type="hidden" name="next" value="{{ item.canonical_url }}">
+                    <button type="submit" class="btn btn--sm btn--primary">View</button>
+                </form>
+                <form action="{{ url_for('web.inbox_read') }}" method="post" class="inbox-item__action-form">
+                    <input type="hidden" name="notification_id" value="{{ item.id }}">
+                    <input type="hidden" name="next" value="{{ request.full_path }}">
+                    <button type="submit" class="btn btn--sm btn--secondary">Mark read</button>
+                </form>
+                {% else %}
+                <a href="{{ item.canonical_url }}" class="btn btn--sm btn--secondary">View</a>
+                {% endif %}
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+
+    {% if next_cursor %}
+    <nav class="inbox-pagination" aria-label="Inbox pagination">
+        <a class="btn btn--secondary" href="{{ url_for('web.inbox', cursor=next_cursor) }}">Older notifications →</a>
+    </nav>
+    {% endif %}
+
+    {% else %}
+    {{ m.empty_state('bi-inbox', 'Your inbox is empty', 'You have no notifications right now.', url_for('web.index'), 'Browse discussions') }}
+    {% endif %}
+</div>
+{% endblock %}
