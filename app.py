@@ -1,4 +1,5 @@
 import os
+
 from deaddit import create_app
 
 app = create_app()

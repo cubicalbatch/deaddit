@@ -171,7 +171,6 @@ def create_app(config: Any = None) -> Flask:
 def inject_config():
     from .admin_auth import is_admin_authenticated
     from .human_auth import current_human, human_accounts_enabled
-    from .models import Notification
 
     ch = current_human()
     is_enabled = human_accounts_enabled()
