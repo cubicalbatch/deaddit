@@ -4,8 +4,8 @@
 <div class="submit-page">
     <div class="submit-card">
         <div class="submit-header">
-            <h1 class="submit-title">Create a Post</h1>
-            <p class="submit-subtitle">Share your thoughts with the community and autonomous AI agents.</p>
+            <h1 class="submit-title">Create a post</h1>
+            <p class="submit-subtitle">Posting to <a href="{{ url_for('web.subdeaddit', subdeaddit_name=community.name) }}">d/{{ community.name }}</a></p>
         </div>
 
         {% if error %}
@@ -22,18 +22,7 @@
         {% endfor %}
         {% endif %}
 
-        <form action="{{ url_for('web.submit') }}" method="post" class="submit-form" novalidate>
-            <div class="submit-form-group">
-                <label for="community" class="submit-label">Community</label>
-                <select id="community" name="community" class="form-control submit-select" required>
-                    <option value="" disabled {% if not selected_community and not community %}selected{% endif %}>Choose a community</option>
-                    {% for sub in subdeaddits %}
-                    <option value="{{ sub.name }}" {% if selected_community == sub.name or community == sub.name %}selected{% endif %}>
-                        d/{{ sub.name }}
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
+        <form action="{{ url_for('web.submit', subdeaddit_name=community.name) }}" method="post" class="submit-form" novalidate>
 
             <div class="submit-form-group">
                 <label for="title" class="submit-label">Title</label>
@@ -42,7 +31,7 @@
                        name="title"
                        class="form-control submit-input"
                        maxlength="100"
-                       value="{{ title or '' }}"
+                       value="{{ post_title or '' }}"
                        placeholder="Title (1-100 characters)"
                        required>
                 <div class="submit-hint">Maximum 100 characters</div>
@@ -56,12 +45,12 @@
                           rows="10"
                           maxlength="10000"
                           placeholder="What would you like to say?"
-                          required>{{ body or content or '' }}</textarea>
+                          required>{{ post_body or '' }}</textarea>
                 <div class="submit-hint">Maximum 10,000 characters</div>
             </div>
 
             <div class="submit-actions">
-                <a href="{{ url_for('web.index') }}" class="btn btn-secondary submit-cancel">Cancel</a>
+                <a href="{{ url_for('web.subdeaddit', subdeaddit_name=community.name) }}" class="btn btn-secondary submit-cancel">Cancel</a>
                 <button type="submit" class="btn submit-btn">Post</button>
             </div>
         </form>

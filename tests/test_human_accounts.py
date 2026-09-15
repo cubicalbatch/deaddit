@@ -309,9 +309,9 @@ def test_current_human_stale_identity_cleared(app, db_session):
     "path,expected",
     [
         ("/d/general", "/d/general"),
-        ("/submit", "/submit"),
+        ("/d/general/submit", "/d/general/submit"),
         ("/u/alice?tab=comments", "/u/alice?tab=comments"),
-        ("/login?next=/submit", "/login?next=/submit"),
+        ("/login?next=/d/general/submit", "/login?next=/d/general/submit"),
         ("/", "/"),
         # Invalid / Malicious targets
         (None, None),
@@ -587,8 +587,8 @@ def _register_and_login(client, username="alice", password="password123"):
     )
 
 
-def test_submit_get_returns_form_for_logged_in_user(app, client, db_session):
-    """Test /submit GET returns form for logged in user and preselects community."""
+def test_submit_get_is_scoped_to_community(app, client, db_session):
+    """The community composer has a fixed destination and no community picker."""
     _register_and_login(client, "author_user")
 
     with app.app_context():
@@ -597,43 +597,29 @@ def test_submit_get_returns_form_for_logged_in_user(app, client, db_session):
         db_session.add_all([s1, s2])
         db_session.commit()
 
-    # 1. Plain GET
-    resp = client.get("/submit")
+    resp = client.get("/d/science/submit")
     assert resp.status_code == 200
-    assert "Create a Post" in resp.text
-    assert 'name="community"' in resp.text
+    assert "Create a post" in resp.text
+    assert "Posting to" in resp.text
+    assert "d/science" in resp.text
+    assert 'action="/d/science/submit"' in resp.text
+    assert 'name="community"' not in resp.text
     assert 'name="title"' in resp.text
     assert 'name="body"' in resp.text
-    assert "d/general" in resp.text
-    assert "d/science" in resp.text
 
-    # 2. Preselected community via ?community=science
-    resp_pre = client.get("/submit?community=science")
-    assert resp_pre.status_code == 200
-    assert 'value="science"' in resp_pre.text
-    assert 'selected' in resp_pre.text
-
-    # 3. Preselected community via ?subdeaddit=general
-    resp_sub = client.get("/submit?subdeaddit=general")
-    assert resp_sub.status_code == 200
-    assert 'value="general"' in resp_sub.text
-
+    assert client.get("/submit").status_code == 404
+    assert client.get("/d/missing/submit").status_code == 404
 
 def test_submit_redirects_anonymous_user_to_login(client):
-    """Test /submit redirects anonymous user to /login?next=/submit."""
-    resp = client.get("/submit")
+    """The scoped composer preserves its community through login."""
+    resp = client.get("/d/general/submit")
     assert resp.status_code == 302
-    assert resp.headers["Location"].endswith("/login?next=/submit")
-
-    # With query parameter
-    resp_query = client.get("/submit?community=general")
-    assert resp_query.status_code == 302
-    assert "/login?next=" in resp_query.headers["Location"]
-    assert "community%3Dgeneral" in resp_query.headers["Location"] or "community=general" in resp_query.headers["Location"]
+    assert "/login?next=" in resp.headers["Location"]
+    assert "/d/general/submit" in resp.headers["Location"]
 
 
 def test_submit_creates_post_success(app, client, db_session):
-    """Test /submit creates post with model='human', llm_model=None, text post type."""
+    """The scoped form creates a human-authored text post."""
     _register_and_login(client, "writer_human")
 
     with app.app_context():
@@ -642,9 +628,8 @@ def test_submit_creates_post_success(app, client, db_session):
         db_session.commit()
 
     resp = client.post(
-        "/submit",
+        "/d/technology/submit",
         data={
-            "community": "technology",
             "title": "A Great Discovery",
             "body": "Detailed findings on artificial intelligence and human collaboration.",
         },
@@ -665,7 +650,7 @@ def test_submit_creates_post_success(app, client, db_session):
 
 
 def test_submit_validation(app, client, db_session):
-    """Test /submit validation: title length, body length, invalid subdeaddit."""
+    """Test title/body validation on the community-scoped composer."""
     _register_and_login(client, "validator_user")
 
     with app.app_context():
@@ -673,67 +658,49 @@ def test_submit_validation(app, client, db_session):
         db_session.add(sub)
         db_session.commit()
 
-    # 1. Missing / whitespace-only title
     resp = client.post(
-        "/submit",
-        data={"community": "general", "title": "   ", "body": "Some body content"},
+        "/d/general/submit",
+        data={"title": "   ", "body": "Some body content"},
     )
     assert resp.status_code == 200
     assert "Title must be between 1 and 100 characters." in resp.text
     assert "Some body content" in resp.text
 
-    # 2. Title too long (>100 chars)
     long_title = "T" * 101
     resp = client.post(
-        "/submit",
-        data={"community": "general", "title": long_title, "body": "Some body content"},
+        "/d/general/submit",
+        data={"title": long_title, "body": "Some body content"},
     )
     assert resp.status_code == 200
     assert "Title must be between 1 and 100 characters." in resp.text
     assert long_title in resp.text
 
-    # 3. Missing / whitespace-only body
     resp = client.post(
-        "/submit",
-        data={"community": "general", "title": "Valid Title", "body": "   "},
+        "/d/general/submit",
+        data={"title": "Valid Title", "body": "   "},
     )
     assert resp.status_code == 200
     assert "Body must be between 1 and 10,000 characters." in resp.text
     assert "Valid Title" in resp.text
 
-    # 4. Body too long (>10,000 chars)
-    long_body = "B" * 10001
     resp = client.post(
-        "/submit",
-        data={"community": "general", "title": "Valid Title", "body": long_body},
+        "/d/general/submit",
+        data={"title": "Valid Title", "body": "B" * 10001},
     )
     assert resp.status_code == 200
     assert "Body must be between 1 and 10,000 characters." in resp.text
 
-    # 5. Non-existent subdeaddit
-    resp = client.post(
-        "/submit",
-        data={"community": "nonexistent_sub", "title": "Valid Title", "body": "Valid body"},
-    )
-    assert resp.status_code == 200
-    assert "does not exist" in resp.text
-    assert "Valid Title" in resp.text
-    assert "Valid body" in resp.text
-
-    # 6. Missing community
-    resp = client.post(
-        "/submit",
-        data={"community": "", "title": "Valid Title", "body": "Valid body"},
-    )
-    assert resp.status_code == 200
-    assert "Please select a community." in resp.text
+    assert client.post(
+        "/d/nonexistent/submit",
+        data={"title": "Valid Title", "body": "Valid body"},
+    ).status_code == 404
 
     with app.app_context():
         assert Post.query.count() == 0
 
 
 def test_submit_rate_limit_error_handling(app, client, db_session):
-    """Test rate limit error handling on /submit catches ContentValidationError and preserves inputs."""
+    """Rate limit errors preserve input in the scoped composer."""
     _register_and_login(client, "rate_limited_human")
 
     with app.app_context():
@@ -743,8 +710,8 @@ def test_submit_rate_limit_error_handling(app, client, db_session):
 
     with patch("deaddit.services.content.create_post", side_effect=ContentValidationError("rate_limited")):
         resp = client.post(
-            "/submit",
-            data={"community": "general", "title": "Preserved Title", "body": "Preserved Body Text"},
+            "/d/general/submit",
+            data={"title": "Preserved Title", "body": "Preserved Body Text"},
         )
         assert resp.status_code == 200
         assert "rate limit" in resp.text.lower()
@@ -989,7 +956,7 @@ def test_anonymous_comment_post_redirects_to_login(app, client, db_session):
 
 
 def test_disabled_feature_returns_404_phase2(app, client, db_session, monkeypatch):
-    """Test disabled feature returns 404 on /submit and comment POST, and hides composer."""
+    """Disabled accounts hide and reject human content controls."""
     _register_and_login(client, "gated_human")
 
     with app.app_context():
@@ -1009,9 +976,9 @@ def test_disabled_feature_returns_404_phase2(app, client, db_session, monkeypatc
 
     monkeypatch.setenv("HUMAN_ACCOUNTS_ENABLED", "false")
 
-    # /submit GET and POST 404
-    assert client.get("/submit").status_code == 404
-    assert client.post("/submit", data={"community": "general", "title": "Test", "body": "Test"}).status_code == 404
+    # Scoped composer GET and POST 404
+    assert client.get("/d/general/submit").status_code == 404
+    assert client.post("/d/general/submit", data={"title": "Test", "body": "Test"}).status_code == 404
 
     # Comment POST 404
     assert client.post(f"/d/general/{post_id}/comments", data={"content": "Test comment"}).status_code == 404
@@ -1053,9 +1020,12 @@ def test_post_get_reply_to_context(app, client, db_session):
         post_id = post.id
         comment_id = target_comment.id
 
-    # Valid reply_to
+    # Valid reply_to: the composer renders after its target, not above the tree.
     resp = client.get(f"/d/general/{post_id}?reply_to={comment_id}")
     assert resp.status_code == 200
+    target_pos = resp.text.index(f'id="comment-{comment_id}"')
+    composer_pos = resp.text.index(f'id="reply-composer-{comment_id}"')
+    assert target_pos < composer_pos
     assert "Replying to" in resp.text
     assert "u/original_replier" in resp.text
     assert f'name="parent_id" value="{comment_id}"' in resp.text
@@ -1067,25 +1037,27 @@ def test_post_get_reply_to_context(app, client, db_session):
     assert "Replying to" not in resp_invalid.text
 
 
-def test_nav_create_post_link(app, client, monkeypatch):
-    """Test 'Create Post' nav link visibility depending on auth state and feature flag."""
-    # 1. Anonymous visitor -> no "Create Post"
+def test_create_post_link_lives_on_community_page(app, client, db_session, monkeypatch):
+    """Create-post entry points are contextual, not global header actions."""
+    with app.app_context():
+        db_session.add(Subdeaddit(name="general", description="General"))
+        db_session.commit()
+
     resp = client.get("/")
     assert resp.status_code == 200
-    assert "Create Post" not in resp.text
+    assert "Create post" not in resp.text
 
-    # 2. Signed-in human -> has "Create Post"
+    community = client.get("/d/general")
+    assert community.status_code == 200
+    assert "Create post" in community.text
+    assert 'href="/d/general/submit"' in community.text
+
     _register_and_login(client, "nav_poster")
-    resp = client.get("/")
-    assert resp.status_code == 200
-    assert "Create Post" in resp.text
-    assert 'href="/submit"' in resp.text
+    assert "Create post" not in client.get("/").text
+    assert 'href="/d/general/submit"' in client.get("/d/general").text
 
-    # 3. Disabled feature flag -> no "Create Post" even when session exists
     monkeypatch.setenv("HUMAN_ACCOUNTS_ENABLED", "false")
-    resp = client.get("/")
-    assert resp.status_code == 200
-    assert "Create Post" not in resp.text
+    assert "Create post" not in client.get("/d/general").text
 
 
 # ============================================================================

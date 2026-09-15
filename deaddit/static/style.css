@@ -327,6 +327,96 @@ html[data-theme="dark"] .brand__logo--dark {
     margin-right: calc(var(--space-xs) * -1);
 }
 
+.header-inbox {
+    position: relative;
+}
+
+.header-inbox.is-active,
+.account-menu[open] > .account-menu__toggle {
+    color: var(--text-1);
+    background-color: var(--accent-soft);
+}
+
+.header-inbox .badge {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    min-width: 16px;
+    padding: 2px 4px;
+    margin: 0;
+    font-size: 10px;
+}
+
+.account-menu {
+    position: relative;
+}
+
+.account-menu > summary {
+    list-style: none;
+}
+
+.account-menu > summary::-webkit-details-marker {
+    display: none;
+}
+
+.account-menu__panel {
+    position: absolute;
+    top: calc(100% + var(--space-sm));
+    right: 0;
+    z-index: var(--z-dropdown);
+    width: 220px;
+    padding: var(--space-xs);
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-3);
+}
+
+.account-menu__identity {
+    padding: var(--space-sm);
+    margin-bottom: var(--space-xs);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-2);
+    font-size: var(--font-size-xs);
+    overflow-wrap: anywhere;
+}
+
+.account-menu__identity strong {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-1);
+    font-size: var(--font-size-sm);
+}
+
+.account-menu__form {
+    margin: 0;
+}
+
+.account-menu__link {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    width: 100%;
+    min-height: 40px;
+    box-sizing: border-box;
+    padding: var(--space-sm);
+    background: none;
+    border: 0;
+    border-radius: var(--radius-sm);
+    color: var(--text-1);
+    font: inherit;
+    font-size: var(--font-size-sm);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.account-menu__link:hover,
+.account-menu__link:focus-visible {
+    background-color: var(--bg-hover-row);
+    outline: none;
+}
+
 /* Disclosure controls: the one-row layout needs neither. */
 .site-header__menu,
 .site-header__search-toggle {
@@ -816,6 +906,7 @@ html[data-theme="dark"] .brand__logo--dark {
    toggled by JS when a flat comment collapses its deeper following siblings. */
 .comment.is-collapsed > .comment-main .comment-body,
 .comment.is-collapsed > .comment-main .comment-actions,
+.comment.is-collapsed > .comment-main .comment-composer-wrapper,
 .comment.is-collapsed > .comment-children,
 .comment.is-collapsed > .continue-thread,
 .comment.is-collapsed > .comment--flat,
@@ -1931,11 +2022,24 @@ a.chip:hover {
     padding: var(--space-xl) var(--space-lg);
 }
 
+.community-hero__top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-md);
+    margin-bottom: var(--space-sm);
+}
+
+.community-hero__create {
+    flex: none;
+    text-decoration: none;
+}
+
 /* Carried no rule of its own, so the UA default (2em, fixed) applied and a
    single-token name like d/UnresolvedMysteries - which offers no break
    opportunity - pushed the page wider than a phone viewport. */
 .community-hero__name {
-    margin: 0 0 var(--space-sm);
+    margin: 0;
     font-size: clamp(var(--font-size-lg), 6vw, var(--font-size-xxl));
     font-weight: 700;
     line-height: var(--line-height-tight);
@@ -1965,6 +2069,17 @@ a.chip:hover {
 
 .community-hero .community-hero__stats {
     font-size: var(--font-size-base);
+}
+
+@media (max-width: 600px) {
+    .community-hero__top {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .community-hero__create {
+        justify-content: center;
+    }
 }
 
 /* Feed-wide image toolbar (plan 6B/6C). .feed-wrap contains every
@@ -3176,19 +3291,6 @@ a.chip:hover {
     text-decoration: underline;
 }
 
-/* Nav logout form and button */
-.nav-logout-form {
-    display: inline-flex;
-    margin: 0;
-    padding: 0;
-}
-
-button.nav-link {
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    font-family: inherit;
-}
 
 /* Flash messages */
 .flash-messages {
@@ -3229,7 +3331,8 @@ button.nav-link {
 
 /* --- Submit Post Page --- */
 .submit-page {
-    max-width: 740px;
+    width: min(100%, 740px);
+    box-sizing: border-box;
     margin: var(--space-xl) auto;
     padding: 0 var(--space-md);
 }
@@ -3259,6 +3362,10 @@ button.nav-link {
     font-size: var(--font-size-sm);
     color: var(--text-2);
     margin: 0;
+}
+
+.submit-subtitle a {
+    color: var(--link);
 }
 
 .submit-error {
@@ -3292,7 +3399,6 @@ button.nav-link {
     color: var(--text-1);
 }
 
-.submit-select,
 .submit-input,
 .submit-textarea {
     width: 100%;
@@ -3374,6 +3480,10 @@ button.nav-link {
 /* --- Comment Composer --- */
 .comment-composer-wrapper {
     margin-bottom: var(--space-lg);
+}
+
+.comment-composer-wrapper--inline {
+    margin: var(--space-sm) 0 0;
 }
 
 .comment-composer {
@@ -3528,9 +3638,8 @@ button.nav-link {
 }
 
 .inbox-page {
-    max-width: 800px;
-    margin: var(--space-lg) auto;
-    padding: 0 var(--space-md);
+    width: 100%;
+    min-width: 0;
 }
 
 .inbox-header {

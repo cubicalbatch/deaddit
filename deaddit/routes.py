@@ -795,8 +795,8 @@ def logout():
     return redirect(url_for("web.index"))
 
 
-@bp.route("/submit", methods=["GET", "POST"])
-def submit():
+@bp.route("/d/<subdeaddit_name>/submit", methods=["GET", "POST"])
+def submit(subdeaddit_name):
     if not human_accounts_enabled():
         abort(404)
     human = current_human()
@@ -811,87 +811,68 @@ def submit():
             url_for("web.login", next=safe_next) if safe_next else url_for("web.login")
         )
 
-    subdeaddits = Subdeaddit.query.order_by(Subdeaddit.name).all()
+    community = Subdeaddit.query.filter_by(name=subdeaddit_name).first_or_404()
 
     if request.method == "GET":
-        selected_community = (
-            request.args.get("community") or request.args.get("subdeaddit") or ""
-        ).strip()
-        if selected_community and not any(
-            s.name == selected_community for s in subdeaddits
-        ):
-            selected_community = ""
-
         return render_template(
             "submit.html",
-            subdeaddits=subdeaddits,
-            selected_community=selected_community,
-            community=selected_community,
-            title="",
-            body="",
-            content="",
+            community=community,
+            post_title="",
+            post_body="",
             error=None,
             errors=None,
+            title=f"Create a post in d/{community.name} - Deaddit",
+            subdeaddit_name=community.name,
         )
 
-    # POST
-    community = (
-        request.form.get("community") or request.form.get("subdeaddit") or ""
-    ).strip()
-    title = request.form.get("title", "")
-    body = request.form.get("body") or request.form.get("content") or ""
-
-    title_clean = title.strip()
-    body_clean = body.strip()
+    post_title = request.form.get("title", "")
+    post_body = request.form.get("body") or request.form.get("content") or ""
+    title_clean = post_title.strip()
+    body_clean = post_body.strip()
 
     error_msg = None
-    if not community:
-        error_msg = "Please select a community."
-    elif not any(s.name == community for s in subdeaddits):
-        error_msg = f"Community '{community}' does not exist."
-    elif not title_clean or len(title_clean) > 100:
+    if not title_clean or len(title_clean) > 100:
         error_msg = "Title must be between 1 and 100 characters."
-    elif not body_clean or len(body) > 10000:
+    elif not body_clean or len(post_body) > 10000:
         error_msg = "Body must be between 1 and 10,000 characters."
 
     if error_msg:
         return render_template(
             "submit.html",
-            subdeaddits=subdeaddits,
-            selected_community=community,
             community=community,
-            title=title,
-            body=body,
-            content=body,
+            post_title=post_title,
+            post_body=post_body,
             error=error_msg,
             errors=[error_msg],
+            title=f"Create a post in d/{community.name} - Deaddit",
+            subdeaddit_name=community.name,
         )
 
     try:
         new_post = content_service.create_post(
             title=title_clean,
-            content=body,
+            content=post_body,
             user=human.username,
-            subdeaddit=community,
+            subdeaddit=community.name,
             model="human",
             llm_model=None,
             post_type="text",
         )
     except content_service.ContentValidationError as exc:
-        if str(exc) == "rate_limited":
-            error_msg = "Rate limit exceeded. You are posting too frequently. Please try again later."
-        else:
-            error_msg = str(exc)
+        error_msg = (
+            "Rate limit exceeded. You are posting too frequently. Please try again later."
+            if str(exc) == "rate_limited"
+            else str(exc)
+        )
         return render_template(
             "submit.html",
-            subdeaddits=subdeaddits,
-            selected_community=community,
             community=community,
-            title=title,
-            body=body,
-            content=body,
+            post_title=post_title,
+            post_body=post_body,
             error=error_msg,
             errors=[error_msg],
+            title=f"Create a post in d/{community.name} - Deaddit",
+            subdeaddit_name=community.name,
         )
 
     return redirect(
