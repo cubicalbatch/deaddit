@@ -2,7 +2,7 @@ import json
 from collections import namedtuple
 from datetime import UTC
 
-from flask import Blueprint, abort, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -26,6 +26,7 @@ from deaddit.human_auth import (
     logout_human,
     register_human,
 )
+from deaddit.services import content as content_service
 
 from .admin_auth import is_admin_authenticated
 from .config import Config
@@ -239,6 +240,11 @@ def post(subdeaddit_name, post_id):
     # Comment sort: "top" default plus new/best/controversial; garbage falls back.
     sort = normalize_comment_sort(request.args.get("sort"))
 
+    reply_target_comment = None
+    reply_to = request.args.get("reply_to", type=int)
+    if reply_to:
+        reply_target_comment = Comment.query.filter_by(id=reply_to, post_id=post_id).first()
+
     comments = Comment.query.filter_by(post_id=post_id).all()
 
     def comment_rank_key(node):
@@ -371,6 +377,7 @@ def post(subdeaddit_name, post_id):
         sort=sort,
         post_body_html=format_content_html(post.content),
         subdeaddit_name=subdeaddit_name,
+        reply_target_comment=reply_target_comment,
         visitor_votes=visitor_vote_map([post.id]),
         comment_visitor_votes=visitor_vote_map(
             [comment.id for comment in comments], target="comment"
@@ -785,4 +792,183 @@ def login():
 def logout():
     logout_human()
     return redirect(url_for("web.index"))
+
+
+@bp.route("/submit", methods=["GET", "POST"])
+def submit():
+    if not human_accounts_enabled():
+        abort(404)
+    human = current_human()
+    if not human:
+        target = (
+            request.full_path.rstrip("?")
+            if request.full_path.endswith("?")
+            else request.full_path
+        )
+        safe_next = safe_local_next(target)
+        return redirect(
+            url_for("web.login", next=safe_next) if safe_next else url_for("web.login")
+        )
+
+    subdeaddits = Subdeaddit.query.order_by(Subdeaddit.name).all()
+
+    if request.method == "GET":
+        selected_community = (
+            request.args.get("community") or request.args.get("subdeaddit") or ""
+        ).strip()
+        if selected_community and not any(
+            s.name == selected_community for s in subdeaddits
+        ):
+            selected_community = ""
+
+        return render_template(
+            "submit.html",
+            subdeaddits=subdeaddits,
+            selected_community=selected_community,
+            community=selected_community,
+            title="",
+            body="",
+            content="",
+            error=None,
+            errors=None,
+        )
+
+    # POST
+    community = (
+        request.form.get("community") or request.form.get("subdeaddit") or ""
+    ).strip()
+    title = request.form.get("title", "")
+    body = request.form.get("body") or request.form.get("content") or ""
+
+    title_clean = title.strip()
+    body_clean = body.strip()
+
+    error_msg = None
+    if not community:
+        error_msg = "Please select a community."
+    elif not any(s.name == community for s in subdeaddits):
+        error_msg = f"Community '{community}' does not exist."
+    elif not title_clean or len(title_clean) > 100:
+        error_msg = "Title must be between 1 and 100 characters."
+    elif not body_clean or len(body) > 10000:
+        error_msg = "Body must be between 1 and 10,000 characters."
+
+    if error_msg:
+        return render_template(
+            "submit.html",
+            subdeaddits=subdeaddits,
+            selected_community=community,
+            community=community,
+            title=title,
+            body=body,
+            content=body,
+            error=error_msg,
+            errors=[error_msg],
+        )
+
+    try:
+        new_post = content_service.create_post(
+            title=title_clean,
+            content=body,
+            user=human.username,
+            subdeaddit=community,
+            model="human",
+            llm_model=None,
+            post_type="text",
+        )
+    except content_service.ContentValidationError as exc:
+        if str(exc) == "rate_limited":
+            error_msg = "Rate limit exceeded. You are posting too frequently. Please try again later."
+        else:
+            error_msg = str(exc)
+        return render_template(
+            "submit.html",
+            subdeaddits=subdeaddits,
+            selected_community=community,
+            community=community,
+            title=title,
+            body=body,
+            content=body,
+            error=error_msg,
+            errors=[error_msg],
+        )
+
+    return redirect(
+        url_for(
+            "web.post",
+            subdeaddit_name=new_post.subdeaddit_name,
+            post_id=new_post.id,
+        )
+    )
+
+
+@bp.route("/d/<subdeaddit_name>/<int:post_id>/comments", methods=["POST"])
+def create_comment(subdeaddit_name, post_id):
+    if not human_accounts_enabled():
+        abort(404)
+    human = current_human()
+    if not human:
+        return redirect(
+            url_for(
+                "web.login",
+                next=url_for(
+                    "web.post", subdeaddit_name=subdeaddit_name, post_id=post_id
+                ),
+            )
+        )
+
+    target_post = Post.query.get_or_404(post_id)
+    if target_post.subdeaddit_name != subdeaddit_name:
+        abort(404)
+
+    body = (request.form.get("content") or request.form.get("body") or "").strip()
+    parent_id_raw = request.form.get("parent_id")
+
+    if not body or len(body) > 5000:
+        flash("Comment must be between 1 and 5,000 characters.", "error")
+        return redirect(
+            url_for("web.post", subdeaddit_name=subdeaddit_name, post_id=post_id)
+        )
+
+    parent_id = None
+    if parent_id_raw and str(parent_id_raw).strip():
+        try:
+            parent_id = int(parent_id_raw)
+        except (ValueError, TypeError):
+            flash("Invalid parent comment.", "error")
+            return redirect(
+                url_for("web.post", subdeaddit_name=subdeaddit_name, post_id=post_id)
+            )
+        parent_comment = db.session.get(Comment, parent_id)
+        if not parent_comment or parent_comment.post_id != post_id:
+            flash("Parent comment does not belong to this post.", "error")
+            return redirect(
+                url_for("web.post", subdeaddit_name=subdeaddit_name, post_id=post_id)
+            )
+
+    try:
+        new_comment = content_service.create_comment(
+            post_id=post_id,
+            content=body,
+            user=human.username,
+            parent_id=parent_id,
+            model="human",
+            llm_model=None,
+        )
+    except content_service.ContentValidationError as exc:
+        msg = (
+            "Rate limit exceeded. Please wait before commenting again."
+            if str(exc) == "rate_limited"
+            else str(exc)
+        )
+        flash(msg, "error")
+        return redirect(
+            url_for("web.post", subdeaddit_name=subdeaddit_name, post_id=post_id)
+        )
+
+    return redirect(
+        url_for("web.post", subdeaddit_name=subdeaddit_name, post_id=post_id)
+        + f"#comment-{new_comment.id}"
+    )
+
 

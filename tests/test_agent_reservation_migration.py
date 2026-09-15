@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from deaddit.extensions import db
-from deaddit.models import Agent, AgentRun, User
+from deaddit.models import Agent, AgentRun
 from tests.test_random_persona_migration import _downgrade, _runner, _upgrade
 
 PREVIOUS_HEAD = "a9b8c7d6e5f4"

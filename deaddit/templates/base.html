@@ -58,6 +58,8 @@
                 {% endif %}
                 {% if human_accounts_enabled %}
                     {% if current_human %}
+                    <a class="nav-link{% if endpoint in ('web.submit', 'main.submit') %} is-active{% endif %}"
+                       href="{{ url_for('web.submit') }}">Create Post</a>
                     <a class="nav-link{% if endpoint in ('web.user_profile',) and request.view_args and request.view_args.get('username') == current_human.username %} is-active{% endif %}"
                        href="/u/{{ current_human.username }}">u/{{ current_human.username }}</a>
                     <form class="nav-logout-form" action="{{ url_for('web.logout') }}" method="post" style="display: inline;">

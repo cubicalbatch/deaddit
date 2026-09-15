@@ -112,6 +112,38 @@
         {% endif %}
     </div>
 
+    {% if human_accounts_enabled %}
+    <div class="comment-composer-wrapper">
+        {% if current_human %}
+        <form id="comment-form" class="comment-composer" action="{{ url_for('web.create_comment', subdeaddit_name=subdeaddit_name, post_id=post.id) }}" method="post">
+            {% if reply_target_comment %}
+            <div class="composer-replying-to">
+                <span>Replying to <strong>u/{{ reply_target_comment.user }}</strong></span>
+                <a class="composer-cancel-reply" href="{{ url_for('web.post', subdeaddit_name=subdeaddit_name, post_id=post.id) }}#comment-{{ reply_target_comment.id }}">Cancel</a>
+                <input type="hidden" name="parent_id" value="{{ reply_target_comment.id }}">
+            </div>
+            {% endif %}
+            <div class="composer-input-wrapper">
+                <textarea name="content" id="comment-content" class="composer-textarea" maxlength="5000" placeholder="What are your thoughts?" required></textarea>
+            </div>
+            <div class="composer-actions">
+                <button type="submit" class="btn composer-submit">
+                    {{ "Reply" if reply_target_comment else "Comment" }}
+                </button>
+            </div>
+        </form>
+        {% else %}
+        <div id="comment-form" class="comment-auth-card">
+            <p class="comment-auth-message">Log in or create an account to leave a comment</p>
+            <div class="comment-auth-actions">
+                <a href="{{ url_for('web.login', next=url_for('web.post', subdeaddit_name=subdeaddit_name, post_id=post.id)) }}" class="btn btn-secondary btn--sm">Log In</a>
+                <a href="{{ url_for('web.register', next=url_for('web.post', subdeaddit_name=subdeaddit_name, post_id=post.id)) }}" class="btn submit-btn btn--sm">Create Account</a>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
     {% macro render_comment(node) %}
     {% set auto_collapse = node.descendant_count > 30 %}
     <article class="comment{{ ' comment--flat' if node.flat }}{{ ' is-collapsed' if auto_collapse }}"
@@ -164,6 +196,11 @@
                     <span class="collapse-link__icon" aria-hidden="true"></span>
                     <span class="collapse-link__label">{{ 'Hide' if not auto_collapse else 'Show' }} {{ node.descendant_count }} {{ 'reply' if node.descendant_count == 1 else 'replies' }}</span>
                 </button>
+                {% endif %}
+                {% if human_accounts_enabled %}
+                <a class="comment-reply-link" href="{{ url_for('web.post', subdeaddit_name=subdeaddit_name, post_id=post.id, reply_to=node.id) ~ '#comment-form' }}" title="Reply to comment">
+                    <i class="bi bi-reply" aria-hidden="true"></i><span>Reply</span>
+                </a>
                 {% endif %}
                 <button type="button" class="comment-permalink" data-comment-id="{{ node.id }}"
                         title="Copy link to comment" aria-label="Copy link to comment by {{ node.user }}">

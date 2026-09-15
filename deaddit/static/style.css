@@ -3223,4 +3223,287 @@ button.nav-link {
     border: 1px solid rgba(23, 162, 184, 0.25);
 }
 
+/* ============================================================
+   Phase 2: Post Submission & Comment Composer
+   ============================================================ */
+
+/* --- Submit Post Page --- */
+.submit-page {
+    max-width: 740px;
+    margin: var(--space-xl) auto;
+    padding: 0 var(--space-md);
+}
+
+.submit-card {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-xl);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.submit-header {
+    margin-bottom: var(--space-lg);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: var(--space-md);
+}
+
+.submit-title {
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+    color: var(--text-1);
+    margin: 0 0 var(--space-xs) 0;
+}
+
+.submit-subtitle {
+    font-size: var(--font-size-sm);
+    color: var(--text-2);
+    margin: 0;
+}
+
+.submit-error {
+    background-color: rgba(220, 53, 69, 0.1);
+    color: #dc3545;
+    border: 1px solid rgba(220, 53, 69, 0.25);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    margin-bottom: var(--space-md);
+    font-size: var(--font-size-sm);
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.submit-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.submit-form-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.submit-label {
+    margin-bottom: var(--space-xs);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--text-1);
+}
+
+.submit-select,
+.submit-input,
+.submit-textarea {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.submit-textarea {
+    resize: vertical;
+    min-height: 160px;
+    line-height: var(--line-height-normal);
+}
+
+.submit-hint {
+    font-size: var(--font-size-xs);
+    color: var(--text-3);
+    margin-top: var(--space-xs);
+}
+
+.submit-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--border);
+}
+
+.submit-btn {
+    background-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    padding: var(--space-sm) var(--space-xl);
+    border-radius: var(--radius-md);
+    border: none;
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    transition: opacity var(--motion-fast) ease;
+}
+
+.submit-btn:hover {
+    opacity: 0.9;
+}
+
+.submit-cancel {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Button modifiers */
+.btn--primary {
+    background-color: var(--accent);
+    color: #fff;
+    border: none;
+}
+
+.btn--primary:hover {
+    opacity: 0.9;
+}
+
+.btn--secondary {
+    background-color: var(--bg-canvas);
+    color: var(--text-1);
+    border: 1px solid var(--border);
+}
+
+.btn--secondary:hover {
+    background-color: var(--bg-hover-row);
+}
+
+.btn--sm {
+    padding: var(--space-xs) var(--space-sm);
+    font-size: var(--font-size-xs);
+    border-radius: var(--radius-sm);
+}
+
+/* --- Comment Composer --- */
+.comment-composer-wrapper {
+    margin-bottom: var(--space-lg);
+}
+
+.comment-composer {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    transition: border-color var(--motion-fast) ease;
+}
+
+.comment-composer:focus-within {
+    border-color: var(--accent);
+}
+
+.composer-replying-to {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: var(--bg-hover-row);
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--space-sm);
+    font-size: var(--font-size-xs);
+    color: var(--text-2);
+}
+
+.composer-replying-to strong {
+    color: var(--text-1);
+}
+
+.composer-cancel-reply {
+    color: var(--text-3);
+    text-decoration: none;
+    font-weight: 600;
+    margin-left: var(--space-sm);
+}
+
+.composer-cancel-reply:hover {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
+.composer-input-wrapper {
+    margin-bottom: var(--space-sm);
+}
+
+.composer-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background-color: var(--bg-surface);
+    color: var(--text-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-sm);
+    font-family: inherit;
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-normal);
+    min-height: 80px;
+    resize: vertical;
+}
+
+.composer-textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(255, 69, 0, 0.1);
+}
+
+.composer-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.composer-submit {
+    background-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    font-size: var(--font-size-xs);
+    padding: var(--space-xs) var(--space-md);
+    border-radius: var(--radius-sm);
+    border: none;
+    cursor: pointer;
+    transition: opacity var(--motion-fast) ease;
+}
+
+.composer-submit:hover {
+    opacity: 0.9;
+}
+
+/* Anonymous comment invitation card */
+.comment-auth-card {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-lg);
+    text-align: center;
+}
+
+.comment-auth-message {
+    font-size: var(--font-size-sm);
+    color: var(--text-2);
+    margin: 0 0 var(--space-sm) 0;
+}
+
+.comment-auth-actions {
+    display: inline-flex;
+    gap: var(--space-sm);
+    align-items: center;
+}
+
+.comment-auth-actions .btn {
+    text-decoration: none;
+}
+
+/* Comment Reply action button */
+.comment-reply-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-3);
+    font-size: var(--font-size-xs);
+    text-decoration: none;
+    padding: 2px var(--space-xs);
+    border-radius: var(--radius-xs);
+    transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease;
+}
+
+.comment-reply-link:hover {
+    color: var(--accent);
+    background-color: var(--bg-hover-row);
+}
+
+
 

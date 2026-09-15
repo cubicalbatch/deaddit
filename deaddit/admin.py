@@ -39,6 +39,7 @@ from deaddit.dynamics.engagement import (
     preset_config,
     validate_policy,
 )
+from deaddit.human_auth import human_accounts_enabled
 from deaddit.images import client as image_client
 from deaddit.images import service as media_service
 from deaddit.images import verification as image_verification
@@ -88,7 +89,6 @@ from deaddit.services.content import (
     create_subdeaddit,
     create_user,
 )
-from deaddit.human_auth import human_accounts_enabled
 from deaddit.settings import SecretNotPersistable
 from deaddit.utils import safe_local_next
 from deaddit.websites import service as website_service
