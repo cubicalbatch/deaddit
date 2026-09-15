@@ -16,7 +16,7 @@ def test_upgrade_interrupts_duplicate_runs_and_downgrade_removes_constraint(tmp_
     _, app, runner = _runner(tmp_path)
     _upgrade(runner, PREVIOUS_HEAD)
     with app.app_context():
-        db.session.add_all([User(username="older"), User(username="newer")])
+        db.session.execute(db.text("INSERT INTO user (username) VALUES ('older'), ('newer')"))
         agent = Agent(persona_mode="random", status="running")
         db.session.add(agent)
         db.session.flush()

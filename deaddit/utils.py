@@ -217,3 +217,14 @@ def format_content_html(text: str | None) -> str:
                 parts.append(f"<p>{body}</p>")
 
     return "".join(parts)
+
+
+def safe_local_next(value: str | None) -> str | None:
+    """Return a local redirect path starting with '/', never an absolute or protocol-relative URL."""
+    if not isinstance(value, str) or not value.startswith("/"):
+        return None
+    if value.startswith("//") or "\\" in value or "://" in value:
+        return None
+    if any(c in value for c in ("\r", "\n", "\0")):
+        return None
+    return value

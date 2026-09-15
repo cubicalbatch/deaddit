@@ -3071,3 +3071,156 @@ a.chip:hover {
     color: var(--accent) !important;
 }
 
+/* --- Account Form (Login / Register) --- */
+.account-container {
+    max-width: 440px;
+    margin: var(--space-xl) auto;
+    padding: 0 var(--space-md);
+}
+
+.account-card {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-xl);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.account-header {
+    margin-bottom: var(--space-lg);
+    text-align: center;
+}
+
+.account-title {
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+    color: var(--text-1);
+    margin: 0 0 var(--space-xs) 0;
+}
+
+.account-subtitle {
+    font-size: var(--font-size-sm);
+    color: var(--text-2);
+    margin: 0;
+}
+
+.account-error {
+    background-color: rgba(220, 53, 69, 0.1);
+    color: #dc3545;
+    border: 1px solid rgba(220, 53, 69, 0.25);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    margin-bottom: var(--space-md);
+    font-size: var(--font-size-sm);
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.account-form-group {
+    margin-bottom: var(--space-md);
+}
+
+.account-form-group label {
+    display: block;
+    margin-bottom: var(--space-xs);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--text-1);
+}
+
+.account-form-group .form-control {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.account-form-group .form-hint {
+    font-size: var(--font-size-xs);
+    color: var(--text-3);
+    margin-top: var(--space-xs);
+}
+
+.account-submit-btn {
+    width: 100%;
+    background-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md);
+    border: none;
+    cursor: pointer;
+    font-size: var(--font-size-md);
+    transition: opacity var(--motion-fast) ease;
+}
+
+.account-submit-btn:hover {
+    opacity: 0.9;
+}
+
+.account-footer {
+    margin-top: var(--space-lg);
+    text-align: center;
+    font-size: var(--font-size-sm);
+    color: var(--text-2);
+    border-top: 1px solid var(--border);
+    padding-top: var(--space-md);
+}
+
+.account-footer a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.account-footer a:hover {
+    text-decoration: underline;
+}
+
+/* Nav logout form and button */
+.nav-logout-form {
+    display: inline-flex;
+    margin: 0;
+    padding: 0;
+}
+
+button.nav-link {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+/* Flash messages */
+.flash-messages {
+    max-width: 800px;
+    margin: var(--space-md) auto;
+    padding: 0 var(--space-md);
+}
+
+.flash-message {
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-xs);
+    font-size: var(--font-size-sm);
+}
+
+.flash-message--error,
+.flash-message--danger {
+    background-color: rgba(220, 53, 69, 0.1);
+    color: #dc3545;
+    border: 1px solid rgba(220, 53, 69, 0.25);
+}
+
+.flash-message--success {
+    background-color: rgba(40, 167, 69, 0.1);
+    color: #28a745;
+    border: 1px solid rgba(40, 167, 69, 0.25);
+}
+
+.flash-message--info {
+    background-color: rgba(23, 162, 184, 0.1);
+    color: #17a2b8;
+    border: 1px solid rgba(23, 162, 184, 0.25);
+}
+
+

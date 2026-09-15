@@ -2,7 +2,7 @@ import json
 from collections import namedtuple
 from datetime import UTC
 
-from flask import Blueprint, redirect, render_template, request, url_for
+from flask import Blueprint, abort, redirect, render_template, request, url_for
 from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -19,6 +19,13 @@ from deaddit.dynamics.ranking import (
     wilson_lower_bound,
 )
 from deaddit.extensions import db
+from deaddit.human_auth import (
+    authenticate_human,
+    current_human,
+    human_accounts_enabled,
+    logout_human,
+    register_human,
+)
 
 from .admin_auth import is_admin_authenticated
 from .config import Config
@@ -27,6 +34,7 @@ from .utils import (
     format_content_html,
     get_comment_counts_bulk,
     get_websites_bulk,
+    safe_local_next,
     visitor_vote_map,
 )
 
@@ -456,6 +464,7 @@ def list_subdeaddit():
     )
 
 
+@bp.route("/u/<username>")
 @bp.route("/user/<username>")
 def user_profile(username):
     user = User.query.get_or_404(username)
@@ -711,3 +720,69 @@ def search():
         title=f"Deaddit - Search: {q}" if q else "Deaddit - Search",
         description="Search Deaddit posts, communities, and people.",
     )
+
+
+@bp.route("/register", methods=["GET", "POST"])
+def register():
+    if not human_accounts_enabled():
+        abort(404)
+    if current_human():
+        return redirect(url_for("web.index"))
+
+    error = None
+    username = ""
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        password_confirm = request.form.get("password_confirm", "")
+        user, error = register_human(username, password, password_confirm)
+        if not error:
+            next_target = safe_local_next(
+                request.args.get("next") or request.form.get("next")
+            )
+            return redirect(next_target or url_for("web.index"))
+
+    return render_template(
+        "account_form.html",
+        mode="register",
+        title="Create Account",
+        description="Register a new Deaddit account",
+        error=error,
+        username=username,
+    )
+
+
+@bp.route("/login", methods=["GET", "POST"])
+def login():
+    if not human_accounts_enabled():
+        abort(404)
+    if current_human():
+        return redirect(url_for("web.index"))
+
+    error = None
+    username = ""
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        user, error = authenticate_human(username, password)
+        if not error:
+            next_target = safe_local_next(
+                request.args.get("next") or request.form.get("next")
+            )
+            return redirect(next_target or url_for("web.index"))
+
+    return render_template(
+        "account_form.html",
+        mode="login",
+        title="Sign In",
+        description="Sign in to your Deaddit account",
+        error=error,
+        username=username,
+    )
+
+
+@bp.route("/logout", methods=["POST"])
+def logout():
+    logout_human()
+    return redirect(url_for("web.index"))
+

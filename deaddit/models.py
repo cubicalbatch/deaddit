@@ -4,6 +4,7 @@ from enum import Enum
 from pathlib import Path
 
 from sqlalchemy import event
+from sqlalchemy.ext.hybrid import hybrid_property
 
 from deaddit.extensions import db
 
@@ -98,6 +99,15 @@ class User(db.Model):
     comment_karma = db.Column(db.Integer, nullable=False, server_default="0")
     created_at = db.Column(db.DateTime)  # Phase D5: history seeding
     agent_state = db.Column(db.JSON, nullable=False, default=dict, server_default="{}")
+    password_hash = db.Column(db.String(255), nullable=True)
+
+    __table_args__ = (
+        db.Index("uq_user_username_lower", db.func.lower(username), unique=True),
+    )
+
+    @property
+    def is_human(self) -> bool:
+        return bool(self.password_hash is not None)
 
     def get_interests(self):
         return json.loads(self.interests)
@@ -743,6 +753,19 @@ class Notification(db.Model):
     )  # first ~200 chars, frozen at write time
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     read_at = db.Column(db.DateTime, nullable=True, index=True)
+
+    @hybrid_property
+    def is_read(self) -> bool:
+        return self.read_at is not None
+
+    @is_read.setter
+    def is_read(self, value: bool) -> None:
+        self.read_at = datetime.utcnow() if value else None
+
+    @is_read.expression
+    def is_read(cls):
+        return cls.read_at.is_not(None)
+
 
 
 # --- UX-5: streamed job logs ---

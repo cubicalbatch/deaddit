@@ -11,7 +11,7 @@ import logging
 import os
 from typing import Any
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, url_for
 from flask_migrate import upgrade as db_upgrade
 from werkzeug.exceptions import HTTPException
 
@@ -119,7 +119,11 @@ def create_app(config: Any = None) -> Flask:
         # Session cookie posture: Lax keeps cross-site POSTs from carrying
         # the admin session (CSRF mitigation that does not depend on the
         # browser's default).
+        app.config["SESSION_COOKIE_HTTPONLY"] = True
         app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+        app.config["SESSION_COOKIE_SECURE"] = (
+            str(os.environ.get("PRODUCTION", "")).lower() in ("true", "1", "yes", "on")
+        )
         # Configure session settings for admin authentication
         app.config["PERMANENT_SESSION_LIFETIME"] = 24 * 60 * 60  # 24 hours
 
@@ -138,6 +142,14 @@ def create_app(config: Any = None) -> Flask:
             logger.warning(
                 "SECRET_KEY is unset (built-in dev default). Admin session cookies are forgeable - set SECRET_KEY in the environment before exposing this app."
             )
+
+    # Resolve "main.<endpoint>" references to "web.<endpoint>"
+    def _handle_url_build_error(error, endpoint, values):
+        if endpoint.startswith("main."):
+            return url_for("web." + endpoint[5:], **values)
+        raise error
+
+    app.url_build_error_handlers.append(_handle_url_build_error)
 
     # Template context processor: config available in templates
     app.context_processor(inject_config)
@@ -158,6 +170,16 @@ def create_app(config: Any = None) -> Flask:
 
 def inject_config():
     from .admin_auth import is_admin_authenticated
+    from .human_auth import current_human, human_accounts_enabled
+    from .models import Notification
+
+    ch = current_human()
+    is_enabled = human_accounts_enabled()
+    unread_count = 0
+    if ch and is_enabled:
+        unread_count = Notification.query.filter_by(
+            recipient=ch.username, is_read=False
+        ).count()
 
     return {
         "config": {
@@ -168,6 +190,9 @@ def inject_config():
         },
         "admin_authenticated": is_admin_authenticated(),
         "PRODUCTION": Config.get("PRODUCTION", "false").lower() == "true",
+        "current_human": ch,
+        "human_unread_count": unread_count,
+        "human_accounts_enabled": is_enabled,
     }
 
 

@@ -88,7 +88,9 @@ from deaddit.services.content import (
     create_subdeaddit,
     create_user,
 )
+from deaddit.human_auth import human_accounts_enabled
 from deaddit.settings import SecretNotPersistable
+from deaddit.utils import safe_local_next
 from deaddit.websites import service as website_service
 
 logger = logging.getLogger(__name__)
@@ -622,13 +624,7 @@ def check_has_more_pages(models_data, page_models, per_page):
     return len(page_models) == per_page
 
 
-def _safe_local_next(value):
-    """Return a local redirect path, never an absolute or protocol-relative URL."""
-    if not isinstance(value, str) or not value.startswith("/"):
-        return None
-    if value.startswith("//") or "\\" in value or "://" in value:
-        return None
-    return value
+_safe_local_next = safe_local_next
 
 
 def admin_required(f):
@@ -1996,6 +1992,8 @@ def settings():
         != "***not set***",
         "all_settings": all_settings,
         "default_provider": default_provider.to_dict() if default_provider else None,
+        "human_accounts_enabled": human_accounts_enabled(),
+        "human_accounts_env_override": "HUMAN_ACCOUNTS_ENABLED" in os.environ,
     }
 
     return render_template("admin/settings.html", config=config, providers=providers)
@@ -2255,6 +2253,37 @@ def save_deaddit_config_api():
                     "message": "API_TOKEN is environment-only since refactor A6 — set it in your environment/.env.",
                 }
             )
+
+        ha_val = None
+        if "human_accounts_enabled" in data:
+            ha_val = data["human_accounts_enabled"]
+        elif "HUMAN_ACCOUNTS_ENABLED" in data:
+            ha_val = data["HUMAN_ACCOUNTS_ENABLED"]
+
+        if ha_val is not None:
+            if isinstance(ha_val, bool):
+                val_str = "true" if ha_val else "false"
+            elif isinstance(ha_val, str):
+                val_clean = ha_val.strip().lower()
+                if val_clean in ("true", "1", "yes", "on"):
+                    val_str = "true"
+                elif val_clean in ("false", "0", "no", "off"):
+                    val_str = "false"
+                else:
+                    return jsonify(
+                        {
+                            "success": False,
+                            "message": "Invalid value for human_accounts_enabled; must be true or false",
+                        }
+                    ), 400
+            else:
+                return jsonify(
+                    {
+                        "success": False,
+                        "message": "Invalid value for human_accounts_enabled; must be true or false",
+                    }
+                ), 400
+            Config.set("HUMAN_ACCOUNTS_ENABLED", val_str)
 
         return jsonify(
             {"success": True, "message": "Deaddit configuration saved successfully"}
