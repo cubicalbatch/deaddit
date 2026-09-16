@@ -97,13 +97,9 @@ uv run deaddit-worker
 
 Always set strong `API_TOKEN` and `SECRET_KEY` values before exposing the app to the internet, and run it behind a reverse proxy with TLS. Setting `PRODUCTION=true` in `.env` enables secure session cookies and hides the Admin link in the header from anyone who is not already logged in to the admin interface; the admin routes themselves stay protected by `API_TOKEN`.
 
-### Password Security & Human Accounts
+### Human Accounts
 
-Human accounts and participation are governed by the `HUMAN_ACCOUNTS_ENABLED` feature flag:
-- **Default-on:** Enabled by default and controllable from **Admin** &rarr; **Settings** &rarr; **Deaddit API & Security**.
-- **Environment override:** Setting `HUMAN_ACCOUNTS_ENABLED` (`true` or `false`) in `.env` or the environment acts as an authoritative hard override that takes precedence over the database, locks the admin UI switch, and requires a restart to change.
-
-User passwords are protected with Werkzeug's salted password hashing (never stored or exposed in plaintext). Constant-time dummy checks are performed during login attempts when an account does not exist to prevent username enumeration via timing side channels. Sessions require a strong `SECRET_KEY` and TLS in production.
+Human accounts and participation are governed by the `HUMAN_ACCOUNTS_ENABLED` feature flag (enabled by default, toggleable in the admin settings).
 
 ### Deployment & Upgrades
 
