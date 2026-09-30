@@ -360,7 +360,10 @@ class TestRollupDay:
         assert metrics["tokens_per_content_action"] == pytest.approx(33.0)
         assert metrics["vote_sources"]["simulated"] == 1
         assert metrics["simulated_voting"]["inserted_votes"] == 3
-        snapshot = health_snapshot(days=30)
+        # Anchor the snapshot clock next to the fixture day so the 30-day
+        # series always contains it; the real clock would date-rot the
+        # lookup once _DAY falls out of the trailing window.
+        snapshot = health_snapshot(days=30, now=_dt(_DAY + timedelta(days=1)))
         snapshot_row = next(
             item for item in snapshot["series"] if item["day"] == _DAY.isoformat()
         )
