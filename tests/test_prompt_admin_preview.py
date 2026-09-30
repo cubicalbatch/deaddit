@@ -355,7 +355,7 @@ class TestPreviewAgainstPinnedVersions:
         assert body["effective"]["resolution_source"] == "agent"
         entry = next(d for d in body["diff"] if d["path"] == "intent_mix.post")
         assert entry["change"] == "modified"
-        assert entry["effective"] == 0.30
+        assert entry["effective"] == 0.12
         assert entry["preview"] == 0.9
 
     def test_no_version_previews_the_effective_pin(

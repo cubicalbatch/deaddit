@@ -438,7 +438,7 @@ logger = logging.getLogger(__name__)
 #: Source-controlled default visit profile. Phase 4 replaces this single
 #: constant with pinned per-agent profile documents.
 DEFAULT_PROFILE_NAME = "agent_visit_default"
-DEFAULT_PROFILE_VERSION = 4
+DEFAULT_PROFILE_VERSION = 5
 
 #: How the resolved intent was decided (PromptPlan.intent_source).
 INTENT_SOURCE_LURKER = "lurker"
@@ -866,7 +866,11 @@ _DEFAULT_PROFILE_DOCUMENT = {
         {"id": "general.quality", "text": _PROFILE_QUALITY_RULES},
     ],
     "intent_mix": {
-        "post": 0.30,
+        # Post-family visit probability. 0.30 yielded roughly 2 comments per
+        # post; 0.12 targets 5-6 comments per post (browse visits comment in
+        # about 80% of cases). The other keys are shares within the family,
+        # so the historical 60/15/15/10 composition is preserved.
+        "post": 0.12,
         "image": 0.15,
         "website": 0.15,
         "backstage": 0.10,
