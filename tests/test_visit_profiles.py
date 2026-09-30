@@ -183,7 +183,7 @@ class TestProfilePrecedence:
             Config.set(key, "1.0")
         try:
             visit = prepare_agent_visit(agent, user, unread=0)
-            # The default profile mix (0.30 post) is the only live source;
+            # The default profile mix (0.12 post) is the only live source;
             # the stray settings are inert.
             assert visit.plan.resolution_source == "default"
             assert visit.plan.profile_version == DEFAULT_PROFILE_VERSION

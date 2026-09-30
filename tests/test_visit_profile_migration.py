@@ -849,6 +849,14 @@ def test_v4_rollout_clones_pinned_sources_idempotently_and_downgrades(
             ).fetchone()[0]
         )
         source["length_catalog"]["comment"] = _V4_LEGACY_COMMENT_LENGTHS
+        # A non-default mix keeps this test scoped to the length rollout;
+        # mix migrations (visit_profile_v5) must not rewrite its pins.
+        source["intent_mix"] = {
+            "post": 0.28,
+            "image": 0.0,
+            "website": 0.0,
+            "backstage": 0.10,
+        }
         source_version = conn.execute(
             "SELECT COALESCE(MAX(version), 0) + 1 "
             "FROM prompt_template_version WHERE template_id = ?",
@@ -1002,3 +1010,216 @@ def test_v4_rollout_clones_pinned_sources_idempotently_and_downgrades(
         conn.close()
 
     assert _V4_REVISION in [rev.revision for rev in _script().walk_revisions()]
+
+
+_V5_PREDECESSOR = "b1e3a5c7d9f2"
+_V5_REVISION = "c3a9e7f1b5d8"
+_V5_MARKER = "migration:visit_profile_v5"
+
+# The two shipped default mixes current at the v5 predecessor.
+_V5_OLD_SOURCE_DEFAULT = {
+    "post": 0.30,
+    "image": 0.15,
+    "website": 0.15,
+    "backstage": 0.10,
+}
+_V5_OLD_LEGACY_DEFAULT = {
+    "post": 0.30,
+    "image": 0.0,
+    "website": 0.0,
+    "backstage": 0.10,
+}
+_V5_NEW_SOURCE_DEFAULT = {
+    "post": 0.12,
+    "image": 0.15,
+    "website": 0.15,
+    "backstage": 0.10,
+}
+_V5_NEW_LEGACY_DEFAULT = {
+    "post": 0.12,
+    "image": 0.0,
+    "website": 0.0,
+    "backstage": 0.10,
+}
+
+
+def test_v5_rollout_clones_default_mix_sources_idempotently_and_downgrades(
+    tmp_path,
+):
+    db_path = tmp_path / "visit-profile-v5.db"
+    app = create_app(
+        {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_path}", "TESTING": True}
+    )
+    runner = app.test_cli_runner()
+    assert runner.invoke(args=["db", "upgrade", _V5_PREDECESSOR]).exit_code == 0
+
+    conn = sqlite3.connect(db_path)
+    try:
+        template_id = conn.execute(
+            "SELECT id FROM prompt_template WHERE name = 'agent.visit_profile'"
+        ).fetchone()[0]
+        base = json.loads(
+            conn.execute(
+                "SELECT body FROM prompt_template_version "
+                "WHERE template_id = ? AND version = 1",
+                (template_id,),
+            ).fetchone()[0]
+        )
+
+        def _insert(document: dict) -> int:
+            version = conn.execute(
+                "SELECT COALESCE(MAX(version), 0) + 1 "
+                "FROM prompt_template_version WHERE template_id = ?",
+                (template_id,),
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO prompt_template_version "
+                "(template_id, version, body, created_by, created_at) "
+                "VALUES (?, ?, ?, 'operator-v5-test', CURRENT_TIMESTAMP)",
+                (template_id, version, json.dumps(document, sort_keys=True,
+                                                  separators=(",", ":"))),
+            )
+            return version
+
+        shaped = dict(base)
+        shaped["intent_mix"] = dict(_V5_OLD_SOURCE_DEFAULT)
+        shaped_version = _insert(shaped)
+
+        legacy = dict(base)
+        legacy["intent_mix"] = dict(_V5_OLD_LEGACY_DEFAULT)
+        legacy_version = _insert(legacy)
+
+        custom = dict(base)
+        custom["intent_mix"] = {
+            "post": 0.45,
+            "image": 0.15,
+            "website": 0.25,
+            "backstage": 0.10,
+        }
+        custom_version = _insert(custom)
+
+        conn.executemany(
+            "INSERT INTO prompt_pin "
+            "(target_kind, target_key, template_id, version_number, updated_at) "
+            "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            [
+                ("global", "agent.visit_profile", template_id, shaped_version),
+                ("cohort", "v5-cohort", template_id, shaped_version),
+                ("agent", "v5-legacy", template_id, legacy_version),
+                ("agent", "v5-custom", template_id, custom_version),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    upgraded = runner.invoke(args=["db", "upgrade"])
+    assert upgraded.exit_code == 0, upgraded.output
+
+    conn = sqlite3.connect(db_path)
+    try:
+        # Sources survive untouched.
+        for version, body in (
+            (shaped_version, json.dumps(shaped, sort_keys=True,
+                                        separators=(",", ":"))),
+            (legacy_version, json.dumps(legacy, sort_keys=True,
+                                        separators=(",", ":"))),
+            (custom_version, json.dumps(custom, sort_keys=True,
+                                        separators=(",", ":"))),
+        ):
+            assert (
+                conn.execute(
+                    "SELECT body FROM prompt_template_version "
+                    "WHERE template_id = ? AND version = ?",
+                    (template_id, version),
+                ).fetchone()[0]
+                == body
+            )
+
+        # Exactly one clone per default-shaped source, none for the custom mix.
+        clones = conn.execute(
+            "SELECT version, body, created_by FROM prompt_template_version "
+            "WHERE template_id = ? AND created_by LIKE "
+            f"'{_V5_MARKER}:%'",
+            (template_id,),
+        ).fetchall()
+        assert len(clones) == 2
+        clone_by_source = {
+            int(row[2].rsplit("=", 1)[1]): (row[0], json.loads(row[1]))
+            for row in clones
+        }
+        assert set(clone_by_source) == {shaped_version, legacy_version}
+        shaped_clone_version, shaped_clone = clone_by_source[shaped_version]
+        legacy_clone_version, legacy_clone = clone_by_source[legacy_version]
+        assert shaped_clone["intent_mix"] == _V5_NEW_SOURCE_DEFAULT
+        assert legacy_clone["intent_mix"] == _V5_NEW_LEGACY_DEFAULT
+        # Everything except the mix is preserved verbatim.
+        for clone in (shaped_clone, legacy_clone):
+            assert clone["direction_catalog"] == base["direction_catalog"]
+            assert clone["layouts"] == base["layouts"]
+            assert clone["length_catalog"] == base["length_catalog"]
+            assert clone["behavior_blocks"] == base["behavior_blocks"]
+            assert clone["system_template"] == base["system_template"]
+
+        # Default-shaped pins moved to the clones; the custom pin stays put.
+        assert conn.execute(
+            "SELECT target_kind, target_key, version_number FROM prompt_pin "
+            "WHERE template_id = ? ORDER BY target_kind, target_key",
+            (template_id,),
+        ).fetchall() == [
+            ("agent", "v5-custom", custom_version),
+            ("agent", "v5-legacy", legacy_clone_version),
+            ("cohort", "v5-cohort", shaped_clone_version),
+            ("global", "agent.visit_profile", shaped_clone_version),
+        ]
+
+        # Idempotency: rerunning the revision must not create another clone.
+        conn.execute("UPDATE alembic_version SET version_num = ?",
+                     (_V5_PREDECESSOR,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    rerun = runner.invoke(args=["db", "upgrade"])
+    assert rerun.exit_code == 0, rerun.output
+    conn = sqlite3.connect(db_path)
+    try:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM prompt_template_version "
+                "WHERE template_id = ? AND created_by LIKE "
+                f"'{_V5_MARKER}:%'",
+                (template_id,),
+            ).fetchone()[0]
+            == 2
+        )
+    finally:
+        conn.close()
+
+    downgraded = runner.invoke(args=["db", "downgrade", _V5_PREDECESSOR])
+    assert downgraded.exit_code == 0, downgraded.output
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute(
+            "SELECT target_kind, target_key, version_number FROM prompt_pin "
+            "WHERE template_id = ? ORDER BY target_kind, target_key",
+            (template_id,),
+        ).fetchall() == [
+            ("agent", "v5-custom", custom_version),
+            ("agent", "v5-legacy", legacy_version),
+            ("cohort", "v5-cohort", shaped_version),
+            ("global", "agent.visit_profile", shaped_version),
+        ]
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM prompt_template_version "
+                "WHERE template_id = ? AND created_by LIKE "
+                f"'{_V5_MARKER}:%'",
+                (template_id,),
+            ).fetchone()[0]
+            == 0
+        )
+    finally:
+        conn.close()
+
+    assert _V5_REVISION in [rev.revision for rev in _script().walk_revisions()]
