@@ -406,9 +406,10 @@ def run_nightly_rollup(now: datetime | None = None) -> PlatformDaily:
     return rollup_day((now - timedelta(days=1)).date())
 
 
-def daily_series(days: int = 30) -> list[PlatformDaily]:
+def daily_series(days: int = 30, now: datetime | None = None) -> list[PlatformDaily]:
     """Ascending rollup rows for the trailing ``days`` days (admin tab)."""
-    cutoff = (datetime.utcnow() - timedelta(days=days)).date()
+    now = now or datetime.utcnow()
+    cutoff = (now - timedelta(days=days)).date()
     return (
         PlatformDaily.query.filter(PlatformDaily.day >= cutoff)
         .order_by(PlatformDaily.day.asc())
@@ -456,7 +457,9 @@ def daily_metric_row(row: PlatformDaily) -> dict[str, Any]:
     }
 
 
-def sub_gini_series(window_days: int = 7) -> dict[str, float]:
+def sub_gini_series(
+    window_days: int = 7, now: datetime | None = None
+) -> dict[str, float]:
     """Per-subdeaddit participation Gini over the trailing window.
 
     Half of the AgenticCore publication contract (with dissent_share_avg
@@ -464,7 +467,8 @@ def sub_gini_series(window_days: int = 7) -> dict[str, float]:
     """
     from deaddit.dynamics.degeneracy import _participation_by_user
 
-    cutoff = datetime.utcnow() - timedelta(days=window_days)
+    now = now or datetime.utcnow()
+    cutoff = now - timedelta(days=window_days)
     out: dict[str, float] = {}
     for (sub,) in db.session.query(Post.subdeaddit_name).distinct():
         counts = _participation_by_user(sub, cutoff)
@@ -474,14 +478,14 @@ def sub_gini_series(window_days: int = 7) -> dict[str, float]:
     return out
 
 
-def health_snapshot(days: int = 7) -> dict:
+def health_snapshot(days: int = 7, now: datetime | None = None) -> dict:
     """AgenticCore-facing snapshot: rollup series plus additive metrics.
 
     ``cost_per_engagement`` remains the LLM-token-funded cost of content
     production. ``tokens_per_content_action`` is reported separately, and
     simulated voting contributes neither metric.
     """
-    series = daily_series(days)
+    series = daily_series(days, now=now)
     return {
         "days": days,
         "series": [
@@ -500,5 +504,5 @@ def health_snapshot(days: int = 7) -> dict:
             for row in series
             for metric in (daily_metric_row(row),)
         ],
-        "sub_gini": sub_gini_series(window_days=days),
+        "sub_gini": sub_gini_series(window_days=days, now=now),
     }
