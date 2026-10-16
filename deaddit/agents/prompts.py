@@ -993,22 +993,22 @@ _ENGAGEMENT_FOCUSES: tuple[_EngagementFocus, ...] = (
     _EngagementFocus(
         "engagement.quiet_new",
         "Engagement focus: find a recent post with no comments yet and give it a first reply.",
-        30,
+        10,
     ),
     _EngagementFocus(
         "engagement.direct_reply",
         "Engagement focus: prioritize one direct reply where you can add genuine value.",
-        30,
+        40,
     ),
     _EngagementFocus(
         "engagement.active_new_angle",
         "Engagement focus: enter an active thread only when you have a new angle.",
-        20,
+        35,
     ),
     _EngagementFocus(
         "engagement.browse_without_comment",
         "Engagement focus: browse and read without commenting this visit.",
-        20,
+        15,
     ),
 )
 
