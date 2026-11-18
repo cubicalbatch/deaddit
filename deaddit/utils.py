@@ -5,6 +5,7 @@ Utility functions for the Deaddit application.
 import hashlib
 import hmac
 import html
+import json
 import re
 
 from flask import current_app, request
@@ -228,3 +229,12 @@ def safe_local_next(value: str | None) -> str | None:
     if any(c in value for c in ("\r", "\n", "\0")):
         return None
     return value
+
+
+def safe_json_list(raw) -> list:
+    """Parse a JSON list column, falling back to [] on NULL/invalid/non-list."""
+    try:
+        parsed = json.loads(raw) if raw else []
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []

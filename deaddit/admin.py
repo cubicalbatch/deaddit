@@ -1168,6 +1168,30 @@ def _comments_query(search=""):
     return query
 
 
+def _normalize_json_string_list(value, field):
+    """Validate an admin-supplied JSON-array-of-strings field.
+
+    Accepts a list of strings or a string holding a JSON array of strings;
+    a blank string (or null) clears the field. Returns the JSON to store,
+    with entries stripped and empty ones dropped. Raises ``ValueError``
+    naming ``field`` for anything else.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return "[]"
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            raise ValueError(
+                f"{field} is not valid JSON; expected a JSON array of strings"
+            ) from None
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be a JSON array of strings")
+    if not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{field} must contain only strings")
+    return json.dumps([item.strip() for item in value if item.strip()])
+
+
 def _user_payload(user):
     """Serialize a user row for the admin content API."""
     return {
@@ -1230,6 +1254,16 @@ def api_update_user(username):
             rate_caps = normalize_persona_rate_caps(data["rate_caps"], strict=True)
         except ValueError as exc:
             return jsonify({"success": False, "error": str(exc)}), 400
+
+    # Interests / personality traits are JSON arrays of strings. Normalise
+    # them up front so a blank or malformed value is a 400, not stored.
+    list_fields = {}
+    for field in ("interests", "personality_traits"):
+        if field in data:
+            try:
+                list_fields[field] = _normalize_json_string_list(data[field], field)
+            except ValueError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
 
     # Optional human-account password change (same limits as registration).
     new_password = data.get("password")
@@ -1297,8 +1331,8 @@ def api_update_user(username):
         user.occupation = data.get("occupation", user.occupation)
         user.education = data.get("education", user.education)
         user.bio = data.get("bio", user.bio)
-        user.interests = data.get("interests", user.interests)
-        user.personality_traits = data.get(
+        user.interests = list_fields.get("interests", user.interests)
+        user.personality_traits = list_fields.get(
             "personality_traits", user.personality_traits
         )
         user.writing_style = data.get("writing_style", user.writing_style)

@@ -13,6 +13,7 @@ from deaddit.utils import (
     VOTER_COOKIE,
     VOTER_COOKIE_MAX_AGE,
     get_websites_bulk,
+    safe_json_list,
     visitor_hash_for,
 )
 
@@ -241,11 +242,11 @@ def get_users():
             "age": user.age,
             "gender": user.gender,
             "bio": user.bio,
-            "interests": json.loads(user.interests),
+            "interests": safe_json_list(user.interests),
             "occupation": user.occupation,
             "education": user.education,
             "writing_style": user.writing_style,
-            "personality_traits": json.loads(user.personality_traits),
+            "personality_traits": safe_json_list(user.personality_traits),
             "model": user.model
             if isinstance(user.model, str)
             else json.loads(user.model)

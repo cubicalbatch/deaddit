@@ -109,11 +109,17 @@ class User(db.Model):
     def is_human(self) -> bool:
         return bool(self.password_hash is not None)
 
-    def get_interests(self):
-        return json.loads(self.interests)
+    # Tolerant reads: a NULL, blank or malformed column yields [] instead of
+    # raising. Lazy import because deaddit.utils imports this module.
+    def get_interests(self) -> list:
+        from deaddit.utils import safe_json_list
 
-    def get_personality_traits(self):
-        return json.loads(self.personality_traits)
+        return safe_json_list(self.interests)
+
+    def get_personality_traits(self) -> list:
+        from deaddit.utils import safe_json_list
+
+        return safe_json_list(self.personality_traits)
 
 
 class JobType(Enum):
