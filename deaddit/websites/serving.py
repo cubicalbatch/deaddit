@@ -43,6 +43,29 @@ X_CONTENT_TYPE_OPTIONS = "nosniff"
 REFERRER_POLICY = "no-referrer"
 PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 
+#: Directives a ``<meta http-equiv>`` policy may not carry; browsers ignore
+#: them there (CSP3 section 3.3).
+_META_UNSUPPORTED_DIRECTIVES = frozenset(
+    {"sandbox", "frame-ancestors", "report-uri", "report-to"}
+)
+
+
+def meta_content_security_policy(policy: str = CONTENT_SECURITY_POLICY) -> str:
+    """Return ``policy`` without the directives a ``<meta>`` CSP cannot hold.
+
+    The screenshot renderer has no response headers, so it delivers the
+    served policy through a ``<meta>`` tag instead; this keeps the header as
+    the single source of truth for both.
+    """
+    directives = (part.strip() for part in policy.split(";"))
+    return "; ".join(
+        directive
+        for directive in directives
+        if directive
+        and directive.split()[0].lower() not in _META_UNSUPPORTED_DIRECTIVES
+    )
+
+
 #: Matches a <body ...> open tag, tolerating quoted attributes.
 _BODY_OPEN_TAG_RE = re.compile(
     r"<body\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*>", re.IGNORECASE
