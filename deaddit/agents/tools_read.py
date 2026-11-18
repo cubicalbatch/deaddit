@@ -417,6 +417,7 @@ def _search(ctx: ToolContext, params: SearchArgs) -> dict:
             .limit(params.limit)
             .all()
         )
+        results = [{"username": u.username, "bio": _excerpt(u.bio, 200)} for u in rows]
     out: dict[str, object] = {"results": results}
     if not results and params.type == "subdeaddit":
         popular = [

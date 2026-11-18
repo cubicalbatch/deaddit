@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import time
 from collections.abc import Iterator
@@ -36,6 +37,8 @@ from deaddit.llm import SchemaValidationError, ToolSpec, validate_tool_args
 from deaddit.models import Agent, AgentRun, AgentTurn, Comment, Post, ToolCall, User
 
 __all__ = ["ExecutorError", "execute", "normalize_persona_rate_caps"]
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutorError(Exception):
@@ -677,6 +680,9 @@ def execute(name: str, raw_arguments: dict | str, ctx: ToolContext) -> dict:
     params_instance: BaseModel = tool.parameters.model_validate(validated)
     if not _run_is_active(ctx):
         return _inactive_run_result()
+    # Read now, while the session is known healthy, so the failure path
+    # below never has to load it from a poisoned session.
+    run_id = getattr(ctx.run, "id", None)
     try:
         with _run_write_fence(ctx):
             result = tool.handler(ctx, params_instance)
@@ -685,6 +691,21 @@ def execute(name: str, raw_arguments: dict | str, ctx: ToolContext) -> dict:
         result = _inactive_run_result()
     except ValueError as exc:
         result = {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        # Any other handler failure is still a result with an audit row:
+        # loop detection reads those rows, so an escaped exception would let
+        # the model repeat the same failing (possibly paid) call unchecked.
+        # Roll back first - the handler may have staged writes or poisoned
+        # the session with a failed flush - so the persist below starts a
+        # clean transaction and commits only the ToolCall row. The traceback
+        # goes to the log; the model gets a short, generic error.
+        db.session.rollback()
+        logger.exception("tool %r raised unexpectedly (run %s)", name, run_id)
+        result = {
+            "ok": False,
+            "error": f"{name} failed unexpectedly ({type(exc).__name__})",
+            "hint": "try something different, or use finish to end your run",
+        }
 
     final = dict(result)
     if "ok" not in final:

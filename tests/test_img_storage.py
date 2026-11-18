@@ -8,14 +8,17 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import requests
 from PIL import Image
 
 from deaddit import create_app
 from deaddit.images import storage
 from deaddit.images.storage import (
+    ImageDownloadError,
     ImageTooLargeError,
     MalformedImageError,
     MediaPathTraversalError,
+    MediaStorageError,
     UnsafeImageURLError,
     UnsupportedImageMIMEError,
     delete_variants,
@@ -318,6 +321,78 @@ def test_download_image_expired_deadline_fails_before_fetch(monkeypatch):
             fetch=fetch,
             deadline=Deadline(expires_at=99.0),
         )
+
+
+@pytest.mark.parametrize(
+    ("stage", "error"),
+    [
+        ("transport", requests.ConnectionError("connection reset by peer")),
+        ("transport", requests.ReadTimeout("read timed out")),
+        ("body", requests.exceptions.ChunkedEncodingError("peer closed connection")),
+    ],
+    ids=["connect", "read-timeout", "chunked-body"],
+)
+def test_download_image_maps_transport_failures_to_storage_errors(
+    monkeypatch, stage, error
+):
+    """A flaky CDN surfaces as a MediaStorageError, never a raw requests error."""
+    monkeypatch.setattr(storage, "_resolve_host", lambda host: ["8.8.8.8"])
+    response = FakeResponse(200, {"Content-Type": "image/jpeg"})
+
+    def iter_content(chunk_size: int):
+        yield b"\xff\xd8\xff"
+        raise error
+
+    response.iter_content = iter_content
+
+    def fetch(method: str, url: str, **kwargs):
+        if stage == "transport":
+            raise error
+        return response
+
+    with pytest.raises(ImageDownloadError) as caught:
+        download_image(
+            "https://images.example/1", fetch=fetch, deadline=Deadline.after(60)
+        )
+
+    assert isinstance(caught.value, MediaStorageError)
+    assert caught.value.__cause__ is error
+    assert str(caught.value) == f"image download failed ({type(error).__name__})"
+    if stage == "body":
+        assert response.closed
+
+
+@pytest.mark.parametrize("stage", ["transport", "body"])
+def test_download_image_transport_failure_past_deadline_is_a_timeout(
+    monkeypatch, stage
+):
+    clock = [100.0]
+    monkeypatch.setattr("deaddit.images.types.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr(storage, "_resolve_host", lambda host: ["8.8.8.8"])
+    error = requests.ReadTimeout("read timed out")
+    response = FakeResponse(200, {"Content-Type": "image/jpeg"})
+
+    def iter_content(chunk_size: int):
+        yield b"\xff\xd8\xff"
+        clock[0] = 101.0  # the stalled read outlives the deadline
+        raise error
+
+    response.iter_content = iter_content
+
+    def fetch(method: str, url: str, **kwargs):
+        if stage == "transport":
+            clock[0] = 101.0
+            raise error
+        return response
+
+    with pytest.raises(ImageTimeoutError) as caught:
+        download_image(
+            "https://images.example/1",
+            fetch=fetch,
+            deadline=Deadline(expires_at=101.0),
+        )
+
+    assert caught.value.__cause__ is error
 
 
 def test_download_image_rejects_unsafe_or_unusable_responses(monkeypatch):

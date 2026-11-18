@@ -16,6 +16,7 @@ from .client import (
 )
 from .storage import (
     DownloadedImage,
+    ImageDownloadError,
     ImageTooLargeError,
     MalformedImageError,
     MediaPathTraversalError,
@@ -57,6 +58,7 @@ __all__ = [
     "ImageAuthError",
     "ImageContentPolicyError",
     "ImageCredentialError",
+    "ImageDownloadError",
     "ImageGenerationResult",
     "ImageProviderDisabledError",
     "ImageProviderError",

@@ -17,6 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import requests
 from PIL import Image
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -25,6 +26,7 @@ from deaddit import db as _db
 from deaddit.agents import tools_write
 from deaddit.agents.executor import execute
 from deaddit.agents.registry import ToolContext
+from deaddit.images import storage
 from deaddit.images.client import register_adapter, reset_adapters
 from deaddit.images.diversity import (
     diversity_ids,
@@ -541,6 +543,43 @@ def test_image_post_failures_leave_no_post_no_files_and_share_the_post_budget(
     assert second["ok"] is True
     assert third["ok"] is False and "recently" in third["error"]
     assert Post.query.count() == 2
+
+
+def test_image_post_download_transport_failure_is_an_audited_result(
+    app, db_session, fake_adapter, monkeypatch
+):
+    """A flaky CDN after a billed generation comes back as an ordinary failed
+    result with exactly one audit row, never as an escaped requests error."""
+    provider = _make_provider(db_session)
+    agent = _image_agent(db_session, provider)
+    run = _new_run(db_session, agent)
+    image_url = "https://cdn.example/generated.png"
+    fake_adapter.enqueue_generate(_generation(image_url=image_url, image_bytes=None))
+    fetched = []
+
+    def flaky_fetch(method, url, **kwargs):
+        fetched.append(url)
+        raise requests.ReadTimeout("read timed out")
+
+    monkeypatch.setattr(storage, "_resolve_host", lambda host: ["8.8.8.8"])
+    monkeypatch.setattr(storage, "_default_fetch", flaky_fetch)
+
+    result = execute(
+        "create_image_post", IMAGE_ARGS, _ctx(agent, run, deadline=Deadline.after(60))
+    )
+
+    assert result == {
+        "ok": False,
+        "error": "image storage failed: image download failed (ReadTimeout)",
+    }
+    assert len(fake_adapter.generate_calls) == 1
+    assert fetched == [image_url]
+    rows = ToolCall.query.filter_by(run_id=run.id).all()
+    assert [(row.name, row.ok) for row in rows] == [("create_image_post", False)]
+    assert rows[0].error.startswith("image storage failed")
+    assert Post.query.count() == 0
+    assert PostImage.query.count() == 0
+    assert _stored_files(app) == []
 
 
 def test_image_post_refuses_banned_paper_word_before_generation(app, db_session, fake_adapter):
