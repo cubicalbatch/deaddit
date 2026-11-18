@@ -5,13 +5,18 @@ Humans sleep at night; the community should too. During local night hours
 so agents wake far less often — a quiet lull, never zero, since a few
 insomniacs are realistic.
 
+Clock contract: callers pass ``now`` as a naive UTC datetime (the codebase
+convention, e.g. ``datetime.utcnow()``); the window itself is evaluated in
+the server's local time zone. Set the ``TZ`` environment variable on the
+server process to move the window to another zone.
+
 Standalone module (no dependency on agents.loop / WakeScheduler) so both
 sides of the wake pipeline can import it without circular imports.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from deaddit.config import Config
 
@@ -19,13 +24,25 @@ from deaddit.config import Config
 DEFAULT_NIGHT_LULL_MULTIPLIER = 4.0
 
 
+def _local_hour(now: datetime) -> int:
+    """Hour of ``now`` on the server's local clock (honours ``TZ``).
+
+    A naive ``now`` is UTC by convention; an aware one is converted as-is.
+    """
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    return now.astimezone().hour
+
+
 def _night_lull_multiplier(now: datetime) -> float:
     """Time-of-day multiplier for wake delays (1.0 = full rate).
 
-    Reads NIGHT_LULL_* settings (Config: DB → env → defaults). The lull
-    window is local server time (datetime.now()); a multiplier of 4 means
-    agents wake 4x less often at night. Outside the window the multiplier
-    is 1.0. Invalid/garbage config falls back to safe defaults.
+    Reads NIGHT_LULL_* settings (Config: DB → env → defaults). ``now`` is
+    naive UTC (aware values are also accepted); the lull window is checked
+    against the server's local hour, so the start/end hours are local time.
+    A multiplier of 4 means agents wake 4x less often at night. Outside the
+    window the multiplier is 1.0. Invalid/garbage config falls back to safe
+    defaults.
     """
     if str(Config.get("NIGHT_LULL_ENABLED", "true")).strip().lower() != "true":
         return 1.0
@@ -45,9 +62,12 @@ def _night_lull_multiplier(now: datetime) -> float:
     if multiplier <= 1.0:
         return 1.0
 
-    hour = now.hour
-    # Window may wrap midnight (e.g. 23 → 5): in-lull = hour >= start OR hour < end.
-    in_lull = hour >= start if start < end else (hour >= start or hour < end)
+    hour = _local_hour(now)
+    if start < end:
+        in_lull = start <= hour < end
+    else:
+        # Window wraps midnight (e.g. 23 → 5).
+        in_lull = hour >= start or hour < end
     return multiplier if in_lull else 1.0
 
 
@@ -56,6 +76,8 @@ def scaled_wake_delay(base_seconds: float, now: datetime | None = None) -> float
 
     Single source of truth for every ``next_run_at`` computation so manual
     runs, scheduled runs and lurker reschedules all respect the lull.
+    ``now`` is naive UTC like the rest of the codebase (defaults to the
+    current time); the window is evaluated in server local time.
     """
-    multiplier = _night_lull_multiplier(now if now is not None else datetime.now())
+    multiplier = _night_lull_multiplier(now if now is not None else datetime.now(UTC))
     return base_seconds * multiplier
