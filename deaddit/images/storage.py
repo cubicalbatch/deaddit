@@ -49,6 +49,10 @@ class MediaPathTraversalError(MediaStorageError):
     """A media path escapes, or attempts to escape, the media root."""
 
 
+class ImageDownloadError(MediaStorageError):
+    """The image transfer failed at the transport level (connect, read, body)."""
+
+
 @dataclass
 class DownloadedImage:
     """A validated image response."""
@@ -230,7 +234,9 @@ def download_image(
         except requests.RequestException as exc:
             if deadline is not None and deadline.expired():
                 raise ImageTimeoutError("image download deadline elapsed") from exc
-            raise
+            raise ImageDownloadError(
+                f"image download failed ({type(exc).__name__})"
+            ) from exc
         try:
             status_code = int(getattr(response, "status_code", 0))
             if status_code in _REDIRECT_STATUSES:
@@ -269,7 +275,9 @@ def download_image(
             except requests.RequestException as exc:
                 if deadline is not None and deadline.expired():
                     raise ImageTimeoutError("image download deadline elapsed") from exc
-                raise
+                raise ImageDownloadError(
+                    f"image download failed ({type(exc).__name__})"
+                ) from exc
             if deadline is not None and deadline.expired():
                 raise ImageTimeoutError("image download deadline elapsed")
             data = b"".join(chunks)

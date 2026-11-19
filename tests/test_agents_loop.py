@@ -636,6 +636,49 @@ def test_two_consecutive_rejections_force_finish(seeded_db, db_session, fake_llm
     assert all(c.ok is False for c in ToolCall.query.filter_by(run_id=run.id))
 
 
+def test_repeated_crashing_tool_call_force_finishes_run(
+    seeded_db, db_session, fake_llm, monkeypatch
+):
+    """A handler that raises is audited like any other failure, so repeat
+    detection ends the run instead of letting the model retry the same
+    broken call until its action budget runs out."""
+    from dataclasses import replace
+
+    from deaddit.agents import registry as registry_module
+    from deaddit.agents.registry import get
+
+    calls = []
+
+    def broken(_ctx, params):
+        calls.append(params.username)
+        raise RuntimeError("handler bug")
+
+    monkeypatch.setitem(
+        registry_module.TOOL_REGISTRY,
+        "view_profile",
+        replace(get("view_profile"), handler=broken),
+    )
+    agent = _make_agent(db_session, "alice", config={"max_actions_per_run": 99})
+    for n in range(1, 4):
+        fake_llm.enqueue(
+            _tool_response([_tool_call(f"c{n}", "view_profile", {"username": "bob"})])
+        )
+    # Unconsumed on purpose: the run must stop before a fourth turn.
+    fake_llm.enqueue(_finish())
+
+    run = run_once(agent.id)
+
+    assert run.status == "completed"
+    assert run.action_count == 3
+    assert len(fake_llm.requests) == 3
+    assert calls == ["bob", "bob"]  # the third repeat is force-finished
+    rows = ToolCall.query.filter_by(run_id=run.id).order_by(ToolCall.id).all()
+    assert [(row.name, row.ok) for row in rows] == [("view_profile", False)] * 3
+    assert rows[0].error == "view_profile failed unexpectedly (RuntimeError)"
+    assert rows[2].error == "repeating the same action"
+    assert _stored(rows[2])["force_finish"] is True
+
+
 def test_kickoff_prompt_post_intent_inspires_create_post(seeded_db, db_session):
     agent = _make_agent(db_session, "alice")
     prompt, intent = _kickoff(db_session, agent, requested_intent="post")

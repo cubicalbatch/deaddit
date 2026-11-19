@@ -439,6 +439,7 @@ class ContentManager {
             document.getElementById('editUserEducation').value = user.education || '';
             document.getElementById('editUserBio').value = user.bio || '';
             document.getElementById('editUserInterests').value = user.interests || '';
+            document.getElementById('editUserPersonality').value = user.personality_traits || '';
             document.getElementById('editUserWritingStyle').value = user.writing_style || '';
             const subs = Array.isArray(user.subscriptions) ? user.subscriptions.join(', ') : (user.subscriptions || '');
             document.getElementById('editUserSubscriptions').value = subs;

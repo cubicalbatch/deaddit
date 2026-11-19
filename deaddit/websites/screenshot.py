@@ -9,8 +9,10 @@ This keeps optional preview capture from changing the durable website-post path.
 from __future__ import annotations
 
 import functools
+import html
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -23,6 +25,7 @@ from deaddit.extensions import db
 from deaddit.images.storage import delete_variants, media_root, store_variants
 from deaddit.images.types import Deadline
 from deaddit.models import PostImage
+from deaddit.websites.serving import meta_content_security_policy
 from deaddit.websites.storage import resolve_website_path, website_root
 
 logger = logging.getLogger(__name__)
@@ -33,6 +36,31 @@ SCREENSHOT_TIMEOUT_SECONDS = 30.0
 MAX_SCREENSHOT_BYTES = 26_214_400
 VIRTUAL_TIME_BUDGET_MS = 2000
 PROVIDER_SNAPSHOT = "screenshot"
+
+#: Proxy every request is forced through. Nothing should listen on the
+#: loopback discard port, so connections are refused fast and fail closed.
+DEAD_PROXY = "127.0.0.1:9"
+
+#: The only variables Chrome inherits from the worker; the worker's
+#: environment holds API_TOKEN, SECRET_KEY and provider keys. TMPDIR is kept
+#: as-is: nesting it deeper can push Chrome's singleton socket path past the
+#: 108-byte Unix socket limit, which aborts Chrome.
+_CHROME_ENV_PASSTHROUGH = (
+    "PATH",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+    "TMPDIR",
+)
+#: Font configuration overrides (e.g. FONTCONFIG_FILE on Nix-style systems).
+_CHROME_ENV_PREFIXES = ("FONTCONFIG_",)
+
+#: A leading doctype, optionally behind a BOM, whitespace or comments.
+_LEADING_DOCTYPE_RE = re.compile(
+    r"\A\ufeff?(?:\s|<!--.*?-->)*<!doctype\b[^>]*>", re.IGNORECASE | re.DOTALL
+)
 
 
 class ScreenshotError(Exception):
@@ -138,12 +166,64 @@ def invalidate_binary_cache() -> None:
     _warned_no_browser = False
 
 
-def render_page_png(url: str, *, binary: str, deadline: Deadline) -> bytes:
-    """Render a fixed viewport using an isolated Chrome profile.
+def with_csp_meta(page_html: str) -> str:
+    """Return a copy of ``page_html`` carrying the served CSP as a ``<meta>``.
 
-    ``--no-sandbox`` is required when containers run Chromium as root, where
-    the sandbox cannot work.  The input is only our self-generated ``file://``
-    HTML, so the blast radius is bounded by the timeout and size cap.
+    The tag goes straight after the doctype (so the page keeps standards
+    mode), or at the very start without one. Either way the parser puts it
+    first in ``<head>``, ahead of every script, style and link it governs.
+    """
+    policy = html.escape(meta_content_security_policy(), quote=True)
+    meta = f'<meta http-equiv="Content-Security-Policy" content="{policy}">'
+    match = _LEADING_DOCTYPE_RE.match(page_html)
+    split = match.end() if match else 0
+    return page_html[:split] + meta + page_html[split:]
+
+
+def sandbox_wrapper(page_html: str) -> str:
+    """Return the trusted, script-free document Chrome is pointed at.
+
+    The page renders in a viewport-sized ``srcdoc`` frame sandboxed with
+    ``allow-scripts`` alone, mirroring the served ``sandbox allow-scripts``.
+    The frame gets an opaque origin, so it cannot load or navigate to
+    ``file:`` URLs, navigate the top frame, open popups or submit forms.
+    Attribute escaping keeps the page inert inside the wrapper; the HTML
+    parser decodes it back to the exact original text.
+    """
+    framed = html.escape(with_csp_meta(page_html), quote=True)
+    return (
+        '<!doctype html><html><head><meta charset="utf-8"></head>'
+        '<body style="margin:0;overflow:hidden">'
+        '<iframe sandbox="allow-scripts" '
+        'style="display:block;border:0;margin:0;width:100vw;height:100vh" '
+        f'srcdoc="{framed}"></iframe></body></html>'
+    )
+
+
+def _chrome_environment(home: Path) -> dict[str, str]:
+    """Return the allowlisted environment Chrome runs with.
+
+    Everything else is dropped: the worker's API keys and tokens, proxy
+    variables, and session-bus/display sockets. ``HOME`` points into the
+    per-render directory, so nothing reads or writes the real home.
+    """
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if name in _CHROME_ENV_PASSTHROUGH or name.startswith(_CHROME_ENV_PREFIXES)
+    }
+    env["HOME"] = str(home)
+    return env
+
+
+def render_page_png(page_html: str, *, binary: str, deadline: Deadline) -> bytes:
+    """Render generated HTML at a fixed viewport in an isolated Chrome.
+
+    ``page_html`` is untrusted (LLM-written, prompt-injectable), so it gets
+    the served page's isolation: the CSP as a ``<meta>``, a sandboxed frame
+    (:func:`sandbox_wrapper`), all network traffic sent to a dead proxy, and
+    an allowlisted environment. ``--no-sandbox`` is still required when
+    containers run Chromium as root, where the OS sandbox cannot work.
     """
 
     if deadline.expired():
@@ -154,6 +234,8 @@ def render_page_png(url: str, *, binary: str, deadline: Deadline) -> bytes:
         profile = temporary_root / "chrome-profile"
         profile.mkdir()
         out_png = temporary_root / "screenshot.png"
+        wrapper = temporary_root / "wrapper.html"
+        wrapper.write_text(sandbox_wrapper(page_html), encoding="utf-8")
         # CLI screenshots are viewport-bounded by design. Full-height capture
         # needs CDP; fixed 1280x800 keeps output deterministic and bounded.
         argv = [
@@ -167,14 +249,38 @@ def render_page_png(url: str, *, binary: str, deadline: Deadline) -> bytes:
             "--disable-dev-shm-usage",
             "--disable-crash-reporter",
             "--disable-extensions",
+            # Send every request to a proxy nothing listens on. Besides
+            # subresources, this stops what CSP cannot: the frame navigating
+            # itself to http://169.254.169.254/ or an internal service and
+            # the response landing in the screenshot.
+            f"--proxy-server={DEAD_PROXY}",
+            # Chrome sends localhost/127.0.0.1/[::1] DIRECT even with a proxy;
+            # "<-loopback>" removes that implicit bypass.
+            "--proxy-bypass-list=<-loopback>",
+            # Fail every hostname lookup: DNS prefetch hints are not covered
+            # by CSP and resolve outside the proxy (a DNS beacon).
+            "--host-resolver-rules=MAP * ~NOTFOUND",
+            # WebRTC sends STUN/TURN over UDP straight past the proxy and is
+            # not governed by CSP; allow only proxied (so dead) connections.
+            "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+            # No component updates, Safe Browsing or other Chrome traffic.
+            "--disable-background-networking",
+            # Keep the sandboxed frame in the wrapper's renderer. In its own
+            # process it learns its size only after the wrapper's layout, so
+            # page scripts reading innerWidth/innerHeight at load see 0x0 and
+            # size canvases to nothing. The opaque origin, not the process
+            # split, is what keeps it off file: URLs (and with --no-sandbox a
+            # renderer exploit escapes either way).
+            "--disable-features=IsolateSandboxedIframes",
             f"--virtual-time-budget={VIRTUAL_TIME_BUDGET_MS}",
             f"--user-data-dir={profile}",
-            url,
+            wrapper.as_uri(),
         ]
         try:
             completed = subprocess.run(
                 argv,
                 capture_output=True,
+                env=_chrome_environment(temporary_root),
                 timeout=max(deadline.remaining(), 1.0),
             )
         except subprocess.TimeoutExpired as exc:
@@ -243,9 +349,8 @@ def attach_website_screenshot(
             return
 
         page_file = resolve_website_path(website_root(current_app), storage_path)
-        url = page_file.resolve().as_uri()
         png = render_page_png(
-            url,
+            page_file.read_text("utf-8"),
             binary=binary,
             deadline=Deadline.after(SCREENSHOT_TIMEOUT_SECONDS),
         )

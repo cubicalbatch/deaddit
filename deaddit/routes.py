@@ -1,4 +1,3 @@
-import json
 from collections import namedtuple
 from datetime import UTC
 
@@ -36,20 +35,12 @@ from .utils import (
     format_content_html,
     get_comment_counts_bulk,
     get_websites_bulk,
+    safe_json_list,
     safe_local_next,
     visitor_vote_map,
 )
 
 bp = Blueprint("web", __name__)
-
-
-def _safe_json_list(raw):
-    """Parse a JSON list column, falling back to [] on NULL/invalid."""
-    try:
-        parsed = json.loads(raw) if raw else []
-    except (TypeError, ValueError):
-        return []
-    return parsed if isinstance(parsed, list) else []
 
 
 @bp.route("/")
@@ -450,7 +441,7 @@ def list_subdeaddit():
         _CommunityRow(
             name=row.name,
             description=row.description,
-            post_types=_safe_json_list(row.post_types),
+            post_types=safe_json_list(row.post_types),
             post_count=row.post_count,
             comment_count=row.comment_count,
         )
@@ -512,8 +503,8 @@ def user_profile(username):
         "total_posts": total_posts,
         "total_comments": total_comments,
         "stats": stats,
-        "traits": _safe_json_list(user.personality_traits),
-        "interests": _safe_json_list(user.interests),
+        "traits": safe_json_list(user.personality_traits),
+        "interests": safe_json_list(user.interests),
         "subscriptions": subscriptions,
         "bio_html": format_content_html(user.bio),
         "title": f"Deaddit - User Profile: {username}",

@@ -15,9 +15,11 @@ Detectors (cheap, local):
 Levers:
 
 - **Ranking demotion** — posts whose author carries a repetition flag inside
-  the demotion window are ordered at half hot weight (``×0.5``). The formula
-  module :mod:`deaddit.dynamics.ranking` stays byte-frozen; this module wraps
-  its output at query-composition time (see :func:`with_repetition_demotion`).
+  the demotion window are ranked as if their net score were halved: the hot
+  value is lowered by the fixed ``HOT_DEMOTION_PENALTY = log10(2)`` (≈0.301,
+  the same as a ~3.76h age handicap). The formula module
+  :mod:`deaddit.dynamics.ranking` stays byte-frozen; this module wraps its
+  output at query-composition time (see :func:`with_repetition_demotion`).
   With no active flags the ORDER BY text is IDENTICAL to the plain hot
   fragment, so EXPLAIN QUERY PLAN keeps using ``ix_post_hot_expr``. While
   flags are active the CASE wrapper defeats that index — accepted at this
@@ -57,6 +59,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from datetime import datetime, timedelta
 
@@ -78,6 +81,12 @@ THREAD_SAMPLE = 50
 #: How long a repetition flag keeps demoting its author's posts in hot feeds.
 DEMOTION_WINDOW_DAYS_DEFAULT = 7
 _SETTING_DEMOTION_WINDOW = "degeneracy_demotion_window_days"
+#: Subtracted from a flagged author's hot value. The hot vote term is
+#: ``log10(score)``, so subtracting ``log10(2)`` ranks the post exactly as if
+#: its net score were halved (≈3.76h of age at 45000s gravity). Additive on
+#: purpose: the time term (~14,690 today) dwarfs the vote term, so scaling the
+#: whole hot value would bury the post below everything since ~2016.
+HOT_DEMOTION_PENALTY = math.log10(2)
 
 _ECHO_WINDOW_DAYS = 7
 _ECHO_GINI_THRESHOLD = 0.7
@@ -294,7 +303,10 @@ def flagged_hot_authors(cutoff: datetime | None = None) -> list[str]:
 
 
 def with_repetition_demotion(order_clauses: list) -> list:
-    """Wrap a ``ranking.post_order_by`` result with the ×0.5 hot demotion.
+    """Wrap a ``ranking.post_order_by`` result with the hot demotion.
+
+    Flagged authors' posts order by ``hot - HOT_DEMOTION_PENALTY`` (as if
+    their net score were halved); everyone else keeps the plain hot value.
 
     Fast path: no active flags → the input clauses are returned UNCHANGED
     (byte-identical SQL, so the D2 expression index keeps serving EXPLAIN).
@@ -310,22 +322,24 @@ def with_repetition_demotion(order_clauses: list) -> list:
     authors = flagged_hot_authors()
     if not authors:
         return order_clauses
-    factor = case((Post.user.in_(authors), 0.5), else_=1.0)
-    demoted_hot = (factor * literal_column(HOT_SQL_FRAGMENT)).desc()
+    penalty = case((Post.user.in_(authors), HOT_DEMOTION_PENALTY), else_=0.0)
+    demoted_hot = (literal_column(HOT_SQL_FRAGMENT) - penalty).desc()
     return [demoted_hot, *order_clauses[1:]]
 
 
 def hot_rank_key_demoted(
     *, score: int, created_at: datetime, now: datetime, demoted: bool
 ) -> float:
-    """Test-only mirror of the demoted hot rank key: ``0.5 ×`` the frozen mirror.
+    """Test-only mirror of the demoted hot rank key.
+
+    The frozen hot mirror minus ``HOT_DEMOTION_PENALTY`` when ``demoted``.
 
     Used by tests to assert numerical parity against SQL with_repetition_demotion.
     """
     from deaddit.dynamics.ranking import post_rank_key
 
     key = post_rank_key("hot", score=score, created_at=created_at, now=now)
-    return key * 0.5 if demoted else key
+    return key - HOT_DEMOTION_PENALTY if demoted else key
 
 
 # --------------------------------------------------------------------------

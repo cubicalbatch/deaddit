@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import stat
 import subprocess
+from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import pytest
 from PIL import Image
@@ -29,8 +32,14 @@ from deaddit.websites.screenshot import (
     invalidate_binary_cache,
     render_page_png,
     resolve_chrome_binary,
+    sandbox_wrapper,
+    with_csp_meta,
 )
-from deaddit.websites.storage import store_website, website_root
+from deaddit.websites.serving import (
+    CONTENT_SECURITY_POLICY,
+    meta_content_security_policy,
+)
+from deaddit.websites.storage import resolve_website_path, store_website, website_root
 
 
 @pytest.fixture()
@@ -216,7 +225,7 @@ def test_render_clean_exit_without_output_is_distinct_error(monkeypatch):
     monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
     with pytest.raises(ScreenshotRenderError) as excinfo:
         render_page_png(
-            "file:///tmp/page.html",
+            "<!doctype html><html><body>Hi</body></html>",
             binary="chromium-browser",
             deadline=screenshot.Deadline.after(5),
         )
@@ -359,7 +368,7 @@ def test_render_rejects_oversize_before_read(monkeypatch, tmp_path):
     monkeypatch.setattr(screenshot, "MAX_SCREENSHOT_BYTES", 1024)
     with pytest.raises(ScreenshotTooLargeError):
         render_page_png(
-            "file:///tmp/page.html",
+            "<!doctype html><html><body>Hi</body></html>",
             binary="fake-chrome",
             deadline=screenshot.Deadline.after(5),
         )
@@ -655,3 +664,312 @@ class TestWebsitePostScreenshotIntegration:
 
 def test_screenshot_cap_matches_image_download_cap():
     assert MAX_SCREENSHOT_BYTES == 26_214_400
+
+
+# ---------------------------------------------------------------------------
+# Render isolation: the screenshot path must give the untrusted page the same
+# protections as /out/ serving (CSP, sandbox, no network, no secrets).
+# ---------------------------------------------------------------------------
+
+#: Quotes, entities, a literal </script>, non-ASCII, and an attempt to break
+#: out of the srcdoc attribute into the trusted wrapper.
+_TRICKY_PAGE = (
+    "<!doctype html><html><head><title>T &amp; \"q\" 'a'</title>"
+    '<link rel=icon href="data:,"><style>p::after{content:"&amp;\\""}</style>'
+    '</head><body><p title="a &quot;b&quot; &amp; c">Tom &amp; Jerry\'s '
+    '"show" &lt;3 caf\u00e9 \u2603</p>'
+    "\"></iframe><script>alert('breakout')</script>"
+    "<script>var s = '<b>&amp;</b>'; document.title = \"x\";</script>"
+    "</body></html>"
+)
+
+_FORBIDDEN_SANDBOX_TOKENS = (
+    "allow-same-origin",
+    "allow-top-navigation",
+    "allow-top-navigation-by-user-activation",
+    "allow-top-navigation-to-custom-protocols",
+    "allow-popups",
+    "allow-popups-to-escape-sandbox",
+    "allow-forms",
+    "allow-modals",
+)
+
+
+class _TagCollector(HTMLParser):
+    """Collect (tag, attrs) pairs; attribute values decoded like a browser."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.tags: list[tuple[str, dict[str, str | None]]] = []
+
+    def handle_starttag(self, tag, attrs):
+        self.tags.append((tag, dict(attrs)))
+
+    handle_startendtag = handle_starttag
+
+
+def _tags(document: str) -> list[tuple[str, dict[str, str | None]]]:
+    collector = _TagCollector()
+    collector.feed(document)
+    collector.close()
+    return collector.tags
+
+
+def _capturing_run(captured: dict):
+    """Fake ``subprocess.run`` that records argv/env and the wrapper Chrome got."""
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = list(argv)
+        captured["env"] = kwargs.get("env")
+        url = argv[-1]
+        captured["url"] = url
+        wrapper_path = Path(unquote(urlparse(url).path))
+        captured["wrapper_path"] = wrapper_path
+        captured["wrapper"] = wrapper_path.read_text("utf-8")
+        target = next(
+            Path(arg.split("=", 1)[1])
+            for arg in argv
+            if arg.startswith("--screenshot=")
+        )
+        captured["render_dir"] = target.parent
+        target.write_bytes(_png())
+        return subprocess.CompletedProcess(argv, 0, stdout=b"", stderr=b"")
+
+    return fake_run
+
+
+def _render(monkeypatch, page: str = _TRICKY_PAGE) -> dict:
+    captured: dict = {}
+    monkeypatch.setattr(screenshot.subprocess, "run", _capturing_run(captured))
+    png = render_page_png(
+        page, binary="fake-chrome", deadline=screenshot.Deadline.after(5)
+    )
+    assert png == _png()
+    return captured
+
+
+def _framed_document(wrapper: str) -> str:
+    iframes = [attrs for tag, attrs in _tags(wrapper) if tag == "iframe"]
+    assert len(iframes) == 1
+    return iframes[0]["srcdoc"]
+
+
+def _meta_policy(document: str) -> str:
+    metas = [
+        attrs
+        for tag, attrs in _tags(document)
+        if tag == "meta"
+        and (attrs.get("http-equiv") or "").lower() == "content-security-policy"
+    ]
+    assert len(metas) == 1
+    return metas[0]["content"]
+
+
+def _directive_names(policy: str) -> list[str]:
+    return [part.split()[0] for part in policy.split(";") if part.strip()]
+
+
+def test_render_argv_routes_all_traffic_to_dead_proxy(monkeypatch):
+    argv = _render(monkeypatch)["argv"]
+
+    assert "--proxy-server=127.0.0.1:9" in argv
+    assert "--proxy-bypass-list=<-loopback>" in argv
+    assert "--host-resolver-rules=MAP * ~NOTFOUND" in argv
+    assert "--disable-background-networking" in argv
+    assert "--webrtc-ip-handling-policy=disable_non_proxied_udp" in argv
+    assert not any(arg.startswith("--proxy-pac-url") for arg in argv)
+    # Same-process frame, so page scripts see the 1280x800 viewport at load.
+    assert "--disable-features=IsolateSandboxedIframes" in argv
+    # The only positional argument is the wrapper URL.
+    assert [arg for arg in argv[1:] if not arg.startswith("--")] == [argv[-1]]
+    assert argv[-1].startswith("file://")
+
+
+def test_render_loads_script_free_wrapper_with_strict_sandbox(monkeypatch):
+    captured = _render(monkeypatch)
+    wrapper = captured["wrapper"]
+
+    # Chrome is pointed at the generated wrapper in the per-render temp dir.
+    assert captured["url"] == captured["wrapper_path"].as_uri()
+    assert captured["wrapper_path"].parent == captured["render_dir"]
+    assert not captured["wrapper_path"].exists()  # removed with the temp dir
+
+    tags = _tags(wrapper)
+    assert [tag for tag, _attrs in tags].count("iframe") == 1
+    assert "script" not in [tag for tag, _attrs in tags]
+    # Not even the framed page's scripts appear unescaped in the wrapper.
+    assert "<script" not in wrapper.lower()
+    iframe = next(attrs for tag, attrs in tags if tag == "iframe")
+    tokens = iframe["sandbox"].split()
+    assert tokens == ["allow-scripts"]
+    for forbidden in _FORBIDDEN_SANDBOX_TOKENS:
+        assert forbidden not in tokens
+    assert set(iframe) == {"sandbox", "style", "srcdoc"}
+    style = iframe["style"].replace(" ", "")
+    assert "border:0" in style
+    assert "width:100vw" in style and "height:100vh" in style
+    body = next(attrs for tag, attrs in tags if tag == "body")
+    assert "margin:0" in body["style"].replace(" ", "")
+
+
+def test_render_framed_page_has_csp_meta_first_and_round_trips(monkeypatch):
+    framed = _framed_document(_render(monkeypatch)["wrapper"])
+
+    lowered = framed.lower()
+    meta_at = lowered.index('<meta http-equiv="content-security-policy"')
+    first_active = min(
+        lowered.index(marker) for marker in ("<script", "<style", "<link")
+    )
+    assert meta_at < first_active
+    assert framed.startswith("<!doctype html><meta ")
+
+    policy = _meta_policy(framed)
+    assert "default-src 'none'" in policy
+    assert "sandbox" not in _directive_names(policy)
+    assert "frame-ancestors" not in _directive_names(policy)
+    assert policy == meta_content_security_policy()
+
+    # Exactly the original page plus the meta tag: quotes, entities, the
+    # literal </script> and non-ASCII survive the attribute escaping.
+    assert framed == with_csp_meta(_TRICKY_PAGE)
+    meta_tag = framed[meta_at : framed.index(">", meta_at) + 1]
+    assert framed.replace(meta_tag, "", 1) == _TRICKY_PAGE
+
+
+def test_render_scrubs_secrets_from_chrome_environment(monkeypatch):
+    secrets = {
+        "API_TOKEN": "tok-should-not-leak",
+        "SECRET_KEY": "flask-should-not-leak",
+        "OPENAI_API_KEY": "sk-should-not-leak",
+        "ANTHROPIC_API_KEY": "ant-should-not-leak",
+        "FAL_KEY": "fal-should-not-leak",
+        "AWS_SECRET_ACCESS_KEY": "aws-should-not-leak",
+        "HTTPS_PROXY": "http://proxy.invalid:3128",
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+    }
+    for name, value in secrets.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin:/bin")
+    monkeypatch.setenv("LANG", "C.UTF-8")
+    monkeypatch.setenv("FONTCONFIG_FILE", "/etc/fonts/fonts.conf")
+
+    captured = _render(monkeypatch)
+    env = captured["env"]
+
+    assert env is not None, "Chrome must not inherit the worker environment"
+    for name, value in secrets.items():
+        assert name not in env
+        assert value not in env.values()
+    assert not [
+        name
+        for name in env
+        if any(word in name.upper() for word in ("KEY", "TOKEN", "SECRET", "PASS"))
+    ]
+    assert env["PATH"] == "/usr/local/bin:/usr/bin:/bin"
+    assert env["LANG"] == "C.UTF-8"
+    assert env["FONTCONFIG_FILE"] == "/etc/fonts/fonts.conf"
+    assert env["HOME"] == str(captured["render_dir"])
+    assert set(env) <= {
+        "PATH",
+        "HOME",
+        "LANG",
+        "LANGUAGE",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TZ",
+        "TMPDIR",
+        "FONTCONFIG_FILE",
+    }
+
+
+def test_attach_renders_stored_page_through_wrapper_and_leaves_file_unchanged(
+    app, db_session, monkeypatch, tmp_path
+):
+    stored = store_website(_TRICKY_PAGE, website_root(app))
+    page_file = resolve_website_path(website_root(app), stored.storage_path)
+    before = hashlib.sha256(page_file.read_bytes()).hexdigest()
+    assert before == stored.sha256
+    post = _post(db_session)
+    binary = _executable(tmp_path / "fake-chrome")
+    monkeypatch.setenv("DEADDIT_CHROME_BINARY", str(binary))
+    monkeypatch.setattr(screenshot, "resolve_chrome_binary", lambda: str(binary))
+    captured: dict = {}
+    monkeypatch.setattr(screenshot.subprocess, "run", _capturing_run(captured))
+
+    with app.app_context():
+        attach_website_screenshot(
+            post.id,
+            storage_path=stored.storage_path,
+            hostname="example.test",
+            page_name="home.html",
+        )
+        assert PostImage.query.filter_by(post_id=post.id).count() == 1
+
+    assert hashlib.sha256(page_file.read_bytes()).hexdigest() == before
+    assert page_file.read_text("utf-8") == _TRICKY_PAGE
+    # Chrome never sees the stored file, only the wrapper around a copy.
+    assert captured["url"] != page_file.resolve().as_uri()
+    assert str(page_file) not in " ".join(captured["argv"])
+    assert _framed_document(captured["wrapper"]) == with_csp_meta(_TRICKY_PAGE)
+
+
+def test_meta_csp_drops_header_only_directives_from_served_policy():
+    policy = meta_content_security_policy()
+
+    assert policy == meta_content_security_policy(CONTENT_SECURITY_POLICY)
+    names = _directive_names(policy)
+    assert "sandbox" not in names
+    assert "frame-ancestors" not in names
+    served = [
+        part.strip() for part in CONTENT_SECURITY_POLICY.split(";") if part.strip()
+    ]
+    expected = [
+        part for part in served if part.split()[0] not in {"sandbox", "frame-ancestors"}
+    ]
+    assert policy.split("; ") == expected
+    assert "default-src 'none'" in expected
+    assert "script-src 'unsafe-inline'" in expected
+
+
+def test_meta_csp_strips_reporting_and_tolerates_messy_input():
+    policy = meta_content_security_policy(
+        " default-src 'none' ;; Report-URI /csp ; report-to grp; "
+        "FRAME-ANCESTORS 'none'; img-src data: ; Sandbox allow-scripts ;"
+    )
+    assert policy == "default-src 'none'; img-src data:"
+    assert meta_content_security_policy("") == ""
+
+
+@pytest.mark.parametrize(
+    ("page", "prefix"),
+    [
+        ("<!doctype html><html><body>x</body></html>", "<!doctype html>"),
+        ("<!DOCTYPE HTML>\n<html><body>x</body></html>", "<!DOCTYPE HTML>"),
+        (
+            "\ufeff  <!-- c <script> --> <!doctype html><body>x</body>",
+            "\ufeff  <!-- c <script> --> <!doctype html>",
+        ),
+        ("<html><head><script>x()</script></head></html>", ""),
+        ("<p>no doctype</p><!doctype html>", ""),
+    ],
+)
+def test_with_csp_meta_places_tag_after_doctype_or_at_start(page, prefix):
+    result = with_csp_meta(page)
+
+    assert result.startswith(prefix)
+    rest = result[len(prefix) :]
+    assert rest.startswith('<meta http-equiv="Content-Security-Policy" content="')
+    assert rest[rest.index(">") + 1 :] == page[len(prefix) :]
+    assert _meta_policy(result) == meta_content_security_policy()
+
+
+def test_sandbox_wrapper_cannot_be_escaped_by_page_markup():
+    hostile = (
+        '<!doctype html>"></iframe><script>top.location="file:///etc/passwd"'
+        "</script><iframe srcdoc='x' sandbox='allow-same-origin'>"
+    )
+    wrapper = sandbox_wrapper(hostile)
+
+    tags = _tags(wrapper)
+    assert [tag for tag, _attrs in tags] == ["html", "head", "meta", "body", "iframe"]
+    assert _framed_document(wrapper) == with_csp_meta(hostile)

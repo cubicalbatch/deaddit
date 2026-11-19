@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
+from pydantic import BaseModel
 
+from deaddit.agents import executor as executor_module
+from deaddit.agents import registry as registry_module
 from deaddit.agents.executor import execute
-from deaddit.agents.registry import BACKSTAGE_SUBDEADDIT_NAME, ToolContext
+from deaddit.agents.registry import (
+    BACKSTAGE_SUBDEADDIT_NAME,
+    AutonomyTier,
+    RateClass,
+    Tool,
+    ToolContext,
+)
 from deaddit.models import Agent, AgentRun, Comment, Post, Subdeaddit, ToolCall, User
 
 
@@ -478,6 +488,172 @@ def test_repeated_identical_read_warns_then_force_finishes(ctx, db_session):
 
     rows = ToolCall.query.filter_by(run_id=ctx.run.id).all()
     assert [row.ok for row in rows] == [True, True, False]
+
+
+# ---------------------------------------------------------------------------
+# Unexpected handler exceptions are results too
+
+
+class _ExplodeArgs(BaseModel):
+    target: str = "anything"
+
+
+_UNEXPECTED_HINT = "try something different, or use finish to end your run"
+
+
+@pytest.fixture()
+def explode_tool(monkeypatch):
+    """Install a test-only 'explode' tool whose handler the test supplies."""
+    monkeypatch.setattr(executor_module, "_llm_spec_cache", {})
+
+    def install(handler):
+        monkeypatch.setitem(
+            registry_module.TOOL_REGISTRY,
+            "explode",
+            Tool(
+                name="explode",
+                description="Test-only tool with a misbehaving handler.",
+                parameters=_ExplodeArgs,
+                handler=handler,
+                min_tier=AutonomyTier.LURKER,
+                rate_class=RateClass.READ,
+            ),
+        )
+
+    return install
+
+
+def test_unexpected_handler_exception_is_an_audited_result(
+    ctx, db_session, explode_tool, caplog
+):
+    post_id = Post.query.filter_by(subdeaddit_name="testsub").first().id
+    comments_before = Comment.query.count()
+
+    def handler(_ctx, _params):
+        # A flushed-but-uncommitted write that must not survive the failure.
+        db_session.add(
+            Comment(post_id=post_id, user="alice", content="half-done", model="m")
+        )
+        db_session.flush()
+        raise RuntimeError("internal detail /srv/secret/path")
+
+    explode_tool(handler)
+    with caplog.at_level(logging.ERROR, logger="deaddit.agents.executor"):
+        result = execute("explode", {"target": "x"}, ctx)
+
+    assert result == {
+        "ok": False,
+        "error": "explode failed unexpectedly (RuntimeError)",
+        "hint": _UNEXPECTED_HINT,
+    }
+    rows = ToolCall.query.filter_by(run_id=ctx.run.id).all()
+    assert len(rows) == 1
+    assert (rows[0].name, rows[0].ok) == ("explode", False)
+    assert rows[0].error == "explode failed unexpectedly (RuntimeError)"
+    assert rows[0].arguments == {"target": "x"}
+    # The staged write was rolled back, not committed with the audit row.
+    assert Comment.query.count() == comments_before
+    # The traceback goes to the log, never into the model's context.
+    [record] = [r for r in caplog.records if r.name == "deaddit.agents.executor"]
+    assert record.exc_info[0] is RuntimeError
+    assert "'explode'" in record.getMessage()
+    assert f"run {ctx.run.id}" in record.getMessage()
+
+    # The session is still usable: a follow-up call audits and commits.
+    follow_up = execute("view_profile", {"username": "bob"}, ctx)
+    assert follow_up["ok"] is True
+    assert ToolCall.query.filter_by(run_id=ctx.run.id).count() == 2
+
+
+def test_handler_that_poisons_the_session_is_rolled_back_and_audited(
+    ctx, db_session, explode_tool
+):
+    post_id = Post.query.filter_by(subdeaddit_name="testsub").first().id
+    comments_before = Comment.query.count()
+
+    def handler(_ctx, _params):
+        db_session.add(
+            Comment(post_id=post_id, user="alice", content="partial write", model="m")
+        )
+        db_session.flush()
+        # Case-insensitive twin of 'alice': the uq_user_username_lower index
+        # rejects it at flush time, leaving the session needing a rollback.
+        db_session.add(User(username="ALICE"))
+        db_session.flush()
+        return {"ok": True}
+
+    explode_tool(handler)
+    result = execute("explode", {}, ctx)
+
+    assert result["ok"] is False
+    assert result["error"] == "explode failed unexpectedly (IntegrityError)"
+    rows = ToolCall.query.filter_by(run_id=ctx.run.id).all()
+    assert [(row.name, row.ok) for row in rows] == [("explode", False)]
+    assert Comment.query.count() == comments_before
+    assert Comment.query.filter_by(content="partial write").count() == 0
+    assert db_session.get(User, "ALICE") is None
+
+    # No PendingRollbackError: the session accepts and commits new work.
+    db_session.get(User, "alice").bio = "still here"
+    db_session.commit()
+    db_session.expire_all()
+    assert db_session.get(User, "alice").bio == "still here"
+
+
+def test_repeated_failing_call_warns_then_force_finishes(ctx, db_session, explode_tool):
+    calls = []
+
+    def handler(_ctx, params):
+        calls.append(params.target)
+        raise RuntimeError("still broken")
+
+    explode_tool(handler)
+    args = {"target": "same"}
+    first = execute("explode", args, ctx)
+    second = execute("explode", args, ctx)
+    third = execute("explode", args, ctx)
+
+    assert first == {
+        "ok": False,
+        "error": "explode failed unexpectedly (RuntimeError)",
+        "hint": _UNEXPECTED_HINT,
+    }
+    assert second["ok"] is False
+    assert second["warning"] == (
+        "you are repeating the same action; vary your behaviour"
+    )
+    assert third["ok"] is False
+    assert third["force_finish"] is True
+    assert third["error"] == "repeating the same action"
+    # The force-finished third attempt never reached the handler.
+    assert calls == ["same", "same"]
+    rows = ToolCall.query.filter_by(run_id=ctx.run.id).order_by(ToolCall.id).all()
+    assert [row.ok for row in rows] == [False, False, False]
+
+
+# ---------------------------------------------------------------------------
+# Search
+
+
+def test_search_users_returns_username_and_bio_excerpt(ctx, db_session):
+    db_session.add(User(username="carol", bio="builds   boats\nand " + "x" * 300))
+    db_session.commit()
+
+    result = execute("search", {"query": "builds", "type": "user"}, ctx)
+
+    assert result["ok"] is True
+    assert "hint" not in result
+    bob, carol = result["results"]
+    assert bob == {"username": "bob", "bio": "bob builds things"}
+    assert carol["username"] == "carol"
+    assert carol["bio"].startswith("builds boats and xxx")
+    assert len(carol["bio"]) == 200
+    assert _last_call().ok is True
+
+    empty = execute("search", {"query": "nobody-matches", "type": "user"}, ctx)
+    assert empty["ok"] is True
+    assert empty["results"] == []
+    assert empty["hint"] == "No user results found matching 'nobody-matches'."
 
 
 # ---------------------------------------------------------------------------

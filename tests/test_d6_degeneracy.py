@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta
 
 import pytest
+from flask import template_rendered
 
 from deaddit.dynamics import degeneracy
 from deaddit.dynamics.degeneracy import (
@@ -35,6 +37,42 @@ def _ensure_user(db_session, name: str) -> None:
 def _ensure_sub(db_session, name: str) -> None:
     if db_session.get(Subdeaddit, name) is None:
         db_session.add(Subdeaddit(name=name, description=f"{name} fixture"))
+
+
+def _flag_repetition(db_session, username: str) -> None:
+    db_session.add(
+        DegeneracyFlag(
+            kind="repetition",
+            username=username,
+            metric=0.9,
+            created_at=datetime.utcnow(),
+        )
+    )
+    db_session.commit()
+
+
+def _demo_post(title: str, *, score: int, user: str, created_at: datetime) -> Post:
+    return Post(
+        title=title,
+        content=title,
+        score=score,
+        user=user,
+        subdeaddit_name="demo",
+        created_at=created_at,
+    )
+
+
+@pytest.fixture()
+def rendered(app):
+    """Record (template name, context) pairs rendered during requests."""
+    recorded: list[tuple[str, dict]] = []
+
+    def _record(sender, template, context, **extra):
+        recorded.append((template.name, dict(context)))
+
+    template_rendered.connect(_record)
+    yield recorded
+    template_rendered.disconnect(_record)
 
 
 @pytest.fixture()
@@ -140,49 +178,132 @@ class TestHotDemotion:
         clauses = post_order_by("hot")
         assert with_repetition_demotion(clauses) is clauses
 
-    def test_flagged_author_demoted_half_hot_weight(self, app, db_session, seeded_db):
+    def test_flagged_author_demoted_as_if_score_halved(
+        self, app, db_session, seeded_db
+    ):
         for name in ("echo_a", "clean_b"):
             _ensure_user(db_session, name)
         _ensure_sub(db_session, "demo")
         db_session.commit()
 
-        now = datetime.utcnow()
-        # echo_a's higher score leads hot outright before demotion.
-        loud = Post(
-            title="loud", content="x", score=100, user="echo_a", subdeaddit_name="demo"
-        )
-        quiet = Post(
-            title="quiet", content="y", score=10, user="clean_b", subdeaddit_name="demo"
-        )
+        now = datetime.utcnow().replace(microsecond=0)
+        # Same instant: echo_a's 15 leads clean_b's 10 before demotion; once
+        # flagged it ranks like a score of 7.5 and falls behind.
+        loud = _demo_post("loud", score=15, user="echo_a", created_at=now)
+        quiet = _demo_post("quiet", score=10, user="clean_b", created_at=now)
         db_session.add_all([loud, quiet])
         db_session.commit()
 
-        feed_query = Post.query
+        feed_query = Post.query.filter_by(subdeaddit_name="demo")
         unflagged_order = [*post_order_by("hot")]
         assert feed_query.order_by(*unflagged_order).first().user == "echo_a"
 
-        db_session.add(
-            DegeneracyFlag(
-                kind="repetition",
-                username="echo_a",
-                metric=0.9,
-                created_at=datetime.utcnow(),
-            )
-        )
-        db_session.commit()
+        _flag_repetition(db_session, "echo_a")
 
         demoted_order = with_repetition_demotion(post_order_by("hot"))
         assert demoted_order is not unflagged_order
         assert feed_query.order_by(*demoted_order).first().user == "clean_b"
 
-        # Mirror check: demotion halves the frozen hot key.
+        # Numerical parity: the SQL ORDER BY value equals the Python mirror.
+        demoted_hot = demoted_order[0].element
+        rows = (
+            db_session.query(Post.score, Post.created_at, Post.user, demoted_hot)
+            .filter(Post.subdeaddit_name == "demo")
+            .all()
+        )
+        assert len(rows) == 2
+        for score, created_at, user, sql_key in rows:
+            mirror = degeneracy.hot_rank_key_demoted(
+                score=score, created_at=created_at, now=now, demoted=user == "echo_a"
+            )
+            assert sql_key == pytest.approx(mirror, rel=0, abs=1e-9)
+
+        # Mirror check: demotion subtracts log10(2) from the frozen hot key.
         base = degeneracy.hot_rank_key_demoted(
             score=100, created_at=now, now=now, demoted=False
         )
         key = degeneracy.hot_rank_key_demoted(
             score=100, created_at=now, now=now, demoted=True
         )
-        assert key == pytest.approx(base * 0.5)
+        assert base - key == pytest.approx(math.log10(2))
+
+    def test_flagged_new_post_not_buried_under_old_posts(
+        self, app, db_session, rendered
+    ):
+        """Regression: scaling the whole hot value by 0.5 halved its time term
+        too, sinking a flagged author's brand-new post below every unflagged
+        post since ~2016. Exercised through the real front and community feeds.
+        """
+        for name in ("echo_a", "clean_b"):
+            _ensure_user(db_session, name)
+        _ensure_sub(db_session, "demo")
+        db_session.commit()
+
+        now = datetime.utcnow().replace(microsecond=0)
+        db_session.add_all(
+            [
+                _demo_post("flagged new", score=100, user="echo_a", created_at=now),
+                _demo_post("clean new", score=100, user="clean_b", created_at=now),
+                _demo_post(
+                    "clean old",
+                    score=0,
+                    user="clean_b",
+                    created_at=now - timedelta(days=30),
+                ),
+            ]
+        )
+        db_session.commit()
+        Setting.set_value("SETUP_COMPLETED_AT", "2026-01-01T00:00:00Z")
+        _flag_repetition(db_session, "echo_a")
+
+        client = app.test_client()
+        for url, template in (("/", "index.html"), ("/d/demo", "subdeaddit.html")):
+            rendered.clear()
+            assert client.get(url).status_code == 200
+            posts = next(ctx["posts"] for name, ctx in rendered if name == template)
+            assert [p.title for p in posts] == ["clean new", "flagged new", "clean old"]
+
+    def test_penalty_equals_halving_the_score(self, app, db_session):
+        """A flagged post at score 2S ties an unflagged post at S posted with it."""
+        now = datetime.utcnow().replace(microsecond=0)
+        # Mirror: log10(2S) - log10(2) == log10(S).
+        for s in (2, 10, 50, 500):
+            doubled = degeneracy.hot_rank_key_demoted(
+                score=2 * s, created_at=now, now=now, demoted=True
+            )
+            plain = degeneracy.hot_rank_key_demoted(
+                score=s, created_at=now, now=now, demoted=False
+            )
+            assert doubled == pytest.approx(plain, rel=0, abs=1e-9)
+
+        # SQL: the real ORDER BY value ties flagged 20 with unflagged 10, and
+        # brackets the tie (flagged 21 above it, flagged 19 below it).
+        for name in ("echo_a", "clean_b"):
+            _ensure_user(db_session, name)
+        _ensure_sub(db_session, "demo")
+        db_session.commit()
+        db_session.add_all(
+            [
+                _demo_post("clean 10", score=10, user="clean_b", created_at=now),
+                _demo_post("flagged 19", score=19, user="echo_a", created_at=now),
+                _demo_post("flagged 20", score=20, user="echo_a", created_at=now),
+                _demo_post("flagged 21", score=21, user="echo_a", created_at=now),
+            ]
+        )
+        db_session.commit()
+        _flag_repetition(db_session, "echo_a")
+
+        demoted_order = with_repetition_demotion(post_order_by("hot"))
+        keys = dict(db_session.query(Post.title, demoted_order[0].element).all())
+        assert keys["flagged 20"] == pytest.approx(keys["clean 10"], rel=0, abs=1e-9)
+        assert keys["flagged 21"] > keys["clean 10"] > keys["flagged 19"]
+
+        titles = [p.title for p in Post.query.order_by(*demoted_order)]
+        assert (
+            titles.index("flagged 21")
+            < titles.index("clean 10")
+            < titles.index("flagged 19")
+        )
 
     def test_expired_window_stops_demotion(self, app, db_session, seeded_db):
         _ensure_sub(db_session, "demo")
